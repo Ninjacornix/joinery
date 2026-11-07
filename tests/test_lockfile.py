@@ -80,3 +80,28 @@ def test_unknown_origin_fails(project: Path) -> None:
 
 def test_missing_lock_fails(tmp_path: Path) -> None:
     assert any("missing" in e for e in errors(tmp_path))
+
+
+def custom_lock(project: Path, sha: str) -> None:
+    (project / "joinery.lock").write_text(
+        f'version = 1\n[[asset]]\npath = "art/door.blend"\nsha256 = "{sha}"\n'
+        'origin = "custom-tool"\ntool = "sdxl"\n'
+    )
+
+
+def test_custom_output_needs_project_custom_tool(project: Path) -> None:
+    custom_lock(project, add_asset(project))
+    assert any("not a custom tool" in e for e in errors(project))
+    (project / "joinery.toml").write_text(
+        '[tools]\n[[tools.custom]]\nid = "sdxl"\nname = "S"\ndomain = "2d"\n'
+        'server = "sdxl"\ncommand = "s"\n'
+    )
+    assert errors(project) == []
+
+
+def test_custom_tool_cannot_claim_tool_created(project: Path) -> None:
+    sha = add_asset(project)
+    lock(project, sha)
+    text = (project / "joinery.lock").read_text().replace('"blender"', '"sdxl"')
+    (project / "joinery.lock").write_text(text)
+    assert any("not a preferred tool" in e for e in errors(project))

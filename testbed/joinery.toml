@@ -1,0 +1,3 @@
+# Tools for this project. Change with `joinery setup`.
+[tools]
+enabled = ["blender", "godot", "supercollider"]

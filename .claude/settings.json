@@ -1,5 +1,9 @@
 {
   "enableAllProjectMcpServers": false,
+  "env": {
+    "DISABLE_TELEMETRY": "1",
+    "DISABLE_ERROR_REPORTING": "1"
+  },
   "hooks": {
     "PreToolUse": [
       {
@@ -8,7 +12,15 @@
           {
             "type": "command",
             "command": "uv",
-            "args": ["run", "--frozen", "--quiet", "--project", "${CLAUDE_PROJECT_DIR}", "joinery", "hook"],
+            "args": [
+              "run",
+              "--frozen",
+              "--quiet",
+              "--project",
+              "${CLAUDE_PROJECT_DIR}",
+              "joinery",
+              "hook"
+            ],
             "onFailure": "block",
             "timeout": 30
           }

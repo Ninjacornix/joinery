@@ -1,5 +1,6 @@
 import io
 import json
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -29,6 +30,25 @@ def test_mcp_allowlist(
     monkeypatch: pytest.MonkeyPatch, tool: str, expected: int
 ) -> None:
     assert run_hook(monkeypatch, {"tool_name": tool, "tool_input": {}}) == expected
+
+
+def test_blocked_tool_on_allowed_server(monkeypatch: pytest.MonkeyPatch) -> None:
+    event = {"tool_name": "mcp__godot__game_http_request", "tool_input": {}}
+    assert run_hook(monkeypatch, event) == 2
+
+
+def test_custom_mcp_follows_project_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    (tmp_path / "joinery.toml").write_text(
+        '[tools]\nenabled = []\n[[tools.custom]]\nid = "x"\nname = "X"\n'
+        'domain = "2d"\nserver = "x"\ncommand = "x"\n'
+    )
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    assert run_hook(monkeypatch, {"tool_name": "mcp__x__draw", "tool_input": {}}) == 0
+    assert (
+        run_hook(monkeypatch, {"tool_name": "mcp__blender__x", "tool_input": {}}) == 2
+    )
 
 
 def test_broken_policy_blocks(monkeypatch: pytest.MonkeyPatch) -> None:

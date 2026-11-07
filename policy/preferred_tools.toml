@@ -1,7 +1,8 @@
-# Tools offered in the install menu. Add a future tool by appending a [[tool]];
-# `joinery check catalog` enforces the admission bar in joinery/catalog.py.
-# Stars and dates are a snapshot from `vetted_on`. Vetting covered repo metadata and
-# READMEs, not a full source audit. Any source change means re-vetting and a new ref.
+# Preferred tools shown in project setup. Add a future tool by appending a [[tool]];
+# `joinery check catalog` enforces the bar in joinery/catalog.py. Preferred MCPs must be
+# non-generative and send no telemetry. Users may add anything else per project.
+# Stars and dates are a snapshot from `vetted_on`. Each ref had its source scanned for
+# telemetry, generative services and outbound calls. Any new ref means re-vetting.
 
 vetted_on = 2026-11-07
 
@@ -23,18 +24,20 @@ required = true
 status = "available"
 [tool.mcp]
 server = "godot"
-repo = "https://github.com/hi-godot/godot-ai"
-ref = "643c64f3edf984a9668b3043f4d20ebb2bbec6b6"
+repo = "https://github.com/tugcantopaloglu/godot-mcp"
+ref = "88f0fbc69a08225d4fdec32f921209e127f52395"
 tier = "community"
-stars = 3428
-last_push = 2026-11-06
+stars = 510
+last_push = 2026-10-09
 licence = "MIT"
-notes = "Sends anonymous telemetry unless GODOT_AI_DISABLE_TELEMETRY=true is set; set it."
+blocked_tools = ["game_http_request"]
+notes = "game_http_request is a generic network escape, so it stays blocked."
 
 [[tool]]
 id = "blender"
 name = "Blender"
 domain = "3d"
+also_domains = ["materials"]
 status = "available"
 [tool.mcp]
 server = "blender"
@@ -44,7 +47,7 @@ tier = "official"
 stars = 37
 last_push = 2026-09-29
 licence = "unverified"
-notes = "v1.0.3, needs Blender 5.1+. Runs LLM code unguarded, so use it only inside the sandbox."
+notes = "v1.0.3, needs Blender 5.1+. Runs LLM code unguarded, so use it only inside the sandbox. Materials via shader nodes and bake."
 
 [[tool]]
 id = "aseprite"
@@ -133,6 +136,8 @@ tier = "community"
 stars = 140
 last_push = 2026-11-02
 licence = "MIT"
+blocked_tools = ["show_score"]
+notes = "show_score loads its viewer from unpkg.com, so it stays blocked."
 
 [[tool]]
 id = "audacity"
@@ -174,12 +179,20 @@ name = "Material Maker"
 domain = "materials"
 status = "first-party-planned"
 candidates = [
-  "graysonchalmers/Tool-MaterialMaker-MCP: 10 stars, self-described alpha",
+  "graysonchalmers/Tool-MaterialMaker-MCP: base for our hardened fork, MIT, no telemetry, 10 stars, self-described alpha",
   "SS-360/materialpilot: 9 stars, no clear licence",
 ]
 
-# Never admit these, however popular.
+# Never preferred, however popular. Users may still add them as custom tools.
 
 [[rejected]]
 repo = "https://github.com/ahujasid/blender-mcp"
 reason = "Bundles generative 3D (Hyper3D Rodin, Hunyuan3D, Tripo) and asset fetching (Sketchfab, Poly Haven)."
+
+[[rejected]]
+repo = "https://github.com/hi-godot/godot-ai"
+reason = "Sends telemetry by default, and can route vision requests to cloud models."
+
+[[rejected]]
+repo = "https://github.com/tomyud1/godot-mcp"
+reason = "Includes a generate_2d_asset tool."

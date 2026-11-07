@@ -9,7 +9,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError
 
-from joinery.catalog import Catalog
+from joinery.catalog import Catalog, load_project_tools
 
 LOCK_NAME = "joinery.lock"
 ASSET_DIRS = ("art", "audio")
@@ -36,8 +36,17 @@ class HumanImport(_Entry):
     licence: str = Field(min_length=1)
 
 
-AssetEntry = Annotated[ToolCreated | HumanImport, Field(discriminator="origin")]
-_ENTRIES: TypeAdapter[list[ToolCreated | HumanImport]] = TypeAdapter(list[AssetEntry])
+class CustomOutput(_Entry):
+    """Made by a user-added tool, which may be generative. Never counted as tool-created."""
+
+    origin: Literal["custom-tool"]
+    tool: str
+    recipe: str | None = None
+
+
+Entry = ToolCreated | HumanImport | CustomOutput
+AssetEntry = Annotated[Entry, Field(discriminator="origin")]
+_ENTRIES: TypeAdapter[list[Entry]] = TypeAdapter(list[AssetEntry])
 
 
 def _asset_files(project: Path) -> set[str]:
@@ -56,7 +65,7 @@ def _asset_files(project: Path) -> set[str]:
 
 
 def _entry_errors(
-    project: Path, entry: ToolCreated | HumanImport, catalog: Catalog
+    project: Path, entry: Entry, catalog: Catalog, custom: set[str]
 ) -> list[str]:
     errors: list[str] = []
     file = project / entry.path
@@ -66,10 +75,21 @@ def _entry_errors(
         errors.append(f"{entry.path}: sha256 differs from {LOCK_NAME}")
     if isinstance(entry, ToolCreated):
         if entry.tool not in {t.id for t in catalog.tool}:
-            errors.append(f"{entry.path}: unknown tool {entry.tool!r}")
+            errors.append(f"{entry.path}: {entry.tool!r} is not a preferred tool")
         if not (project / entry.recipe).is_file():
             errors.append(f"{entry.path}: recipe {entry.recipe} not found")
+    if isinstance(entry, CustomOutput) and entry.tool not in custom:
+        errors.append(
+            f"{entry.path}: {entry.tool!r} is not a custom tool in this project"
+        )
     return errors
+
+
+def _custom_ids(project: Path) -> set[str]:
+    config = project / "joinery.toml"
+    return (
+        {c.id for c in load_project_tools(config).custom} if config.is_file() else set()
+    )
 
 
 def check_assets(project: Path, catalog: Catalog) -> list[str]:
@@ -82,8 +102,9 @@ def check_assets(project: Path, catalog: Catalog) -> list[str]:
     except (tomllib.TOMLDecodeError, ValidationError) as exc:
         return [f"{lock}: invalid: {exc}"]
     errors: list[str] = []
+    custom = _custom_ids(project)
     for entry in entries:
-        errors.extend(_entry_errors(project, entry, catalog))
+        errors.extend(_entry_errors(project, entry, catalog, custom))
     locked = {e.path for e in entries}
     errors.extend(
         f"{p}: no {LOCK_NAME} entry" for p in sorted(_asset_files(project) - locked)

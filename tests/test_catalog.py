@@ -11,6 +11,7 @@ from joinery.catalog import (
     CATALOG_PATH,
     Catalog,
     allowed_servers,
+    blocked_tools,
     enabled_tools,
     load_catalog,
 )
@@ -42,7 +43,11 @@ def community_tool(**overrides: Any) -> dict[str, Any]:
 
 def test_shipped_catalog_is_valid() -> None:
     catalog = load_catalog()
-    assert catalog.required_ids() == ["godot"]
+    assert all(
+        t.mcp.telemetry == "none" and not t.mcp.generative
+        for t in catalog.tool
+        if t.mcp
+    )
 
 
 def test_future_tool_can_be_added() -> None:
@@ -59,6 +64,10 @@ def test_future_tool_can_be_added() -> None:
         {"licence": "NOASSERTION"},
         {"ref": "main"},
         {"repo": "https://github.com/ahujasid/blender-mcp.git"},
+        {"telemetry": "opt-out"},
+        {"telemetry": "always"},
+        {"generative": True},
+        {"tier": "official", "telemetry": "opt-out"},
     ],
 )
 def test_admission_bar_rejects(overrides: dict[str, Any]) -> None:
@@ -90,3 +99,41 @@ def test_enabling_unavailable_tool_fails(tmp_path: Path) -> None:
     config.write_text('[tools]\nenabled = ["krita"]\n')
     with pytest.raises(ValueError, match="krita"):
         enabled_tools(load_catalog(), config)
+
+
+CUSTOM = (
+    '[[tools.custom]]\nid = "sdxl"\nname = "SDXL"\ndomain = "2d"\n'
+    'server = "sdxl"\ncommand = "sdxl-mcp"\n'
+)
+
+
+def test_custom_tool_is_allowed_for_its_project_only(tmp_path: Path) -> None:
+    config = tmp_path / "joinery.toml"
+    config.write_text(f"[tools]\nenabled = []\n{CUSTOM}")
+    assert "sdxl" in allowed_servers(load_catalog(), config)
+    config.write_text("[tools]\nenabled = []\n")
+    assert "sdxl" not in allowed_servers(load_catalog(), config)
+
+
+def test_custom_tool_cannot_impersonate_preferred(tmp_path: Path) -> None:
+    config = tmp_path / "joinery.toml"
+    config.write_text(
+        f"[tools]\nenabled = []\n{CUSTOM.replace('server = "sdxl"', 'server = "blender"')}"
+    )
+    with pytest.raises(ValueError, match="clashes"):
+        allowed_servers(load_catalog(), config)
+
+
+def test_custom_engine_tool_replaces_required_godot_mcp(tmp_path: Path) -> None:
+    config = tmp_path / "joinery.toml"
+    custom = CUSTOM.replace('domain = "2d"', 'domain = "engine"')
+    config.write_text(f"[tools]\nenabled = []\n{custom}")
+    assert enabled_tools(load_catalog(), config) == []
+
+
+def test_preferred_godot_blocks_generic_network_tool() -> None:
+    assert "game_http_request" in blocked_tools(load_catalog(), "godot")
+
+
+def test_preferred_musescore_blocks_remote_viewer() -> None:
+    assert "show_score" in blocked_tools(load_catalog(), "musescore")
