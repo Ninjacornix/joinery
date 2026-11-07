@@ -30,11 +30,12 @@ Joinery = Godot 4.7 + thin patch series + Joinery addon. The Journeyman sidebar 
 - Architecture decisions go in `docs/adr/NNNN-title.md`.
 
 ## Commands (fill in as they exist)
-- Tests: `uv run pytest` • Lint/type: `uv run ruff check . && uv run mypy servers`
+- Tests: `uv run pytest` • Lint/type: `uv run ruff check . && uv run mypy joinery servers`
 - Sandbox: `docker build -t joinery-sandbox sandbox/ && docker run --rm -it joinery-sandbox`
 - Rebuild assets from recipes: `uv run joinery rebuild --all` (CI runs a sample)
 - Deterministic capture: `xvfb-run godot --path <proj> --write-movie out/frames.png --fixed-fps 30 --quit-after 300 <scene>`
 - Evals: `uv run python evals/run.py --suite testbed|gamedevbench-subset`
+- Policy checks: `uv run joinery check all` • Choose tools: `uv run joinery setup`
 - Godot fork: `godot_patches/fork.sh sync|export|rebase <tag>|build` (see `godot_patches/README.md`)
 
 ## Workflow
