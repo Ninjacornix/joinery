@@ -1,0 +1,19 @@
+{
+  "enableAllProjectMcpServers": false,
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__.*|Bash|WebFetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv",
+            "args": ["run", "--frozen", "--quiet", "--project", "${CLAUDE_PROJECT_DIR}", "joinery", "hook"],
+            "onFailure": "block",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

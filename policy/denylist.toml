@@ -1,0 +1,47 @@
+# Creation-only policy. Remove entries only through a reviewed policy change.
+
+# Package names, compared after PEP 503 normalisation.
+packages = [
+  "audiocraft",
+  "blender-mcp",
+  "comfy-cli",
+  "comfyui",
+  "diffusers",
+  "elevenlabs",
+  "@elevenlabs/elevenlabs-js",
+  "fal-client",
+  "@fal-ai/client",
+  "google-genai",
+  "google-generativeai",
+  "hunyuan3d",
+  "lumaai",
+  "meshy",
+  "meshy-sdk",
+  "openai",
+  "replicate",
+  "runwayml",
+  "stability-sdk",
+  "stable-audio-tools",
+  "suno",
+  "suno-api",
+  "trellis",
+  "tripo3d",
+]
+
+# Generative services, plus asset sites: assets are never fetched.
+hosts = [
+  "elevenlabs.io",
+  "fal.ai",
+  "fal.run",
+  "hyper3d.ai",
+  "lumalabs.ai",
+  "meshy.ai",
+  "midjourney.com",
+  "polyhaven.com",
+  "replicate.com",
+  "runwayml.com",
+  "sketchfab.com",
+  "stability.ai",
+  "suno.com",
+  "tripo3d.ai",
+]
