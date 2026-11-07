@@ -1,0 +1,11 @@
+.godot/
+*.import.tmp
+__pycache__/
+.venv/
+node_modules/
+out/
+.env
+*.blend1
+
+# Internal docs, local only
+.private/
