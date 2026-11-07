@@ -164,6 +164,14 @@ def _repo_label(tool: Tool) -> str:
     return "/".join(tool.mcp.repo.rstrip("/").split("/")[-2:])
 
 
+def _mcp_options(tool: Tool) -> list[str]:
+    if tool.mcp is not None:
+        return [tool.mcp.server]
+    # Candidates read as "owner/repo: why it does not qualify"; the repo alone
+    # is what identifies it in a menu.
+    return [candidate.split(":", 1)[0].strip() for candidate in tool.candidates]
+
+
 def tool_menu(catalog: Catalog, current: ProjectTools) -> dict[str, object]:
     """The tool menu as plain data, for a UI that draws its own widgets.
 
@@ -189,6 +197,11 @@ def tool_menu(catalog: Catalog, current: ProjectTools) -> dict[str, object]:
                 # actually wiring up rather than just naming a program.
                 "mcp": tool.mcp.server if tool.mcp else "",
                 "mcp_repo": _repo_label(tool),
+                # Every MCP the catalog knows for this tool. One entry when a
+                # server is vetted; the rejected or still-being-judged
+                # candidates when none is, so the menu can show what was
+                # considered instead of a bare "none".
+                "mcp_options": _mcp_options(tool),
                 # Starred in the menu. The whole catalog is vetted, so this
                 # marks the strongest tier: an official MCP, or the engine
                 # itself, which every project needs.

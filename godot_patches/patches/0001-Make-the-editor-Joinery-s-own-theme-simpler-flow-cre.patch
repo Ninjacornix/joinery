@@ -7,7 +7,7 @@ Subject: [PATCH] Make the editor Joinery's: own theme, simpler flow, creation
 A Joinery colour preset, and this build's default: near-black neutral
 surfaces so viewport content draws the eye, a brass accent matching the
 Journeyman sidebar, contrast below the stock 0.3 to stop panel-on-panel
-banding, softer corners and roomier spacing. The stock presets all stay
+banding, softer corners and roomier spacing. The stock presets stay
 selectable.
 
 The Project Manager is stripped back to opening and creating a project. Gone
@@ -16,20 +16,24 @@ the asset store, settings and donate. The logo becomes the name.
 
 Creating a project walks steps: Godot's fields, the tools that will make it,
 then the art bible in short themed pages. The first page keeps what you must
-decide and loses what you must read, so the renderer's bullet list, its
-information link and its "can be changed later" note are hidden: three
-paragraphs about a choice with three options. "Edit Now" goes too, since it
-asks whether to open a project you just asked to create.
+decide and drops what you must read or what has only one sane answer: the
+renderer's bullet list and notes, "Edit Now", "Create Folder", and the
+version control dropdown. A project gets its own folder and starts on git
+with LFS, because its sources are .blend and WAV files and converting a repo
+to LFS afterwards means rewriting history.
 
-Each tool names the MCP that drives it, starred for the strongest tier, which
-is the thing actually being trusted rather than the program. Both
-questionnaires come from the `joinery` CLI, so the catalog and the bible's
-shape stay the one source of truth.
+The tools page is a table: application, what it is for, and the MCP that
+drives it, since the MCP is the thing actually being trusted. A star marks
+the strongest tier, and a tool with several candidate servers and none vetted
+shows them in a dropdown rather than a bare "none".
 
-One size for the whole flow. Dropping reset_size stops the dialog resizing
-between a wide first page and a narrow tool list, every input fills the same
-width, and the stretch spacer is hidden on later pages where it only opened
-gaps above and below the content.
+Both questionnaires come from the `joinery` CLI, so the catalog and the
+bible's shape stay the one source of truth.
+
+Width is pinned for the whole flow so pages cannot jump sideways, while
+height follows each page's content; the stretch spacer and the path message
+are first-page furniture and hidden elsewhere, and multiline answers expand
+to take the remaining height instead of leaving a field of empty space.
 
 Everything hides rather than deletes. Upstream still constructs and refers to
 these controls, and removing their construction is how a fork earns a null
@@ -37,16 +41,16 @@ dereference that compiles cleanly and crashes on launch.
 
 Joinery-only, not for upstream: it reroutes stock flows into Joinery's own.
 ---
- editor/project_manager/project_dialog.cpp  | 481 ++++++++++++++++++++-
- editor/project_manager/project_dialog.h    |  41 ++
- editor/project_manager/project_manager.cpp |  52 ++-
+ editor/project_manager/project_dialog.cpp  | 522 ++++++++++++++++++++-
+ editor/project_manager/project_dialog.h    |  42 ++
+ editor/project_manager/project_manager.cpp |  52 +-
  editor/project_manager/project_manager.h   |   7 +
  editor/settings/editor_settings.cpp        |  12 +-
  editor/themes/editor_theme_manager.cpp     |  11 +
- 6 files changed, 598 insertions(+), 6 deletions(-)
+ 6 files changed, 640 insertions(+), 6 deletions(-)
 
 diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
-index 7c83dcc..1c3ecc3 100644
+index 7c83dcc..5c29dd8 100644
 --- a/editor/project_manager/project_dialog.cpp
 +++ b/editor/project_manager/project_dialog.cpp
 @@ -32,6 +32,13 @@
@@ -63,15 +67,17 @@ index 7c83dcc..1c3ecc3 100644
  #include "core/io/zip_io.h"
  #include "core/object/callable_mp.h"
  #include "core/os/os.h"
-@@ -46,6 +53,7 @@
+@@ -45,7 +52,9 @@
+ #include "editor/version_control/editor_vcs_interface.h"
  #include "scene/gui/check_box.h"
  #include "scene/gui/check_button.h"
++#include "scene/gui/grid_container.h"
  #include "scene/gui/line_edit.h"
 +#include "scene/gui/text_edit.h"
  #include "scene/gui/link_button.h"
  #include "scene/gui/option_button.h"
  #include "scene/gui/separator.h"
-@@ -536,6 +544,417 @@ void ProjectDialog::_renderer_selected() {
+@@ -536,6 +545,454 @@ void ProjectDialog::_renderer_selected() {
  	_update_ok_button();
  }
  
@@ -142,17 +148,19 @@ index 7c83dcc..1c3ecc3 100644
 +	Dictionary doc = json->get_data();
 +	Array tools = doc.get("tools", Array());
 +
++	// Header, so the columns say what they are.
++	for (const String &heading : { TTRC("Application"), TTRC("Type"), TTRC("MCP") }) {
++		Label *label = memnew(Label);
++		label->set_text(heading);
++		label->set_modulate(Color(1, 1, 1, 0.5));
++		joinery_tool_list->add_child(label);
++	}
++
 +	for (int i = 0; i < tools.size(); i++) {
 +		Dictionary tool = tools[i];
 +
-+		// One row: the tool, then what actually drives it. Naming the MCP
-+		// matters because that is the thing being trusted, not the program.
-+		HBoxContainer *row = memnew(HBoxContainer);
-+		joinery_tool_list->add_child(row);
-+
 +		CheckBox *box = memnew(CheckBox);
 +		box->set_text(String(tool.get("name", "")));
-+		box->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 +		bool required = tool.get("required", false);
 +		bool available = tool.get("available", false);
 +		box->set_pressed(tool.get("enabled", false) || required);
@@ -160,29 +168,42 @@ index 7c83dcc..1c3ecc3 100644
 +		// built cannot be turned on. Both carry the catalog's own reason.
 +		box->set_disabled(required || !available);
 +		box->set_tooltip_text(String(tool.get("reason", "")));
-+		row->add_child(box);
++		joinery_tool_list->add_child(box);
 +
 +		Label *domains = memnew(Label);
 +		domains->set_text(String(tool.get("domains", "")));
 +		domains->set_modulate(Color(1, 1, 1, 0.6));
-+		domains->set_custom_minimum_size(Size2(110, 0) * EDSCALE);
-+		row->add_child(domains);
++		joinery_tool_list->add_child(domains);
 +
-+		// A star marks the strongest tier: an official MCP, or the engine.
-+		Label *mcp = memnew(Label);
-+		String server = String(tool.get("mcp", ""));
++		// The MCP is the thing actually being trusted, so it gets a column.
++		// More than one candidate means a choice exists, which is a dropdown;
++		// one means a label. A star marks the strongest tier.
++		Array options = tool.get("mcp_options", Array());
 +		bool starred = tool.get("recommended", false);
-+		if (server.is_empty()) {
-+			mcp->set_text(TTRC("no server yet"));
-+			mcp->set_modulate(Color(1, 1, 1, 0.4));
++		if (options.size() > 1) {
++			OptionButton *picker = memnew(OptionButton);
++			for (int o = 0; o < options.size(); o++) {
++				picker->add_item(String(options[o]));
++			}
++			picker->select(0);
++			// None of these is vetted yet, so the choice is informational: it
++			// shows what was considered rather than offering to wire one up.
++			picker->set_disabled(!available);
++			picker->set_tooltip_text(TTRC("Candidates for this tool. None has been vetted yet, so the tool is not selectable."));
++			joinery_tool_list->add_child(picker);
 +		} else {
-+			mcp->set_text(starred ? "* " + server : server);
-+			mcp->set_modulate(Color(1, 1, 1, starred ? 0.95 : 0.6));
-+			mcp->set_tooltip_text(String(tool.get("mcp_repo", "")));
++			Label *mcp = memnew(Label);
++			String server = options.is_empty() ? String() : String(options[0]);
++			if (server.is_empty()) {
++				mcp->set_text(TTRC("none yet"));
++				mcp->set_modulate(Color(1, 1, 1, 0.4));
++			} else {
++				mcp->set_text(starred ? "* " + server : server);
++				mcp->set_modulate(Color(1, 1, 1, starred ? 0.95 : 0.6));
++				mcp->set_tooltip_text(String(tool.get("mcp_repo", "")));
++			}
++			joinery_tool_list->add_child(mcp);
 +		}
-+		mcp->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_RIGHT);
-+		mcp->set_custom_minimum_size(Size2(150, 0) * EDSCALE);
-+		row->add_child(mcp);
 +
 +		joinery_boxes.push_back(box);
 +		joinery_ids.push_back(tool.get("id", ""));
@@ -287,6 +308,7 @@ index 7c83dcc..1c3ecc3 100644
 +				TextEdit *box = memnew(TextEdit);
 +				box->set_custom_minimum_size(Size2(0, JOINERY_FIELD_HEIGHT) * EDSCALE);
 +				box->set_h_size_flags(Control::SIZE_EXPAND_FILL);
++				box->set_v_size_flags(Control::SIZE_EXPAND_FILL);
 +				box->set_line_wrapping_mode(TextEdit::LINE_WRAPPING_BOUNDARY);
 +				container->add_child(box);
 +				joinery_bible_inputs.push_back(box);
@@ -342,6 +364,21 @@ index 7c83dcc..1c3ecc3 100644
 +		edit_check_box->set_pressed(true);
 +		edit_check_box->hide();
 +	}
++	if (create_dir) {
++		// A project needs its own folder. Asking is a question with one sane
++		// answer, so it is made rather than offered.
++		create_dir->set_pressed(true);
++		create_dir->hide();
++	}
++	if (default_files_container) {
++		// Version control metadata: git, always, and with LFS rules that
++		// `joinery setup` writes. A Joinery project keeps .blend and WAV
++		// sources in the repo, so this was never a real choice either.
++		if (vcs_metadata_selection) {
++			vcs_metadata_selection->select((int)EditorVCSInterface::VCSMetadata::GIT);
++		}
++		default_files_container->hide();
++	}
 +}
 +
 +void ProjectDialog::_joinery_show_step(int p_step) {
@@ -365,6 +402,11 @@ index 7c83dcc..1c3ecc3 100644
 +	if (joinery_tail_spacer) {
 +		joinery_tail_spacer->set_visible(first);
 +	}
++	// The path/name message only belongs to the first page, and an empty label
++	// still reserves its line, which is the gap under the title on every other.
++	if (msg) {
++		msg->set_visible(first);
++	}
 +	for (int i = 0; i < joinery_bible_pages.size(); i++) {
 +		joinery_bible_pages[i]->set_visible(p_step == 2 + i);
 +	}
@@ -380,9 +422,10 @@ index 7c83dcc..1c3ecc3 100644
 +		set_title(vformat(TTRC("Art bible  (%d of %d)"), p_step + 1, total));
 +	}
 +	_set_message("", MESSAGE_SUCCESS);
-+	// Deliberately no reset_size(): shrinking to each page's content is what
-+	// made the dialog jump between a wide first page and a narrow tool list.
-+	// One size for the whole flow instead.
++	// Width is pinned by set_min_size so pages cannot jump sideways, but height
++	// has to follow the content: without this a short page keeps the tallest
++	// page's height and leaves a field of empty space above the buttons.
++	reset_size();
 +}
 +
 +void ProjectDialog::_joinery_reset_pages() {
@@ -489,7 +532,7 @@ index 7c83dcc..1c3ecc3 100644
  void ProjectDialog::_nonempty_confirmation_ok_pressed() {
  	is_folder_empty = true;
  	ok_pressed();
-@@ -558,6 +977,13 @@ void ProjectDialog::ok_pressed() {
+@@ -558,6 +1015,13 @@ void ProjectDialog::ok_pressed() {
  
  	String path = project_path->get_text();
  
@@ -503,7 +546,7 @@ index 7c83dcc..1c3ecc3 100644
  	if (mode == MODE_NEW) {
  		if (create_dir->is_pressed()) {
  			Ref<DirAccess> d = DirAccess::create(DirAccess::ACCESS_FILESYSTEM);
-@@ -601,12 +1027,25 @@ void ProjectDialog::ok_pressed() {
+@@ -601,12 +1065,25 @@ void ProjectDialog::ok_pressed() {
  			initial_settings[extra_setting.key] = extra_setting.value;
  		}
  
@@ -529,7 +572,7 @@ index 7c83dcc..1c3ecc3 100644
  		// Store default project icon in SVG format.
  		Ref<FileAccess> fa_icon = FileAccess::open(path.path_join("icon.svg"), FileAccess::WRITE, &err);
  		if (err != OK) {
-@@ -917,8 +1356,21 @@ void ProjectDialog::show_dialog(bool p_reset_name, bool p_is_confirmed) {
+@@ -917,8 +1394,21 @@ void ProjectDialog::show_dialog(bool p_reset_name, bool p_is_confirmed) {
  
  			// Project path dialog is also opened; no need to change focus.
  		} else if (mode == MODE_NEW) {
@@ -553,7 +596,7 @@ index 7c83dcc..1c3ecc3 100644
  
  			if (!rendering_device_checked) {
  				rendering_device_supported = DisplayServer::is_rendering_device_supported();
-@@ -1019,6 +1471,9 @@ void ProjectDialog::_bind_methods() {
+@@ -1019,6 +1509,9 @@ void ProjectDialog::_bind_methods() {
  ProjectDialog::ProjectDialog() {
  	VBoxContainer *vb = memnew(VBoxContainer);
  	add_child(vb);
@@ -563,7 +606,7 @@ index 7c83dcc..1c3ecc3 100644
  
  	name_container = memnew(VBoxContainer);
  	vb->add_child(name_container);
-@@ -1111,6 +1566,7 @@ ProjectDialog::ProjectDialog() {
+@@ -1111,6 +1604,7 @@ ProjectDialog::ProjectDialog() {
  	renderer_container->add_child(l);
  	HBoxContainer *rshc = memnew(HBoxContainer);
  	renderer_container->add_child(rshc);
@@ -571,7 +614,7 @@ index 7c83dcc..1c3ecc3 100644
  	renderer_button_group.instantiate();
  
  	// Left hand side, used for checkboxes to select renderer.
-@@ -1159,6 +1615,7 @@ ProjectDialog::ProjectDialog() {
+@@ -1159,6 +1653,7 @@ ProjectDialog::ProjectDialog() {
  	rs_button->connect(SceneStringName(pressed), callable_mp(this, &ProjectDialog::_renderer_selected));
  	rvb->add_child(rs_button);
  	LinkButton *ri_link = memnew(LinkButton);
@@ -579,7 +622,7 @@ index 7c83dcc..1c3ecc3 100644
  	ri_link->set_text(TTRC("More information"));
  	ri_link->set_uri(GODOT_VERSION_DOCS_URL "/tutorials/rendering/renderers.html");
  	ri_link->set_h_size_flags(Control::SIZE_SHRINK_CENTER);
-@@ -1192,6 +1649,7 @@ ProjectDialog::ProjectDialog() {
+@@ -1192,6 +1687,7 @@ ProjectDialog::ProjectDialog() {
  	l = memnew(Label);
  	l->set_focus_mode(Control::FOCUS_ACCESSIBILITY);
  	l->set_text(TTRC("The renderer can be changed later, but scenes may need to be adjusted."));
@@ -587,7 +630,7 @@ index 7c83dcc..1c3ecc3 100644
  	// Add some extra spacing to separate it from the list above and the buttons below.
  	l->set_custom_minimum_size(Size2(0, 40) * EDSCALE);
  	l->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
-@@ -1201,6 +1659,21 @@ ProjectDialog::ProjectDialog() {
+@@ -1201,6 +1697,24 @@ ProjectDialog::ProjectDialog() {
  
  	default_files_container = memnew(HBoxContainer);
  	vb->add_child(default_files_container);
@@ -600,7 +643,10 @@ index 7c83dcc..1c3ecc3 100644
 +
 +	joinery_container->add_child(_joinery_heading(TTRC("Tools that will make this project")));
 +
-+	joinery_tool_list = memnew(VBoxContainer);
++	// A table: application, what it is for, and the MCP that drives it.
++	joinery_tool_list = memnew(GridContainer);
++	joinery_tool_list->set_columns(3);
++	joinery_tool_list->add_theme_constant_override("h_separation", 24 * EDSCALE);
 +	joinery_container->add_child(joinery_tool_list);
 +
 +	joinery_status = memnew(Label);
@@ -609,7 +655,7 @@ index 7c83dcc..1c3ecc3 100644
  	l = memnew(Label);
  	l->set_text(TTRC("Version Control Metadata:"));
  	default_files_container->add_child(l);
-@@ -1221,6 +1694,7 @@ ProjectDialog::ProjectDialog() {
+@@ -1221,6 +1735,7 @@ ProjectDialog::ProjectDialog() {
  	Control *spacer2 = memnew(Control);
  	spacer2->set_v_size_flags(Control::SIZE_EXPAND_FILL);
  	vb->add_child(spacer2);
@@ -617,7 +663,7 @@ index 7c83dcc..1c3ecc3 100644
  
  	edit_check_box = memnew(CheckBox);
  	edit_check_box->set_text(TTRC("Edit Now"));
-@@ -1245,3 +1719,6 @@ ProjectDialog::ProjectDialog() {
+@@ -1245,3 +1760,6 @@ ProjectDialog::ProjectDialog() {
  	dialog_error = memnew(AcceptDialog);
  	add_child(dialog_error);
  }
@@ -625,18 +671,19 @@ index 7c83dcc..1c3ecc3 100644
 +
 +
 diff --git a/editor/project_manager/project_dialog.h b/editor/project_manager/project_dialog.h
-index bad5570..1c0296e 100644
+index bad5570..566d587 100644
 --- a/editor/project_manager/project_dialog.h
 +++ b/editor/project_manager/project_dialog.h
-@@ -34,6 +34,7 @@
+@@ -34,6 +34,8 @@
  
  class Button;
  class CheckBox;
 +class LinkButton;
++class GridContainer;
  class CheckButton;
  class EditorFileDialog;
  class LineEdit;
-@@ -84,6 +85,32 @@ private:
+@@ -84,6 +86,32 @@ private:
  	VBoxContainer *renderer_container = nullptr;
  	Label *renderer_info = nullptr;
  	HBoxContainer *default_files_container = nullptr;
@@ -646,7 +693,7 @@ index bad5570..1c0296e 100644
 +	// editor opens. Built from `joinery tools --json`, so the catalog stays the
 +	// one source of truth rather than being restated in C++.
 +	VBoxContainer *joinery_container = nullptr;
-+	VBoxContainer *joinery_tool_list = nullptr;
++	GridContainer *joinery_tool_list = nullptr;
 +	Label *joinery_status = nullptr;
 +	Vector<CheckBox *> joinery_boxes;
 +	Vector<String> joinery_ids;
@@ -669,7 +716,7 @@ index bad5570..1c0296e 100644
  	Ref<ButtonGroup> renderer_button_group;
  	bool rendering_device_supported = false;
  	bool rendering_device_checked = false;
-@@ -144,6 +171,20 @@ private:
+@@ -144,6 +172,20 @@ private:
  	void _reset_name();
  	void _renderer_selected();
  	void _nonempty_confirmation_ok_pressed();
