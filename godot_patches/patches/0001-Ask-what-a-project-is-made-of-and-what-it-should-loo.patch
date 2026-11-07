@@ -1,35 +1,41 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Joinery <joinery@localhost>
 Date: Sat, 7 Nov 2026 19:01:40 +0100
-Subject: [PATCH] Ask which tools make a project while creating it
+Subject: [PATCH] Ask what a project is made of, and what it should look like
 
-Creating a project is the moment the tools that will make it get chosen, so
-the dialog has two pages now: Godot's own fields, then Joinery's
-questionnaire. Next moves between them and Create finishes, which keeps the
-whole decision in the Project Manager rather than deferring it to the editor.
+Creating a project is when both of its founding decisions get made, so the
+dialog is three pages: Godot's own fields, the tools that will make it, then
+the art bible. Next walks them and Create finishes, which keeps the whole
+decision in the Project Manager rather than deferring it to the editor.
 
-The questionnaire is built from `joinery tools --json`, so the catalog and
-its admission rules stay the one source of truth and this code cannot invent
-a tool or offer one whose server is not built. Required tools cannot be
-unticked, unavailable ones cannot be ticked, and each carries the catalog's
-own reason as its tooltip.
+Both questionnaires are built from the `joinery` CLI, `tools --json` and
+`bible --questions`, so the catalog and the bible's shape stay the one source
+of truth. This code cannot invent a tool, offer one whose server is not
+built, or decide what the bible asks. Required tools cannot be unticked and
+unavailable ones cannot be ticked, each carrying the catalog's own reason.
 
-Creating then installs the addon and runs `joinery setup` with the chosen
-tools, which is the path `joinery new` takes.
+Creating installs the addon, runs `joinery setup` with the chosen tools, and
+hands the bible answers to `joinery bible`, which renders them through
+templates/art_bible.md. The answers go via a small JSON file beside the
+project, because multi-line prose does not belong in command arguments.
+Rendering stays in Python so the bible can change without rebuilding Godot.
 
-All of it degrades: with no Joinery install the page is skipped, the title
-and button read as stock Godot, and the user gets a plain valid project.
-Only in that case is `joinery/setup_pending` set, so the addon asks in the
-editor instead; when the questionnaire has already run, it does not nag.
+Typography follows the editor's own theme: headings use its header variation
+and guidance text is a step down from the body size and dimmed, derived from
+the user's editor font size rather than fixed pixels. The long Rule Zero
+paragraph is gone; the greyed-out tools still carry their reasons.
+
+It all degrades. Without Joinery the pages are skipped, the dialog reads as
+stock Godot, and the project is plain and valid.
 
 Joinery-only, not for upstream: it reroutes a stock flow into Joinery's own.
 ---
- editor/project_manager/project_dialog.cpp | 222 +++++++++++++++++++++-
- editor/project_manager/project_dialog.h   |  20 ++
- 2 files changed, 240 insertions(+), 2 deletions(-)
+ editor/project_manager/project_dialog.cpp | 386 +++++++++++++++++++++-
+ editor/project_manager/project_dialog.h   |  32 ++
+ 2 files changed, 416 insertions(+), 2 deletions(-)
 
 diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
-index 7c83dcc..c425232 100644
+index 7c83dcc..bef7f9d 100644
 --- a/editor/project_manager/project_dialog.cpp
 +++ b/editor/project_manager/project_dialog.cpp
 @@ -32,6 +32,7 @@
@@ -40,7 +46,15 @@ index 7c83dcc..c425232 100644
  #include "core/io/zip_io.h"
  #include "core/object/callable_mp.h"
  #include "core/os/os.h"
-@@ -536,6 +537,173 @@ void ProjectDialog::_renderer_selected() {
+@@ -46,6 +47,7 @@
+ #include "scene/gui/check_box.h"
+ #include "scene/gui/check_button.h"
+ #include "scene/gui/line_edit.h"
++#include "scene/gui/text_edit.h"
+ #include "scene/gui/link_button.h"
+ #include "scene/gui/option_button.h"
+ #include "scene/gui/separator.h"
+@@ -536,6 +538,328 @@ void ProjectDialog::_renderer_selected() {
  	_update_ok_button();
  }
  
@@ -143,26 +157,181 @@ index 7c83dcc..c425232 100644
 +	return chosen;
 +}
 +
-+void ProjectDialog::_joinery_show_page() {
-+	joinery_on_page = true;
++// A heading that matches the editor's own type scale, instead of a fixed pixel
++// size that goes wrong at a different interface scale.
++Label *ProjectDialog::_joinery_heading(const String &p_text) const {
++	Label *label = memnew(Label);
++	label->set_text(p_text);
++	label->set_theme_type_variation(SNAME("HeaderMedium"));
++	return label;
++}
++
++// Secondary text: a step down from the body size and dimmed, so it reads as
++// guidance rather than competing with the question it belongs to. Derived from
++// the user's own editor font size, never a fixed pixel value.
++Label *ProjectDialog::_joinery_hint(const String &p_text) const {
++	Label *label = memnew(Label);
++	label->set_text(p_text);
++	int base = int(EDITOR_GET("interface/editor/main_font_size"));
++	label->add_theme_font_size_override(SceneStringName(font_size), MAX(9, base - 1));
++	label->add_theme_color_override(SceneStringName(font_color),
++			get_theme_color(SNAME("font_disabled_color"), EditorStringName(Editor)));
++	label->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
++	label->set_custom_minimum_size(Size2(520, 0) * EDSCALE);
++	return label;
++}
++
++bool ProjectDialog::_joinery_load_questions() {
++	for (Control *field : joinery_bible_fields) {
++		field->get_parent()->remove_child(field);
++		memdelete(field);
++	}
++	joinery_bible_fields.clear();
++	joinery_bible_keys.clear();
++
++	String home = _joinery_home();
++	if (home.is_empty()) {
++		return false;
++	}
++
++	List<String> args;
++	args.push_back("run");
++	args.push_back("--project");
++	args.push_back(home);
++	args.push_back("joinery");
++	args.push_back("bible");
++	args.push_back("--project");
++	args.push_back(home);
++	args.push_back("--questions");
++	String output;
++	int exit_code = 0;
++	if (OS::get_singleton()->execute("uv", args, &output, &exit_code, true) != OK || exit_code != 0) {
++		return false;
++	}
++
++	Ref<JSON> json;
++	json.instantiate();
++	if (json->parse(output) != OK) {
++		return false;
++	}
++	Array questions = Dictionary(json->get_data()).get("questions", Array());
++
++	for (int i = 0; i < questions.size(); i++) {
++		Dictionary question = questions[i];
++		Label *label = memnew(Label);
++		label->set_text(String(question.get("label", "")));
++		label->set_theme_type_variation(SNAME("HeaderSmall"));
++		joinery_bible_container->add_child(label);
++		joinery_bible_fields.push_back(label);
++		joinery_bible_keys.push_back(String());
++
++		Label *hint = _joinery_hint(String(question.get("hint", "")));
++		joinery_bible_container->add_child(hint);
++		joinery_bible_fields.push_back(hint);
++		joinery_bible_keys.push_back(String());
++
++		// Only the inputs carry a key; the labels above are decoration, which
++		// keeps the answer-gathering loop honest about which control is which.
++		if (bool(question.get("multiline", false))) {
++			TextEdit *box = memnew(TextEdit);
++			box->set_custom_minimum_size(Size2(520, 56) * EDSCALE);
++			box->set_line_wrapping_mode(TextEdit::LINE_WRAPPING_BOUNDARY);
++			joinery_bible_container->add_child(box);
++			joinery_bible_fields.push_back(box);
++			joinery_bible_keys.push_back(String(question.get("key", "")));
++		} else {
++			LineEdit *line = memnew(LineEdit);
++			line->set_custom_minimum_size(Size2(520, 0) * EDSCALE);
++			joinery_bible_container->add_child(line);
++			joinery_bible_fields.push_back(line);
++			joinery_bible_keys.push_back(String(question.get("key", "")));
++		}
++	}
++	return !joinery_bible_keys.is_empty();
++}
++
++void ProjectDialog::_joinery_show_tools_page() {
++	joinery_page = 1;
 +	name_container->hide();
 +	project_path_container->hide();
 +	install_path_container->hide();
 +	renderer_container->hide();
 +	default_files_container->hide();
++	joinery_bible_container->hide();
 +	joinery_container->show();
 +	set_title(TTRC("Choose the tools that will make this project"));
-+	set_ok_button_text(TTRC("Create"));
++	set_ok_button_text(TTRC("Next"));
 +	_set_message("", MESSAGE_SUCCESS);
-+	joinery_status->set_text(
-+			vformat(TTRC("Project: %s"), project_name->get_text().strip_edges()));
 +	reset_size();
 +}
 +
-+void ProjectDialog::_joinery_leave_page() {
-+	joinery_on_page = false;
++void ProjectDialog::_joinery_show_bible_page() {
++	joinery_page = 2;
++	joinery_container->hide();
++	joinery_bible_container->show();
++	set_title(TTRC("What should this project look and sound like?"));
++	set_ok_button_text(TTRC("Create"));
++	_set_message("", MESSAGE_SUCCESS);
++	reset_size();
++}
++
++void ProjectDialog::_joinery_reset_pages() {
++	joinery_page = 0;
 +	if (joinery_container) {
 +		joinery_container->hide();
++	}
++	if (joinery_bible_container) {
++		joinery_bible_container->hide();
++	}
++}
++
++// Hand the answers to `joinery bible`, which renders them through
++// templates/art_bible.md. Passing multi-line text as arguments is awkward, so
++// the answers go in a small JSON file beside the project and the CLI consumes
++// it. Rendering stays in Python so the bible's shape can change without
++// rebuilding the engine.
++void ProjectDialog::_joinery_write_bible(const String &p_path, const String &p_title) {
++	if (joinery_bible_keys.is_empty()) {
++		return;
++	}
++	Dictionary answers;
++	answers["title"] = p_title;
++	for (int i = 0; i < joinery_bible_fields.size(); i++) {
++		const String &key = joinery_bible_keys[i];
++		if (key.is_empty()) {
++			continue;
++		}
++		TextEdit *box = Object::cast_to<TextEdit>(joinery_bible_fields[i]);
++		LineEdit *line = Object::cast_to<LineEdit>(joinery_bible_fields[i]);
++		if (box) {
++			answers[key] = box->get_text();
++		} else if (line) {
++			answers[key] = line->get_text();
++		}
++	}
++
++	String answers_path = p_path.path_join(".joinery-bible-answers.json");
++	Ref<FileAccess> f = FileAccess::open(answers_path, FileAccess::WRITE);
++	if (f.is_null()) {
++		WARN_PRINT("Joinery: could not write the bible answers to " + answers_path);
++		return;
++	}
++	f->store_string(JSON::stringify(answers));
++	f->close();
++
++	String home = _joinery_home();
++	List<String> args;
++	args.push_back("run");
++	args.push_back("--project");
++	args.push_back(home);
++	args.push_back("joinery");
++	args.push_back("bible");
++	args.push_back("--project");
++	args.push_back(p_path);
++	String output;
++	int exit_code = 0;
++	if (OS::get_singleton()->execute("uv", args, &output, &exit_code, true) != OK || exit_code != 0) {
++		WARN_PRINT("Joinery: `joinery bible` did not run, so art/bible.md was not written. " + output);
 +	}
 +}
 +
@@ -214,21 +383,27 @@ index 7c83dcc..c425232 100644
  void ProjectDialog::_nonempty_confirmation_ok_pressed() {
  	is_folder_empty = true;
  	ok_pressed();
-@@ -558,6 +726,13 @@ void ProjectDialog::ok_pressed() {
+@@ -558,6 +882,19 @@ void ProjectDialog::ok_pressed() {
  
  	String path = project_path->get_text();
  
-+	// Joinery: first Next shows the questionnaire; Create on that page falls
-+	// through to the real creation below.
-+	if (mode == MODE_NEW && !joinery_on_page && joinery_available) {
-+		_joinery_show_page();
-+		return;
++	// Joinery: Next walks the pages. Only Create on the last one falls through
++	// to the real creation below.
++	if (mode == MODE_NEW && joinery_available) {
++		if (joinery_page == 0) {
++			_joinery_show_tools_page();
++			return;
++		}
++		if (joinery_page == 1 && !joinery_bible_keys.is_empty()) {
++			_joinery_show_bible_page();
++			return;
++		}
 +	}
 +
  	if (mode == MODE_NEW) {
  		if (create_dir->is_pressed()) {
  			Ref<DirAccess> d = DirAccess::create(DirAccess::ACCESS_FILESYSTEM);
-@@ -601,12 +776,24 @@ void ProjectDialog::ok_pressed() {
+@@ -601,12 +938,25 @@ void ProjectDialog::ok_pressed() {
  			initial_settings[extra_setting.key] = extra_setting.value;
  		}
  
@@ -249,11 +424,12 @@ index 7c83dcc..c425232 100644
  		}
  
 +		_joinery_install(path, _joinery_selected_tools());
++		_joinery_write_bible(path, project_name->get_text().strip_edges());
 +
  		// Store default project icon in SVG format.
  		Ref<FileAccess> fa_icon = FileAccess::open(path.path_join("icon.svg"), FileAccess::WRITE, &err);
  		if (err != OK) {
-@@ -917,8 +1104,16 @@ void ProjectDialog::show_dialog(bool p_reset_name, bool p_is_confirmed) {
+@@ -917,8 +1267,17 @@ void ProjectDialog::show_dialog(bool p_reset_name, bool p_is_confirmed) {
  
  			// Project path dialog is also opened; no need to change focus.
  		} else if (mode == MODE_NEW) {
@@ -263,16 +439,17 @@ index 7c83dcc..c425232 100644
 +			// each time the dialog opens, so a tool that became available since
 +			// last time shows up, and fall back to stock wording when Joinery
 +			// is not installed.
-+			_joinery_leave_page();
++			_joinery_reset_pages();
 +			name_container->show();
 +			project_path_container->show();
 +			bool have_catalog = _joinery_load_catalog();
++			_joinery_load_questions();
 +			set_title(have_catalog ? TTRC("Create New Joinery Project") : TTRC("Create New Project"));
 +			set_ok_button_text(have_catalog ? TTRC("Next") : TTRC("Create"));
  
  			if (!rendering_device_checked) {
  				rendering_device_supported = DisplayServer::is_rendering_device_supported();
-@@ -1201,6 +1396,29 @@ ProjectDialog::ProjectDialog() {
+@@ -1201,6 +1560,29 @@ ProjectDialog::ProjectDialog() {
  
  	default_files_container = memnew(HBoxContainer);
  	vb->add_child(default_files_container);
@@ -283,15 +460,7 @@ index 7c83dcc..c425232 100644
 +	joinery_container->hide();
 +	vb->add_child(joinery_container);
 +
-+	Label *joinery_heading = memnew(Label);
-+	joinery_heading->set_text(TTRC("Tools that will make this project"));
-+	joinery_container->add_child(joinery_heading);
-+
-+	Label *joinery_note = memnew(Label);
-+	joinery_note->set_text(TTRC("Preferred tools are non-generative and send no telemetry. Assets are made by operating them, never generated, and each one keeps a recipe that remakes it. Greyed out means Joinery has not built that tool's server yet."));
-+	joinery_note->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
-+	joinery_note->set_custom_minimum_size(Size2(480, 0) * EDSCALE);
-+	joinery_container->add_child(joinery_note);
++	joinery_container->add_child(_joinery_heading(TTRC("Tools that will make this project")));
 +
 +	joinery_tool_list = memnew(VBoxContainer);
 +	joinery_container->add_child(joinery_tool_list);
@@ -299,14 +468,22 @@ index 7c83dcc..c425232 100644
 +	joinery_status = memnew(Label);
 +	joinery_container->add_child(joinery_status);
 +
++	joinery_bible_container = memnew(VBoxContainer);
++	joinery_bible_container->hide();
++	vb->add_child(joinery_bible_container);
++
++	joinery_bible_container->add_child(_joinery_heading(TTRC("The art bible")));
++
++	joinery_bible_container->add_child(_joinery_hint(TTRC("Answer in your own words. This becomes art/bible.md, which every change in this project is checked against. Anything left blank is recorded as unanswered, not guessed.")));
++
  	l = memnew(Label);
  	l->set_text(TTRC("Version Control Metadata:"));
  	default_files_container->add_child(l);
 diff --git a/editor/project_manager/project_dialog.h b/editor/project_manager/project_dialog.h
-index bad5570..74f9ada 100644
+index bad5570..35668ea 100644
 --- a/editor/project_manager/project_dialog.h
 +++ b/editor/project_manager/project_dialog.h
-@@ -84,6 +84,18 @@ private:
+@@ -84,6 +84,25 @@ private:
  	VBoxContainer *renderer_container = nullptr;
  	Label *renderer_info = nullptr;
  	HBoxContainer *default_files_container = nullptr;
@@ -320,12 +497,19 @@ index bad5570..74f9ada 100644
 +	Label *joinery_status = nullptr;
 +	Vector<CheckBox *> joinery_boxes;
 +	Vector<String> joinery_ids;
-+	bool joinery_on_page = false;
++	// Page three: the art bible interview. A project decides what it should
++	// look and sound like before any asset exists, so the questions are asked
++	// here and `joinery bible` renders them into art/bible.md.
++	VBoxContainer *joinery_bible_container = nullptr;
++	Vector<Control *> joinery_bible_fields;
++	Vector<String> joinery_bible_keys;
++	// 0 = Godot's fields, 1 = tools, 2 = bible.
++	int joinery_page = 0;
 +	bool joinery_available = false;
  	Ref<ButtonGroup> renderer_button_group;
  	bool rendering_device_supported = false;
  	bool rendering_device_checked = false;
-@@ -144,6 +156,14 @@ private:
+@@ -144,6 +163,19 @@ private:
  	void _reset_name();
  	void _renderer_selected();
  	void _nonempty_confirmation_ok_pressed();
@@ -333,10 +517,15 @@ index bad5570..74f9ada 100644
 +	void _joinery_install(const String &p_path, const String &p_tools);
 +	// Joinery: page two of creating a project.
 +	bool _joinery_load_catalog();
-+	void _joinery_show_page();
-+	void _joinery_leave_page();
++	bool _joinery_load_questions();
++	void _joinery_show_tools_page();
++	void _joinery_show_bible_page();
++	void _joinery_reset_pages();
 +	String _joinery_selected_tools() const;
 +	String _joinery_home() const;
++	void _joinery_write_bible(const String &p_path, const String &p_title);
++	Label *_joinery_heading(const String &p_text) const;
++	Label *_joinery_hint(const String &p_text) const;
  
  	void ok_pressed() override;
  

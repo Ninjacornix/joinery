@@ -13,6 +13,7 @@ from joinery import hook
 from joinery.agents import all_agents
 from joinery.agents import get as get_agent
 from joinery.auth import for_agent
+from joinery.bible import questions, write_from_answers_file
 from joinery.catalog import (
     CONFIG_PATH,
     ROOT,
@@ -39,7 +40,7 @@ from joinery.policy import load_denylist, normalise
 from joinery.project import create_project
 from joinery.recipe import rebuild_all, recipe_paths, record
 from joinery.runner import pick
-from joinery.wiring import unwireable
+from joinery.wiring import unwireable, write_agent_wiring
 
 
 def check_mcp_config(root: Path, config: Path = CONFIG_PATH) -> list[str]:
@@ -98,7 +99,13 @@ def _setup(tools: str | None, project: Path) -> int:
     selection = _choose(tools, config)
     write_selection(selection, config)
     write_mcp_config(selection, project)
+    # Setting a project up includes gating it. A project created through the
+    # Project Manager reaches this path rather than `joinery new`, and without
+    # this it would have no creation-only hooks for any agent, which is the one
+    # thing a Joinery project must not be missing.
+    wired = write_agent_wiring(project)
     print(f"Saved: {', '.join(selection.tools)}")
+    print(f"Gate wired for: {', '.join(sorted({p.split('/')[0] for p in wired}))}")
     return 0
 
 
@@ -238,6 +245,15 @@ def main() -> int:
         "lock", help="write joinery.lock from what the recipes produced"
     )
     lock.add_argument("--project", type=Path, default=ROOT / "testbed")
+    bible = commands.add_parser(
+        "bible", help="write a project's art bible from interview answers"
+    )
+    bible.add_argument("--project", type=Path, required=True)
+    bible.add_argument(
+        "--questions",
+        action="store_true",
+        help="print the interview questions as JSON, for a UI front end",
+    )
     auth = commands.add_parser("auth", help="show how to sign an agent in")
     auth.add_argument(
         "agent", nargs="?", choices=[a.id for a in all_agents()], default=None
@@ -261,6 +277,20 @@ def main() -> int:
         return code
     if args.command == "rebuild":
         return _rebuild(args.project, args.runner, args.record, args.timeout)
+    if args.command == "bible":
+        if args.questions:
+            print(json.dumps({"questions": questions()}, indent=2))
+            return 0
+        try:
+            written = write_from_answers_file(args.project)
+        except (ValueError, FileExistsError) as exc:
+            print(f"bible: {exc}", file=sys.stderr)
+            return 1
+        if written is None:
+            print("bible: no answers file to read; nothing written")
+            return 0
+        print(f"bible: wrote {written}")
+        return 0
     if args.command == "lock":
         problems = write_lock(args.project)
         for problem in problems:

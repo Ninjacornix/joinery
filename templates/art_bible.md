@@ -1,4 +1,4 @@
-# Art Bible — <game title>
+# Art Bible — {{title}}
 
 > One per game project, at `<project>/art/bible.md`. Written by you, the master (Journeyman can interview you and draft it). Journeyman checks every change in this project against it.
 > Keep it short and concrete. "Gritty" is a mood; "palette below, roughness 0.6–0.9" is a rule.
@@ -7,12 +7,16 @@
 ## 1. Vision (2–4 sentences)
 What the game feels like, and what it must never feel like.
 
+{{vision}}
+
 ## 2. References (your own words, no images pulled from the web)
 - Games, films or places whose *look* you mean, and what exactly to take from each:
   - e.g. "<game>: the chunky silhouettes and flat lighting, not its colours"
 
+{{references}}
+
 ## 3. Visual style
-- Overall look: low-poly / stylized PBR / toon / pixel art / other: …
+- Overall look: {{look}}
 - Shape language: (round & friendly / angular & hostile / blocky & industrial) …
 - Detail level: where detail goes (characters, interactables) vs where it stays simple (background) …
 - Lighting mood: time of day, contrast, colour temperature …
@@ -25,6 +29,7 @@ What the game feels like, and what it must never feel like.
 | Accent (interactables only) | #…… | |
 | Shadow tint | #…… | |
 | UI base | #…… | |
+- Palette, in your words: {{palette}}
 - Max colour distance (ΔE) from the palette for surface colours: 12
 - Saturation ceiling outside accents: …
 
@@ -43,13 +48,15 @@ What the game feels like, and what it must never feel like.
 - Pixel art (if used): resolution …, palette size ≤ …, no sub-pixel rotation
 
 ## 7. Sound palette
-- Overall: acoustic-ish / synthetic / lo-fi / orchestral-synth hybrid …
+- Overall: {{sound}}
 - SFX character: e.g. "dry, close, punchy; no cartoon boings"
 - Music: tempo range … BPM, keys/modes …, instruments/patches …, loops (seamless, 60–120 s)
 - Loudness (checked): music −16 LUFS, ambience −22 LUFS, SFX peaks ≤ −1 dBTP
 
 ## 8. Never (hard bans)
 - e.g. lens flares, chromatic aberration, neon outside UI, stock "whoosh" transitions …
+
+{{bans}}
 
 ## 9. Allowed human imports
 - Sources you allow (your own work, bought packs, CC0 libraries) and their licences.
