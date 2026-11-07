@@ -1,0 +1,9 @@
+version = 1
+tool = "supercollider"
+script = "recipes/music_explore.scd"
+outputs = ["audio/music/explore_loop.wav"]
+note = "4-bar loop in A aeolian at 84 BPM. Notes and patches are the source; seeded RNG."
+
+# Measured from the real outputs by `joinery rebuild --record`.
+[expect]
+"audio/music/explore_loop.wav" = "sha256:198c4af27c669e225ea3324a1bdcf1ab230650213989e96015c28ac48e81eadd"

@@ -1,0 +1,10 @@
+version = 1
+tool = "supercollider"
+script = "recipes/sfx_door.scd"
+outputs = ["audio/sfx/door_creak.wav", "audio/sfx/door_close.wav"]
+note = "Synth patches, not samples. Server RNG is seeded so renders are byte-identical."
+
+# Measured from the real outputs by `joinery rebuild --record`.
+[expect]
+"audio/sfx/door_close.wav" = "sha256:dc7e69c8cd7b884d32a98fe4483fa71e883d1b7a957bda4e5444cde78c41d416"
+"audio/sfx/door_creak.wav" = "sha256:3633b10f95c27f8e4e86dd3983cc597e899ff5c2a21b7b9c2b68a24a4729756d"

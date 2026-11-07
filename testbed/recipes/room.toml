@@ -1,0 +1,9 @@
+version = 1
+tool = "blender"
+script = "recipes/room.py"
+outputs = ["art/kit/room.blend"]
+note = "Modular room: floor, ceiling, four walls, doorway cut by boolean to fit the door."
+
+# Measured from the real outputs by `joinery rebuild --record`.
+[expect]
+"art/kit/room.blend" = "blend:167359c50db7e774e6ac9f6994ba1802e762bc36761961888299fa8afb5540f9"

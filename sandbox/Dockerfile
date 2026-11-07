@@ -180,6 +180,25 @@ RUN chmod +x /usr/local/bin/joinery-sandbox
 # Unprivileged worker: nothing here needs root, and tool scripts are untrusted.
 RUN useradd --create-home --shell /bin/bash joiner
 USER joiner
+
+# Point Godot at Blender so it can import .blend natively. Godot stores this as
+# an editor setting and refuses to configure it in headless mode, so bake it in:
+# without this, importing a .blend fails with "Blender path is invalid or not
+# set" and no amount of command-line argument fixes it. The setting wants the
+# executable, not its directory, which the error message does not say.
+RUN set -eu; \
+    if [ "${WITH_BLENDER}" != "1" ]; then echo "godot/blender: nothing to link"; exit 0; fi; \
+    mkdir -p /tmp/bootstrap; \
+    printf 'config_version=5\n\n[application]\nconfig/name="bootstrap"\n' \
+      >/tmp/bootstrap/project.godot; \
+    godot --headless --path /tmp/bootstrap --editor --quit >/dev/null 2>&1 || true; \
+    settings=$(find "${HOME}/.config/godot" -name 'editor_settings-*.tres' | head -1); \
+    test -n "${settings}" || { echo "godot wrote no editor settings" >&2; exit 1; }; \
+    sed -i 's|filesystem/import/blender/blender_path = .*|filesystem/import/blender/blender_path = "/opt/blender/blender"|' "${settings}"; \
+    grep -q '"/opt/blender/blender"' "${settings}" \
+      || { echo "failed to set blender_path" >&2; exit 1; }; \
+    rm -rf /tmp/bootstrap
+
 WORKDIR /work
 
 ENTRYPOINT ["/usr/local/bin/joinery-sandbox"]

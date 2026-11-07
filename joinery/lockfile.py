@@ -13,7 +13,7 @@ from joinery.catalog import Catalog, load_project_tools
 
 LOCK_NAME = "joinery.lock"
 ASSET_DIRS = ("art", "audio")
-NOT_ASSETS = {".gitkeep", ".DS_Store"}
+NOT_ASSETS = {".gitkeep", ".DS_Store", ".gdignore"}
 NOT_ASSET_PATHS = {"art/bible.md"}
 
 
@@ -49,7 +49,8 @@ AssetEntry = Annotated[Entry, Field(discriminator="origin")]
 _ENTRIES: TypeAdapter[list[Entry]] = TypeAdapter(list[AssetEntry])
 
 
-def _asset_files(project: Path) -> set[str]:
+def asset_files(project: Path) -> set[str]:
+    """Every file under art/ and audio/ that the gate considers an asset."""
     found: set[str] = set()
     for directory in ASSET_DIRS:
         for path in (project / directory).rglob("*"):
@@ -107,6 +108,6 @@ def check_assets(project: Path, catalog: Catalog) -> list[str]:
         errors.extend(_entry_errors(project, entry, catalog, custom))
     locked = {e.path for e in entries}
     errors.extend(
-        f"{p}: no {LOCK_NAME} entry" for p in sorted(_asset_files(project) - locked)
+        f"{p}: no {LOCK_NAME} entry" for p in sorted(asset_files(project) - locked)
     )
     return errors

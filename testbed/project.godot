@@ -6,3 +6,4 @@ config_version=5
 
 config/name="Joinery Testbed"
 config/features=PackedStringArray("4.7")
+run/main_scene="res://main.tscn"

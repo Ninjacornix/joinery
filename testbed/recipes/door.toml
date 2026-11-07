@@ -1,0 +1,9 @@
+version = 1
+tool = "blender"
+script = "recipes/door.py"
+outputs = ["art/props/door.blend"]
+note = "Door leaf and lever handle, pivot at the hinge. Shader-node wood and brass."
+
+# Measured from the real outputs by `joinery rebuild --record`.
+[expect]
+"art/props/door.blend" = "blend:9b2cdc82fc852dd92e6867eec7d0e84849b93c129942efe8c10bb88bef592967"

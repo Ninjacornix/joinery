@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 from joinery import hook
@@ -30,8 +32,11 @@ from joinery.installer import (
     write_selection,
 )
 from joinery.lockfile import check_assets
+from joinery.locking import write_lock
 from joinery.policy import load_denylist, normalise
 from joinery.project import create_project
+from joinery.recipe import rebuild_all, recipe_paths, record
+from joinery.runner import pick
 from joinery.wiring import unwireable
 
 
@@ -141,6 +146,51 @@ def _auth(agent_id: str | None) -> int:
     return 0
 
 
+def _rebuild(project: Path, prefer: str, record_mode: bool, timeout: int) -> int:
+    """Replay every recipe and report whether each asset came back identical."""
+    runner = pick(prefer)
+    if not runner.available():
+        print(
+            f"runner {runner.name!r} is not available. Build the sandbox "
+            "(sandbox/build.sh) or use --runner host with the tools installed.",
+            file=sys.stderr,
+        )
+        return 1
+    paths = recipe_paths(project)
+    if not paths:
+        print(f"no recipes in {project / 'recipes'}")
+        return 0
+
+    if record_mode:
+        # Measures the committed outputs; it does not rebuild them.
+        for path in paths:
+            updated = record(path, project, runner)
+            fps = ", ".join(sorted(updated.expect.values()))
+            print(f"recorded {path.name}: {fps}")
+        return 0
+
+    # Replay in a copy, never in place. A rebuild rewrites its outputs, and a
+    # .blend is not byte-reproducible, so rebuilding the working tree would
+    # leave every asset's joinery.lock hash stale even when the recipe is
+    # perfectly correct. Verification must not dirty the thing it verifies.
+    failed = 0
+    with tempfile.TemporaryDirectory(prefix="joinery-rebuild-") as tmp:
+        scratch = Path(tmp) / project.name
+        shutil.copytree(project, scratch, symlinks=True)
+        print(
+            f"rebuilding {len(paths)} recipe(s) via the {runner.name} runner, "
+            "in a scratch copy"
+        )
+        for result in rebuild_all(scratch, runner, timeout):
+            mark = "ok " if result.ok else "FAIL"
+            print(f"  [{mark}] {result.recipe:<28} {result.seconds:6.1f}s")
+            for problem in result.problems:
+                print(f"         {problem}", file=sys.stderr)
+            failed += not result.ok
+    print("rebuild: " + ("FAILED" if failed else "ok"))
+    return 1 if failed else 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="joinery")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -166,6 +216,23 @@ def main() -> int:
         "doctor", help="check the programs this project's tools need"
     )
     doctor.add_argument("--project", type=Path, default=ROOT)
+    rebuild = commands.add_parser(
+        "rebuild", help="replay every recipe and check the assets come back"
+    )
+    rebuild.add_argument("--project", type=Path, default=ROOT / "testbed")
+    rebuild.add_argument(
+        "--runner", choices=["auto", "sandbox", "host"], default="auto"
+    )
+    rebuild.add_argument(
+        "--record",
+        action="store_true",
+        help="measure the current outputs and write their fingerprints",
+    )
+    rebuild.add_argument("--timeout", type=int, default=900)
+    lock = commands.add_parser(
+        "lock", help="write joinery.lock from what the recipes produced"
+    )
+    lock.add_argument("--project", type=Path, default=ROOT / "testbed")
     auth = commands.add_parser("auth", help="show how to sign an agent in")
     auth.add_argument(
         "agent", nargs="?", choices=[a.id for a in all_agents()], default=None
@@ -187,6 +254,17 @@ def main() -> int:
         text, code = report(args.project / "joinery.toml")
         print(text)
         return code
+    if args.command == "rebuild":
+        return _rebuild(args.project, args.runner, args.record, args.timeout)
+    if args.command == "lock":
+        problems = write_lock(args.project)
+        for problem in problems:
+            print(problem, file=sys.stderr)
+        if problems:
+            print("lock: FAILED (nothing written)")
+            return 1
+        print(f"lock: wrote {args.project / 'joinery.lock'}")
+        return 0
     if args.command == "auth":
         return _auth(args.agent)
     if args.command == "tools":

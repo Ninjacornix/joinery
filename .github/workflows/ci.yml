@@ -21,3 +21,39 @@ jobs:
       - run: uv run mypy joinery servers bridge
       - run: uv run pytest
       - run: uv run joinery check all
+
+  # Replays the testbed recipes in the sandbox, which is what proves an asset
+  # can actually be remade rather than just claiming it in a lock file. Split
+  # from the fast checks because it builds the tool image, which takes minutes.
+  assets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          lfs: true
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - run: uv sync --frozen --python 3.12
+
+      # Hashes are measured, never committed by hand, so record them here and
+      # let the build verify every download against them.
+      - name: Record download checksums
+        run: sandbox/fetch-checksums.sh
+
+      # Only the tools the sampled recipes need. Adding Krita, GIMP, Inkscape
+      # or Material Maker would roughly double the image for no extra coverage.
+      - name: Build the sandbox
+        run: sandbox/build.sh --with blender --with supercollider
+
+      # The lock must match what the recipes actually produce. Regenerating it
+      # and finding a diff means an asset changed without its lock entry.
+      - name: joinery.lock is up to date
+        run: |
+          uv run joinery lock --project testbed
+          git diff --exit-code -- testbed/joinery.lock
+
+      - run: uv run joinery check assets --project testbed
+
+      # The gate: every testbed asset rebuilds from its recipe. Runs in a
+      # scratch copy, so it cannot quietly rewrite the committed assets.
+      - name: Rebuild every asset from its recipe
+        run: uv run joinery rebuild --project testbed --runner sandbox

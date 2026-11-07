@@ -1,0 +1,11 @@
+version = 1
+tool = "blender"
+script = "recipes/material_stone.py"
+outputs = ["art/materials/stone_tiles_albedo.png", "art/materials/stone_tiles_roughness.png", "art/materials/stone_tiles.blend"]
+note = "Shader-node stone tiles baked to flat maps. Blender is the material tool per ADR 0003."
+
+# Measured from the real outputs by `joinery rebuild --record`.
+[expect]
+"art/materials/stone_tiles.blend" = "blend:b89e105901d5687dddfcfaef6e3b40423e63e50cd6f432cb95106ac5f7cbf6b8"
+"art/materials/stone_tiles_albedo.png" = "sha256:498a68805434d4fceb5fc3a40c07280aa6b00947758499509e6946a36f5f5c7a"
+"art/materials/stone_tiles_roughness.png" = "sha256:ac75d1e824cbedc5e5f77a90bfcbe3b93d2699735cd15e0c7d352c5679f9c13f"
