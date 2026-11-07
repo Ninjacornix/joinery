@@ -1,59 +1,69 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Joinery <joinery@localhost>
 Date: Sat, 7 Nov 2026 19:01:40 +0100
-Subject: [PATCH] Make the editor Joinery's: own theme, simpler project
- manager, creation flow
+Subject: [PATCH] Make the editor Joinery's: own theme, simpler flow, creation
+ questionnaire
 
-Three changes to the editor's front door.
-
-A Joinery colour preset, and this build's default. Flat and roomy rather than
-high-contrast: a near-black neutral surface so viewport content draws the eye,
-a brass accent matching the Journeyman sidebar, contrast below the stock 0.3
-to stop panel-on-panel banding, softer corners and the spacious spacing
-preset. The stock presets all stay selectable, so nothing is taken away.
+A Joinery colour preset, and this build's default: near-black neutral
+surfaces so viewport content draws the eye, a brass accent matching the
+Journeyman sidebar, contrast below the stock 0.3 to stop panel-on-panel
+banding, softer corners and roomier spacing. The stock presets all stay
+selectable.
 
 The Project Manager is stripped back to opening and creating a project. Gone
 are the disk scan, sorting, the per-project action sidebar, the view toggles,
-the asset store, settings and donate. Joinery drives a project from the
-sidebar once one is open, so this screen only has to get you into one, and the
-asset store is a place to download assets, which is the opposite of
-creation-only. The logo becomes the name.
+the asset store, settings and donate. The logo becomes the name.
 
 Creating a project walks steps: Godot's fields, the tools that will make it,
-then the art bible in short themed pages. Both questionnaires come from the
-`joinery` CLI, so the catalog and the bible's shape stay the one source of
-truth and this code cannot invent a tool or decide what the bible asks.
-Creating installs the addon, runs `joinery setup`, and renders the answers
-through templates/art_bible.md.
+then the art bible in short themed pages. The first page keeps what you must
+decide and loses what you must read, so the renderer's bullet list, its
+information link and its "can be changed later" note are hidden: three
+paragraphs about a choice with three options. "Edit Now" goes too, since it
+asks whether to open a project you just asked to create.
+
+Each tool names the MCP that drives it, starred for the strongest tier, which
+is the thing actually being trusted rather than the program. Both
+questionnaires come from the `joinery` CLI, so the catalog and the bible's
+shape stay the one source of truth.
+
+One size for the whole flow. Dropping reset_size stops the dialog resizing
+between a wide first page and a narrow tool list, every input fills the same
+width, and the stretch spacer is hidden on later pages where it only opened
+gaps above and below the content.
 
 Everything hides rather than deletes. Upstream still constructs and refers to
 these controls, and removing their construction is how a fork earns a null
-dereference that compiles cleanly and crashes on launch. Hiding also means a
-Godot release that moves things degrades into showing more UI, not breaking.
+dereference that compiles cleanly and crashes on launch.
 
 Joinery-only, not for upstream: it reroutes stock flows into Joinery's own.
 ---
- editor/project_manager/project_dialog.cpp  | 405 ++++++++++++++++++++-
- editor/project_manager/project_dialog.h    |  33 ++
+ editor/project_manager/project_dialog.cpp  | 481 ++++++++++++++++++++-
+ editor/project_manager/project_dialog.h    |  41 ++
  editor/project_manager/project_manager.cpp |  52 ++-
  editor/project_manager/project_manager.h   |   7 +
  editor/settings/editor_settings.cpp        |  12 +-
  editor/themes/editor_theme_manager.cpp     |  11 +
- 6 files changed, 514 insertions(+), 6 deletions(-)
+ 6 files changed, 598 insertions(+), 6 deletions(-)
 
 diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
-index 7c83dcc..4b1d01c 100644
+index 7c83dcc..1c3ecc3 100644
 --- a/editor/project_manager/project_dialog.cpp
 +++ b/editor/project_manager/project_dialog.cpp
-@@ -32,6 +32,7 @@
+@@ -32,6 +32,13 @@
  
  #include "core/config/project_settings.h"
  #include "core/io/dir_access.h"
 +#include "core/io/json.h"
++
++// Joinery: one width for the whole creation flow. Every page and every input
++// is sized from this, so the dialog never resizes between steps and a text box
++// on the bible pages lines up with the project name field on the first.
++#define JOINERY_DIALOG_WIDTH 720
++#define JOINERY_FIELD_HEIGHT 76
  #include "core/io/zip_io.h"
  #include "core/object/callable_mp.h"
  #include "core/os/os.h"
-@@ -46,6 +47,7 @@
+@@ -46,6 +53,7 @@
  #include "scene/gui/check_box.h"
  #include "scene/gui/check_button.h"
  #include "scene/gui/line_edit.h"
@@ -61,7 +71,7 @@ index 7c83dcc..4b1d01c 100644
  #include "scene/gui/link_button.h"
  #include "scene/gui/option_button.h"
  #include "scene/gui/separator.h"
-@@ -536,6 +538,355 @@ void ProjectDialog::_renderer_selected() {
+@@ -536,6 +544,417 @@ void ProjectDialog::_renderer_selected() {
  	_update_ok_button();
  }
  
@@ -96,9 +106,11 @@ index 7c83dcc..4b1d01c 100644
 +
 +bool ProjectDialog::_joinery_load_catalog() {
 +	joinery_available = false;
-+	for (CheckBox *box : joinery_boxes) {
-+		joinery_tool_list->remove_child(box);
-+		memdelete(box);
++	// Rows own the widgets, so clearing rows clears everything in them.
++	while (joinery_tool_list->get_child_count() > 0) {
++		Node *row = joinery_tool_list->get_child(0);
++		joinery_tool_list->remove_child(row);
++		memdelete(row);
 +	}
 +	joinery_boxes.clear();
 +	joinery_ids.clear();
@@ -132,9 +144,15 @@ index 7c83dcc..4b1d01c 100644
 +
 +	for (int i = 0; i < tools.size(); i++) {
 +		Dictionary tool = tools[i];
++
++		// One row: the tool, then what actually drives it. Naming the MCP
++		// matters because that is the thing being trusted, not the program.
++		HBoxContainer *row = memnew(HBoxContainer);
++		joinery_tool_list->add_child(row);
++
 +		CheckBox *box = memnew(CheckBox);
-+		String label = String(tool.get("name", "")) + "   " + String(tool.get("domains", ""));
-+		box->set_text(label);
++		box->set_text(String(tool.get("name", "")));
++		box->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 +		bool required = tool.get("required", false);
 +		bool available = tool.get("available", false);
 +		box->set_pressed(tool.get("enabled", false) || required);
@@ -142,7 +160,30 @@ index 7c83dcc..4b1d01c 100644
 +		// built cannot be turned on. Both carry the catalog's own reason.
 +		box->set_disabled(required || !available);
 +		box->set_tooltip_text(String(tool.get("reason", "")));
-+		joinery_tool_list->add_child(box);
++		row->add_child(box);
++
++		Label *domains = memnew(Label);
++		domains->set_text(String(tool.get("domains", "")));
++		domains->set_modulate(Color(1, 1, 1, 0.6));
++		domains->set_custom_minimum_size(Size2(110, 0) * EDSCALE);
++		row->add_child(domains);
++
++		// A star marks the strongest tier: an official MCP, or the engine.
++		Label *mcp = memnew(Label);
++		String server = String(tool.get("mcp", ""));
++		bool starred = tool.get("recommended", false);
++		if (server.is_empty()) {
++			mcp->set_text(TTRC("no server yet"));
++			mcp->set_modulate(Color(1, 1, 1, 0.4));
++		} else {
++			mcp->set_text(starred ? "* " + server : server);
++			mcp->set_modulate(Color(1, 1, 1, starred ? 0.95 : 0.6));
++			mcp->set_tooltip_text(String(tool.get("mcp_repo", "")));
++		}
++		mcp->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_RIGHT);
++		mcp->set_custom_minimum_size(Size2(150, 0) * EDSCALE);
++		row->add_child(mcp);
++
 +		joinery_boxes.push_back(box);
 +		joinery_ids.push_back(tool.get("id", ""));
 +	}
@@ -184,7 +225,7 @@ index 7c83dcc..4b1d01c 100644
 +	// a size reduction on top of the dimming turned it into fine print.
 +	label->set_modulate(Color(1, 1, 1, 0.75));
 +	label->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
-+	label->set_custom_minimum_size(Size2(520, 0) * EDSCALE);
++	label->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 +	return label;
 +}
 +
@@ -244,13 +285,14 @@ index 7c83dcc..4b1d01c 100644
 +
 +			if (bool(question.get("multiline", false))) {
 +				TextEdit *box = memnew(TextEdit);
-+				box->set_custom_minimum_size(Size2(520, 72) * EDSCALE);
++				box->set_custom_minimum_size(Size2(0, JOINERY_FIELD_HEIGHT) * EDSCALE);
++				box->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 +				box->set_line_wrapping_mode(TextEdit::LINE_WRAPPING_BOUNDARY);
 +				container->add_child(box);
 +				joinery_bible_inputs.push_back(box);
 +			} else {
 +				LineEdit *line = memnew(LineEdit);
-+				line->set_custom_minimum_size(Size2(520, 0) * EDSCALE);
++				line->set_h_size_flags(Control::SIZE_EXPAND_FILL);
 +				container->add_child(line);
 +				joinery_bible_inputs.push_back(line);
 +			}
@@ -274,6 +316,34 @@ index 7c83dcc..4b1d01c 100644
 +	return 2 + joinery_bible_pages.size();
 +}
 +
++// The first page keeps what you must decide and loses what you must read. The
++// renderer bullets, its "more information" link and the "can be changed later"
++// note are three paragraphs about a choice with three options, and "Edit Now"
++// asks whether to open a project you just asked to create.
++void ProjectDialog::_joinery_trim_first_page() {
++	if (joinery_renderer_row) {
++		// Child 0 is the radio column. Everything after it is explanation: a
++		// separator and the bullet list.
++		for (int i = 1; i < joinery_renderer_row->get_child_count(); i++) {
++			Control *child = Object::cast_to<Control>(joinery_renderer_row->get_child(i));
++			if (child) {
++				child->hide();
++			}
++		}
++	}
++	if (joinery_renderer_link) {
++		joinery_renderer_link->hide();
++	}
++	if (joinery_renderer_note) {
++		joinery_renderer_note->hide();
++	}
++	if (edit_check_box) {
++		// Always open what you just created; the checkbox only ever said no.
++		edit_check_box->set_pressed(true);
++		edit_check_box->hide();
++	}
++}
++
 +void ProjectDialog::_joinery_show_step(int p_step) {
 +	joinery_page = p_step;
 +
@@ -289,11 +359,11 @@ index 7c83dcc..4b1d01c 100644
 +		default_files_container->hide();
 +	}
 +	joinery_container->set_visible(p_step == 1);
-+	// "Edit Now" belongs to the act of creating, so it appears on the step
-+	// where Create does. It lives on the dialog root rather than inside a page,
-+	// which is why it floated at the top of every page until this.
-+	if (edit_check_box) {
-+		edit_check_box->set_visible(p_step >= _joinery_total_steps() - 1);
++	// The stretch spacer exists to push Godot's buttons to the bottom of a
++	// short first page. On the later pages it just opens a gap above and below
++	// the content, which is what made them look padded out.
++	if (joinery_tail_spacer) {
++		joinery_tail_spacer->set_visible(first);
 +	}
 +	for (int i = 0; i < joinery_bible_pages.size(); i++) {
 +		joinery_bible_pages[i]->set_visible(p_step == 2 + i);
@@ -310,7 +380,9 @@ index 7c83dcc..4b1d01c 100644
 +		set_title(vformat(TTRC("Art bible  (%d of %d)"), p_step + 1, total));
 +	}
 +	_set_message("", MESSAGE_SUCCESS);
-+	reset_size();
++	// Deliberately no reset_size(): shrinking to each page's content is what
++	// made the dialog jump between a wide first page and a narrow tool list.
++	// One size for the whole flow instead.
 +}
 +
 +void ProjectDialog::_joinery_reset_pages() {
@@ -417,7 +489,7 @@ index 7c83dcc..4b1d01c 100644
  void ProjectDialog::_nonempty_confirmation_ok_pressed() {
  	is_folder_empty = true;
  	ok_pressed();
-@@ -558,6 +909,13 @@ void ProjectDialog::ok_pressed() {
+@@ -558,6 +977,13 @@ void ProjectDialog::ok_pressed() {
  
  	String path = project_path->get_text();
  
@@ -431,7 +503,7 @@ index 7c83dcc..4b1d01c 100644
  	if (mode == MODE_NEW) {
  		if (create_dir->is_pressed()) {
  			Ref<DirAccess> d = DirAccess::create(DirAccess::ACCESS_FILESYSTEM);
-@@ -601,12 +959,25 @@ void ProjectDialog::ok_pressed() {
+@@ -601,12 +1027,25 @@ void ProjectDialog::ok_pressed() {
  			initial_settings[extra_setting.key] = extra_setting.value;
  		}
  
@@ -457,7 +529,7 @@ index 7c83dcc..4b1d01c 100644
  		// Store default project icon in SVG format.
  		Ref<FileAccess> fa_icon = FileAccess::open(path.path_join("icon.svg"), FileAccess::WRITE, &err);
  		if (err != OK) {
-@@ -917,8 +1288,17 @@ void ProjectDialog::show_dialog(bool p_reset_name, bool p_is_confirmed) {
+@@ -917,8 +1356,21 @@ void ProjectDialog::show_dialog(bool p_reset_name, bool p_is_confirmed) {
  
  			// Project path dialog is also opened; no need to change focus.
  		} else if (mode == MODE_NEW) {
@@ -472,12 +544,16 @@ index 7c83dcc..4b1d01c 100644
 +			project_path_container->show();
 +			bool have_catalog = _joinery_load_catalog();
 +			_joinery_load_questions();
++			if (have_catalog) {
++				_joinery_trim_first_page();
++				set_min_size(Size2(JOINERY_DIALOG_WIDTH, 0) * EDSCALE);
++			}
 +			set_title(have_catalog ? TTRC("Create New Joinery Project") : TTRC("Create New Project"));
 +			set_ok_button_text(have_catalog ? TTRC("Next") : TTRC("Create"));
  
  			if (!rendering_device_checked) {
  				rendering_device_supported = DisplayServer::is_rendering_device_supported();
-@@ -1019,6 +1399,9 @@ void ProjectDialog::_bind_methods() {
+@@ -1019,6 +1471,9 @@ void ProjectDialog::_bind_methods() {
  ProjectDialog::ProjectDialog() {
  	VBoxContainer *vb = memnew(VBoxContainer);
  	add_child(vb);
@@ -487,7 +563,31 @@ index 7c83dcc..4b1d01c 100644
  
  	name_container = memnew(VBoxContainer);
  	vb->add_child(name_container);
-@@ -1201,6 +1584,21 @@ ProjectDialog::ProjectDialog() {
+@@ -1111,6 +1566,7 @@ ProjectDialog::ProjectDialog() {
+ 	renderer_container->add_child(l);
+ 	HBoxContainer *rshc = memnew(HBoxContainer);
+ 	renderer_container->add_child(rshc);
++	joinery_renderer_row = rshc;
+ 	renderer_button_group.instantiate();
+ 
+ 	// Left hand side, used for checkboxes to select renderer.
+@@ -1159,6 +1615,7 @@ ProjectDialog::ProjectDialog() {
+ 	rs_button->connect(SceneStringName(pressed), callable_mp(this, &ProjectDialog::_renderer_selected));
+ 	rvb->add_child(rs_button);
+ 	LinkButton *ri_link = memnew(LinkButton);
++	joinery_renderer_link = ri_link;
+ 	ri_link->set_text(TTRC("More information"));
+ 	ri_link->set_uri(GODOT_VERSION_DOCS_URL "/tutorials/rendering/renderers.html");
+ 	ri_link->set_h_size_flags(Control::SIZE_SHRINK_CENTER);
+@@ -1192,6 +1649,7 @@ ProjectDialog::ProjectDialog() {
+ 	l = memnew(Label);
+ 	l->set_focus_mode(Control::FOCUS_ACCESSIBILITY);
+ 	l->set_text(TTRC("The renderer can be changed later, but scenes may need to be adjusted."));
++	joinery_renderer_note = l;
+ 	// Add some extra spacing to separate it from the list above and the buttons below.
+ 	l->set_custom_minimum_size(Size2(0, 40) * EDSCALE);
+ 	l->set_horizontal_alignment(HORIZONTAL_ALIGNMENT_CENTER);
+@@ -1201,6 +1659,21 @@ ProjectDialog::ProjectDialog() {
  
  	default_files_container = memnew(HBoxContainer);
  	vb->add_child(default_files_container);
@@ -509,7 +609,15 @@ index 7c83dcc..4b1d01c 100644
  	l = memnew(Label);
  	l->set_text(TTRC("Version Control Metadata:"));
  	default_files_container->add_child(l);
-@@ -1245,3 +1643,6 @@ ProjectDialog::ProjectDialog() {
+@@ -1221,6 +1694,7 @@ ProjectDialog::ProjectDialog() {
+ 	Control *spacer2 = memnew(Control);
+ 	spacer2->set_v_size_flags(Control::SIZE_EXPAND_FILL);
+ 	vb->add_child(spacer2);
++	joinery_tail_spacer = spacer2;
+ 
+ 	edit_check_box = memnew(CheckBox);
+ 	edit_check_box->set_text(TTRC("Edit Now"));
+@@ -1245,3 +1719,6 @@ ProjectDialog::ProjectDialog() {
  	dialog_error = memnew(AcceptDialog);
  	add_child(dialog_error);
  }
@@ -517,10 +625,18 @@ index 7c83dcc..4b1d01c 100644
 +
 +
 diff --git a/editor/project_manager/project_dialog.h b/editor/project_manager/project_dialog.h
-index bad5570..403bc0b 100644
+index bad5570..1c0296e 100644
 --- a/editor/project_manager/project_dialog.h
 +++ b/editor/project_manager/project_dialog.h
-@@ -84,6 +84,26 @@ private:
+@@ -34,6 +34,7 @@
+ 
+ class Button;
+ class CheckBox;
++class LinkButton;
+ class CheckButton;
+ class EditorFileDialog;
+ class LineEdit;
+@@ -84,6 +85,32 @@ private:
  	VBoxContainer *renderer_container = nullptr;
  	Label *renderer_info = nullptr;
  	HBoxContainer *default_files_container = nullptr;
@@ -538,6 +654,12 @@ index bad5570..403bc0b 100644
 +	// questions on one screen is a wall nobody reads, so the CLI groups them
 +	// and this paginates. Built at dialog-open time, hence vb_root.
 +	VBoxContainer *vb_root = nullptr;
++	// Controls the Joinery flow hides or needs to keep a steady size. Held as
++	// members because they are locals upstream and hiding beats deleting.
++	HBoxContainer *joinery_renderer_row = nullptr;
++	LinkButton *joinery_renderer_link = nullptr;
++	Label *joinery_renderer_note = nullptr;
++	Control *joinery_tail_spacer = nullptr;
 +	Vector<VBoxContainer *> joinery_bible_pages;
 +	Vector<Control *> joinery_bible_inputs;
 +	Vector<String> joinery_bible_keys;
@@ -547,7 +669,7 @@ index bad5570..403bc0b 100644
  	Ref<ButtonGroup> renderer_button_group;
  	bool rendering_device_supported = false;
  	bool rendering_device_checked = false;
-@@ -144,6 +164,19 @@ private:
+@@ -144,6 +171,20 @@ private:
  	void _reset_name();
  	void _renderer_selected();
  	void _nonempty_confirmation_ok_pressed();
@@ -564,6 +686,7 @@ index bad5570..403bc0b 100644
 +	void _joinery_write_bible(const String &p_path, const String &p_title);
 +	Label *_joinery_heading(const String &p_text) const;
 +	Label *_joinery_hint(const String &p_text) const;
++	void _joinery_trim_first_page();
  
  	void ok_pressed() override;
  

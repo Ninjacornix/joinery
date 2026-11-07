@@ -157,6 +157,13 @@ def run_menu(
                 selection.symmetric_difference_update({tool.id})
 
 
+def _repo_label(tool: Tool) -> str:
+    """`owner/name` of the MCP's repo, which is what identifies it to a user."""
+    if tool.mcp is None:
+        return ""
+    return "/".join(tool.mcp.repo.rstrip("/").split("/")[-2:])
+
+
 def tool_menu(catalog: Catalog, current: ProjectTools) -> dict[str, object]:
     """The tool menu as plain data, for a UI that draws its own widgets.
 
@@ -178,6 +185,16 @@ def tool_menu(catalog: Catalog, current: ProjectTools) -> dict[str, object]:
                 "available": tool.status == "available",
                 "enabled": tool.id in enabled,
                 "reason": _describe(tool),
+                # Which MCP drives the tool, so the menu can say what it is
+                # actually wiring up rather than just naming a program.
+                "mcp": tool.mcp.server if tool.mcp else "",
+                "mcp_repo": _repo_label(tool),
+                # Starred in the menu. The whole catalog is vetted, so this
+                # marks the strongest tier: an official MCP, or the engine
+                # itself, which every project needs.
+                "recommended": bool(
+                    tool.required or (tool.mcp and tool.mcp.tier == "official")
+                ),
             }
         )
     return {

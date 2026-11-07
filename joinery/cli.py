@@ -40,6 +40,7 @@ from joinery.policy import load_denylist, normalise
 from joinery.project import create_project
 from joinery.recipe import rebuild_all, recipe_paths, record
 from joinery.runner import pick
+from joinery.vcs import ensure_lfs
 from joinery.wiring import unwireable, write_agent_wiring
 
 
@@ -104,6 +105,11 @@ def _setup(tools: str | None, project: Path) -> int:
     # this it would have no creation-only hooks for any agent, which is the one
     # thing a Joinery project must not be missing.
     wired = write_agent_wiring(project)
+    # Git LFS before the first binary lands, because converting later means
+    # rewriting history. Not an option at creation time, just how a project
+    # starts: its sources are .blend, .kra, WAV and PNG files.
+    if ensure_lfs(project):
+        print("Tracking native sources with Git LFS (.gitattributes)")
     print(f"Saved: {', '.join(selection.tools)}")
     print(f"Gate wired for: {', '.join(sorted({p.split('/')[0] for p in wired}))}")
     return 0
