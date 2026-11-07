@@ -155,3 +155,35 @@ def run_menu(
                 show(f"{tool.name}: {_describe(tool)}.")
             else:
                 selection.symmetric_difference_update({tool.id})
+
+
+def tool_menu(catalog: Catalog, current: ProjectTools) -> dict[str, object]:
+    """The tool menu as plain data, for a UI that draws its own widgets.
+
+    The Project Manager screen in the fork builds its questionnaire from this,
+    so the catalog and its admission rules stay the one source of truth. A UI
+    cannot invent a tool, and cannot present an unavailable one as selectable,
+    because `available` and `reason` come from the same validation the CLI uses.
+    """
+    enabled = set(selection_ids(catalog, current))
+    entries: list[dict[str, object]] = []
+    for tool in menu_tools(catalog):
+        entries.append(
+            {
+                "id": tool.id,
+                "name": tool.name,
+                "domains": "/".join((tool.domain, *tool.also_domains)),
+                "required": tool.required,
+                "paid": tool.paid,
+                "available": tool.status == "available",
+                "enabled": tool.id in enabled,
+                "reason": _describe(tool),
+            }
+        )
+    return {
+        "tools": entries,
+        "enabled": sorted(enabled),
+        "custom": [
+            {"id": c.id, "name": c.name, "domain": c.domain} for c in current.custom
+        ],
+    }

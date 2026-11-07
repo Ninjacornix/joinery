@@ -16,6 +16,7 @@ from joinery.auth import for_agent
 from joinery.catalog import (
     CONFIG_PATH,
     ROOT,
+    ProjectTools,
     allowed_servers,
     load_catalog,
     load_project_tools,
@@ -27,6 +28,7 @@ from joinery.installer import (
     Selection,
     render,
     run_menu,
+    tool_menu,
     validate_choice,
     write_mcp_config,
     write_selection,
@@ -211,6 +213,9 @@ def main() -> int:
     setup.add_argument("--project", type=Path, default=ROOT)
     tools = commands.add_parser("tools", help="list tools and their MCP status")
     tools.add_argument("--project", type=Path, default=ROOT)
+    tools.add_argument(
+        "--json", action="store_true", help="machine-readable, for a UI front end"
+    )
     commands.add_parser("agents", help="list supported agents and gate status")
     doctor = commands.add_parser(
         "doctor", help="check the programs this project's tools need"
@@ -269,7 +274,17 @@ def main() -> int:
         return _auth(args.agent)
     if args.command == "tools":
         catalog = load_catalog()
-        current = load_project_tools(args.project / "joinery.toml")
+        # A project that does not exist yet has no selection, which is the
+        # normal case when a UI asks for the menu before creating anything.
+        config = args.project / "joinery.toml"
+        current = load_project_tools(config) if config.is_file() else ProjectTools()
+        if args.json:
+            # Machine-readable, for front ends that build their own menu. The
+            # Project Manager screen in the fork reads this, so the catalog
+            # stays the single source of truth instead of being duplicated in
+            # C++ where it would drift.
+            print(json.dumps(tool_menu(catalog, current), indent=2))
+            return 0
         print(render(catalog, set(selection_ids(catalog, current)), current.custom))
         return 0
     return _check(args.target, args.project)

@@ -71,17 +71,47 @@ cmd_build() {
   [[ -d "$SRC" ]] || die "no godot-src/. Run 'sync' first."
   local jobs
   jobs="$(getconf _NPROCESSORS_ONLN)"
-  (cd "$SRC" && uv tool run scons target=editor -j"$jobs" "$@")
+
+  # Cache aggressively: patching the engine means rebuilding it repeatedly, and
+  # almost nothing changes between those builds. Two independent caches:
+  #
+  #  ccache     skips recompiling a translation unit whose input is unchanged.
+  #             This is the one that matters after editing a single file, and it
+  #             survives `sync --force` because it is keyed on content, not path.
+  #  SCons cache keyed on build signature, so it also helps across a fresh
+  #             checkout or a switched branch.
+  #
+  # Both are opt-out via JOINERY_NO_CCACHE / JOINERY_NO_SCONS_CACHE, since a
+  # cache is the first thing to suspect when a build goes strange.
+  local -a cache_args=()
+  if [[ -z "${JOINERY_NO_CCACHE:-}" ]] && command -v ccache >/dev/null; then
+    cache_args+=(
+      "c_compiler_launcher=ccache"
+      "cpp_compiler_launcher=ccache"
+    )
+  fi
+  if [[ -z "${JOINERY_NO_SCONS_CACHE:-}" ]]; then
+    local scons_cache="${JOINERY_SCONS_CACHE:-$HOME/.cache/joinery/scons}"
+    mkdir -p "$scons_cache"
+    cache_args+=("cache_path=$scons_cache" "cache_limit=${JOINERY_SCONS_CACHE_GIB:-8}")
+  fi
+
+  (cd "$SRC" && uv tool run scons target=editor -j"$jobs" "${cache_args[@]}" "$@")
+}
+
+cmd_cachestats() {
+  command -v ccache >/dev/null || die "ccache is not installed."
+  ccache --show-stats
 }
 
 case "${1:-}" in
-  sync | export | rebase | build)
+  sync | export | rebase | build | cachestats)
     cmd="$1"
     shift
     "cmd_$cmd" "$@"
     ;;
   *)
-    echo "usage: fork.sh sync [--force] | export | rebase <tag> | build [scons args]" >&2
+    echo "usage: fork.sh sync [--force] | export | rebase <tag> | build [scons args] | cachestats" >&2
     exit 2
     ;;
 esac

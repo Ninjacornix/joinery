@@ -22,15 +22,29 @@ var _review: PanelContainer
 var _send: Button
 var _targets: Array[String] = []
 var _busy := false
+## Base font size, read from the editor so the sidebar follows the user's own
+## interface scale instead of imposing fixed pixel sizes.
+var _base_font := 14
+
+
+func _font(delta: int = 0) -> int:
+	return maxi(10, _base_font + delta)
+
+
+func _read_base_font() -> void:
+	var settings := EditorInterface.get_editor_settings()
+	if settings != null and settings.has_setting("interface/editor/main_font_size"):
+		_base_font = int(settings.get_setting("interface/editor/main_font_size"))
 
 
 func _init() -> void:
 	name = "Journeyman"
-	custom_minimum_size = Vector2(340, 0)
+	custom_minimum_size = Vector2(380, 0)
 	add_theme_constant_override("separation", 6)
 
 
 func _ready() -> void:
+	_read_base_font()
 	_build_header()
 	_build_targets()
 	_build_transcript()
@@ -46,7 +60,7 @@ func _build_header() -> void:
 
 	var title := Label.new()
 	title.text = "Journeyman"
-	title.add_theme_font_size_override("font_size", 16)
+	title.add_theme_font_size_override("font_size", _font(4))
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(title)
 
@@ -65,7 +79,7 @@ func _build_header() -> void:
 	var tag := Label.new()
 	tag.text = "Made in the Joinery, not generated."
 	tag.add_theme_color_override("font_color", DIM)
-	tag.add_theme_font_size_override("font_size", 10)
+	tag.add_theme_font_size_override("font_size", _font(-1))
 	add_child(tag)
 	add_child(HSeparator.new())
 
@@ -74,7 +88,7 @@ func _build_targets() -> void:
 	var label := Label.new()
 	label.text = "Selection"
 	label.add_theme_color_override("font_color", DIM)
-	label.add_theme_font_size_override("font_size", 11)
+	label.add_theme_font_size_override("font_size", _font(0))
 	add_child(label)
 
 	_chips = HFlowContainer.new()
@@ -87,7 +101,11 @@ func _build_transcript() -> void:
 	_transcript.scroll_following = true
 	_transcript.selection_enabled = true
 	_transcript.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_transcript.custom_minimum_size = Vector2(0, 220)
+	_transcript.custom_minimum_size = Vector2(0, 260)
+	_transcript.add_theme_font_size_override("normal_font_size", _font(1))
+	_transcript.add_theme_font_size_override("bold_font_size", _font(1))
+	_transcript.add_theme_font_size_override("italics_font_size", _font(1))
+	_transcript.add_theme_font_size_override("mono_font_size", _font(-1))
 	add_child(_transcript)
 
 
@@ -108,6 +126,7 @@ func _build_review() -> void:
 	var heading := Label.new()
 	heading.text = "Review"
 	heading.add_theme_color_override("font_color", ACCENT)
+	heading.add_theme_font_size_override("font_size", _font(1))
 	box.add_child(heading)
 
 	var row := HBoxContainer.new()
@@ -127,7 +146,8 @@ func _build_prompt() -> void:
 	add_child(HSeparator.new())
 	_prompt = TextEdit.new()
 	_prompt.placeholder_text = "Tell Journeyman what to change…"
-	_prompt.custom_minimum_size = Vector2(0, 54)
+	_prompt.custom_minimum_size = Vector2(0, 64)
+	_prompt.add_theme_font_size_override("font_size", _font(1))
 	_prompt.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	add_child(_prompt)
 
@@ -177,7 +197,7 @@ func on_selection_changed() -> void:
 		var empty := Label.new()
 		empty.text = "nothing selected"
 		empty.add_theme_color_override("font_color", DIM)
-		empty.add_theme_font_size_override("font_size", 11)
+		empty.add_theme_font_size_override("font_size", _font(0))
 		_chips.add_child(empty)
 		return
 

@@ -16,6 +16,10 @@ const FOCUS_SCRIPT := preload("res://addons/joinery/focus_mode.gd")
 ## it on every launch instead of re-toggling it each session.
 const FOCUS_SETTING := "joinery/focus_mode"
 
+## Written by the Project Manager's Next button, in the fork. Tells the addon
+## that this project was just created and still needs its questionnaire.
+const SETUP_PENDING := "joinery/setup_pending"
+
 var _dock: Control
 var _setup: AcceptDialog
 var _focus: RefCounted
@@ -57,6 +61,23 @@ func _restore_focus() -> void:
 	if settings.has_setting(FOCUS_SETTING) and bool(settings.get_setting(FOCUS_SETTING)):
 		_focus.apply(get_editor_interface().get_base_control())
 		_dock.log_system("Focus mode restored from last session.")
+	_offer_setup_if_pending()
+
+
+func _offer_setup_if_pending() -> void:
+	## A project created through Joinery's Project Manager screen is marked
+	## `joinery/setup_pending`, because that screen's Next button hands the rest
+	## of setup here: the questionnaire lives in GDScript so it can change
+	## without rebuilding the engine. Clear the flag first, so a project cannot
+	## get stuck reopening the questionnaire if something below fails.
+	if not ProjectSettings.has_setting(SETUP_PENDING):
+		return
+	if not bool(ProjectSettings.get_setting(SETUP_PENDING)):
+		return
+	ProjectSettings.set_setting(SETUP_PENDING, null)
+	ProjectSettings.save()
+	_dock.log_system("New project: choosing the tools that will make it.")
+	_setup.open_for_new_project()
 
 
 func _exit_tree() -> void:

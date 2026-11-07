@@ -16,6 +16,11 @@ var _name_field: LineEdit
 var _tools: Dictionary = {}
 var _status: Label
 var _notice: Label
+var _base_font := 14
+
+
+func _font(delta: int = 0) -> int:
+	return maxi(10, _base_font + delta)
 
 ## Mirrors policy/preferred_tools.toml. Shown with its real state, including
 ## the tools whose MCP Joinery has not built yet, so the menu never implies a
@@ -38,12 +43,16 @@ const CATALOG: Array[Dictionary] = [
 
 func _init() -> void:
 	title = "Joinery project setup"
-	min_size = Vector2i(560, 620)
+	min_size = Vector2i(680, 700)
 	ok_button_text = "Save"
 	confirmed.connect(_on_save)
 
 
 func _ready() -> void:
+	var settings := EditorInterface.get_editor_settings()
+	if settings != null and settings.has_setting("interface/editor/main_font_size"):
+		_base_font = int(settings.get_setting("interface/editor/main_font_size"))
+
 	var root := VBoxContainer.new()
 	root.add_theme_constant_override("separation", 8)
 	add_child(root)
@@ -94,7 +103,7 @@ func _add_heading(parent: Node, text: String) -> void:
 	parent.add_child(HSeparator.new())
 	var label := Label.new()
 	label.text = text
-	label.add_theme_font_size_override("font_size", 14)
+	label.add_theme_font_size_override("font_size", _font(3))
 	parent.add_child(label)
 
 
@@ -103,7 +112,7 @@ func _add_note(parent: Node, text: String) -> void:
 	label.text = text
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.add_theme_color_override("font_color", DIM)
-	label.add_theme_font_size_override("font_size", 11)
+	label.add_theme_font_size_override("font_size", _font(0))
 	parent.add_child(label)
 
 
@@ -131,7 +140,7 @@ func _add_tool_row(parent: Node, entry: Dictionary) -> void:
 	domain.text = entry["domain"]
 	domain.custom_minimum_size = Vector2(120, 0)
 	domain.add_theme_color_override("font_color", DIM)
-	domain.add_theme_font_size_override("font_size", 11)
+	domain.add_theme_font_size_override("font_size", _font(0))
 	row.add_child(domain)
 
 	var state := Label.new()
@@ -142,7 +151,7 @@ func _add_tool_row(parent: Node, entry: Dictionary) -> void:
 		"planned": "server not built",
 	}.get(entry["state"], "")
 	state.add_theme_color_override("font_color", DIM)
-	state.add_theme_font_size_override("font_size", 11)
+	state.add_theme_font_size_override("font_size", _font(0))
 	row.add_child(state)
 
 
@@ -151,6 +160,22 @@ func open_for_current_project() -> void:
 	_name_field.text = ProjectSettings.get_setting("application/config/name", "")
 	_load_enabled()
 	_status.text = "Saves to joinery.toml, the same file `joinery setup` writes."
+	popup_centered()
+
+
+func open_for_new_project() -> void:
+	## Straight after the Project Manager's Next button. The project exists and
+	## is a valid Godot project; what is missing is the decision about which
+	## tools will make it, which is what this asks.
+	_notice.text = (
+		"Project created. Now choose the tools that will make it. Preferred "
+		+ "tools are non-generative and send no telemetry; you can add your own "
+		+ "program later, and its output is labelled custom-tool."
+	)
+	_notice.visible = true
+	_name_field.text = ProjectSettings.get_setting("application/config/name", "")
+	_load_enabled()
+	_status.text = "Saves to joinery.toml, the same file `joinery new` writes."
 	popup_centered()
 
 

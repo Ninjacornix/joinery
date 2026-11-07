@@ -1,0 +1,342 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Joinery <joinery@localhost>
+Date: Sat, 7 Nov 2026 19:01:40 +0100
+Subject: [PATCH] Ask which tools make a project while creating it
+
+Creating a project is the moment the tools that will make it get chosen, so
+the dialog has two pages now: Godot's own fields, then Joinery's
+questionnaire. Next moves between them and Create finishes, which keeps the
+whole decision in the Project Manager rather than deferring it to the editor.
+
+The questionnaire is built from `joinery tools --json`, so the catalog and
+its admission rules stay the one source of truth and this code cannot invent
+a tool or offer one whose server is not built. Required tools cannot be
+unticked, unavailable ones cannot be ticked, and each carries the catalog's
+own reason as its tooltip.
+
+Creating then installs the addon and runs `joinery setup` with the chosen
+tools, which is the path `joinery new` takes.
+
+All of it degrades: with no Joinery install the page is skipped, the title
+and button read as stock Godot, and the user gets a plain valid project.
+Only in that case is `joinery/setup_pending` set, so the addon asks in the
+editor instead; when the questionnaire has already run, it does not nag.
+
+Joinery-only, not for upstream: it reroutes a stock flow into Joinery's own.
+---
+ editor/project_manager/project_dialog.cpp | 222 +++++++++++++++++++++-
+ editor/project_manager/project_dialog.h   |  20 ++
+ 2 files changed, 240 insertions(+), 2 deletions(-)
+
+diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
+index 7c83dcc..c425232 100644
+--- a/editor/project_manager/project_dialog.cpp
++++ b/editor/project_manager/project_dialog.cpp
+@@ -32,6 +32,7 @@
+ 
+ #include "core/config/project_settings.h"
+ #include "core/io/dir_access.h"
++#include "core/io/json.h"
+ #include "core/io/zip_io.h"
+ #include "core/object/callable_mp.h"
+ #include "core/os/os.h"
+@@ -536,6 +537,173 @@ void ProjectDialog::_renderer_selected() {
+ 	_update_ok_button();
+ }
+ 
++// Joinery: everything below implements the second page of creating a project.
++//
++// Creating a project is the moment the tools that will make it are chosen, so
++// the dialog has two pages: Godot's own fields, then Joinery's questionnaire.
++// Next moves between them and Create finishes, which keeps the whole decision
++// in this window instead of deferring it to the editor.
++//
++// The questionnaire is built from `joinery tools --json`, so the catalog and
++// its admission rules stay the single source of truth; this code cannot invent
++// a tool or present an unavailable one as selectable. If Joinery is not
++// installed the page is skipped entirely and the dialog behaves like stock
++// Godot, because a missing sidebar is not a reason to block making a project.
++
++String ProjectDialog::_joinery_home() const {
++	String home = OS::get_singleton()->get_environment("JOINERY_HOME");
++	if (!home.is_empty()) {
++		return home;
++	}
++	String exe_dir = OS::get_singleton()->get_executable_path().get_base_dir();
++	// A Joinery build keeps the engine repo alongside or above the binary.
++	for (int i = 0; i < 4; i++) {
++		if (DirAccess::exists(exe_dir.path_join("godot_addon/joinery"))) {
++			return exe_dir;
++		}
++		exe_dir = exe_dir.path_join("..").simplify_path();
++	}
++	return String();
++}
++
++bool ProjectDialog::_joinery_load_catalog() {
++	joinery_available = false;
++	for (CheckBox *box : joinery_boxes) {
++		joinery_tool_list->remove_child(box);
++		memdelete(box);
++	}
++	joinery_boxes.clear();
++	joinery_ids.clear();
++
++	String home = _joinery_home();
++	if (home.is_empty()) {
++		return false;
++	}
++
++	List<String> args;
++	args.push_back("run");
++	args.push_back("--project");
++	args.push_back(home);
++	args.push_back("joinery");
++	args.push_back("tools");
++	args.push_back("--json");
++	String output;
++	int exit_code = 0;
++	Error err = OS::get_singleton()->execute("uv", args, &output, &exit_code, true);
++	if (err != OK || exit_code != 0) {
++		return false;
++	}
++
++	Ref<JSON> json;
++	json.instantiate();
++	if (json->parse(output) != OK) {
++		return false;
++	}
++	Dictionary doc = json->get_data();
++	Array tools = doc.get("tools", Array());
++
++	for (int i = 0; i < tools.size(); i++) {
++		Dictionary tool = tools[i];
++		CheckBox *box = memnew(CheckBox);
++		String label = String(tool.get("name", "")) + "   " + String(tool.get("domains", ""));
++		box->set_text(label);
++		bool required = tool.get("required", false);
++		bool available = tool.get("available", false);
++		box->set_pressed(tool.get("enabled", false) || required);
++		// Required tools cannot be turned off, and a tool whose server is not
++		// built cannot be turned on. Both carry the catalog's own reason.
++		box->set_disabled(required || !available);
++		box->set_tooltip_text(String(tool.get("reason", "")));
++		joinery_tool_list->add_child(box);
++		joinery_boxes.push_back(box);
++		joinery_ids.push_back(tool.get("id", ""));
++	}
++
++	joinery_available = !joinery_boxes.is_empty();
++	return joinery_available;
++}
++
++String ProjectDialog::_joinery_selected_tools() const {
++	String chosen;
++	for (int i = 0; i < joinery_boxes.size(); i++) {
++		if (joinery_boxes[i]->is_pressed()) {
++			if (!chosen.is_empty()) {
++				chosen += ",";
++			}
++			chosen += joinery_ids[i];
++		}
++	}
++	return chosen;
++}
++
++void ProjectDialog::_joinery_show_page() {
++	joinery_on_page = true;
++	name_container->hide();
++	project_path_container->hide();
++	install_path_container->hide();
++	renderer_container->hide();
++	default_files_container->hide();
++	joinery_container->show();
++	set_title(TTRC("Choose the tools that will make this project"));
++	set_ok_button_text(TTRC("Create"));
++	_set_message("", MESSAGE_SUCCESS);
++	joinery_status->set_text(
++			vformat(TTRC("Project: %s"), project_name->get_text().strip_edges()));
++	reset_size();
++}
++
++void ProjectDialog::_joinery_leave_page() {
++	joinery_on_page = false;
++	if (joinery_container) {
++		joinery_container->hide();
++	}
++}
++
++// Joinery: put the addon into the new project and let the `joinery` CLI write
++// joinery.toml and the agent policy hooks, which is the path `joinery new`
++// takes (ADR 0004). Best effort: without Joinery or uv the user still gets a
++// working Godot project and a warning.
++void ProjectDialog::_joinery_install(const String &p_path, const String &p_tools) {
++	String home = _joinery_home();
++	if (home.is_empty()) {
++		WARN_PRINT("Joinery: JOINERY_HOME is not set, so the addon was not installed.");
++		return;
++	}
++
++	String source = home.path_join("godot_addon/joinery");
++	if (DirAccess::exists(source)) {
++		String dest = p_path.path_join("addons/joinery");
++		Ref<DirAccess> da = DirAccess::create(DirAccess::ACCESS_FILESYSTEM);
++		if (da.is_valid() && da->make_dir_recursive(dest) == OK) {
++			Ref<DirAccess> src_da = DirAccess::open(source);
++			if (src_da.is_null() || src_da->copy_dir(source, dest) != OK) {
++				WARN_PRINT("Joinery: could not copy the addon into " + dest);
++			}
++		} else {
++			WARN_PRINT("Joinery: could not create " + dest);
++		}
++	} else {
++		WARN_PRINT("Joinery: no addon at " + source);
++	}
++
++	List<String> args;
++	args.push_back("run");
++	args.push_back("--project");
++	args.push_back(home);
++	args.push_back("joinery");
++	args.push_back("setup");
++	args.push_back("--project");
++	args.push_back(p_path);
++	args.push_back("--tools");
++	args.push_back(p_tools.is_empty() ? String("godot") : p_tools);
++	String output;
++	int exit_code = 0;
++	Error cli = OS::get_singleton()->execute("uv", args, &output, &exit_code, true);
++	if (cli != OK || exit_code != 0) {
++		WARN_PRINT("Joinery: `joinery setup` did not run, so the project has no joinery.toml yet. " + output);
++	}
++}
++
+ void ProjectDialog::_nonempty_confirmation_ok_pressed() {
+ 	is_folder_empty = true;
+ 	ok_pressed();
+@@ -558,6 +726,13 @@ void ProjectDialog::ok_pressed() {
+ 
+ 	String path = project_path->get_text();
+ 
++	// Joinery: first Next shows the questionnaire; Create on that page falls
++	// through to the real creation below.
++	if (mode == MODE_NEW && !joinery_on_page && joinery_available) {
++		_joinery_show_page();
++		return;
++	}
++
+ 	if (mode == MODE_NEW) {
+ 		if (create_dir->is_pressed()) {
+ 			Ref<DirAccess> d = DirAccess::create(DirAccess::ACCESS_FILESYSTEM);
+@@ -601,12 +776,24 @@ void ProjectDialog::ok_pressed() {
+ 			initial_settings[extra_setting.key] = extra_setting.value;
+ 		}
+ 
++		// Joinery: hand the rest of setup to the addon. The questionnaire lives
++		// in GDScript so it can be changed without rebuilding the engine, and
++		// this flag is what tells it to open on first load. _joinery_install
++		// puts the addon in place and writes joinery.toml; if that cannot be
++		// done the project is still a plain, valid Godot project.
++		// Only ask again in the editor if the questionnaire never ran here.
++		if (!joinery_available) {
++			initial_settings["joinery/setup_pending"] = true;
++		}
++
+ 		Error err = ProjectSettings::get_singleton()->save_custom(path.path_join("project.godot"), initial_settings, Vector<String>(), false);
+ 		if (err != OK) {
+ 			_set_message(TTRC("Couldn't create project.godot in project path."), MESSAGE_ERROR);
+ 			return;
+ 		}
+ 
++		_joinery_install(path, _joinery_selected_tools());
++
+ 		// Store default project icon in SVG format.
+ 		Ref<FileAccess> fa_icon = FileAccess::open(path.path_join("icon.svg"), FileAccess::WRITE, &err);
+ 		if (err != OK) {
+@@ -917,8 +1104,16 @@ void ProjectDialog::show_dialog(bool p_reset_name, bool p_is_confirmed) {
+ 
+ 			// Project path dialog is also opened; no need to change focus.
+ 		} else if (mode == MODE_NEW) {
+-			set_title(TTRC("Create New Project"));
+-			set_ok_button_text(TTRC("Create"));
++			// Joinery: a new project is made in two steps. Reload the catalog
++			// each time the dialog opens, so a tool that became available since
++			// last time shows up, and fall back to stock wording when Joinery
++			// is not installed.
++			_joinery_leave_page();
++			name_container->show();
++			project_path_container->show();
++			bool have_catalog = _joinery_load_catalog();
++			set_title(have_catalog ? TTRC("Create New Joinery Project") : TTRC("Create New Project"));
++			set_ok_button_text(have_catalog ? TTRC("Next") : TTRC("Create"));
+ 
+ 			if (!rendering_device_checked) {
+ 				rendering_device_supported = DisplayServer::is_rendering_device_supported();
+@@ -1201,6 +1396,29 @@ ProjectDialog::ProjectDialog() {
+ 
+ 	default_files_container = memnew(HBoxContainer);
+ 	vb->add_child(default_files_container);
++
++	// Joinery: page two. Empty until show_dialog fills it from the catalog, so
++	// the widgets always reflect what Joinery actually offers right now.
++	joinery_container = memnew(VBoxContainer);
++	joinery_container->hide();
++	vb->add_child(joinery_container);
++
++	Label *joinery_heading = memnew(Label);
++	joinery_heading->set_text(TTRC("Tools that will make this project"));
++	joinery_container->add_child(joinery_heading);
++
++	Label *joinery_note = memnew(Label);
++	joinery_note->set_text(TTRC("Preferred tools are non-generative and send no telemetry. Assets are made by operating them, never generated, and each one keeps a recipe that remakes it. Greyed out means Joinery has not built that tool's server yet."));
++	joinery_note->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
++	joinery_note->set_custom_minimum_size(Size2(480, 0) * EDSCALE);
++	joinery_container->add_child(joinery_note);
++
++	joinery_tool_list = memnew(VBoxContainer);
++	joinery_container->add_child(joinery_tool_list);
++
++	joinery_status = memnew(Label);
++	joinery_container->add_child(joinery_status);
++
+ 	l = memnew(Label);
+ 	l->set_text(TTRC("Version Control Metadata:"));
+ 	default_files_container->add_child(l);
+diff --git a/editor/project_manager/project_dialog.h b/editor/project_manager/project_dialog.h
+index bad5570..74f9ada 100644
+--- a/editor/project_manager/project_dialog.h
++++ b/editor/project_manager/project_dialog.h
+@@ -84,6 +84,18 @@ private:
+ 	VBoxContainer *renderer_container = nullptr;
+ 	Label *renderer_info = nullptr;
+ 	HBoxContainer *default_files_container = nullptr;
++
++	// Joinery: the second page of a new project. Creating a project is where
++	// the tools that will make it get chosen, so Next leads here before the
++	// editor opens. Built from `joinery tools --json`, so the catalog stays the
++	// one source of truth rather than being restated in C++.
++	VBoxContainer *joinery_container = nullptr;
++	VBoxContainer *joinery_tool_list = nullptr;
++	Label *joinery_status = nullptr;
++	Vector<CheckBox *> joinery_boxes;
++	Vector<String> joinery_ids;
++	bool joinery_on_page = false;
++	bool joinery_available = false;
+ 	Ref<ButtonGroup> renderer_button_group;
+ 	bool rendering_device_supported = false;
+ 	bool rendering_device_checked = false;
+@@ -144,6 +156,14 @@ private:
+ 	void _reset_name();
+ 	void _renderer_selected();
+ 	void _nonempty_confirmation_ok_pressed();
++	// Joinery: install the addon and write joinery.toml for a new project.
++	void _joinery_install(const String &p_path, const String &p_tools);
++	// Joinery: page two of creating a project.
++	bool _joinery_load_catalog();
++	void _joinery_show_page();
++	void _joinery_leave_page();
++	String _joinery_selected_tools() const;
++	String _joinery_home() const;
+ 
+ 	void ok_pressed() override;
+ 
