@@ -3,13 +3,20 @@ name = "joinery"
 version = "0.0.0"
 description = "Godot-based engine directed through real creative tools. Creation, not generation."
 requires-python = ">=3.12,<3.13"
-dependencies = []
+dependencies = ["pydantic"]
+
+[project.scripts]
+joinery = "joinery.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["joinery"]
 
 [dependency-groups]
 dev = ["mypy", "pytest", "ruff"]
-
-[tool.uv]
-package = false
 
 [tool.ruff]
 target-version = "py312"

@@ -1,0 +1,185 @@
+# Tools offered in the install menu. Add a future tool by appending a [[tool]];
+# `joinery check catalog` enforces the admission bar in joinery/catalog.py.
+# Stars and dates are a snapshot from `vetted_on`. Vetting covered repo metadata and
+# READMEs, not a full source audit. Any source change means re-vetting and a new ref.
+
+vetted_on = 2026-11-07
+
+# Joinery's own servers, always allowed.
+builtin_servers = [
+  "joinery-registry",
+  "joinery-verify",
+  "joinery-blender-ops",
+  "joinery-materialmaker",
+  "joinery-paint",
+  "joinery-sound",
+]
+
+[[tool]]
+id = "godot"
+name = "Godot"
+domain = "engine"
+required = true
+status = "available"
+[tool.mcp]
+server = "godot"
+repo = "https://github.com/hi-godot/godot-ai"
+ref = "643c64f3edf984a9668b3043f4d20ebb2bbec6b6"
+tier = "community"
+stars = 3428
+last_push = 2026-11-06
+licence = "MIT"
+notes = "Sends anonymous telemetry unless GODOT_AI_DISABLE_TELEMETRY=true is set; set it."
+
+[[tool]]
+id = "blender"
+name = "Blender"
+domain = "3d"
+status = "available"
+[tool.mcp]
+server = "blender"
+repo = "https://projects.blender.org/lab/blender_mcp"
+ref = "2cea8d566dde07fbac28a61d698909d69724e853"
+tier = "official"
+stars = 37
+last_push = 2026-09-29
+licence = "unverified"
+notes = "v1.0.3, needs Blender 5.1+. Runs LLM code unguarded, so use it only inside the sandbox."
+
+[[tool]]
+id = "aseprite"
+name = "Aseprite"
+domain = "2d"
+paid = true
+status = "available"
+[tool.mcp]
+server = "aseprite"
+repo = "https://github.com/diivi/aseprite-mcp"
+ref = "4bcdb6f5932116bbdbd1b7d3fcc1e8f965f7657a"
+tier = "community"
+stars = 916
+last_push = 2026-11-03
+licence = "MIT"
+notes = "Needs your own Aseprite licence."
+
+[[tool]]
+id = "supercollider"
+name = "SuperCollider"
+domain = "audio"
+status = "available"
+[tool.mcp]
+server = "claude-collider"
+repo = "https://github.com/jeremyruppel/claude-collider"
+ref = "467fac4eb5bbb6e1c00c259e4da9fbc275734bf9"
+tier = "community"
+stars = 61
+last_push = 2026-11-01
+licence = "MIT"
+
+[[tool]]
+id = "gimp"
+name = "GIMP"
+domain = "2d"
+status = "available"
+[tool.mcp]
+server = "gimp"
+repo = "https://github.com/gimp-mcp/gimp-mcp"
+ref = "7325865385541a01aaf336ebc93b00332297f77f"
+tier = "community"
+stars = 289
+last_push = 2026-11-01
+licence = "GPL-3.0"
+
+[[tool]]
+id = "inkscape"
+name = "Inkscape"
+domain = "2d"
+status = "available"
+[tool.mcp]
+server = "inkscape"
+repo = "https://github.com/aravindev/inkscape_mcp"
+ref = "5a53f769fc33a5c3b5e6e7049797d74bcb67bc51"
+tier = "community"
+stars = 92
+last_push = 2026-11-02
+licence = "MIT"
+
+[[tool]]
+id = "reaper"
+name = "REAPER"
+domain = "audio"
+paid = true
+status = "available"
+[tool.mcp]
+server = "reaper"
+repo = "https://github.com/bonfire-systems/reaper-mcp"
+ref = "e3dff9fd8e215d86462e6dd1599055a0dcd7921a"
+tier = "community"
+stars = 180
+last_push = 2026-10-25
+licence = "MIT"
+notes = "Needs your own REAPER licence."
+
+[[tool]]
+id = "musescore"
+name = "MuseScore"
+domain = "audio"
+status = "available"
+[tool.mcp]
+server = "musescore"
+repo = "https://github.com/ghchen99/mcp-musescore"
+ref = "80e2af772a51f152298a2186d1d18ba2b734c280"
+tier = "community"
+stars = 140
+last_push = 2026-11-02
+licence = "MIT"
+
+[[tool]]
+id = "audacity"
+name = "Audacity"
+domain = "audio"
+status = "available"
+[tool.mcp]
+server = "audacity"
+repo = "https://github.com/xDarkzx/Audacity-MCP"
+ref = "2835f96c18934fe93b0b0673ba18fc88d884a12b"
+tier = "community"
+stars = 133
+last_push = 2026-10-31
+licence = "Apache-2.0"
+
+# Wanted, but no MCP meets the bar yet. Listed in the menu, not selectable.
+
+[[tool]]
+id = "krita"
+name = "Krita"
+domain = "2d"
+status = "needs-mcp"
+candidates = [
+  "nanayax3/krita-mcp: 52 stars, last push 2026-02-26, stale",
+  "SanSaSane/krita-mcp: 12 stars",
+  "thuanlm215/krita-mcp: 6 stars",
+]
+
+[[tool]]
+id = "surge-xt"
+name = "Surge XT"
+domain = "audio"
+status = "needs-mcp"
+candidates = ["redsquidleader/surge-xt-mcp: 1 star"]
+
+[[tool]]
+id = "material-maker"
+name = "Material Maker"
+domain = "materials"
+status = "first-party-planned"
+candidates = [
+  "graysonchalmers/Tool-MaterialMaker-MCP: 10 stars, self-described alpha",
+  "SS-360/materialpilot: 9 stars, no clear licence",
+]
+
+# Never admit these, however popular.
+
+[[rejected]]
+repo = "https://github.com/ahujasid/blender-mcp"
+reason = "Bundles generative 3D (Hyper3D Rodin, Hunyuan3D, Tripo) and asset fetching (Sketchfab, Poly Haven)."

@@ -4,3 +4,7 @@
 music_lufs = -16.0
 ambience_lufs = -22.0
 sfx_peak_dbtp = -1.0
+
+# Creation tools in use. Change with `joinery setup`; see policy/tools.toml.
+[tools]
+enabled = ["blender", "godot", "supercollider"]
