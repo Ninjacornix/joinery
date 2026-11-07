@@ -20,28 +20,44 @@
 # fetch-checksums.sh writes, from the bytes it actually downloaded. A missing or
 # mismatched hash fails the build rather than installing an unverified binary.
 
-FROM debian:trixie-slim
+# Every downloaded artifact is x86_64: Blender publishes no Linux arm64 build,
+# and neither does Material Maker, so the image is amd64 and so is CI. On Apple
+# Silicon it therefore runs emulated, which is fine for reproducible rebuilds
+# but slow for interactive work; use host tools (`joinery doctor`) for that.
+ARG JOINERY_PLATFORM=linux/amd64
+FROM --platform=${JOINERY_PLATFORM} debian:trixie-slim
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 ENV DEBIAN_FRONTEND=noninteractive LANG=C.UTF-8
+
+# Make package fetching survive a slow or emulated network. The image is amd64
+# even on an arm64 host, and under emulation a long run of fetches starts
+# dropping connections mid-layer. Prefer IPv4, do not pipeline, serialise per
+# host, and retry; apt-install wraps the whole step in a retry loop too.
+RUN printf 'Acquire::Retries "8";\nAcquire::http::Timeout "60";\nAcquire::http::Pipeline-Depth "0";\nAcquire::Queue-Mode "access";\nAcquire::ForceIPv4 "true";\n' \
+      >/etc/apt/apt.conf.d/80-joinery-fetch
+COPY apt-install.sh /usr/local/bin/apt-install
+RUN chmod +x /usr/local/bin/apt-install
 
 # Which tools to include. Default is the minimum that can run a Godot project
 # and render audio and video; the heavy creative tools are opt-in.
 ARG WITH_BLENDER=0
 ARG WITH_KRITA=0
 ARG WITH_SUPERCOLLIDER=0
-ARG WITH_SURGE=0
 ARG WITH_MATERIALMAKER=0
 ARG WITH_GIMP=0
 ARG WITH_INKSCAPE=0
 
 # Core runtime. xvfb because Blender, Krita and Material Maker are GUI programs
-# we drive headless; ffmpeg for capture and audio conversion; fluidsynth to
-# render MIDI through SoundFonts.
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# we drive headless; ffmpeg for capture and audio conversion; fluidsynth plus
+# the Fluid (R3) GM SoundFont to render MIDI, since fluidsynth alone has no
+# instruments to play. That SoundFont is MIT-licensed, which the asset gate
+# records for anything built from it.
+RUN apt-install \
       ca-certificates \
       curl \
       ffmpeg \
+      fluid-soundfont-gm \
       fluidsynth \
       fontconfig \
       fonts-dejavu-core \
@@ -52,8 +68,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       unzip \
       xauth \
       xvfb \
-      xz-utils \
-    && rm -rf /var/lib/apt/lists/*
+      xz-utils
 
 # Hashes for every direct download, checked before anything is unpacked.
 COPY checksums.txt /opt/joinery/checksums.txt
@@ -88,10 +103,8 @@ RUN set -euo pipefail; \
     if [ -z "${BLENDER_VERSION:-}" ]; then \
       echo "BLENDER_VERSION unset: build via sandbox/build.sh" >&2; exit 1; \
     fi; \
-    apt-get update && apt-get install -y --no-install-recommends \
-      libegl1 libgl1 libglu1-mesa libsm6 libxfixes3 libxi6 libxkbcommon0 \
-      libxrender1 libxxf86vm1 \
-    && rm -rf /var/lib/apt/lists/*; \
+    apt-install libegl1 libgl1 libglu1-mesa libsm6 libxfixes3 libxi6 \
+      libxkbcommon0 libxrender1 libxxf86vm1; \
     curl -fsSL -o /tmp/blender.tar.xz \
       "https://download.blender.org/release/Blender${BLENDER_SERIES}/blender-${BLENDER_VERSION}-linux-x64.tar.xz"; \
     joinery-verify-download /tmp/blender.tar.xz blender; \
@@ -115,34 +128,29 @@ RUN set -euo pipefail; \
 # Layered painting. Debian packages it, so apt verifies it.
 RUN set -euo pipefail; \
     if [ "${WITH_KRITA}" != "1" ]; then echo "krita: not requested"; exit 0; fi; \
-    apt-get update && apt-get install -y --no-install-recommends krita \
-    && rm -rf /var/lib/apt/lists/*
+    apt-install krita
 
 # --- SuperCollider -----------------------------------------------------------
-# sclang and scsynth, for sound design and synthesis.
+# sclang and scsynth, for sound design and synthesis. This is the sandbox's
+# synth: it is packaged, drives headlessly from a script, and is what the
+# catalog's audio MCP targets.
 RUN set -euo pipefail; \
     if [ "${WITH_SUPERCOLLIDER}" != "1" ]; then echo "sc: not requested"; exit 0; fi; \
-    apt-get update && apt-get install -y --no-install-recommends \
-      supercollider supercollider-language supercollider-server \
-    && rm -rf /var/lib/apt/lists/*
+    apt-install supercollider supercollider-language supercollider-server
 
-# --- Surge XT ----------------------------------------------------------------
-# Synth patches for SFX and instruments. Packaged name needs confirming on the
-# first build with --with surge; if apt has no surge-xt, this fails loudly
-# rather than quietly producing an image without it.
-RUN set -euo pipefail; \
-    if [ "${WITH_SURGE}" != "1" ]; then echo "surge: not requested"; exit 0; fi; \
-    apt-get update && apt-get install -y --no-install-recommends surge-xt \
-    && rm -rf /var/lib/apt/lists/*
+# Surge XT is deliberately absent. Debian does not package it, and upstream
+# publishes only nightly Linux builds under a moving "Nightly" tag, so there is
+# no stable artifact to pin or hash. Synthesis goes through SuperCollider above,
+# and MIDI renders through FluidSynth with the GM SoundFont in the core layer.
+# If a packaged subtractive synth is ever wanted, Debian has zynaddsubfx,
+# amsynth and yoshimi; none is installed until something drives it.
 
 # --- Material Maker ----------------------------------------------------------
 # Procedural PBR material graphs, with a CLI exporter.
 ARG MATERIALMAKER_VERSION
 RUN set -euo pipefail; \
     if [ "${WITH_MATERIALMAKER}" != "1" ]; then echo "mm: not requested"; exit 0; fi; \
-    apt-get update && apt-get install -y --no-install-recommends \
-      libegl1 libgl1 libxcursor1 libxi6 libxinerama1 libxrandr2 \
-    && rm -rf /var/lib/apt/lists/*; \
+    apt-install libegl1 libgl1 libxcursor1 libxi6 libxinerama1 libxrandr2; \
     under=$(printf '%s' "${MATERIALMAKER_VERSION}" | tr '.' '_'); \
     curl -fsSL -o /tmp/mm.tar.gz \
       "https://github.com/RodZill4/material-maker/releases/download/${MATERIALMAKER_VERSION}/material_maker_${under}_linux.tar.gz"; \
@@ -158,12 +166,10 @@ RUN set -euo pipefail; \
 # --- GIMP / Inkscape ---------------------------------------------------------
 RUN set -euo pipefail; \
     if [ "${WITH_GIMP}" != "1" ]; then echo "gimp: not requested"; exit 0; fi; \
-    apt-get update && apt-get install -y --no-install-recommends gimp \
-    && rm -rf /var/lib/apt/lists/*
+    apt-install gimp
 RUN set -euo pipefail; \
     if [ "${WITH_INKSCAPE}" != "1" ]; then echo "inkscape: not requested"; exit 0; fi; \
-    apt-get update && apt-get install -y --no-install-recommends inkscape \
-    && rm -rf /var/lib/apt/lists/*
+    apt-install inkscape
 
 # Aseprite is deliberately absent: it is paid and source-available, so the user
 # mounts their own licensed build. Krita covers the free pixel path.

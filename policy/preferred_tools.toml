@@ -173,6 +173,10 @@ name = "Surge XT"
 domain = "audio"
 status = "first-party-planned"
 candidates = ["redsquidleader/surge-xt-mcp: 1 star"]
+# Not packaged for Debian, and upstream ships only nightly Linux builds under a
+# moving tag, so there is no stable artifact for the sandbox to pin. Until that
+# changes the sandbox synthesises with SuperCollider and renders MIDI through
+# FluidSynth. See docs/adr/0008-sandbox-image.md.
 
 [[tool]]
 id = "material-maker"

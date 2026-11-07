@@ -5,9 +5,12 @@ claims to? A project enables tools in its `joinery.toml`, and each of those
 drives a real program. If the program is missing, the MCP will fail at the first
 op, so it is better to say so up front than to discover it mid-transaction.
 
-Runs the same way on the host (live mode, watching the tool work) and inside the
-sandbox image. It only looks for programs and reads their versions; it never
-installs anything, since installing is the sandbox image's job.
+Runs wherever Joinery itself runs: on the host, which is also where live mode
+watches a tool work. It only looks for programs and reads their versions; it
+never installs anything, since installing is the sandbox image's job, and when
+something is missing it points at that image. The image deliberately carries
+the creative tools rather than Joinery's Python environment, so running the
+MCP servers inside it is a separate step (see ADR 0008).
 """
 
 from __future__ import annotations
@@ -46,7 +49,12 @@ PROBES: dict[str, Probe] = {
     "blender": Probe("blender"),
     "krita": Probe("krita"),
     "supercollider": Probe("sclang", version_flag="-v"),
-    "surge-xt": Probe("surge-xt-cli", note="Surge XT CLI renderer"),
+    "surge-xt": Probe(
+        "surge-xt-cli",
+        version_flag="",
+        byo=True,
+        note="not packaged for Debian; the sandbox synthesises with SuperCollider",
+    ),
     "material-maker": Probe("material-maker", version_flag=""),
     "gimp": Probe("gimp", version_flag="--version"),
     "inkscape": Probe("inkscape"),
@@ -59,7 +67,8 @@ PROBES: dict[str, Probe] = {
 # Programs every project needs, whatever tools it enabled.
 CORE: dict[str, Probe] = {
     "ffmpeg": Probe("ffmpeg"),
-    "xvfb": Probe("Xvfb", version_flag="-version"),
+    # Xvfb has no version flag, so finding it on PATH is the whole check.
+    "xvfb": Probe("Xvfb", version_flag=""),
 }
 
 

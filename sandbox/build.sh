@@ -18,7 +18,7 @@ here=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 source "${here}/versions.env"
 
 tag=${JOINERY_SANDBOX_TAG:-joinery-sandbox}
-selectable="blender krita supercollider surge materialmaker gimp inkscape"
+selectable="blender krita supercollider materialmaker gimp inkscape"
 wanted=""
 
 contains() { # contains <needle> <haystack words>
@@ -71,6 +71,7 @@ if [ ! -s "${here}/checksums.txt" ] || ! grep -qv '^#' "${here}/checksums.txt"; 
 fi
 
 set -- \
+  --build-arg "JOINERY_PLATFORM=${JOINERY_PLATFORM:-linux/amd64}" \
   --build-arg "GODOT_VERSION=${GODOT_VERSION}" \
   --build-arg "GODOT_CHANNEL=${GODOT_CHANNEL}" \
   --build-arg "BLENDER_SERIES=${BLENDER_SERIES}" \
