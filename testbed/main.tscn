@@ -60,3 +60,9 @@ stream = ExtResource("6_creak")
 stream = ExtResource("7_music")
 autoplay = true
 volume_db = -6.0
+
+[node name="Camera" type="Camera3D" parent="."]
+; Stands inside the room looking at the door, so pressing Play shows the
+; assets rather than an empty frame. Tilted down 10 degrees, eye height 1.7 m.
+transform = Transform3D(1, 0, 0, 0, 0.9848, -0.1736, 0, 0.1736, 0.9848, 0, 1.7, 1.8)
+fov = 70.0

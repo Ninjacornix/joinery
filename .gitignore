@@ -12,3 +12,6 @@ godot_patches/godot-src/
 
 # Internal docs, local only
 .private/
+
+# Local Godot build for GUI work, not part of the repo
+.tools/
