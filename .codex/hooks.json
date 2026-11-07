@@ -1,0 +1,18 @@
+{
+  "description": "Joinery creation-only gate (Rule Zero).",
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__.*|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --frozen --quiet joinery hook --agent codex",
+            "timeout": 30,
+            "statusMessage": "Joinery policy check"
+          }
+        ]
+      }
+    ]
+  }
+}

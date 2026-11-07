@@ -19,7 +19,9 @@
               "--project",
               "${CLAUDE_PROJECT_DIR}",
               "joinery",
-              "hook"
+              "hook",
+              "--agent",
+              "claude"
             ],
             "onFailure": "block",
             "timeout": 30

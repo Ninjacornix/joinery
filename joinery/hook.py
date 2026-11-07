@@ -1,50 +1,226 @@
-"""PreToolUse hook. Exit 2 blocks the call; any internal error also blocks."""
+"""PreToolUse policy hook, shared by every supported agent.
+
+One command, `joinery hook`, enforces Rule Zero for Claude Code, Codex, Gemini
+CLI and opencode. Each agent sends a slightly different JSON payload on stdin;
+`normalise_event` folds them into one canonical shape before the policy check
+runs.
+
+Nothing is disabled or removed: every tool stays callable and is judged per
+call. A refusal lands one of two ways (see `joinery.policy.Severity`):
+
+* **stop** — a Rule Zero violation, something tried to generate an asset. Where
+  the agent supports it (`stop_mode == "json"`), the hook halts the whole turn
+  with `continue: false` so the user is told, instead of letting the agent
+  quietly try another route. The same payload also denies the call, so if
+  `continue` is ignored the call is still refused; it cannot fail open.
+* **deny** — not available here (a server the project did not enable, a narrow
+  escape-hatch tool). Exit 2 refuses that one call and the turn carries on.
+
+Any internal error also exits 2 (fail-closed).
+"""
 
 from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from joinery.agents import StopMode
+from joinery.agents import get as get_agent
 from joinery.catalog import ROOT, allowed_servers, blocked_tools, load_catalog
-from joinery.policy import command_violation, load_denylist, url_violation
+from joinery.policy import (
+    Severity,
+    Verdict,
+    command_violation,
+    generative_names,
+    load_denylist,
+    normalise,
+    url_violation,
+)
+
+# Env vars an agent may set to tell the hook its project directory, in order.
+_PROJECT_DIR_ENVS = ("CLAUDE_PROJECT_DIR", "CODEX_PROJECT_DIR")
+# Shell tool names across agents, normalised to "Bash".
+_SHELL_TOOLS = {"bash", "run_shell_command", "shell", "exec_command"}
+# Web-fetch tool names across agents, normalised to "WebFetch".
+_FETCH_TOOLS = {"webfetch", "web_fetch", "fetch"}
 
 
-def _project_config() -> Path:
-    return Path(os.environ.get("CLAUDE_PROJECT_DIR", ROOT)) / "joinery.toml"
+@dataclass(frozen=True)
+class Event:
+    """One tool call, canonicalised across agents."""
+
+    kind: str  # "mcp", "bash", "fetch" or "other"
+    server: str  # MCP server, for kind == "mcp"
+    tool: str  # bare MCP tool name, for kind == "mcp"
+    command: str  # shell command, for kind == "bash"
+    url: str  # URL, for kind == "fetch"
+    project_dir: Path
 
 
-def _mcp_violation(tool_name: str) -> str | None:
-    server, _, tool = tool_name.removeprefix("mcp__").partition("__")
-    catalog = load_catalog()
-    if server not in allowed_servers(catalog, _project_config()):
-        return f"MCP server {server!r} is not enabled for this project."
-    if tool in blocked_tools(catalog, server):
-        return f"{tool} is blocked on the preferred {server} MCP."
-    return None
+def _split_mcp(tool_name: str, explicit_server: str) -> tuple[str, str]:
+    """Return (server, tool) from any agent's MCP tool spelling.
+
+    Claude/Codex use ``mcp__server__tool``; Gemini uses ``mcp_server_tool``;
+    opencode may pass the server in a separate field. A single-underscore name
+    is ambiguous (servers and tools can contain ``_``), so prefer the explicit
+    field, then the unambiguous dunder form, then a best-effort single split.
+    """
+    if explicit_server:
+        tool = tool_name
+        for prefix in (f"mcp__{explicit_server}__", f"mcp_{explicit_server}_"):
+            if tool.startswith(prefix):
+                tool = tool[len(prefix) :]
+                break
+        return explicit_server, tool
+    if tool_name.startswith("mcp__"):
+        server, _, tool = tool_name.removeprefix("mcp__").partition("__")
+        return server, tool
+    if tool_name.startswith("mcp_"):
+        server, _, tool = tool_name.removeprefix("mcp_").partition("_")
+        return server, tool
+    return "", tool_name
 
 
-def violation(event: dict[str, Any]) -> str | None:
-    tool = str(event.get("tool_name", ""))
-    tool_input = event.get("tool_input") or {}
-    if tool.startswith("mcp__"):
-        return _mcp_violation(tool)
-    if tool == "Bash":
-        return command_violation(str(tool_input.get("command", "")), load_denylist())
-    if tool == "WebFetch":
-        return url_violation(str(tool_input.get("url", "")), load_denylist())
-    return None
-
-
-def main() -> int:
+def _resolve_project_dir(cwd: str) -> Path:
+    for env in _PROJECT_DIR_ENVS:
+        value = os.environ.get(env)
+        if value:
+            return Path(value)
+    start = Path(cwd) if cwd else Path.cwd()
     try:
-        reason = violation(json.load(sys.stdin))
+        root = subprocess.run(
+            ["git", "-C", str(start), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=True,
+        ).stdout.strip()
+        if root:
+            return Path(root)
+    except (subprocess.SubprocessError, OSError):
+        pass
+    return start if cwd else ROOT
+
+
+def normalise_event(raw: dict[str, Any]) -> Event:
+    """Fold any supported agent's PreToolUse payload into an Event.
+
+    Agents name the fields differently but overlap enough to read uniformly:
+    Claude/Codex/Gemini use ``tool_name``/``tool_input``; opencode's plugin
+    bridge forwards ``tool``/``args``/``server``. Missing fields read as empty,
+    which the policy check treats as "nothing to block" rather than crashing.
+    """
+    tool_name = str(raw.get("tool_name") or raw.get("tool") or "")
+    tool_input = raw.get("tool_input") or raw.get("args") or {}
+    if not isinstance(tool_input, dict):
+        tool_input = {}
+    explicit_server = str(raw.get("server") or raw.get("mcp_server") or "")
+    cwd = str(raw.get("cwd") or raw.get("project_dir") or raw.get("directory") or "")
+    project_dir = _resolve_project_dir(cwd)
+
+    lowered = tool_name.lower()
+    if tool_name.startswith(("mcp__", "mcp_")) or explicit_server:
+        server, tool = _split_mcp(tool_name, explicit_server)
+        return Event("mcp", server, tool, "", "", project_dir)
+    if lowered in _SHELL_TOOLS:
+        command = str(tool_input.get("command") or tool_input.get("cmd") or "")
+        return Event("bash", "", "", command, "", project_dir)
+    if lowered in _FETCH_TOOLS:
+        url = str(tool_input.get("url") or "")
+        return Event("fetch", "", "", "", url, project_dir)
+    return Event("other", "", "", "", "", project_dir)
+
+
+def _mcp_violation(server: str, tool: str, project_dir: Path) -> Verdict | None:
+    if not server:
+        return Verdict(Severity.DENY, "MCP call with no resolvable server name")
+    catalog = load_catalog()
+    config = project_dir / "joinery.toml"
+    if server not in allowed_servers(catalog, config):
+        # A server named after a known generative service is a Rule Zero
+        # attempt, not a configuration gap, so it stops the turn.
+        if normalise(server) in generative_names(load_denylist()):
+            return Verdict(
+                Severity.STOP, f"{server} is a generative asset service"
+            )
+        return Verdict(
+            Severity.DENY, f"MCP server {server!r} is not enabled for this project"
+        )
+    if tool in blocked_tools(catalog, server):
+        return Verdict(
+            Severity.DENY, f"{tool} is blocked on the preferred {server} MCP"
+        )
+    return None
+
+
+def violation(raw: dict[str, Any]) -> Verdict | None:
+    event = normalise_event(raw)
+    if event.kind == "mcp":
+        return _mcp_violation(event.server, event.tool, event.project_dir)
+    if event.kind == "bash":
+        return command_violation(event.command, load_denylist())
+    if event.kind == "fetch":
+        return url_violation(event.url, load_denylist())
+    return None
+
+
+_RULE_ZERO = (
+    "Joinery is creation, not generation: assets are made by operating real "
+    "tools, never generated. Tell the user what was attempted and agree on a "
+    "tool-based approach instead."
+)
+
+
+def _stop_payload(verdict: Verdict, event_name: str) -> dict[str, Any]:
+    """A decision that halts the turn *and* denies the call.
+
+    Both signals go in one payload on purpose. `continue: false` is the stop;
+    the deny fields are the floor, so an agent that does not honour `continue`
+    still refuses the call rather than letting it through.
+    """
+    message = f"Blocked by Joinery policy: {verdict.reason}. {_RULE_ZERO}"
+    return {
+        "continue": False,
+        "stopReason": message,
+        "decision": "deny",
+        "reason": message,
+        "systemMessage": message,
+        "hookSpecificOutput": {
+            "hookEventName": event_name,
+            "permissionDecision": "deny",
+            "permissionDecisionReason": message,
+        },
+    }
+
+
+def _emit(verdict: Verdict, stop_mode: StopMode, event_name: str) -> int:
+    if verdict.severity is Severity.STOP and stop_mode == "json":
+        # Exit 0 is required for the agent to read the decision from stdout.
+        print(json.dumps(_stop_payload(verdict, event_name)))
+        return 0
+    prefix = "STOP, Rule Zero" if verdict.severity is Severity.STOP else "Blocked"
+    detail = f" {_RULE_ZERO}" if verdict.severity is Severity.STOP else ""
+    print(f"{prefix} by Joinery policy: {verdict.reason}.{detail}", file=sys.stderr)
+    return 2
+
+
+def main(agent_id: str | None = None) -> int:
+    """Run the gate. `agent_id` comes from `--agent`; absent means exit-2 mode."""
+    try:
+        raw = json.load(sys.stdin)
+        verdict = violation(raw)
+        if verdict is None:
+            return 0
+        stop_mode: StopMode = "exit"
+        if agent_id:
+            stop_mode = get_agent(agent_id).stop_mode
+        event_name = str(raw.get("hook_event_name") or "PreToolUse")
+        return _emit(verdict, stop_mode, event_name)
     except Exception as exc:  # noqa: BLE001 - a broken policy check must block, not pass.
         print(f"Joinery policy check failed: {exc}", file=sys.stderr)
         return 2
-    if reason is None:
-        return 0
-    print(f"Blocked by Joinery policy: {reason}", file=sys.stderr)
-    return 2

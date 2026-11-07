@@ -31,6 +31,19 @@ def test_new_project_inherits_hook_and_telemetry_off(tmp_path: Path) -> None:
     assert settings["hooks"]["PreToolUse"][0]["hooks"][0]["onFailure"] == "block"
 
 
+def test_new_project_wires_the_gate_for_every_agent(tmp_path: Path) -> None:
+    project = tmp_path / "game"
+    create_project(project, "G", Selection(["godot"], []), load_catalog())
+    # Rule Zero must hold whichever agent the user runs in the project.
+    for path in (
+        ".claude/settings.json",
+        ".codex/hooks.json",
+        ".gemini/settings.json",
+        ".opencode/plugin/joinery-gate.js",
+    ):
+        assert (project / path).is_file(), path
+
+
 def test_custom_tool_lands_in_mcp_config(tmp_path: Path) -> None:
     tool = CustomTool(id="x", name="X", domain="2d", server="x", command="x-mcp")
     project = tmp_path / "game"

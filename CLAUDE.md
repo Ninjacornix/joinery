@@ -21,7 +21,8 @@ Joinery = Godot 4.7 + thin patch series + Joinery addon. The Journeyman sidebar 
 - Native sources live in the repo (`art/`, `audio/`, git LFS); joinery-registry resolves every resource → source → part → owning tool → recipe.
 - Typed tool ops first; raw bpy / Lua / sclang only as a sandboxed, logged fallback, appended to the recipe.
 - Godot UI work is a plugin first (`godot_addon/joinery`). Engine changes go only into `godot_patches/` on 4.7 tags: small and upstreamable where general, Joinery-only where they restructure and simplify the editor around the Journeyman sidebar. The addon must still work (degraded) on stock Godot.
-- MCP allowlist and dependency denylist (see internal checklist) are enforced by hooks and CI. Never weaken them.
+- MCP allowlist and dependency denylist (see internal checklist) are enforced by hooks and CI. Never weaken them. Joinery is **agent-agnostic**: the same `joinery hook` gate is wired into every supported agent — Claude Code, Codex, Gemini CLI, opencode (`joinery/agents.py`, `joinery/wiring.py`, ADR 0006). When adding or changing enforcement, keep it in the shared core so every agent is covered; never Claude-only. Auth per agent (subscription or API key) is documented in `joinery auth`; Joinery does not broker credentials.
+- **No tool is disabled; every call is judged.** A Rule Zero violation (generative service, package or asset site) **stops the turn** so the user is told, rather than being quietly blocked for the agent to route around. Something merely not enabled for the project is **denied** for that one call and the turn continues. Reading the web is not asset generation and stays allowed, bounded by the host denylist. If a stop happens, say what was attempted and agree a tool-based approach with the user; never retry around it.
 
 ## Conventions
 - Python 3.12, `uv`, pydantic v2, `mcp` SDK, ruff + mypy --strict, pytest. Pin and hash all deps.

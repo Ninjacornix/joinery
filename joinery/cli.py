@@ -8,6 +8,9 @@ import sys
 from pathlib import Path
 
 from joinery import hook
+from joinery.agents import all_agents
+from joinery.agents import get as get_agent
+from joinery.auth import for_agent
 from joinery.catalog import (
     CONFIG_PATH,
     ROOT,
@@ -28,6 +31,7 @@ from joinery.installer import (
 from joinery.lockfile import check_assets
 from joinery.policy import load_denylist, normalise
 from joinery.project import create_project
+from joinery.wiring import unwireable
 
 
 def check_mcp_config(root: Path, config: Path = CONFIG_PATH) -> list[str]:
@@ -97,10 +101,56 @@ def _new(path: Path, name: str | None, tools: str | None) -> int:
     return 0
 
 
+def _agents() -> int:
+    """List supported agents and how the creation-only gate lands in each."""
+    blocked = set(unwireable())
+    print("Supported agents. No tool is disabled; every call is judged:")
+    print("  stop = Rule Zero violation, halt the turn and tell the user")
+    print("  deny = not enabled here, refuse the call, the turn continues\n")
+    for agent in all_agents():
+        state = "gated" if agent.id not in blocked else "NOT GATED (fail-closed)"
+        how = "stops the turn" if agent.stop_mode == "json" else "refuses the call"
+        print(f"  {agent.name:<14} {state}  via {agent.config_path}")
+        print(f"      on a Rule Zero hit: {how}")
+        for limit in agent.gate_limits:
+            print(f"      - {limit}")
+    print(
+        "\nThe hook is defense-in-depth per agent. The real guarantee is the "
+        "offline sandbox worker plus CI (`joinery check deps|assets`), which no "
+        "agent can bypass."
+    )
+    return 0
+
+
+def _auth(agent_id: str | None) -> int:
+    """Show how to sign an agent in: subscription or API key."""
+    ids = [agent_id] if agent_id else [a.id for a in all_agents()]
+    for aid in ids:
+        agent = get_agent(aid)
+        info = for_agent(aid)
+        print(f"{agent.name}:")
+        for path in (info.subscription, info.api_key):
+            print(f"  {path.kind}: {path.how}")
+            if path.key_var:
+                print(f"    key: {path.key_var}")
+            if path.get_at:
+                print(f"    at:  {path.get_at}")
+            if path.notes:
+                print(f"    note: {path.notes}")
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="joinery")
     commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("hook", help="PreToolUse policy hook (reads JSON on stdin)")
+    hook_cmd = commands.add_parser(
+        "hook", help="PreToolUse policy hook (reads JSON on stdin)"
+    )
+    hook_cmd.add_argument(
+        "--agent",
+        choices=[a.id for a in all_agents()],
+        help="calling agent; selects how a Rule Zero stop is signalled",
+    )
     new = commands.add_parser("new", help="create a project and choose its tools")
     new.add_argument("path", type=Path)
     new.add_argument("--name")
@@ -110,17 +160,26 @@ def main() -> int:
     setup.add_argument("--project", type=Path, default=ROOT)
     tools = commands.add_parser("tools", help="list tools and their MCP status")
     tools.add_argument("--project", type=Path, default=ROOT)
+    commands.add_parser("agents", help="list supported agents and gate status")
+    auth = commands.add_parser("auth", help="show how to sign an agent in")
+    auth.add_argument(
+        "agent", nargs="?", choices=[a.id for a in all_agents()], default=None
+    )
     check = commands.add_parser("check", help="run policy checks")
     check.add_argument("target", choices=["all", "catalog", "deps", "mcp", "assets"])
     check.add_argument("--project", type=Path, default=ROOT / "testbed")
     args = parser.parse_args()
 
     if args.command == "hook":
-        return hook.main()
+        return hook.main(args.agent)
     if args.command == "new":
         return _new(args.path, args.name, args.tools)
     if args.command == "setup":
         return _setup(args.tools, args.project)
+    if args.command == "agents":
+        return _agents()
+    if args.command == "auth":
+        return _auth(args.agent)
     if args.command == "tools":
         catalog = load_catalog()
         current = load_project_tools(args.project / "joinery.toml")

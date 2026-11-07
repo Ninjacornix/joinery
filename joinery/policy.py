@@ -1,4 +1,18 @@
-"""Creation-only rules applied to tool calls, commands and URLs."""
+"""Creation-only rules applied to tool calls, commands and URLs.
+
+A refusal carries a severity, because the two cases deserve different handling:
+
+* ``STOP`` — a Rule Zero violation: something tried to *generate* an asset. The
+  whole turn halts and the user is told, rather than the agent quietly probing
+  for another route. Everything in ``policy/denylist.toml`` is of this kind:
+  generative services and asset sites.
+* ``DENY`` — not available here, which is a configuration state, not a
+  violation: an MCP server the project did not enable, or a narrow escape-hatch
+  tool on a server that is otherwise fine. The call is refused and the agent is
+  free to pick another path.
+
+No tool is disabled or removed; everything stays callable and is judged per call.
+"""
 
 from __future__ import annotations
 
@@ -6,12 +20,31 @@ import re
 import shlex
 import tomllib
 from dataclasses import dataclass
+from enum import StrEnum
 from pathlib import Path
 from urllib.parse import urlparse
 
 from joinery.catalog import ROOT
 
 DENYLIST_PATH = ROOT / "policy" / "denylist.toml"
+
+
+class Severity(StrEnum):
+    """How hard a refusal lands."""
+
+    STOP = "stop"  # Rule Zero violation: halt the turn and tell the user.
+    DENY = "deny"  # Not available here: refuse the call, the turn continues.
+
+
+@dataclass(frozen=True)
+class Verdict:
+    """A refusal: why, and how hard."""
+
+    severity: Severity
+    reason: str
+
+    def __str__(self) -> str:
+        return self.reason
 
 _SEGMENTS = re.compile(r"&&|\|\||[;|\n]")
 _INSTALLERS = re.compile(
@@ -47,19 +80,33 @@ def _host_matches(host: str, denied: str) -> bool:
     return host == denied or host.endswith("." + denied)
 
 
-def url_violation(url: str, denylist: Denylist) -> str | None:
+def generative_names(denylist: Denylist) -> frozenset[str]:
+    """Names that identify a generative service, for judging MCP server names.
+
+    Built from the denylist: package names as written, and the leading label of
+    each denied host (``meshy.ai`` -> ``meshy``). Matching is exact, so an
+    unrecognised name reads as an ordinary ``DENY`` rather than a false alarm;
+    the sandbox and the CI asset gate are the backstop for that.
+    """
+    names = set(denylist.packages)
+    for host in denylist.hosts:
+        names.add(normalise(host.split(".", 1)[0]))
+    return frozenset(names)
+
+
+def url_violation(url: str, denylist: Denylist) -> Verdict | None:
     host = (urlparse(url).hostname or "").lower()
     for denied in denylist.hosts:
         if _host_matches(host, denied):
-            return f"{denied} is a blocked host"
+            return Verdict(Severity.STOP, f"{denied} is a blocked generative host")
     return None
 
 
-def command_violation(command: str, denylist: Denylist) -> str | None:
+def command_violation(command: str, denylist: Denylist) -> Verdict | None:
     lowered = command.lower()
     for denied in denylist.hosts:
         if re.search(rf"(?<![\w-]){re.escape(denied)}(?![\w-])", lowered):
-            return f"{denied} is a blocked host"
+            return Verdict(Severity.STOP, f"{denied} is a blocked generative host")
     for segment in _SEGMENTS.split(command):
         segment = segment.strip()
         if not _INSTALLERS.match(segment):
@@ -71,5 +118,7 @@ def command_violation(command: str, denylist: Denylist) -> str | None:
         for token in tokens:
             name = normalise(_VERSION_SUFFIX.sub("", token))
             if name in denylist.packages:
-                return f"{name} is a denied package"
+                return Verdict(
+                    Severity.STOP, f"{name} is a denied generative package"
+                )
     return None

@@ -1,0 +1,21 @@
+{
+  "telemetry": {
+    "enabled": false
+  },
+  "hooks": {
+    "BeforeTool": [
+      {
+        "matcher": "mcp_.*|run_shell_command|web_fetch",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run --frozen --quiet joinery hook --agent gemini",
+            "name": "joinery-gate",
+            "timeout": 30000,
+            "description": "Joinery creation-only gate (Rule Zero)."
+          }
+        ]
+      }
+    ]
+  }
+}
