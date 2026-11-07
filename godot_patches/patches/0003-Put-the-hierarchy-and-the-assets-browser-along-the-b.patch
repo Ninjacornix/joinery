@@ -1,0 +1,142 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Sat, 7 Nov 2026 21:51:26 +0100
+Subject: [PATCH] Put the hierarchy and the assets browser along the bottom
+
+The viewport is the one panel that benefits from width, and the
+Journeyman sidebar occupies the right. Stock Godot spends two left
+columns on Scene and FileSystem, which squeezes the viewport from both
+sides for two docks that are mostly lists.
+
+Both now default to DOCK_SLOT_BOTTOM, next to Output and the Debugger,
+and the default layout places them in dock_9 with a height of their own.
+Scene gains DOCK_LAYOUT_ALL because the bottom slot lays its docks out
+horizontally and the stock default permits only vertical and floating,
+so without it the dock could not legally live where it was put, nor be
+dragged back after being moved.
+
+EditorBottomPanel also has to be constructed before the docks now. It is
+the container for the bottom slot, and upstream created it about seventy
+lines after the docks are added, which was fine only while nothing
+defaulted into that slot.
+
+Nothing is deleted: the docks keep every layout the user can choose and
+can be dragged anywhere they could before.
+
+Joinery-only, not for upstream: a layout opinion, not a fix.
+---
+ editor/docks/filesystem_dock.cpp |  4 +++-
+ editor/docks/scene_tree_dock.cpp |  7 ++++++-
+ editor/editor_node.cpp           | 34 +++++++++++++++++++++++---------
+ 3 files changed, 34 insertions(+), 11 deletions(-)
+
+diff --git a/editor/docks/filesystem_dock.cpp b/editor/docks/filesystem_dock.cpp
+index 232fc24..a5b29e2 100644
+--- a/editor/docks/filesystem_dock.cpp
++++ b/editor/docks/filesystem_dock.cpp
+@@ -4430,7 +4430,9 @@ FileSystemDock::FileSystemDock() {
+ 	set_name(TTRC("FileSystem"));
+ 	set_icon_name("Folder");
+ 	set_dock_shortcut(ED_SHORTCUT_AND_COMMAND("docks/open_filesystem", TTRC("Open FileSystem Dock"), KeyModifierMask::ALT | Key::F));
+-	set_default_slot(EditorDock::DOCK_SLOT_LEFT_BR);
++	// Joinery: assets go to the bottom alongside the hierarchy, for the
++	// same reason (ADR 0005).
++	set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
+ 	set_available_layouts(DOCK_LAYOUT_ALL);
+ 
+ 	ProjectSettings::get_singleton()->add_hidden_prefix("file_customization/");
+diff --git a/editor/docks/scene_tree_dock.cpp b/editor/docks/scene_tree_dock.cpp
+index 72f0165..e941945 100644
+--- a/editor/docks/scene_tree_dock.cpp
++++ b/editor/docks/scene_tree_dock.cpp
+@@ -4997,7 +4997,12 @@ SceneTreeDock::SceneTreeDock(Node *p_scene_root, EditorSelection *p_editor_selec
+ 	set_name(TTRC("Scene"));
+ 	set_icon_name("PackedScene");
+ 	set_dock_shortcut(ED_SHORTCUT_AND_COMMAND("docks/open_scene", TTRC("Open Scene Dock")));
+-	set_default_slot(EditorDock::DOCK_SLOT_LEFT_UR);
++	// Joinery: the hierarchy sits along the bottom with the other docks,
++	// leaving the full width of the window to the viewport and the
++	// Journeyman sidebar (ADR 0005). The bottom slot lays its docks out
++	// horizontally, which upstream does not permit by default.
++	set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
++	set_available_layouts(DOCK_LAYOUT_ALL);
+ 
+ 	singleton = this;
+ 	editor_data = &p_editor_data;
+diff --git a/editor/editor_node.cpp b/editor/editor_node.cpp
+index 5bc4649..c3b2686 100644
+--- a/editor/editor_node.cpp
++++ b/editor/editor_node.cpp
+@@ -9163,6 +9163,15 @@ EditorNode::EditorNode() {
+ 	p->add_item(TTRC("Hide Update Spinner"), SPINNER_UPDATE_SPINNER_HIDE);
+ 	_update_update_spinner();
+ 
++	// Joinery: the bottom panel is the dock slot container for DOCK_SLOT_BOTTOM,
++	// and the Scene and FileSystem docks now default into that slot, so it has
++	// to be registered before any dock is added. Upstream created it further
++	// down, which is safe only while no default-slot dock targets the bottom.
++	bottom_panel = memnew(EditorBottomPanel);
++	editor_dock_manager->register_dock_slot(bottom_panel);
++	center_split->add_child(bottom_panel);
++	center_split->set_dragger_visibility(SplitContainer::DRAGGER_HIDDEN);
++
+ 	// Instantiate and place editor docks.
+ 
+ 	memnew(SceneTreeDock(scene_root, editor_selection, editor_data));
+@@ -9202,15 +9211,13 @@ EditorNode::EditorNode() {
+ 	default_layout.instantiate();
+ 	// Dock numbers are based on DockSlot enum value + 1.
+ 	{
+-		const String scene_key = SceneTreeDock::get_singleton()->get_effective_layout_key();
+ 		const String import_key = ImportDock::get_singleton()->get_effective_layout_key();
+-		default_layout->set_value(docks_section, "dock_3", vformat("%s,%s", scene_key, import_key));
++		default_layout->set_value(docks_section, "dock_3", import_key);
+ 		default_layout->set_value(docks_section, "dock_3_selected_tab_idx", 0);
+ 	}
+ 	{
+-		const String filesystem_key = filesystem_dock->get_effective_layout_key();
+ 		const String history_key = history_dock->get_effective_layout_key();
+-		default_layout->set_value(docks_section, "dock_4", vformat("%s,%s", filesystem_key, history_key));
++		default_layout->set_value(docks_section, "dock_4", history_key);
+ 		default_layout->set_value(docks_section, "dock_4_selected_tab_idx", 0);
+ 	}
+ 	{
+@@ -9220,6 +9227,14 @@ EditorNode::EditorNode() {
+ 		default_layout->set_value(docks_section, "dock_5", vformat("%s,%s,%s", inspector_key, signals_key, groups_key));
+ 		default_layout->set_value(docks_section, "dock_5_selected_tab_idx", 0);
+ 	}
++	{
++		// Joinery: dock_9 is DOCK_SLOT_BOTTOM. The hierarchy and the assets
++		// browser sit there so the viewport keeps the full width of the window.
++		const String scene_key = SceneTreeDock::get_singleton()->get_effective_layout_key();
++		const String filesystem_key = filesystem_dock->get_effective_layout_key();
++		default_layout->set_value(docks_section, "dock_9", vformat("%s,%s", scene_key, filesystem_key));
++		default_layout->set_value(docks_section, "dock_9_selected_tab_idx", 0);
++	}
+ 
+ 	int hsplits[] = { 0, dock_hsize, -dock_hsize, 0 };
+ 	for (int i = 0; i < (int)std_size(hsplits); i++) {
+@@ -9233,17 +9248,18 @@ EditorNode::EditorNode() {
+ 		Dictionary offsets;
+ 		offsets["Audio"] = -450;
+ 		offsets["Output"] = -270;
++		// Joinery: the hierarchy and assets docks live at the bottom, so they
++		// need a default height of their own.
++		offsets["Scene"] = -300;
++		offsets["FileSystem"] = -300;
+ 		default_layout->set_value(EDITOR_NODE_CONFIG_SECTION, "bottom_panel_offsets", offsets);
+ 	}
+ 
+ 	_update_layouts_menu();
+ 
+ 	// Bottom panels.
+-
+-	bottom_panel = memnew(EditorBottomPanel);
+-	editor_dock_manager->register_dock_slot(bottom_panel);
+-	center_split->add_child(bottom_panel);
+-	center_split->set_dragger_visibility(SplitContainer::DRAGGER_HIDDEN);
++	// Joinery: the panel itself is created earlier, before the docks, because
++	// it owns the bottom dock slot.
+ 
+ 	log = memnew(EditorLog);
+ 	editor_dock_manager->add_dock(log);

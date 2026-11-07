@@ -1,0 +1,54 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Sat, 7 Nov 2026 21:50:31 +0100
+Subject: [PATCH] Fail loudly when a dock opens into an unregistered slot
+
+EditorDockManager::dock_slots is a raw array of pointers left
+uninitialised, and add_dock() immediately opens a dock into
+dock_slots[default_slot]. Every dock that defaults to the bottom slot
+happens to be added after EditorBottomPanel registers it, so the array
+is always populated in practice today. Give a dock a default slot whose
+container is registered later and open_dock() dereferences an
+uninitialised pointer: signal 11 during editor construction, no error,
+no usable backtrace in a release build.
+
+Zero-initialise the array and null-check the slot, so the same mistake
+reports which dock wanted which slot.
+
+Candidate for upstream: no behaviour change, only a latent crash made
+diagnosable.
+---
+ editor/docks/editor_dock_manager.cpp | 3 +++
+ editor/docks/editor_dock_manager.h   | 5 ++++-
+ 2 files changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/editor/docks/editor_dock_manager.cpp b/editor/docks/editor_dock_manager.cpp
+index 50b991a..42997f5 100644
+--- a/editor/docks/editor_dock_manager.cpp
++++ b/editor/docks/editor_dock_manager.cpp
+@@ -669,6 +669,9 @@ void EditorDockManager::open_dock(EditorDock *p_dock, bool p_set_current) {
+ 	// Open dock to its previous location.
+ 	if (p_dock->dock_slot_index != EditorDock::DOCK_SLOT_NONE) {
+ 		DockTabContainer *slot = dock_slots[p_dock->dock_slot_index];
++		// Joinery: a dock added before its slot container was registered would
++		// otherwise crash below. Report which dock and slot are at fault.
++		ERR_FAIL_NULL_MSG(slot, vformat("Cannot open dock '%s': dock slot %d is not registered yet.", p_dock->get_display_title(), p_dock->dock_slot_index));
+ 		int tab_index = p_dock->previous_tab_index;
+ 		if (tab_index < 0) {
+ 			tab_index = slot->get_tab_count();
+diff --git a/editor/docks/editor_dock_manager.h b/editor/docks/editor_dock_manager.h
+index caf7277..c83a9eb 100644
+--- a/editor/docks/editor_dock_manager.h
++++ b/editor/docks/editor_dock_manager.h
+@@ -95,7 +95,10 @@ private:
+ 	DockSplitContainer *main_hsplit = nullptr;
+ 	DockSplitContainer *bottom_hsplit = nullptr;
+ 
+-	DockTabContainer *dock_slots[EditorDock::DOCK_SLOT_MAX];
++	// Joinery: zero-initialised so that adding a dock whose default slot has
++	// not been registered yet fails loudly in open_dock() instead of
++	// dereferencing an uninitialised pointer.
++	DockTabContainer *dock_slots[EditorDock::DOCK_SLOT_MAX] = {};
+ 	Vector<WindowWrapper *> dock_windows;
+ 	LocalVector<EditorDock *> all_docks;
+ 	HashSet<EditorDock *> dirty_docks;
