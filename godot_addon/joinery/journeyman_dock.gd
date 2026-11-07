@@ -2,95 +2,70 @@
 extends VBoxContainer
 ## The Journeyman sidebar: the single surface you direct Joinery from.
 ##
-## What is live today talks to the real `joinery` CLI, so the output in this
-## panel is the real policy gate, the real tool check and the real recipe
-## replay, not a mock. What is not built yet says so plainly rather than
-## pretending: free-form prompts need the agent bridge, and before/after needs
-## the transaction engine.
+## One input, no button rows. Everything is a slash command typed in the prompt,
+## the way the agent CLIs this talks to already work. A row of buttons has to
+## grow with every capability and was already overflowing the dock at narrow
+## widths; a command list scrolls, and reads the same at any size.
+##
+## What is live today talks to the real `joinery` CLI, so the output here is the
+## real policy gate, tool check and recipe replay. What is not built yet says so
+## rather than pretending: free-form prompts need the agent bridge.
 
 signal setup_requested
 signal focus_toggle_requested
 
-const ACCENT := Color(0.83, 0.61, 0.23)
-const DIM := Color(0.62, 0.60, 0.56)
+const ACCENT := Color(0.85, 0.63, 0.26)
+const DIM := Color(0.66, 0.64, 0.60)
+
+## command -> [description, kind]. `cli` shells out to joinery, `ui` acts here.
+const COMMANDS := {
+	"/doctor": ["Which tools this project needs, and whether they are installed", "cli"],
+	"/agents": ["Which agents are gated, and how a Rule Zero hit lands", "cli"],
+	"/check": ["Run the policy and asset gates", "cli"],
+	"/rebuild": ["Replay every recipe and verify the assets come back", "cli"],
+	"/setup": ["Change which tools make this project", "ui"],
+	"/focus": ["Toggle the stripped-back layout", "ui"],
+	"/help": ["List these commands", "ui"],
+}
 
 var _transcript: RichTextLabel
-var _prompt: TextEdit
+var _prompt: LineEdit
 var _chips: HFlowContainer
-var _steps: VBoxContainer
-var _review: PanelContainer
-var _send: Button
 var _targets: Array[String] = []
 var _busy := false
-## Base font size, read from the editor so the sidebar follows the user's own
-## interface scale instead of imposing fixed pixel sizes.
-var _base_font := 14
-
-
-func _font(delta: int = 0) -> int:
-	return maxi(10, _base_font + delta)
-
-
-func _read_base_font() -> void:
-	var settings := EditorInterface.get_editor_settings()
-	if settings != null and settings.has_setting("interface/editor/main_font_size"):
-		_base_font = int(settings.get_setting("interface/editor/main_font_size"))
 
 
 func _init() -> void:
 	name = "Journeyman"
-	custom_minimum_size = Vector2(380, 0)
+	custom_minimum_size = Vector2(300, 0)
 	add_theme_constant_override("separation", 6)
 
 
+## No font sizes are set here, deliberately.
+##
+## The editor theme sizes its fonts in points and then multiplies by the
+## interface scale, which is 2 on a HiDPI display. An explicit
+## add_theme_font_size_override takes a raw pixel value and skips that, so a
+## hand-picked 14 renders at half the size of every Godot label beside it.
+## That is why this panel kept looking tiny however the numbers were tuned.
+## Inheriting the theme gets the right size at any scale, for free.
 func _ready() -> void:
-	_read_base_font()
 	_build_header()
 	_build_targets()
 	_build_transcript()
-	_build_steps()
-	_build_review()
 	_build_prompt()
 	_greet()
 
 
 func _build_header() -> void:
-	var row := HBoxContainer.new()
-	add_child(row)
-
 	var title := Label.new()
 	title.text = "Journeyman"
-	title.add_theme_font_size_override("font_size", _font(4))
-	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(title)
-
-	var setup := Button.new()
-	setup.text = "Setup"
-	setup.tooltip_text = "Project questionnaire: tools, and how this project is made."
-	setup.pressed.connect(func() -> void: setup_requested.emit())
-	row.add_child(setup)
-
-	var focus := Button.new()
-	focus.text = "Focus"
-	focus.tooltip_text = "Hide everything but the viewport and this sidebar."
-	focus.pressed.connect(func() -> void: focus_toggle_requested.emit())
-	row.add_child(focus)
-
-	var tag := Label.new()
-	tag.text = "Made in the Joinery, not generated."
-	tag.add_theme_color_override("font_color", DIM)
-	tag.add_theme_font_size_override("font_size", _font(-1))
-	add_child(tag)
-	add_child(HSeparator.new())
+	# The theme's own heading size, which scales with the interface.
+	title.set_theme_type_variation("HeaderLarge")
+	add_child(title)
 
 
 func _build_targets() -> void:
-	var label := Label.new()
-	label.text = "Selection"
-	label.add_theme_color_override("font_color", DIM)
-	label.add_theme_font_size_override("font_size", _font(0))
-	add_child(label)
-
 	_chips = HFlowContainer.new()
 	add_child(_chips)
 
@@ -101,85 +76,22 @@ func _build_transcript() -> void:
 	_transcript.scroll_following = true
 	_transcript.selection_enabled = true
 	_transcript.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_transcript.custom_minimum_size = Vector2(0, 260)
-	_transcript.add_theme_font_size_override("normal_font_size", _font(1))
-	_transcript.add_theme_font_size_override("bold_font_size", _font(1))
-	_transcript.add_theme_font_size_override("italics_font_size", _font(1))
-	_transcript.add_theme_font_size_override("mono_font_size", _font(-1))
+	_transcript.custom_minimum_size = Vector2(0, 200)
 	add_child(_transcript)
 
 
-func _build_steps() -> void:
-	_steps = VBoxContainer.new()
-	_steps.visible = false
-	add_child(_steps)
-
-
-func _build_review() -> void:
-	## Before/after and accept/reject. Visible but inert until the transaction
-	## engine exists, so the shape of the workflow is honest about its state.
-	_review = PanelContainer.new()
-	_review.visible = false
-	var box := VBoxContainer.new()
-	_review.add_child(box)
-
-	var heading := Label.new()
-	heading.text = "Review"
-	heading.add_theme_color_override("font_color", ACCENT)
-	heading.add_theme_font_size_override("font_size", _font(1))
-	box.add_child(heading)
-
-	var row := HBoxContainer.new()
-	box.add_child(row)
-	var accept := Button.new()
-	accept.text = "Accept"
-	accept.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(accept)
-	var reject := Button.new()
-	reject.text = "Reject"
-	reject.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	row.add_child(reject)
-	add_child(_review)
-
-
 func _build_prompt() -> void:
-	add_child(HSeparator.new())
-	_prompt = TextEdit.new()
-	_prompt.placeholder_text = "Tell Journeyman what to change…"
-	_prompt.custom_minimum_size = Vector2(0, 64)
-	_prompt.add_theme_font_size_override("font_size", _font(1))
-	_prompt.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+	## A single line. Commands and prose go in the same way, which is how the
+	## agent CLIs behave and leaves nothing extra to find.
+	_prompt = LineEdit.new()
+	_prompt.placeholder_text = "Say what to change, or / for commands"
+	_prompt.text_submitted.connect(_on_submit)
 	add_child(_prompt)
-
-	var row := HBoxContainer.new()
-	add_child(row)
-
-	_send = Button.new()
-	_send.text = "Send"
-	_send.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_send.pressed.connect(_on_send)
-	row.add_child(_send)
-
-	for entry: Array in [
-		["Doctor", "doctor", "Which tools this project needs, and whether they are installed"],
-		["Agents", "agents", "Which agents are gated, and how a Rule Zero hit lands"],
-		["Check", "check", "Run the policy and asset gates"],
-		["Rebuild", "rebuild", "Replay every recipe and verify the assets come back"],
-	]:
-		var button := Button.new()
-		button.text = entry[0]
-		button.tooltip_text = entry[2]
-		var command: String = entry[1]
-		button.pressed.connect(func() -> void: _run_command(command))
-		row.add_child(button)
 
 
 func _greet() -> void:
-	_say("Journeyman", "Ready. Select something in the scene and say what to change.")
-	log_system(
-		"Live now: the buttons below run the real joinery CLI. Free-form "
-		+ "prompts need the agent bridge, which is not connected yet."
-	)
+	_say("Journeyman", "Ready. Select something and say what to change.")
+	log_system("Type [b]/help[/b] for what works today.")
 
 
 # --- selection ---------------------------------------------------------------
@@ -190,17 +102,9 @@ func on_selection_changed() -> void:
 	for child: Node in _chips.get_children():
 		child.queue_free()
 
-	# EditorInterface is a global singleton in 4.2+; fetching it through
-	# Engine.get_singleton and casting trips an internal script error.
 	var nodes := EditorInterface.get_selection().get_selected_nodes()
 	if nodes.is_empty():
-		var empty := Label.new()
-		empty.text = "nothing selected"
-		empty.add_theme_color_override("font_color", DIM)
-		empty.add_theme_font_size_override("font_size", _font(0))
-		_chips.add_child(empty)
 		return
-
 	for node: Node in nodes:
 		_targets.append(node.name)
 		var chip := Button.new()
@@ -211,60 +115,75 @@ func on_selection_changed() -> void:
 		_chips.add_child(chip)
 
 
-# --- talking -----------------------------------------------------------------
+# --- input -------------------------------------------------------------------
 
 
-func _on_send() -> void:
-	var text := _prompt.text.strip_edges()
-	if text.is_empty() or _busy:
+func _on_submit(text: String) -> void:
+	var entry := text.strip_edges()
+	if entry.is_empty() or _busy:
 		return
-	_prompt.text = ""
+	_prompt.clear()
+
+	if entry.begins_with("/"):
+		_say("You", entry)
+		_run_slash(entry)
+		return
+
 	var chips := ""
 	if not _targets.is_empty():
-		chips = " [" + ", ".join(_targets.map(func(t: String) -> String: return "@" + t)) + "]"
-	_say("You", text + chips)
-
-	var word := text.to_lower()
-	for known: String in ["doctor", "agents", "rebuild", "check"]:
-		if word.begins_with(known):
-			_run_command(known)
-			return
-
-	# No agent transport yet. Be straight about it instead of inventing a reply.
+		var tagged := _targets.map(func(t: String) -> String: return "@" + t)
+		chips = " [" + ", ".join(tagged) + "]"
+	_say("You", entry + chips)
+	# No agent transport yet. Be straight about it rather than invent a reply.
 	_say(
 		"Journeyman",
 		"I cannot act on that yet: the agent bridge is not connected, so there "
-		+ "is nothing to plan or apply this request with. What works today is "
-		+ "below the prompt, and `joinery` on the command line."
+		+ "is nothing to plan or apply this with. [b]/help[/b] lists what does work."
 	)
 
 
-func _run_command(command: String) -> void:
-	if _busy:
+func _run_slash(entry: String) -> void:
+	var command := entry.split(" ")[0].to_lower()
+	if not COMMANDS.has(command):
+		_say("Journeyman", "No such command: %s. Try [b]/help[/b]." % command)
 		return
-	_busy = true
-	_send.disabled = true
-	_say("Journeyman", "Running `joinery %s`…" % command)
+	match command:
+		"/help":
+			_show_help()
+		"/setup":
+			setup_requested.emit()
+		"/focus":
+			focus_toggle_requested.emit()
+		_:
+			_run_cli(command.substr(1))
 
-	var args := _args_for(command)
+
+func _show_help() -> void:
+	var lines: Array[String] = []
+	for command: String in COMMANDS:
+		lines.append("[b]%s[/b]  %s" % [command, COMMANDS[command][0]])
+	_say("Journeyman", "\n".join(lines))
+
+
+func _run_cli(command: String) -> void:
+	_busy = true
+	_prompt.editable = false
+	_say("Journeyman", "Running [b]joinery %s[/b]…" % command)
+
 	var out: Array = []
-	var code := OS.execute("uv", args, out, true)
+	var code := OS.execute("uv", _args_for(command), out, true)
 	var text: String = "\n".join(out).strip_edges()
-	if text.is_empty():
-		text = "(no output)"
-	_log_block(text)
-	if code == 0:
-		_say("Journeyman", "`%s` finished cleanly." % command)
-	else:
-		_say("Journeyman", "`%s` exited %d. Output above." % [command, code])
+	_log_block(text if not text.is_empty() else "(no output)")
+	if code != 0:
+		_say("Journeyman", "`%s` exited %d." % [command, code])
 	_busy = false
-	_send.disabled = false
+	_prompt.editable = true
+	_prompt.grab_focus()
 
 
 func _args_for(command: String) -> PackedStringArray:
-	var engine_dir := _engine_dir()
 	var project := ProjectSettings.globalize_path("res://").rstrip("/")
-	var args := PackedStringArray(["run", "--project", engine_dir, "joinery"])
+	var args := PackedStringArray(["run", "--project", _engine_dir(), "joinery"])
 	match command:
 		"doctor":
 			args.append_array(["doctor", "--project", project])
@@ -299,9 +218,7 @@ func _say(who: String, what: String) -> void:
 
 
 func log_system(what: String) -> void:
-	_transcript.append_text(
-		"[color=#%s][i]%s[/i][/color]\n\n" % [DIM.to_html(false), what]
-	)
+	_transcript.append_text("[color=#%s]%s[/color]\n\n" % [DIM.to_html(false), what])
 
 
 func _log_block(text: String) -> void:

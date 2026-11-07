@@ -40,6 +40,8 @@ func _enter_tree() -> void:
 	_focus = FOCUS_SCRIPT.new()
 
 	# Menu entries, so the features are reachable without the dock.
+	# Also reachable as /setup and /focus in the sidebar. These stay for
+	# discoverability: a slash command you have not been told about is hidden.
 	add_tool_menu_item("Joinery: New project…", _on_new_project)
 	add_tool_menu_item("Joinery: Project setup…", _on_project_setup)
 	add_tool_menu_item("Joinery: Toggle Focus mode", _on_toggle_focus)

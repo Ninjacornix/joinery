@@ -16,11 +16,6 @@ var _name_field: LineEdit
 var _tools: Dictionary = {}
 var _status: Label
 var _notice: Label
-var _base_font := 14
-
-
-func _font(delta: int = 0) -> int:
-	return maxi(10, _base_font + delta)
 
 ## Mirrors policy/preferred_tools.toml. Shown with its real state, including
 ## the tools whose MCP Joinery has not built yet, so the menu never implies a
@@ -48,11 +43,10 @@ func _init() -> void:
 	confirmed.connect(_on_save)
 
 
+## Font sizes are left to the theme here too. The editor scales its fonts by
+## the interface scale; a raw pixel override skips that and renders at half
+## size on a HiDPI display. See the note in journeyman_dock.gd.
 func _ready() -> void:
-	var settings := EditorInterface.get_editor_settings()
-	if settings != null and settings.has_setting("interface/editor/main_font_size"):
-		_base_font = int(settings.get_setting("interface/editor/main_font_size"))
-
 	var root := VBoxContainer.new()
 	root.add_theme_constant_override("separation", 8)
 	add_child(root)
@@ -103,7 +97,7 @@ func _add_heading(parent: Node, text: String) -> void:
 	parent.add_child(HSeparator.new())
 	var label := Label.new()
 	label.text = text
-	label.add_theme_font_size_override("font_size", _font(3))
+	label.set_theme_type_variation("HeaderMedium")
 	parent.add_child(label)
 
 
@@ -112,7 +106,6 @@ func _add_note(parent: Node, text: String) -> void:
 	label.text = text
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.add_theme_color_override("font_color", DIM)
-	label.add_theme_font_size_override("font_size", _font(0))
 	parent.add_child(label)
 
 
@@ -140,7 +133,6 @@ func _add_tool_row(parent: Node, entry: Dictionary) -> void:
 	domain.text = entry["domain"]
 	domain.custom_minimum_size = Vector2(120, 0)
 	domain.add_theme_color_override("font_color", DIM)
-	domain.add_theme_font_size_override("font_size", _font(0))
 	row.add_child(domain)
 
 	var state := Label.new()
@@ -151,7 +143,6 @@ func _add_tool_row(parent: Node, entry: Dictionary) -> void:
 		"planned": "server not built",
 	}.get(entry["state"], "")
 	state.add_theme_color_override("font_color", DIM)
-	state.add_theme_font_size_override("font_size", _font(0))
 	row.add_child(state)
 
 
