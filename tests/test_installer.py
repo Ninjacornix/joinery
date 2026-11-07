@@ -45,7 +45,7 @@ def test_required_tool_cannot_be_removed() -> None:
 def test_preferred_tool_without_mcp_cannot_be_selected() -> None:
     result, shown = drive([number("krita"), ""], [])
     assert result.tools == ["godot"]
-    assert any("no vetted MCP" in line for line in shown)
+    assert any("own MCP in progress" in line for line in shown)
 
 
 def test_user_can_add_own_program_with_own_mcp() -> None:

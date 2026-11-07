@@ -1,6 +1,7 @@
 # Preferred tools shown in project setup. Add a future tool by appending a [[tool]];
 # `joinery check catalog` enforces the bar in joinery/catalog.py. Preferred MCPs must be
-# non-generative and send no telemetry. Users may add anything else per project.
+# non-generative and send no telemetry. Users may add anything else per project,
+# including tools that send telemetry: that is their choice.
 # Stars and dates are a snapshot from `vetted_on`. Each ref had its source scanned for
 # telemetry, generative services and outbound calls. Any new ref means re-vetting.
 
@@ -153,13 +154,13 @@ stars = 133
 last_push = 2026-10-31
 licence = "Apache-2.0"
 
-# Wanted, but no MCP meets the bar yet. Listed in the menu, not selectable.
+# Joinery is building its own MCPs for these. Listed in the menu, not selectable yet.
 
 [[tool]]
 id = "krita"
 name = "Krita"
 domain = "2d"
-status = "needs-mcp"
+status = "first-party-planned"
 candidates = [
   "nanayax3/krita-mcp: 52 stars, last push 2026-02-26, stale",
   "SanSaSane/krita-mcp: 12 stars",
@@ -170,7 +171,7 @@ candidates = [
 id = "surge-xt"
 name = "Surge XT"
 domain = "audio"
-status = "needs-mcp"
+status = "first-party-planned"
 candidates = ["redsquidleader/surge-xt-mcp: 1 star"]
 
 [[tool]]

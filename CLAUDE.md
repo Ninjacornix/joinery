@@ -20,7 +20,7 @@ Joinery = Godot 4.7 + thin patch series + Joinery addon. The Journeyman sidebar 
 - Output is a plain Godot 4.7 project that opens in stock Godot. No proprietary formats.
 - Native sources live in the repo (`art/`, `audio/`, git LFS); joinery-registry resolves every resource → source → part → owning tool → recipe.
 - Typed tool ops first; raw bpy / Lua / sclang only as a sandboxed, logged fallback, appended to the recipe.
-- Godot UI work is a plugin first (`godot_addon/joinery`). Engine changes go only into `godot_patches/` as small, upstreamable patches on 4.7 tags; the addon must still work (degraded) on stock Godot.
+- Godot UI work is a plugin first (`godot_addon/joinery`). Engine changes go only into `godot_patches/` on 4.7 tags: small and upstreamable where general, Joinery-only where they restructure and simplify the editor around the Journeyman sidebar. The addon must still work (degraded) on stock Godot.
 - MCP allowlist and dependency denylist (see internal checklist) are enforced by hooks and CI. Never weaken them.
 
 ## Conventions

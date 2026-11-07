@@ -31,12 +31,14 @@ routes vision requests to cloud models, tomyud1/godot-mcp has a `generate_2d_ass
 and Coding-Solo/godot-mcp has had no push since April. The chosen server exposes a generic
 `game_http_request` tool, which stays blocked.
 
-Custom tools are the project owner's call and are not vetted. They may be generative, so
-their assets take origin `custom-tool` and can never be recorded as `tool-created`.
+Custom tools are the project owner's call and are not vetted. They may be generative or
+send telemetry, and the menu says so. Their assets take origin `custom-tool` and can never
+be recorded as `tool-created`.
 
 Materials: Blender (shader nodes and bake) is preferred for now. Material Maker's MCPs are
 early, so the MIT Tool-MaterialMaker-MCP will be forked and hardened as a Joinery server.
-Krita and Surge XT have no MCP that clears the bar, so both are listed but not selectable.
+Krita and Surge XT have no MCP that clears the bar, so Joinery builds its own in
+`servers/paint` and `servers/sound`. Both are listed but not selectable until then.
 
 ## Limits
 Vetting scanned each pinned source for telemetry libraries, generative services and

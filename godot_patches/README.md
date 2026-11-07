@@ -14,5 +14,6 @@ godot_patches/fork.sh build [args]    # scons target=editor via uv
 To change a patch: commit (or amend) on `joinery-4.7` in `godot-src/`, run
 `export`, then commit `patches/` here. `sync --force` discards unexported commits.
 
-Intended series: 3D editor context-menu slot, viewport pick hook, default
-layout. Projects must stay openable in stock Godot; the addon degrades without these.
+Intended series: 3D editor context-menu slot and viewport pick hook, meant for
+upstream, plus Joinery-only patches that restructure the editor (ADR 0005). Projects
+must stay openable in stock Godot; the addon degrades without these.

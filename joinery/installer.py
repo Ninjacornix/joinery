@@ -102,7 +102,7 @@ def render(catalog: Catalog, tools: set[str], custom: Iterable[CustomTool] = ())
         )
     custom = list(custom)
     if custom:
-        lines.append("Your tools: not vetted, assets labelled custom-tool")
+        lines.append("Your tools: not vetted, may send telemetry, assets labelled custom-tool")
         lines += [f"    [+] {c.name:<15} {c.domain:<13} {c.command}" for c in custom]
     return "\n".join(lines)
 

@@ -9,7 +9,7 @@ tools. In the fork, `ProjectManager::_new_project` opens the Joinery screen inst
 `joinery/installer.py` and `joinery/project.py`. Godot's import and install modes stay.
 
 ## Consequences
-This patch is Joinery-specific and will not go upstream, unlike the others in the series.
+This patch is Joinery-specific and will not go upstream. See ADR 0005.
 Stock Godot keeps its own dialog, so `joinery new` is the path there. Projects stay plain
 Godot projects either way.
 
