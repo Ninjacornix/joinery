@@ -6,13 +6,14 @@ Status: accepted, 2026-11-07
 Enforce the rules in code and CI, with data in `policy/`:
 
 - **MCP allowlist:** a PreToolUse hook denies every MCP server outside the built-in
-  servers and selected catalog tools. It is deny by default, so account connectors and
+  servers, the project's selected tools and its custom tools. It is deny by default, so account connectors and
   plugin MCPs are blocked in this repo too.
 - **Commands and URLs:** the hook blocks denied hosts and installs of denied packages.
 - **Dependencies:** `joinery check deps` scans manifests and lockfiles, including
   transitive packages in `uv.lock`.
 - **Assets:** `joinery check assets` requires a `joinery.lock` entry for every file under
-  `art/` and `audio/`, with matching sha256, plus a recipe or import record.
+  `art/` and `audio/`, with matching sha256, plus a recipe or import record. Output from
+  user-added tools uses origin `custom-tool`, so a project stays honest about its assets.
 
 The hook fails closed: internal errors exit 2, and `onFailure: block` covers failures
 to start, which needs Claude Code 2.1.295+.

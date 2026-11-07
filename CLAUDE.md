@@ -7,6 +7,7 @@ Joinery = Godot 4.7 + thin patch series + Joinery addon. The Journeyman sidebar 
 - Assets are made by operating real tools: Blender (modelling, modifiers, geometry nodes, MPFB2, rigify, shader nodes, bake), Material Maker graphs, Krita/Aseprite layers and brushes, Surge XT/SuperCollider patches, MIDI composition rendered through synths/samplers.
 - Code (GDScript, C#, shaders, tool scripts) is written normally.
 - Every asset needs a `joinery.lock` entry: `origin: tool-created` + replayable recipe (native source file + op log), or `origin: human-import` (only when the user explicitly imports it). Never fetch assets from the internet.
+- User-added custom tools are the one exception, per project: the user may add any program or MCP, and its assets get `origin: custom-tool`. Never add or suggest a generative tool yourself, and never relabel its output as `tool-created`.
 - If a request can't be done well with the tools, say so and offer options. Never ship a bad result silently.
 
 ## Product principles
@@ -35,7 +36,7 @@ Joinery = Godot 4.7 + thin patch series + Joinery addon. The Journeyman sidebar 
 - Rebuild assets from recipes: `uv run joinery rebuild --all` (CI runs a sample)
 - Deterministic capture: `xvfb-run godot --path <proj> --write-movie out/frames.png --fixed-fps 30 --quit-after 300 <scene>`
 - Evals: `uv run python evals/run.py --suite testbed|gamedevbench-subset`
-- Policy checks: `uv run joinery check all` • Choose tools: `uv run joinery setup`
+- New project: `uv run joinery new <path>` • Change tools: `uv run joinery setup --project <path>` • Policy checks: `uv run joinery check all`
 - Godot fork: `godot_patches/fork.sh sync|export|rebase <tag>|build` (see `godot_patches/README.md`)
 
 ## Workflow

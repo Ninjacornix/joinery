@@ -3,36 +3,43 @@
 Status: accepted, 2026-11-07
 
 ## Context
-Users choose their creation tools at install, and new tools must be easy to add. Each
-outside tool needs an MCP that is official or highly regarded, and popularity alone is
-not enough: the most popular Blender MCP (33k stars) bundles generative 3D services.
+Users choose their creation tools per project. Joinery recommends a preferred list, and
+users may replace any of it with their own programs and MCPs. Popularity alone cannot
+decide the list: the most popular Blender MCP (33k stars) bundles generative 3D services.
 
 ## Decision
-`policy/tools.toml` is the single list, and the menu, allowlist and checks read it. A
-new tool is one `[[tool]]` entry. Selection is stored in `joinery.toml`. `joinery setup`
-is the first front end; the Godot installer screen will call the same functions.
+`policy/preferred_tools.toml` is the preferred list, and a new tool is one `[[tool]]`
+entry. Each project stores its choices in its own `joinery.toml`, and custom tools go in
+`[[tools.custom]]`.
 
-Admission bar, enforced in `joinery/catalog.py`:
-- **Official:** maintained by the tool's own project, or
-- **Community:** at least 50 stars, a push within 180 days of vetting, accepted licence.
-- All: pinned to a full commit, not on the rejected list, no generative features.
-
-Thresholds live in code so changing them shows up in review as a policy change.
+Bar for preferred MCPs, enforced in `joinery/catalog.py`:
+- Non-generative and no telemetry, for every tier, including opt-out telemetry.
+- Pinned to a full commit, and not on the rejected list.
+- Official, or community with at least 50 stars, a push within 180 days of vetting and
+  an accepted licence.
 
 | Tool | MCP | Tier |
 |---|---|---|
-| Godot | hi-godot/godot-ai | community |
-| Blender | lab/blender_mcp (Blender Lab) | official |
+| Godot | tugcantopaloglu/godot-mcp | community |
+| Blender, also materials | lab/blender_mcp (Blender Lab) | official |
 | Aseprite | diivi/aseprite-mcp | community |
 | SuperCollider | jeremyruppel/claude-collider | community |
-| GIMP, Inkscape, REAPER, MuseScore, Audacity | see catalog | community |
+| GIMP, Inkscape, REAPER, MuseScore, Audacity | see list | community |
 
-Godot uses godot-ai over the more-starred Coding-Solo/godot-mcp, last pushed in April.
+Godot's popular options failed the bar: hi-godot/godot-ai sends telemetry by default and
+routes vision requests to cloud models, tomyud1/godot-mcp has a `generate_2d_asset` tool,
+and Coding-Solo/godot-mcp has had no push since April. The chosen server exposes a generic
+`game_http_request` tool, which stays blocked.
 
-No MCP clears the bar for Krita or Surge XT, so both are listed but not selectable.
-Material Maker gets a Joinery-built MCP; existing ones are early alphas.
+Custom tools are the project owner's call and are not vetted. They may be generative, so
+their assets take origin `custom-tool` and can never be recorded as `tool-created`.
+
+Materials: Blender (shader nodes and bake) is preferred for now. Material Maker's MCPs are
+early, so the MIT Tool-MaterialMaker-MCP will be forked and hardened as a Joinery server.
+Krita and Surge XT have no MCP that clears the bar, so both are listed but not selectable.
 
 ## Limits
-Vetting read repo metadata and READMEs, not all source. Stars show popularity, not
-safety. Each MCP's real tool list needs checking before it first runs. Install commands
-are not automated yet: the menu records choices and drives the allowlist.
+Vetting scanned each pinned source for telemetry libraries, generative services and
+outbound calls. It was not a line-by-line audit, did not run the servers, and did not cover
+transitive dependencies or the programs themselves. Offline sandbox workers are what
+actually guarantee nothing is sent.
