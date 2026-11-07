@@ -180,6 +180,7 @@ def _mcp_options(tool: Tool, catalog: Catalog) -> list[dict[str, object]]:
                 "label": tool.mcp.server,
                 "state": "chosen",
                 "usable": True,
+                "summary": "in use",
                 "reason": f"{tool.mcp.tier} MCP, pinned to {tool.mcp.ref[:12]}",
             }
         )
@@ -191,6 +192,7 @@ def _mcp_options(tool: Tool, catalog: Catalog) -> list[dict[str, object]]:
                     "label": repo.strip(),
                     "state": "candidate",
                     "usable": False,
+                    "summary": "not vetted yet",
                     "reason": why.strip() or "not vetted yet",
                 }
             )
@@ -201,6 +203,9 @@ def _mcp_options(tool: Tool, catalog: Catalog) -> list[dict[str, object]]:
                 "label": "/".join(parts[-2:]),
                 "state": "rejected",
                 "usable": False,
+                # Why it is blocked, in a few words. A user creating a project
+                # has no reason to know Joinery's vetting vocabulary.
+                "summary": rejected.summary or "does not meet the bar",
                 "reason": rejected.reason,
             }
         )

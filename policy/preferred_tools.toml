@@ -193,14 +193,17 @@ candidates = [
 [[rejected]]
 tool = "blender"
 repo = "https://github.com/ahujasid/blender-mcp"
+summary = "generates 3D models"
 reason = "Bundles generative 3D (Hyper3D Rodin, Hunyuan3D, Tripo) and asset fetching (Sketchfab, Poly Haven)."
 
 [[rejected]]
 tool = "godot"
 repo = "https://github.com/hi-godot/godot-ai"
+summary = "sends telemetry"
 reason = "Sends telemetry by default, and can route vision requests to cloud models."
 
 [[rejected]]
 tool = "godot"
 repo = "https://github.com/tomyud1/godot-mcp"
+summary = "generates 2D assets"
 reason = "Includes a generate_2d_asset tool."

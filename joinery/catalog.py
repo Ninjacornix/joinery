@@ -86,6 +86,9 @@ class Rejected(_Strict):
     #: Which tool this was a candidate for, so a UI can show it alongside the
     #: one that was chosen. Empty when it was never tied to a single tool.
     tool: str = ""
+    #: A few words for a menu, where the full reason will not fit. "rejected"
+    #: on its own means nothing to someone creating a project.
+    summary: str = ""
 
 
 class Catalog(_Strict):
