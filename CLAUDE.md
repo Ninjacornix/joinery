@@ -35,9 +35,10 @@ Joinery = Godot 4.7 + thin patch series + Joinery addon. The Journeyman sidebar 
 - Rebuild assets from recipes: `uv run joinery rebuild --all` (CI runs a sample)
 - Deterministic capture: `xvfb-run godot --path <proj> --write-movie out/frames.png --fixed-fps 30 --quit-after 300 <scene>`
 - Evals: `uv run python evals/run.py --suite testbed|gamedevbench-subset`
+- Godot fork: `godot_patches/fork.sh sync|export|rebase <tag>|build` (see `godot_patches/README.md`)
 
 ## Workflow
 1. Before each stage: create a task list from its checkboxes in `.private/PLAN.md`.
-2. Small commits, one task per commit.
+2. Small commits, one task per commit. Keep plan and phase terms out of commit messages, branches, file names and code; they are internal checklists.
 3. After any `.gd`/`.tscn` edit: lint + affected tests (hook enforces this).
 4. At each gate: run evals, write `evals/results/<stage>.md` (numbers, failures, why), then stop.

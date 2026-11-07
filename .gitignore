@@ -7,5 +7,8 @@ out/
 .env
 *.blend1
 
+# Disposable Godot checkout; see godot_patches/README.md
+godot_patches/godot-src/
+
 # Internal docs, local only
 .private/
