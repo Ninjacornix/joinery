@@ -1,40 +1,51 @@
 From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
 From: Joinery <joinery@localhost>
 Date: Sat, 7 Nov 2026 19:01:40 +0100
-Subject: [PATCH] Ask what a project is made of, and what it should look like
+Subject: [PATCH] Make the Project Manager Joinery's, and ask what a project is
+ made of
 
-Creating a project is when both of its founding decisions get made, so the
-dialog walks steps: Godot's own fields, the tools that will make it, then the
-art bible in short themed pages. Next moves forward, Create finishes, and the
-title says which step you are on.
+Two changes to the same screen.
+
+Creating a project is when its founding decisions get made, so the dialog
+walks steps: Godot's fields, the tools that will make it, then the art bible
+in short themed pages. Next moves forward, Create finishes, and the title
+says which step you are on. "Edit Now" appears only on the step that creates,
+since it lives on the dialog root rather than inside a page.
 
 Both questionnaires come from the `joinery` CLI, `tools --json` and
 `bible --questions`, so the catalog and the bible's shape stay the one source
 of truth. This code cannot invent a tool, offer one whose server is not
-built, or decide what the bible asks or how its questions are grouped.
-Required tools cannot be unticked and unavailable ones cannot be ticked.
+built, or decide what the bible asks or how it is grouped. Creating installs
+the addon, runs `joinery setup` with the chosen tools, and hands the answers
+to `joinery bible`, which renders them through templates/art_bible.md.
 
-Creating installs the addon, runs `joinery setup` with the chosen tools, and
-hands the bible answers to `joinery bible`, which renders them through
-templates/art_bible.md. Answers travel in a small JSON file beside the
-project, because multi-line prose does not belong in command arguments.
+The Project Manager itself is stripped back to opening and creating. Gone are
+the disk scan, the per-project sidebar, the view toggles, the asset store,
+settings and donate: Joinery drives a project from the Journeyman sidebar once
+one is open, so this screen only has to get you into one. The asset store in
+particular is a place to download assets, which is the opposite of
+creation-only. The logo becomes the name.
 
-Typography follows the editor's own theme. Headings use its header variation;
-question labels sit at body size and their guidance is a step smaller and
-lightly dimmed. Header variations are deliberately not used for guidance: in
-the editor theme they are larger than body text, which inverts the hierarchy.
+All of it hides rather than deletes. Upstream still constructs and refers to
+those controls, and removing their construction is how a fork earns a null
+dereference that compiles cleanly and crashes on launch. Hiding also means a
+Godot release that moves things degrades into showing more UI, not breaking.
 
-It all degrades. Without Joinery the extra steps are skipped, the dialog
-reads as stock Godot, and the project is plain and valid.
+Typography follows the editor's theme: headings use its header variation,
+question labels sit at body size, and guidance is dimmed but not shrunk.
+Header variations are deliberately not used for guidance, since in this theme
+they are larger than body text and invert the hierarchy.
 
-Joinery-only, not for upstream: it reroutes a stock flow into Joinery's own.
+Joinery-only, not for upstream: it reroutes stock flows into Joinery's own.
 ---
- editor/project_manager/project_dialog.cpp | 399 +++++++++++++++++++++-
- editor/project_manager/project_dialog.h   |  33 ++
- 2 files changed, 430 insertions(+), 2 deletions(-)
+ editor/project_manager/project_dialog.cpp  | 405 ++++++++++++++++++++-
+ editor/project_manager/project_dialog.h    |  33 ++
+ editor/project_manager/project_manager.cpp |  44 ++-
+ editor/project_manager/project_manager.h   |   7 +
+ 4 files changed, 486 insertions(+), 3 deletions(-)
 
 diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
-index 7c83dcc..4c0a430 100644
+index 7c83dcc..4b1d01c 100644
 --- a/editor/project_manager/project_dialog.cpp
 +++ b/editor/project_manager/project_dialog.cpp
 @@ -32,6 +32,7 @@
@@ -53,7 +64,7 @@ index 7c83dcc..4c0a430 100644
  #include "scene/gui/link_button.h"
  #include "scene/gui/option_button.h"
  #include "scene/gui/separator.h"
-@@ -536,6 +538,351 @@ void ProjectDialog::_renderer_selected() {
+@@ -536,6 +538,355 @@ void ProjectDialog::_renderer_selected() {
  	_update_ok_button();
  }
  
@@ -165,18 +176,16 @@ index 7c83dcc..4c0a430 100644
 +	return label;
 +}
 +
-+// Secondary text: a step down from the body size and lightly dimmed, so it
-+// reads as guidance without disappearing. Derived from the user's own editor
-+// font size, never a fixed pixel value. Deliberately not a Header variation:
-+// in the editor theme those are *larger* than body text, which inverts the
-+// hierarchy and is exactly how this page first went wrong.
++// Secondary text: body size, lightly dimmed, so it reads as guidance without
++// becoming fine print. Deliberately not a Header variation: in the editor theme
++// those are *larger* than body text, which inverts the hierarchy and is exactly
++// how this page went wrong twice.
 +Label *ProjectDialog::_joinery_hint(const String &p_text) const {
 +	Label *label = memnew(Label);
 +	label->set_text(p_text);
-+	int base = int(EDITOR_GET("interface/editor/main_font_size"));
-+	label->add_theme_font_size_override(SceneStringName(font_size), MAX(10, base - 1));
-+	// Dim by alpha rather than a fixed colour, so it follows the theme.
-+	label->set_modulate(Color(1, 1, 1, 0.7));
++	// Body size, only dimmed. Guidance has to be readable to be guidance, and
++	// a size reduction on top of the dimming turned it into fine print.
++	label->set_modulate(Color(1, 1, 1, 0.75));
 +	label->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
 +	label->set_custom_minimum_size(Size2(520, 0) * EDSCALE);
 +	return label;
@@ -283,6 +292,12 @@ index 7c83dcc..4c0a430 100644
 +		default_files_container->hide();
 +	}
 +	joinery_container->set_visible(p_step == 1);
++	// "Edit Now" belongs to the act of creating, so it appears on the step
++	// where Create does. It lives on the dialog root rather than inside a page,
++	// which is why it floated at the top of every page until this.
++	if (edit_check_box) {
++		edit_check_box->set_visible(p_step >= _joinery_total_steps() - 1);
++	}
 +	for (int i = 0; i < joinery_bible_pages.size(); i++) {
 +		joinery_bible_pages[i]->set_visible(p_step == 2 + i);
 +	}
@@ -405,7 +420,7 @@ index 7c83dcc..4c0a430 100644
  void ProjectDialog::_nonempty_confirmation_ok_pressed() {
  	is_folder_empty = true;
  	ok_pressed();
-@@ -558,6 +905,13 @@ void ProjectDialog::ok_pressed() {
+@@ -558,6 +909,13 @@ void ProjectDialog::ok_pressed() {
  
  	String path = project_path->get_text();
  
@@ -419,7 +434,7 @@ index 7c83dcc..4c0a430 100644
  	if (mode == MODE_NEW) {
  		if (create_dir->is_pressed()) {
  			Ref<DirAccess> d = DirAccess::create(DirAccess::ACCESS_FILESYSTEM);
-@@ -601,12 +955,25 @@ void ProjectDialog::ok_pressed() {
+@@ -601,12 +959,25 @@ void ProjectDialog::ok_pressed() {
  			initial_settings[extra_setting.key] = extra_setting.value;
  		}
  
@@ -445,7 +460,7 @@ index 7c83dcc..4c0a430 100644
  		// Store default project icon in SVG format.
  		Ref<FileAccess> fa_icon = FileAccess::open(path.path_join("icon.svg"), FileAccess::WRITE, &err);
  		if (err != OK) {
-@@ -917,8 +1284,17 @@ void ProjectDialog::show_dialog(bool p_reset_name, bool p_is_confirmed) {
+@@ -917,8 +1288,17 @@ void ProjectDialog::show_dialog(bool p_reset_name, bool p_is_confirmed) {
  
  			// Project path dialog is also opened; no need to change focus.
  		} else if (mode == MODE_NEW) {
@@ -465,7 +480,7 @@ index 7c83dcc..4c0a430 100644
  
  			if (!rendering_device_checked) {
  				rendering_device_supported = DisplayServer::is_rendering_device_supported();
-@@ -1019,6 +1395,9 @@ void ProjectDialog::_bind_methods() {
+@@ -1019,6 +1399,9 @@ void ProjectDialog::_bind_methods() {
  ProjectDialog::ProjectDialog() {
  	VBoxContainer *vb = memnew(VBoxContainer);
  	add_child(vb);
@@ -475,7 +490,7 @@ index 7c83dcc..4c0a430 100644
  
  	name_container = memnew(VBoxContainer);
  	vb->add_child(name_container);
-@@ -1201,6 +1580,21 @@ ProjectDialog::ProjectDialog() {
+@@ -1201,6 +1584,21 @@ ProjectDialog::ProjectDialog() {
  
  	default_files_container = memnew(HBoxContainer);
  	vb->add_child(default_files_container);
@@ -497,10 +512,12 @@ index 7c83dcc..4c0a430 100644
  	l = memnew(Label);
  	l->set_text(TTRC("Version Control Metadata:"));
  	default_files_container->add_child(l);
-@@ -1245,3 +1639,4 @@ ProjectDialog::ProjectDialog() {
+@@ -1245,3 +1643,6 @@ ProjectDialog::ProjectDialog() {
  	dialog_error = memnew(AcceptDialog);
  	add_child(dialog_error);
  }
++
++
 +
 diff --git a/editor/project_manager/project_dialog.h b/editor/project_manager/project_dialog.h
 index bad5570..403bc0b 100644
@@ -552,4 +569,95 @@ index bad5570..403bc0b 100644
 +	Label *_joinery_hint(const String &p_text) const;
  
  	void ok_pressed() override;
+ 
+diff --git a/editor/project_manager/project_manager.cpp b/editor/project_manager/project_manager.cpp
+index 19cf085..900889e 100644
+--- a/editor/project_manager/project_manager.cpp
++++ b/editor/project_manager/project_manager.cpp
+@@ -246,7 +246,10 @@ void ProjectManager::_update_theme(bool p_skip_creation) {
+ 		background_panel->add_theme_style_override(SceneStringName(panel), get_theme_stylebox("Background", EditorStringName(EditorStyles)));
+ 		main_view_container->add_theme_style_override(SceneStringName(panel), get_theme_stylebox("panel_container", "ProjectManager"));
+ 
+-		title_bar_logo->set_button_icon(get_editor_theme_icon("TitleBarLogo"));
++		// Joinery: this is Joinery's project manager, so it says so. The upstream
++		// logo is an icon; replace it with a word rather than dressing it up.
++		title_bar_logo->set_button_icon(Ref<Texture2D>());
++		title_bar_logo->set_text("JOINER");
+ 
+ 		_set_main_view_icon(MAIN_VIEW_PROJECTS, get_editor_theme_icon("ProjectList"));
+ 		_set_main_view_icon(MAIN_VIEW_ASSETLIB, get_editor_theme_icon("AssetStore"));
+@@ -1654,6 +1657,7 @@ ProjectManager::ProjectManager() {
+ 
+ 			// The side bar with the edit, run, rename, etc. buttons.
+ 			VBoxContainer *project_list_sidebar = memnew(VBoxContainer);
++			joinery_project_sidebar = project_list_sidebar;
+ 			project_list_sidebar->set_custom_minimum_size(Size2(120, 120));
+ 			project_list_hbox->add_child(project_list_sidebar);
+ 
+@@ -1979,6 +1983,43 @@ ProjectManager::ProjectManager() {
+ 	}
+ 
+ 	_update_size_limits();
++
++	_joinery_simplify();
++}
++
++// Joinery: strip the Project Manager back to opening and creating projects.
++//
++// Most of what Godot puts here belongs to a different workflow: scanning for
++// projects on disk, per-project management, the asset store, donating. Joinery
++// drives projects from the Journeyman sidebar once one is open, so this screen
++// only has to get you into one.
++//
++// Everything is hidden, not deleted. Upstream code still constructs these and
++// still refers to them, and removing the construction is how a fork earns a
++// null dereference that compiles cleanly and crashes at runtime. Hiding also
++// means a later Godot release that moves things degrades into showing more UI
++// rather than breaking.
++void ProjectManager::_joinery_simplify() {
++	// Scanning the disk for projects is not how a Joinery project is found.
++	if (scan_btn) {
++		scan_btn->hide();
++	}
++	// Per-project management: edit, run, rename, duplicate, tags, remove.
++	// Opening a project is a double-click, and the rest belongs in the editor.
++	if (joinery_project_sidebar) {
++		joinery_project_sidebar->hide();
++	}
++	// One view, so the toggles have nothing to toggle. The asset store is a
++	// place to download assets, which is the opposite of creation-only.
++	if (main_view_toggles) {
++		main_view_toggles->hide();
++	}
++	if (quick_settings_button) {
++		quick_settings_button->hide();
++	}
++	if (donate_btn) {
++		donate_btn->hide();
++	}
+ }
+ 
+ ProjectManager::~ProjectManager() {
+@@ -1995,3 +2036,4 @@ ProjectManager::~ProjectManager() {
+ 
+ 	EditorThemeManager::finalize();
+ }
++
+diff --git a/editor/project_manager/project_manager.h b/editor/project_manager/project_manager.h
+index 501cdb0..5ab10b9 100644
+--- a/editor/project_manager/project_manager.h
++++ b/editor/project_manager/project_manager.h
+@@ -165,6 +165,13 @@ class ProjectManager : public Control {
+ 	Button *erase_missing_btn = nullptr;
+ 	Button *donate_btn = nullptr;
+ 
++	// Joinery: the Project Manager is simplified to the one thing it is for,
++	// which is opening or creating a project (ADR 0005). Everything hidden is
++	// hidden, never removed, so nothing can be left dangling and the reasoning
++	// stays reversible. Keeping a handle on the sidebar is why this is here.
++	VBoxContainer *joinery_project_sidebar = nullptr;
++	void _joinery_simplify();
++
+ 	HBoxContainer *open_btn_container = nullptr;
+ 	PopupMenu *open_options_popup = nullptr;
  
