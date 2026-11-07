@@ -20,6 +20,7 @@ from joinery.catalog import (
     selection_ids,
 )
 from joinery.deps import check_deps
+from joinery.doctor import report
 from joinery.installer import (
     Selection,
     render,
@@ -161,6 +162,10 @@ def main() -> int:
     tools = commands.add_parser("tools", help="list tools and their MCP status")
     tools.add_argument("--project", type=Path, default=ROOT)
     commands.add_parser("agents", help="list supported agents and gate status")
+    doctor = commands.add_parser(
+        "doctor", help="check the programs this project's tools need"
+    )
+    doctor.add_argument("--project", type=Path, default=ROOT)
     auth = commands.add_parser("auth", help="show how to sign an agent in")
     auth.add_argument(
         "agent", nargs="?", choices=[a.id for a in all_agents()], default=None
@@ -178,6 +183,10 @@ def main() -> int:
         return _setup(args.tools, args.project)
     if args.command == "agents":
         return _agents()
+    if args.command == "doctor":
+        text, code = report(args.project / "joinery.toml")
+        print(text)
+        return code
     if args.command == "auth":
         return _auth(args.agent)
     if args.command == "tools":

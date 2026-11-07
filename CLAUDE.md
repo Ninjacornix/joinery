@@ -33,7 +33,8 @@ Joinery = Godot 4.7 + thin patch series + Joinery addon. The Journeyman sidebar 
 
 ## Commands (fill in as they exist)
 - Tests: `uv run pytest` • Lint/type: `uv run ruff check . && uv run mypy joinery servers`
-- Sandbox: `docker build -t joinery-sandbox sandbox/ && docker run --rm -it joinery-sandbox`
+- Sandbox: `sandbox/fetch-checksums.sh` (once, records hashes) then `sandbox/build.sh [--with blender|--all]`; run offline: `docker run --rm -it --network none -v "$PWD":/work joinery-sandbox`
+- Tool check: `uv run joinery doctor` (what an enabled tool needs, and whether it is installed)
 - Rebuild assets from recipes: `uv run joinery rebuild --all` (CI runs a sample)
 - Deterministic capture: `xvfb-run godot --path <proj> --write-movie out/frames.png --fixed-fps 30 --quit-after 300 <scene>`
 - Evals: `uv run python evals/run.py --suite testbed|gamedevbench-subset`
