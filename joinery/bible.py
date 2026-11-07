@@ -29,40 +29,56 @@ TEMPLATE = ROOT / "templates" / "art_bible.md"
 BIBLE_PATH = Path("art") / "bible.md"
 ANSWERS_FILE = ".joinery-bible-answers.json"
 
+#: The interview, grouped into short pages. Six questions on one screen is a
+#: wall nobody reads, so they come in themed pairs and the UI paginates by
+#: group. Grouping lives here, not in the dialog, so it can be re-cut without
+#: rebuilding the engine.
+GROUPS: tuple[tuple[str, str], ...] = (
+    ("feel", "What this game feels like"),
+    ("look", "How it looks"),
+    ("sound", "How it sounds, and what to never do"),
+)
+
 #: The questions the interview asks, in order. `multiline` is a hint for the UI.
 QUESTIONS: tuple[dict[str, object], ...] = (
     {
         "key": "vision",
+        "group": "feel",
         "label": "Vision",
         "hint": "What the game feels like, and what it must never feel like.",
         "multiline": True,
     },
     {
         "key": "references",
+        "group": "feel",
         "label": "References",
         "hint": "Games, films or places whose look you mean, and what to take from each.",
         "multiline": True,
     },
     {
         "key": "look",
+        "group": "look",
         "label": "Overall look",
         "hint": "low-poly, stylised PBR, toon, pixel art, something else.",
         "multiline": False,
     },
     {
         "key": "palette",
+        "group": "look",
         "label": "Palette",
         "hint": "In your words, or hex values if you have them.",
         "multiline": False,
     },
     {
         "key": "sound",
+        "group": "sound",
         "label": "Sound",
         "hint": "acoustic-ish, synthetic, lo-fi; and how SFX should feel.",
         "multiline": False,
     },
     {
         "key": "bans",
+        "group": "sound",
         "label": "Never",
         "hint": "Hard bans. Anything here is refused rather than argued about.",
         "multiline": True,
@@ -75,6 +91,20 @@ _UNANSWERED = "_Not set yet. Journeyman will ask before it matters._"
 
 def questions() -> list[dict[str, object]]:
     return [dict(q) for q in QUESTIONS]
+
+
+def grouped() -> list[dict[str, object]]:
+    """The interview as pages: one group per page, in order."""
+    pages: list[dict[str, object]] = []
+    for key, label in GROUPS:
+        pages.append(
+            {
+                "key": key,
+                "label": label,
+                "questions": [dict(q) for q in QUESTIONS if q.get("group") == key],
+            }
+        )
+    return pages
 
 
 def render(answers: dict[str, str], template: Path = TEMPLATE) -> str:

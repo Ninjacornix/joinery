@@ -9,7 +9,9 @@ import pytest
 
 from joinery.bible import (
     ANSWERS_FILE,
+    GROUPS,
     QUESTIONS,
+    grouped,
     render,
     write_bible,
     write_from_answers_file,
@@ -33,6 +35,20 @@ def test_every_question_has_a_token_in_the_template() -> None:
     for question in QUESTIONS:
         token = "{{" + str(question["key"]) + "}}"
         assert token in template, question["key"]
+
+
+def test_every_question_belongs_to_a_page() -> None:
+    # A question in no group would never be shown by the paginated UI.
+    group_keys = {key for key, _ in GROUPS}
+    for question in QUESTIONS:
+        assert question["group"] in group_keys, question["key"]
+    paged = sum(len(page["questions"]) for page in grouped())
+    assert paged == len(QUESTIONS)
+
+
+def test_pages_are_small_enough_to_read() -> None:
+    for page in grouped():
+        assert 1 <= len(page["questions"]) <= 3, page["key"]
 
 
 def test_answers_reach_the_output() -> None:

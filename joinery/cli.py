@@ -13,7 +13,7 @@ from joinery import hook
 from joinery.agents import all_agents
 from joinery.agents import get as get_agent
 from joinery.auth import for_agent
-from joinery.bible import questions, write_from_answers_file
+from joinery.bible import grouped, write_from_answers_file
 from joinery.catalog import (
     CONFIG_PATH,
     ROOT,
@@ -279,7 +279,7 @@ def main() -> int:
         return _rebuild(args.project, args.runner, args.record, args.timeout)
     if args.command == "bible":
         if args.questions:
-            print(json.dumps({"questions": questions()}, indent=2))
+            print(json.dumps({"pages": grouped()}, indent=2))
             return 0
         try:
             written = write_from_answers_file(args.project)
