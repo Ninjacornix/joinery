@@ -164,12 +164,47 @@ def _repo_label(tool: Tool) -> str:
     return "/".join(tool.mcp.repo.rstrip("/").split("/")[-2:])
 
 
-def _mcp_options(tool: Tool) -> list[str]:
+def _mcp_options(tool: Tool, catalog: Catalog) -> list[dict[str, object]]:
+    """Every MCP the catalog knows for this tool, the chosen one first.
+
+    A menu that shows only the winner hides the decision. The rejected servers
+    are often the *popular* ones, and why they lost is the most useful thing
+    the catalog knows, so they are listed too, marked unusable and carrying
+    their reason. `usable` is false for anything that cannot actually be
+    wired up, so a UI can show it without implying it is a choice.
+    """
+    options: list[dict[str, object]] = []
     if tool.mcp is not None:
-        return [tool.mcp.server]
-    # Candidates read as "owner/repo: why it does not qualify"; the repo alone
-    # is what identifies it in a menu.
-    return [candidate.split(":", 1)[0].strip() for candidate in tool.candidates]
+        options.append(
+            {
+                "label": tool.mcp.server,
+                "state": "chosen",
+                "usable": True,
+                "reason": f"{tool.mcp.tier} MCP, pinned to {tool.mcp.ref[:12]}",
+            }
+        )
+    else:
+        for candidate in tool.candidates:
+            repo, _, why = candidate.partition(":")
+            options.append(
+                {
+                    "label": repo.strip(),
+                    "state": "candidate",
+                    "usable": False,
+                    "reason": why.strip() or "not vetted yet",
+                }
+            )
+    for rejected in catalog.rejected_for(tool.id):
+        parts = rejected.repo.rstrip("/").split("/")
+        options.append(
+            {
+                "label": "/".join(parts[-2:]),
+                "state": "rejected",
+                "usable": False,
+                "reason": rejected.reason,
+            }
+        )
+    return options
 
 
 def tool_menu(catalog: Catalog, current: ProjectTools) -> dict[str, object]:
@@ -201,7 +236,7 @@ def tool_menu(catalog: Catalog, current: ProjectTools) -> dict[str, object]:
                 # server is vetted; the rejected or still-being-judged
                 # candidates when none is, so the menu can show what was
                 # considered instead of a bare "none".
-                "mcp_options": _mcp_options(tool),
+                "mcp_options": _mcp_options(tool, catalog),
                 # Starred in the menu. The whole catalog is vetted, so this
                 # marks the strongest tier: an official MCP, or the engine
                 # itself, which every project needs.

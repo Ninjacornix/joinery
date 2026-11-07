@@ -83,6 +83,9 @@ class Tool(_Strict):
 class Rejected(_Strict):
     repo: str
     reason: str
+    #: Which tool this was a candidate for, so a UI can show it alongside the
+    #: one that was chosen. Empty when it was never tied to a single tool.
+    tool: str = ""
 
 
 class Catalog(_Strict):
@@ -128,6 +131,10 @@ class Catalog(_Strict):
 
     def rejected_repos(self) -> list[str]:
         return [_repo_key(r.repo) for r in self.rejected]
+
+    def rejected_for(self, tool_id: str) -> list[Rejected]:
+        """Vetted and turned down for this tool. Shown so the call is visible."""
+        return [r for r in self.rejected if r.tool == tool_id]
 
 
 def _repo_key(url: str) -> str:
