@@ -1,0 +1,6 @@
+# Joinery engine-repo settings. Per-project rules live in <project>/art/bible.md.
+
+[audio.loudness]
+music_lufs = -16.0
+ambience_lufs = -22.0
+sfx_peak_dbtp = -1.0

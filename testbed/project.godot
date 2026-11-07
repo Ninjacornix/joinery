@@ -1,0 +1,8 @@
+; Joinery Testbed: sample game project. Must open in stock Godot 4.7.
+
+config_version=5
+
+[application]
+
+config/name="Joinery Testbed"
+config/features=PackedStringArray("4.7")
