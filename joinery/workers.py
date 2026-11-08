@@ -7,6 +7,7 @@ from pathlib import Path
 
 from joinery.mcp_runtime import ServerSpec
 from joinery.server_install import installation
+from joinery.worker_identity import docker_owner_args
 
 WORKER_IMAGE = "joinery-mcp-worker"
 
@@ -27,6 +28,7 @@ def godot_worker(project: Path) -> ServerSpec:
         args=[
             "run",
             "--rm",
+            *docker_owner_args(),
             "-i",
             "--platform",
             "linux/amd64",
@@ -71,6 +73,7 @@ def blender_worker(project: Path) -> ServerSpec:
         args=[
             "run",
             "--rm",
+            *docker_owner_args(),
             "-i",
             "--platform",
             "linux/amd64",
@@ -109,6 +112,7 @@ def supercollider_worker(project: Path) -> ServerSpec:
         args=[
             "run",
             "--rm",
+            *docker_owner_args(),
             "-i",
             "--platform",
             "linux/amd64",
@@ -156,6 +160,7 @@ def inkscape_worker(project: Path, readonly: bool = False) -> ServerSpec:
         args=[
             "run",
             "--rm",
+            *docker_owner_args(),
             "-i",
             "--platform",
             "linux/amd64",

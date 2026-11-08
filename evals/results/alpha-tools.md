@@ -201,3 +201,53 @@ Local evidence: `/tmp/joinery-alpha-agent-prop.log`,
 technical source/export/instance/edit/review path; it does not prove arbitrary
 finished prop quality, Blender rigging/animation, live unsaved-editor placement,
 or that all future provider sessions will respond at the same speed.
+
+## Ubuntu CI ownership failure and verified correction
+
+Candidate `002390b`, [run 42487334081, assets job](https://github.com/Ninjacornix/joinery/actions/runs/42487334081/job/128751963262):
+the actual Ubuntu worker build and measured asset checks passed, then all six
+clean recipe rebuilds failed because all ten declared outputs were **not
+produced**. The richer lifecycle step was consequently skipped. This was not a
+geometry, pixel, audio or provenance fingerprint disagreement.
+
+The image's fixed user had UID 1000 while the Linux host project belonged to UID
+1001. A minimal reproduction inside the worker's Linux filesystem creates a
+directory owned by 1001 with normal 0755 permissions, then asks the image's
+`joiner` user to save a Blender file there. Blender prints `Cannot open file ...
+for writing: Permission denied` yet exits 0, leaving no file. macOS Docker bind
+mount ownership translation had hidden this difference in the earlier local
+tests. Raw evidence: `/tmp/joinery-alpha-ci-assets.log` and
+`/tmp/joinery-alpha-ci-uid-repro.log`.
+
+`joinery/worker_identity.py` now supplies the host UID:GID on native Linux to
+recipe runners, native document operators and all four app MCP worker specs.
+It configures a private ephemeral container HOME and XDG paths; the shared
+entrypoint copies only prepared image-owned tool settings/SC extensions there.
+The official Blender MCP worker now uses that shared bootstrap too. Docker
+Desktop macOS/Windows retain their existing image-user behavior. Root Linux
+invocations are refused rather than granting model workers root. There is no
+host home/credential mount, world-writable project permission change, relaxed
+fingerprint, refreshed expectation, or weakened provenance gate.
+
+The corrected launch path was exercised using actual Docker Linux volumes owned
+by UID 1001, rather than Mac bind-mount ownership semantics:
+
+- All four richer native create/update/replay/reject/accept/revert lifecycles
+  passed, including actual painted pixels, audible synthesis, SVG/PNG pixels,
+  and Material Maker texture pixels/roughness.
+- All six committed recipes reproduced **every unchanged existing expected
+  fingerprint**, including exact baked textures/WAV, semantic Blender geometry
+  and the existing camera-render signature.
+- Actual Godot, Blender, SuperCollider and Inkscape MCP processes connected as
+  UID 1001 (157, 26, 9 and 8 exposed tools respectively). A saved-file Godot MCP
+  write produced a file whose Linux stat owner was exactly 1001:1001.
+- The base, MCP, creative, Blender and Inkscape worker images were rebuilt. Five
+  permanent identity regressions cover all launchers, read-only mounts,
+  Desktop behavior and refusing root; the focused suite passed 25 tests. Ruff,
+  mypy and shell syntax checks passed for the changed launch code.
+
+Evidence: `/tmp/joinery-alpha-ci-linux-owner.log`,
+`/tmp/joinery-alpha-ci-linux-mcp-owner.log` and the
+`/tmp/joinery-alpha-ci-owner-*-build.log` files. The local Linux-filesystem
+verification is complete; an actual Ubuntu CI rerun of the corrected candidate
+is still required. The original failed CI run is not presented as passing.

@@ -28,6 +28,10 @@ setup uses Git and Node.js/npm; Windows setup also uses Git Bash. Creative tool
 workers are Linux AMD64 and run emulated on Apple Silicon. Host desktop apps are
 optional unless you want to open their native files interactively.
 
+Run Joinery as your regular Linux account. Offline workers map its UID:GID so
+staged project files remain writable by their owner, and keep tool homes/caches
+inside disposable containers. Root Linux invocations are refused.
+
 Native Windows permits Codex sessions through Codex's built-in read-only sandbox.
 Claude, Gemini and opencode sessions are explicitly refused on Windows: their
 read-only host project boundary is not implemented. This also applies to API

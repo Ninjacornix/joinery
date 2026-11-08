@@ -5,4 +5,4 @@ COPY blender-requirements.txt /opt/joinery/blender-requirements.txt
 RUN python3 -m venv /opt/blender-python && /opt/blender-python/bin/pip install --require-hashes -r /opt/joinery/blender-requirements.txt
 COPY blender_worker.py blender_bootstrap.py /opt/joinery/
 USER joiner
-ENTRYPOINT ["python3", "/opt/joinery/blender_worker.py"]
+ENTRYPOINT ["/usr/local/bin/joinery-sandbox", "python3", "/opt/joinery/blender_worker.py"]

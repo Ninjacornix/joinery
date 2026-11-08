@@ -27,6 +27,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
+from joinery.worker_identity import docker_owner_args
+
 SANDBOX_IMAGE = "joinery-creative-worker"
 #: Where the project is mounted inside the container.
 WORKDIR = "/work"
@@ -108,6 +110,7 @@ class SandboxRunner:
             "docker",
             "run",
             "--rm",
+            *docker_owner_args(),
             "--platform",
             "linux/amd64",
             "--network",

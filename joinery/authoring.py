@@ -18,6 +18,7 @@ from joinery.locking import write_lock
 from joinery.mcp_runtime import validate_arguments
 from joinery.recipe import Recipe, _tool_argv, load_recipe, recipe_paths, record
 from joinery.runner import Result, SandboxRunner
+from joinery.worker_identity import docker_owner_args
 
 IMAGE = "joinery-creative-worker"
 SUPPORTED = {
@@ -57,6 +58,7 @@ async def run_offline(
         "docker",
         "run",
         "--rm",
+        *docker_owner_args(),
         "--platform",
         "linux/amd64",
         "--network",

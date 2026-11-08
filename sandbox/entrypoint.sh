@@ -8,6 +8,19 @@
 # service cannot use one.
 set -euo pipefail
 
+# Native Linux bind mounts belong to the invoking host UID. That UID has no
+# writable image home; keep tool settings/caches in a private disposable home.
+# Copy image-owned settings only, including the read-only SC extension mount.
+if [[ "${JOINERY_EPHEMERAL_HOME:-}" == "1" ]]; then
+  mkdir -p "${HOME}"
+  chmod 700 "${HOME}"
+  for directory in .config .local; do
+    if [[ -d "/home/joiner/${directory}" ]]; then
+      cp -R "/home/joiner/${directory}" "${HOME}/"
+    fi
+  done
+fi
+
 export DISPLAY=${DISPLAY:-:99}
 export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/tmp/runtime-joiner}
 mkdir -p "${XDG_RUNTIME_DIR}"
