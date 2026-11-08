@@ -95,7 +95,7 @@ func _ready() -> void:
 	add_child(_content)
 	var font_size := get_theme_default_font_size()
 	_content.add_theme_constant_override("separation", maxi(8, int(font_size * 0.6)))
-	custom_minimum_size.x = get_theme_default_font_size() * 22
+	custom_minimum_size.x = get_theme_default_font_size() * 24
 	var connection_row := HBoxContainer.new()
 	connection_row.add_theme_constant_override("separation", maxi(6, int(font_size * 0.45)))
 	_content.add_child(connection_row)
