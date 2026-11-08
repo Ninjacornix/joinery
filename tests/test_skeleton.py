@@ -2,6 +2,7 @@
 
 import importlib
 import os
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -56,6 +57,7 @@ def test_layout_path_exists(path: str) -> None:
 )
 def test_sandbox_scripts_are_executable_and_valid(script: str) -> None:
     path = ROOT / "sandbox" / script
+    bash = "bash"
     if os.name == "nt":
         # NTFS does not expose POSIX executable bits. Check the Git mode that
         # survives cloning/building the Linux worker, without skipping syntax.
@@ -69,11 +71,25 @@ def test_sandbox_scripts_are_executable_and_valid(script: str) -> None:
         assert entry.startswith("100755 "), (
             f"{script} lacks its committed executable bit"
         )
+        # Windows also ships a WSL launcher named bash.exe. Use the actual
+        # shell bundled with the Git installation used for the mode check.
+        git = shutil.which("git")
+        assert git is not None, "Git for Windows is required for repository checks"
+        git_root = Path(git).resolve().parent.parent
+        candidates = (
+            git_root / "bin/bash.exe",
+            git_root.parent / "bin/bash.exe",  # git.exe under mingw64/bin
+        )
+        shell = next(
+            (candidate for candidate in candidates if candidate.is_file()), None
+        )
+        assert shell is not None, "Git for Windows Bash is required for syntax checks"
+        bash = str(shell)
     else:
         assert path.stat().st_mode & 0o111, f"{script} is not executable"
     # macOS ships bash 3.2, and build.sh/fetch-checksums.sh run on the host,
     # so every script must parse under the oldest bash we expect to meet.
-    subprocess.run(["bash", "-n", path.as_posix()], check=True)
+    subprocess.run([bash, "-n", path.as_posix()], check=True)
 
 
 def test_checksums_are_never_hand_written() -> None:
