@@ -15,13 +15,16 @@ func _check(condition: bool, message: String) -> void:
 
 
 func _run() -> void:
+	var python := OS.get_environment("JOINERY_TEST_PYTHON")
+	if python.is_empty():
+		python = "python3"
 	var script := load("res://addons/joinery/command_job.gd") as GDScript
 	var job: RefCounted = script.new()
 	var code := (
 		"import sys,time; print('start'); sys.stderr.write('note'); "
 		+ "time.sleep(.1); print('🌳'*10000)"
 	)
-	_check(job.start("python3", PackedStringArray(["-c", code])) == OK, "Start nonblocking CLI")
+	_check(job.start(python, PackedStringArray(["-c", code])) == OK, "Start nonblocking CLI")
 	_check(script.reload(true) == OK, "Reload must be safe while a CLI is running")
 	var result: Dictionary = {}
 	var deadline := Time.get_ticks_msec() + 5000
@@ -33,7 +36,7 @@ func _run() -> void:
 	_check(str(result.get("output", "")).count("🌳") == 10000, "Preserve UTF-8 across pipe reads")
 	_check(result.get("error") == "note", "Capture stderr separately")
 	var input_job: RefCounted = script.new()
-	input_job.start("python3", PackedStringArray([
+	input_job.start(python, PackedStringArray([
 		"-c", "import sys,hashlib; print(hashlib.sha256(sys.stdin.readline().encode()).hexdigest())",
 	]))
 	var message := "🔑".repeat(10000)
@@ -46,7 +49,7 @@ func _run() -> void:
 	_check(result.get("code", -1) == 0, "Large stdin must finish without blocking")
 	_check(result.get("output") == (message + "\n").sha256_text(), "Preserve chunked stdin bytes")
 	var cancelled: RefCounted = script.new()
-	cancelled.start("python3", PackedStringArray(["-c", "import time; time.sleep(60)"]))
+	cancelled.start(python, PackedStringArray(["-c", "import time; time.sleep(60)"]))
 	_check(cancelled.cancel() == OK, "Closing a job must stop its child")
 	_check(cancelled._process.is_empty(), "Cancellation must close native pipes")
 	# Closing a workspace must cancel its in-flight CLI instead of joining script code.

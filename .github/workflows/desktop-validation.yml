@@ -2,7 +2,7 @@ name: Focused native validation
 
 on:
   push:
-    branches: [release/windows-validation, release/macos-validation, release/linux-validation]
+    branches: [release/windows-validation, release/macos-validation, release/linux-validation, release/checks-validation]
   workflow_dispatch:
 
 permissions:
@@ -14,6 +14,7 @@ jobs:
     with:
       native: false
   native:
+    if: github.ref_name != 'release/checks-validation'
     uses: ./.github/workflows/native.yml
     with:
       editors: >-

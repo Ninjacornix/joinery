@@ -21,10 +21,20 @@ func _button(parent: Node, text: String) -> Button:
 	return null
 
 
-func _capture(dialog: Window, path: String) -> void:
-	if DisplayServer.get_name() != "headless":
-		RenderingServer.force_draw()
-		dialog.get_texture().get_image().save_png(path)
+func _capture(dialog: Window, filename: String) -> void:
+	_check(DisplayServer.get_name() != "headless", "Startup captures require a graphical renderer")
+	if DisplayServer.get_name() == "headless":
+		return
+	var directory := OS.get_environment("JOINERY_CAPTURE_DIR")
+	_check(not directory.is_empty(), "Startup capture directory must be supplied")
+	if directory.is_empty():
+		return
+	RenderingServer.force_draw()
+	var image := dialog.get_texture().get_image()
+	_check(image != null and not image.is_empty(), "Startup framebuffer must contain pixels")
+	if image == null or image.is_empty():
+		return
+	_check(image.save_png(directory.path_join(filename)) == OK, "Startup PNG must save: " + filename)
 
 
 func _run() -> void:
@@ -49,7 +59,7 @@ func _run() -> void:
 		var choice: Button = connect._buttons[id]
 		_check(choice.get_parent() is VBoxContainer, "Agent choices must form one vertical list")
 		_check(choice.icon != null, "Each agent choice must have an icon")
-	_capture(root, "/tmp/joinery-agent-connect.png")
+	_capture(root, "startup-agent-connect.png")
 	# A local fixture tests UI gating without changing any account or user preference.
 	if connect._job != null:
 		connect._job.cancel()
@@ -83,7 +93,7 @@ func _run() -> void:
 	connect._api_form._model.text = "fixture-model"
 	connect._api_form._key.text = "TEST_ONLY"
 	await process_frame
-	_capture(root, "/tmp/joinery-api-submenu.png")
+	_capture(root, "startup-api-submenu.png")
 	connect._api_form._submit()
 	var api_deadline := Time.get_ticks_msec() + 15000
 	while connect._job != null and Time.get_ticks_msec() < api_deadline:
@@ -126,7 +136,7 @@ func _run() -> void:
 		elif line.get_accessibility_name() == "Project Path:":
 			line.text = OS.get_environment("JOINERY_SETUP_CHECK_DIR")
 			line.text_changed.emit(line.text)
-	_capture(dialog, "/tmp/joinery-setup-details.png")
+	_capture(dialog, "startup-setup-details.png")
 	dialog.get_ok_button().pressed.emit()
 	await create_timer(0.2).timeout
 	_check(
@@ -150,10 +160,10 @@ func _run() -> void:
 	if picker != null:
 		for line: Node in picker.get_parent().get_children():
 			if line is LineEdit and line.placeholder_text == "MCP executable":
-				line.text = "/tmp/explicitly-selected-mcp"
+				line.text = OS.get_environment("JOINERY_TEST_MCP_COMMAND")
 			elif line is LineEdit:
 				line.text = '["--stdio", "argument with spaces"]'
-	_capture(dialog, "/tmp/joinery-setup-tools.png")
+	_capture(dialog, "startup-setup-tools.png")
 	dialog.get_ok_button().pressed.emit()
 	await create_timer(0.2).timeout
 	_check(
@@ -165,7 +175,7 @@ func _run() -> void:
 			first_field = field
 			first_field.text = "Test answer retained when navigating back."
 			break
-	_capture(dialog, "/tmp/joinery-setup-art.png")
+	_capture(dialog, "startup-setup-art.png")
 	var back := _button(dialog, "Back")
 	back.pressed.emit()
 	await process_frame
@@ -199,7 +209,10 @@ func _run() -> void:
 	if FileAccess.file_exists(mcp_path):
 		var mcp: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(mcp_path))
 		var server: Dictionary = mcp["mcpServers"]["hi-godot-godot-ai"]
-		_check(server["command"] == "/tmp/explicitly-selected-mcp", "Preserve the chosen executable")
+		_check(
+			server["command"] == OS.get_environment("JOINERY_TEST_MCP_COMMAND"),
+			"Preserve the chosen executable path including spaces"
+		)
 		_check(server["args"] == ["--stdio", "argument with spaces"], "Preserve argument boundaries")
 	print("project setup flow: ", "FAILED" if _failed else "ok")
 	quit(1 if _failed else 0)

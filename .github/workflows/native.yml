@@ -65,7 +65,19 @@ jobs:
         if: runner.os == 'Windows'
         run: uv run python release/windows_graphics.py --engine "$JOINERY_RELEASE_ENGINE" --output out/windows-software-gl --cache "$RUNNER_TEMP/mesa" --github-env "$GITHUB_ENV"
       - name: Lint native addon
-        run: uvx --from gdtoolkit==4.5.0 gdlint godot_addon/joinery/*.gd
+        run: uvx --from gdtoolkit==4.5.0 gdlint godot_addon/joinery/*.gd tests/godot/project_setup_flow_test.gd tests/godot/command_job_test.gd tests/godot/chat_transport_test.gd
+      - name: Exercise native controls and real chat pipes
+        run: uv run python tests/godot/run_widget_tests.py | tee out/widget-tests.log
+      - name: Install the pinned provider for the local API startup fixture
+        run: npm install --global --ignore-scripts @openai/codex@0.167.0
+      - name: Exercise isolated connection, API and project creation flow
+        run: |
+          mkdir -p out/native-evidence
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a uv run python tests/godot/run_startup_test.py
+          else
+            uv run python tests/godot/run_startup_test.py
+          fi
       - name: Exercise real graphical editor, review and undo
         run: |
           mkdir -p out/native-evidence
@@ -126,6 +138,7 @@ jobs:
           name: joinery-native-evidence-${{ matrix.target }}
           path: |
             out/build-engine.json
+            out/widget-tests.log
             out/native-evidence/
             out/windows-software-gl/mesa-ci.json
           if-no-files-found: warn

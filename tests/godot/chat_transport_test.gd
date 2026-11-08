@@ -15,6 +15,9 @@ func _check(condition: bool, message: String) -> void:
 
 
 func _run() -> void:
+	var python := OS.get_environment("JOINERY_TEST_PYTHON")
+	if python.is_empty():
+		python = "python3"
 	var chat: Control = load("res://addons/joinery/journeyman_dock.gd").new()
 	root.add_child(chat)
 	chat.set_chat_agent("codex")
@@ -40,7 +43,7 @@ func _run() -> void:
 		+ " emit({'kind':'message_delta','text':'世界 '+d['targets'][0]['id'],'new_message':True})\n"
 		+ " emit({'kind':'done','ok':True})\n"
 	)
-	_check(backend._job.start("python3", PackedStringArray(["-c", code])) == OK,
+	_check(backend._job.start(python, PackedStringArray(["-c", code])) == OK,
 		"Start a fixture host")
 	var target := [{"id": "Door"}]
 	backend.submit("hello", target)
