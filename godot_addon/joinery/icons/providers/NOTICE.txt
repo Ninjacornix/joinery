@@ -1,0 +1,6 @@
+Provider marks identify their respective products; trademarks belong to their owners.
+Imported unchanged from locally installed applications/extensions at the user's request.
+Claude and opencode SVGs: Material Icon Theme 5.40.0 (MIT; license included).
+Gemini PNG: Continue 2.0.0 provider logos (Google Gemini mark).
+Codex PNG: installed ChatGPT app resources (OpenAI Codex app mark).
+No marks were generated, redrawn or downloaded. See sources.json for hashes.

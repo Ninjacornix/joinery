@@ -15,12 +15,7 @@ extends RefCounted
 ## stops finding panels and does nothing rather than breaking the editor.
 
 ## Docks whose titles we keep, by substring. Everything else gets hidden.
-const KEEP := ["Journeyman"]
-
-## Main-screen tab titles. Focus mode hides the switcher too: with the sidebar
-## driving the work, a row of workspace tabs is chrome, and it comes straight
-## back when Focus is turned off.
-const MAIN_SCREEN_TABS := ["3D", "2D", "Script", "AssetLib", "Game", "Asset Store"]
+const KEEP := ["Journeyman", "Chatup", "JoineryNavigation"]
 
 var _hidden: Array[Control] = []
 var _active := false
@@ -40,58 +35,14 @@ func apply(base: Control) -> void:
 		if container.visible:
 			container.visible = false
 			_hidden.append(container)
-	_hide_viewport_chrome(base)
+	# The viewport toolbar has its own persisted /toolbar toggle. Workspace
+	# navigation stays visible so Focus mode never strands the current view.
 	_active = not _hidden.is_empty()
 	if not _active:
 		push_warning(
 			"[Joinery] Focus mode found nothing to hide. The editor's layout is "
 			+ "not the shape this expects, so nothing was changed."
 		)
-
-
-func _hide_viewport_chrome(base: Control) -> void:
-	## The 3D toolbar and the workspace tab row. Both are things you reach for
-	## when you drive the editor by hand; the point of Focus mode is that you
-	## drive it from the sidebar, so they go until you turn Focus off.
-	##
-	## Found by shape rather than by name, since no plugin API exposes them: a
-	## toolbar is an HBox of icon-only buttons sitting above the viewport, and
-	## the tab row is an HBox whose buttons are the main screen names.
-	for node: Node in _descendants(base):
-		var row := node as HBoxContainer
-		if row == null or not row.visible:
-			continue
-		if _is_main_screen_tabs(row) or _is_viewport_toolbar(row):
-			row.visible = false
-			_hidden.append(row)
-
-
-func _is_main_screen_tabs(row: HBoxContainer) -> bool:
-	var names: Array[String] = []
-	for child: Node in row.get_children():
-		var button := child as Button
-		if button != null and not button.text.is_empty():
-			names.append(button.text)
-	if names.size() < 3:
-		return false
-	for name: String in names:
-		if not MAIN_SCREEN_TABS.has(name):
-			return false
-	return true
-
-
-func _is_viewport_toolbar(row: HBoxContainer) -> bool:
-	## Mostly icon-only buttons: the transform mode row above the 3D viewport.
-	var icon_only := 0
-	var buttons := 0
-	for child: Node in row.get_children():
-		var button := child as Button
-		if button == null:
-			continue
-		buttons += 1
-		if button.text.is_empty() and button.icon != null:
-			icon_only += 1
-	return buttons >= 6 and icon_only >= buttons - 2
 
 
 func restore() -> void:
@@ -129,7 +80,7 @@ func _holds_main_screen(container: Control) -> bool:
 	var tabs := container as TabContainer
 	for index: int in tabs.get_tab_count():
 		var title := tabs.get_tab_title(index)
-		if title in ["3D", "2D", "Script", "AssetLib", "Game"]:
+		if title in ["3D", "2D", "Script", "AssetLib", "Game", "Tools"]:
 			return true
 	return false
 

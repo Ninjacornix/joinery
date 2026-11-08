@@ -1,12 +1,17 @@
+import json
+import sys
 from pathlib import Path
 
 import pytest
 
-from joinery.catalog import CustomTool, load_catalog, load_project_tools
+from joinery.catalog import CustomTool, ProjectTools, load_catalog, load_project_tools
+from joinery.cli import check_mcp_config, main
 from joinery.installer import (
     Selection,
+    custom_choices,
     menu_tools,
     run_menu,
+    tool_menu,
     validate_choice,
     write_mcp_config,
     write_selection,
@@ -43,7 +48,7 @@ def test_required_tool_cannot_be_removed() -> None:
 
 
 def test_preferred_tool_without_mcp_cannot_be_selected() -> None:
-    result, shown = drive([number("krita"), ""], [])
+    result, shown = drive([number("surge-xt"), ""], [])
     assert result.tools == ["godot"]
     assert any("own MCP in progress" in line for line in shown)
 
@@ -69,8 +74,8 @@ def test_bad_input_is_ignored() -> None:
 
 
 def test_noninteractive_rejects_unavailable_tool() -> None:
-    with pytest.raises(ValueError, match="krita"):
-        validate_choice(load_catalog(), ["krita"])
+    with pytest.raises(ValueError, match="surge-xt"):
+        validate_choice(load_catalog(), ["surge-xt"])
 
 
 def test_write_selection_keeps_other_settings(tmp_path: Path) -> None:
@@ -107,3 +112,155 @@ def test_mcp_config_registers_custom_and_keeps_existing(tmp_path: Path) -> None:
     write_mcp_config(Selection(["godot"], [SDXL]), tmp_path)
     text = (tmp_path / ".mcp.json").read_text()
     assert '"godot"' in text and '"sdxl-mcp"' in text
+
+
+def test_nonpreferred_choices_are_custom_and_selectable() -> None:
+    menu = tool_menu(load_catalog(), ProjectTools())
+    tools = menu["tools"]
+    assert isinstance(tools, list)
+    godot = next(tool for tool in tools if tool["id"] == "godot")
+    alternatives = [o for o in godot["mcp_options"] if o["state"] == "alternative"]
+    assert {o["label"] for o in alternatives} == {
+        "hi-godot/godot-ai",
+        "tomyud1/godot-mcp",
+    }
+    assert all(o["usable"] and o["custom"]["domain"] == "engine" for o in alternatives)
+    assert all(not o["custom"]["command"] for o in alternatives)
+    assert all(o["custom"]["server"] != "godot" for o in alternatives)
+    assert godot["mcp_options"][0]["state"] == "chosen"
+    krita = next(tool for tool in tools if tool["id"] == "krita")
+    assert krita["mcp_options"][0]["label"] == "joinery-paint"
+    assert krita["available"]
+    assert not krita["enabled"]
+
+
+def test_setup_saves_custom_alternative_and_replaces_required_engine(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    choice = {
+        "id": "hi-godot-godot-ai",
+        "name": "Godot (hi-godot/godot-ai)",
+        "domain": "engine",
+        "server": "hi-godot-godot-ai",
+        "command": "/Applications/My MCP/server",
+        "args": ["--name", "a b"],
+    }
+    assert (
+        _cli(
+            [
+                "setup",
+                "--project",
+                str(tmp_path),
+                "--tools",
+                "blender",
+                "--custom-mcps",
+                json.dumps([choice]),
+            ],
+            monkeypatch,
+        )
+        == 0
+    )
+    config = tmp_path / "joinery.toml"
+    selected = load_project_tools(config)
+    assert selected.enabled == ("blender",)
+    assert selected.custom[0].command == choice["command"]
+    assert selected.custom[0].args == ("--name", "a b")
+    assert check_mcp_config(tmp_path, config) == []
+    registered = json.loads((tmp_path / ".mcp.json").read_text())["mcpServers"]
+    assert registered[choice["server"]] == {
+        "command": choice["command"],
+        "args": choice["args"],
+    }
+
+
+@pytest.mark.parametrize("payload", ["{}", '[{"id":"x"}]', "[false]"])
+def test_bad_custom_choices_leave_existing_config_untouched(
+    tmp_path: Path,
+    payload: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = tmp_path / "joinery.toml"
+    original = '[tools]\nenabled = ["godot"]\n'
+    config.write_text(original)
+    assert (
+        _cli(
+            [
+                "setup",
+                "--project",
+                str(tmp_path),
+                "--tools",
+                "",
+                "--custom-mcps",
+                payload,
+            ],
+            monkeypatch,
+        )
+        == 1
+    )
+    assert config.read_text() == original
+    assert not (tmp_path / ".mcp.json").exists()
+
+
+def test_blank_custom_command_is_not_saved() -> None:
+    tool = SDXL.model_dump()
+    tool["command"] = " "
+    with pytest.raises(ValueError, match="launch command"):
+        custom_choices(json.dumps([tool]), [])
+
+
+def test_custom_choices_file_keeps_executable_and_arguments_literal(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    choice = SDXL.model_dump()
+    choice["command"] = '/Applications/Tool "quoted"/mcp'
+    choice["args"] = ["$(touch NEVER_EXECUTE)", '"quoted"', "a b", "\n"]
+    choices_file = tmp_path / "choices.json"
+    choices_file.write_text(json.dumps([choice]))
+    assert (
+        _cli(
+            [
+                "setup",
+                "--project",
+                str(tmp_path),
+                "--tools",
+                "",
+                "--custom-mcps-file",
+                str(choices_file),
+            ],
+            monkeypatch,
+        )
+        == 0
+    )
+    custom = load_project_tools(tmp_path / "joinery.toml").custom[0]
+    assert custom.command == choice["command"]
+    assert list(custom.args) == choice["args"]
+    assert not (tmp_path / "NEVER_EXECUTE").exists()
+
+
+def test_missing_choices_file_leaves_project_unchanged(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert (
+        _cli(
+            [
+                "setup",
+                "--project",
+                str(tmp_path),
+                "--tools",
+                "",
+                "--custom-mcps-file",
+                str(tmp_path / "missing.json"),
+            ],
+            monkeypatch,
+        )
+        == 1
+    )
+    assert not (tmp_path / "joinery.toml").exists()
+
+
+def _cli(arguments: list[str], monkeypatch: pytest.MonkeyPatch) -> int:
+    monkeypatch.setattr(sys, "argv", ["joinery", *arguments])
+    return main()

@@ -21,8 +21,8 @@ def test_scaffolded_config_pins_engine_install(tmp_path: Path) -> None:
     # A game project lives elsewhere, so its hook command must point at the
     # concrete engine install to find `joinery`.
     claude = json.loads((tmp_path / ".claude/settings.json").read_text())
-    args = claude["hooks"]["PreToolUse"][0]["hooks"][0]["args"]
-    assert str(ROOT) in args
+    command = claude["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
+    assert str(ROOT) in command and "joinery hook --agent claude" in command
 
 
 def test_portable_config_has_no_machine_path(tmp_path: Path) -> None:

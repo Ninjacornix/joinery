@@ -76,6 +76,8 @@ def write_mcp_config(selection: Selection, project: Path) -> None:
 
 
 def _describe(tool: Tool) -> str:
+    if tool.builtin_server:
+        return "Joinery native document adapter, offline worker"
     if tool.mcp is None:
         reason = (
             "own MCP in progress"
@@ -102,7 +104,9 @@ def render(catalog: Catalog, tools: set[str], custom: Iterable[CustomTool] = ())
         )
     custom = list(custom)
     if custom:
-        lines.append("Your tools: not vetted, may send telemetry, assets labelled custom-tool")
+        lines.append(
+            "Your tools: not vetted, may send telemetry, assets labelled custom-tool"
+        )
         lines += [f"    [+] {c.name:<15} {c.domain:<13} {c.command}" for c in custom]
     return "\n".join(lines)
 
@@ -167,13 +171,13 @@ def _repo_label(tool: Tool) -> str:
 def _mcp_options(tool: Tool, catalog: Catalog) -> list[dict[str, object]]:
     """Every MCP the catalog knows for this tool, the chosen one first.
 
-    A menu that shows only the winner hides the decision. The rejected servers
-    are often the *popular* ones, and why they lost is the most useful thing
-    the catalog knows, so they are listed too, marked unusable and carrying
-    their reason. `usable` is false for anything that cannot actually be
-    wired up, so a UI can show it without implying it is a choice.
+    Alternatives remain selectable as project-owned custom MCPs. They are not
+    promoted into the preferred catalog; their launch command must be supplied
+    explicitly before setup can register them.
     """
     options: list[dict[str, object]] = []
+    if tool.builtin_server:
+        options.append({"label": tool.builtin_server, "state": "chosen", "usable": True, "summary": "in use", "reason": "First-party native document adapter"})
     if tool.mcp is not None:
         options.append(
             {
@@ -191,7 +195,8 @@ def _mcp_options(tool: Tool, catalog: Catalog) -> list[dict[str, object]]:
                 {
                     "label": repo.strip(),
                     "state": "candidate",
-                    "usable": False,
+                    "usable": True,
+                    "custom": _custom_option(tool, repo.strip()),
                     "summary": "not vetted yet",
                     "reason": why.strip() or "not vetted yet",
                 }
@@ -201,15 +206,41 @@ def _mcp_options(tool: Tool, catalog: Catalog) -> list[dict[str, object]]:
         options.append(
             {
                 "label": "/".join(parts[-2:]),
-                "state": "rejected",
-                "usable": False,
-                # Why it is blocked, in a few words. A user creating a project
-                # has no reason to know Joinery's vetting vocabulary.
+                "state": "alternative",
+                "usable": True,
+                "custom": _custom_option(tool, "/".join(parts[-2:])),
                 "summary": rejected.summary or "does not meet the bar",
                 "reason": rejected.reason,
             }
         )
     return options
+
+
+def _custom_option(tool: Tool, repo: str) -> dict[str, object]:
+    identity = re.sub(r"[^a-z0-9-]+", "-", repo.lower()).strip("-")
+    return {
+        "id": identity,
+        "name": f"{tool.name} ({repo})",
+        "domain": tool.domain,
+        "server": identity,
+        "command": "",
+        "args": [],
+    }
+
+
+def custom_choices(payload: str, current: Iterable[CustomTool]) -> list[CustomTool]:
+    """Merge explicit UI choices before writing any files or adding required tools."""
+    data = json.loads(payload)
+    if not isinstance(data, list):
+        raise TypeError("custom MCP choices must be a JSON array")
+    choices = [CustomTool.model_validate(entry) for entry in data]
+    if any(not tool.command.strip() for tool in choices):
+        raise ValueError("each custom MCP needs a launch command")
+    if len({tool.id for tool in choices}) != len(choices):
+        raise ValueError("duplicate custom MCP choice")
+    merged = {tool.id: tool for tool in current}
+    merged.update({tool.id: tool for tool in choices})
+    return list(merged.values())
 
 
 def tool_menu(catalog: Catalog, current: ProjectTools) -> dict[str, object]:
@@ -235,7 +266,7 @@ def tool_menu(catalog: Catalog, current: ProjectTools) -> dict[str, object]:
                 "reason": _describe(tool),
                 # Which MCP drives the tool, so the menu can say what it is
                 # actually wiring up rather than just naming a program.
-                "mcp": tool.mcp.server if tool.mcp else "",
+                "mcp": tool.mcp.server if tool.mcp else tool.builtin_server,
                 "mcp_repo": _repo_label(tool),
                 # Every MCP the catalog knows for this tool. One entry when a
                 # server is vetted; the rejected or still-being-judged

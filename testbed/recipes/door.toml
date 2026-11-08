@@ -6,4 +6,4 @@ note = "Door leaf and lever handle, pivot at the hinge. Shader-node wood and bra
 
 # Measured from the real outputs by `joinery rebuild --record`.
 [expect]
-"art/props/door.blend" = "blend:9b2cdc82fc852dd92e6867eec7d0e84849b93c129942efe8c10bb88bef592967"
+"art/props/door.blend" = "blend:ff1a3bcaf49bc4a2bc7bb001a182e7331997399e01fcc73c8057a6f96b522fea"

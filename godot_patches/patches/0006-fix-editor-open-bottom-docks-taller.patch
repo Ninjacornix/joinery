@@ -1,0 +1,30 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Sat, 7 Nov 2026 23:47:03 +0100
+Subject: [PATCH] fix(editor): open bottom docks taller
+
+Joinery-only shell preference. Not intended for upstream.
+---
+ editor/gui/editor_bottom_panel.cpp | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/editor/gui/editor_bottom_panel.cpp b/editor/gui/editor_bottom_panel.cpp
+index 477dcd2..20dce54 100644
+--- a/editor/gui/editor_bottom_panel.cpp
++++ b/editor/gui/editor_bottom_panel.cpp
+@@ -231,7 +231,14 @@ void EditorBottomPanel::_update_center_split_offset() {
+ 	DockSplitContainer *center_split = EditorNode::get_center_split();
+ 	ERR_FAIL_NULL(center_split);
+ 
+-	center_split->set_split_offset(get_bottom_panel_offset());
++	// Joinery: opening a utility dock should reveal a useful work area, even
++	// when an earlier layout saved a nearly collapsed height. Larger sizes
++	// remain intact, and the divider can still be dragged while the dock is open.
++	int offset = get_bottom_panel_offset();
++	if (get_current_tab() >= 0) {
++		offset = MIN(offset, -int(center_split->get_size().y * 0.45));
++	}
++	center_split->set_split_offset(offset);
+ }
+ 
+ EditorDock *EditorBottomPanel::_get_dock_from_control(Control *p_control) const {

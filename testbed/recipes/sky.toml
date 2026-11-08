@@ -8,4 +8,4 @@ note = "Procedural sky model rendered equirectangular for PanoramaSkyMaterial."
 # Measured from the real outputs by `joinery rebuild --record`.
 [expect]
 "art/sky/dusk_sky.png" = "img:d5143a707e12d5704587dd08c3106bef41b69a4fdff9ddd5da43e7fc70a9bf77"
-"art/sky/src/dusk_sky.blend" = "blend:d40a625739140fcecb33fddc73f509979683596d22a1f8c80bfd7167c567619f"
+"art/sky/src/dusk_sky.blend" = "blend:8e5e675bfb59d5f0534cf302b395c3a815053b2e6f0c294d9d3952e6e65286da"

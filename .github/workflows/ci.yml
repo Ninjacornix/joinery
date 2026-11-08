@@ -42,7 +42,10 @@ jobs:
       # Only the tools the sampled recipes need. Adding Krita, GIMP, Inkscape
       # or Material Maker would roughly double the image for no extra coverage.
       - name: Build the sandbox
-        run: sandbox/build.sh --with blender --with supercollider
+        run: |
+          sandbox/build.sh --with blender --with supercollider --tag joinery-sandbox-runtime
+          docker build --platform linux/amd64 -t joinery-mcp-worker -f sandbox/mcp.Dockerfile sandbox
+          docker build --platform linux/amd64 -t joinery-creative-worker -f sandbox/creative.Dockerfile sandbox
 
       # The lock must match what the recipes actually produce. Regenerating it
       # and finding a diff means an asset changed without its lock entry.
@@ -57,3 +60,21 @@ jobs:
       # scratch copy, so it cannot quietly rewrite the committed assets.
       - name: Rebuild every asset from its recipe
         run: uv run joinery rebuild --project testbed --runner sandbox
+
+  native-editor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e
+      - run: uv sync --frozen --python 3.12
+      - name: Install editor build and display dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential pkg-config libx11-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev libglu1-mesa-dev libasound2-dev libpulse-dev libudev-dev libxi-dev libxrandr-dev xvfb xauth ccache
+      - name: Build the pinned patched editor
+        run: |
+          godot_patches/fork.sh sync
+          godot_patches/fork.sh build
+      - name: Lint addon and exercise native review/undo lifecycle
+        run: |
+          uvx --from gdtoolkit==4.5.0 gdlint godot_addon/joinery/*.gd
+          xvfb-run -a uv run python tests/godot/run_scene_edit_test.py

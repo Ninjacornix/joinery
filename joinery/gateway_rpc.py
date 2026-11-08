@@ -1,0 +1,192 @@
+"""Private project IPC. Approval is deliberately absent from the model-facing API."""
+
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import json
+import os
+import re
+import shutil
+import tempfile
+from collections.abc import Awaitable, Callable
+from pathlib import Path
+from typing import Any
+
+from joinery.gateway import ProjectGateway
+from joinery.mcp_runtime import PolicyStop
+
+
+def search_tools(data: dict[str, Any], query: str) -> dict[str, Any]:
+    """Rank words rather than requiring an entire sentence to be a substring."""
+    words = set(re.findall(r"[a-z0-9]+", query.lower())) - {
+        "a",
+        "an",
+        "and",
+        "the",
+        "to",
+        "for",
+        "with",
+        "in",
+        "of",
+    }
+    candidates = []
+    for tool in data["tools"]:
+        haystack = set(
+            re.findall(
+                r"[a-z0-9]+",
+                (
+                    tool["server"]
+                    + " "
+                    + tool["name"]
+                    + " "
+                    + tool.get("description", "")
+                ).lower(),
+            )
+        )
+        score = len(words & haystack)
+        if not words or score:
+            candidates.append((score, tool))
+    candidates.sort(key=lambda entry: -entry[0])
+    return {
+        "servers": [
+            {
+                **{k: v for k, v in state.items() if k != "tools"},
+                "tool_count": len(state.get("tools", [])),
+            }
+            for state in data["servers"]
+        ],
+        "tools": [
+            {
+                "server": tool["server"],
+                "name": tool["name"],
+                "description": tool.get("description", "")[:500],
+            }
+            for _, tool in candidates[:24]
+        ],
+        "total_matches": len(candidates),
+        "hint": "Search by application or operation to narrow results; read tool_schema before calling. Native document operations save, export, import and record provenance automatically. Final validation and a visual review are prepared when the turn finishes.",
+    }
+
+
+class GatewayRPC:
+    def __init__(
+        self,
+        gateway: ProjectGateway,
+        on_stop: Callable[[str], Awaitable[None]] | None = None,
+    ) -> None:
+        self.gateway = gateway
+        self.directory = Path(tempfile.mkdtemp(prefix="joinery-rpc-", dir="/tmp"))
+        self.path = self.directory / "gateway.sock"
+        self.server: asyncio.Server | None = None
+        self.tasks: set[asyncio.Task[Any]] = set()
+        self.on_stop = on_stop
+        self.stop_reason = ""
+
+    async def start(self) -> None:
+        self.server = await asyncio.start_unix_server(
+            self._client, str(self.path), limit=4_000_000
+        )
+        os.chmod(self.path, 0o600)
+
+    async def _client(
+        self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
+    ) -> None:
+        task = asyncio.current_task()
+        if task is not None:
+            self.tasks.add(task)
+        try:
+            line = await asyncio.wait_for(reader.readline(), timeout=30)
+            request = json.loads(line)
+            method = request.get("method")
+            params = request.get("params", {})
+            if self.stop_reason:
+                raise PolicyStop(self.stop_reason)
+            if method == "inventory":
+                data = await self.gateway.discover()
+                data = search_tools(data, str(params.get("query", "")))
+            elif method == "schema":
+                connection = await self.gateway.connection(str(params["server"]))
+                data = connection.tools[str(params["tool"])].model_dump(
+                    by_alias=True, exclude_none=True
+                )
+            elif method == "call":
+                arguments = params.get("arguments", {})
+                if not isinstance(arguments, dict):
+                    raise ValueError("Tool arguments must be an object.")
+                result = await self.gateway.call(
+                    str(params["server"]), str(params["tool"]), arguments
+                )
+                data = self.gateway.serialise(result)
+                if str(params["server"]) == "godot" and (
+                    str(params["tool"]).startswith("game_")
+                    or params["tool"] in {"run_project", "stop_project"}
+                ):
+                    data["joinery"] = {
+                        "target": "running-game",
+                        "persistent": False,
+                        "requires_review": bool(
+                            self.gateway.transaction and self.gateway.transaction.diff()
+                        ),
+                    }
+                elif self.gateway.transaction is not None:
+                    data["joinery"] = {"status": "staged", "requires_review": True}
+            elif method == "editor_context":
+                data = {"editor": self.gateway.editor_context}
+            elif method == "editor_edit":
+                if self.gateway.edit_scene is None:
+                    raise ValueError("No live editor is connected to this gateway.")
+                data = await self.gateway.edit_scene(params)
+            else:
+                raise ValueError(
+                    "The model interface supports inventory, schema and call; no approval methods."
+                )
+            response = {"ok": True, "result": data}
+        except PolicyStop as exc:
+            first = not self.stop_reason
+            self.stop_reason = str(exc)
+            response = {"ok": False, "stop": True, "error": self.stop_reason}
+            if first and self.on_stop is not None:
+                asyncio.ensure_future(self.on_stop(self.stop_reason))
+        except (OSError, ValueError, KeyError, RuntimeError, TimeoutError) as exc:
+            response = {"ok": False, "error": str(exc)}
+        except asyncio.CancelledError:
+            writer.close()
+            with contextlib.suppress(OSError):
+                await writer.wait_closed()
+            return
+        finally:
+            if task is not None:
+                self.tasks.discard(task)
+        try:
+            writer.write((json.dumps(response) + "\n").encode())
+            await writer.drain()
+        finally:
+            writer.close()
+            with contextlib.suppress(OSError):
+                await writer.wait_closed()
+
+    async def close(self) -> None:
+        if self.server is not None:
+            self.server.close()
+            await self.server.wait_closed()
+        for task in self.tasks:
+            task.cancel()
+        await asyncio.gather(*self.tasks, return_exceptions=True)
+        await self.gateway.close()
+        shutil.rmtree(self.directory, ignore_errors=True)
+
+
+async def rpc(path: Path, method: str, params: dict[str, Any]) -> dict[str, Any]:
+    reader, writer = await asyncio.open_unix_connection(str(path), limit=4_000_000)
+    try:
+        writer.write((json.dumps({"method": method, "params": params}) + "\n").encode())
+        await writer.drain()
+        data = json.loads(await asyncio.wait_for(reader.readline(), timeout=900))
+        if not data["ok"]:
+            raise RuntimeError(data["error"])
+        result: dict[str, Any] = data["result"]
+        return result
+    finally:
+        writer.close()
+        await writer.wait_closed()

@@ -84,6 +84,13 @@ def test_available_tool_needs_an_mcp() -> None:
         Catalog.model_validate(raw)
 
 
+def test_custom_tool_cannot_collide_with_normalized_builtin_namespace(tmp_path: Path) -> None:
+    config = tmp_path / "joinery.toml"
+    config.write_text('[tools]\nenabled=[]\n[[tools.custom]]\nid="x"\nname="X"\ndomain="2d"\nserver="joinery_registry"\ncommand="x"\n')
+    with pytest.raises(ValueError, match="clashes"):
+        enabled_tools(load_catalog(), config)
+
+
 def test_required_tools_always_enabled_and_allowed(tmp_path: Path) -> None:
     config = tmp_path / "joinery.toml"
     config.write_text('[tools]\nenabled = ["blender"]\n')
@@ -96,8 +103,8 @@ def test_required_tools_always_enabled_and_allowed(tmp_path: Path) -> None:
 
 def test_enabling_unavailable_tool_fails(tmp_path: Path) -> None:
     config = tmp_path / "joinery.toml"
-    config.write_text('[tools]\nenabled = ["krita"]\n')
-    with pytest.raises(ValueError, match="krita"):
+    config.write_text('[tools]\nenabled = ["surge-xt"]\n')
+    with pytest.raises(ValueError, match="surge-xt"):
         enabled_tools(load_catalog(), config)
 
 

@@ -28,7 +28,8 @@ def test_new_project_inherits_hook_and_telemetry_off(tmp_path: Path) -> None:
     create_project(project, "G", Selection(["godot"], []), load_catalog())
     settings = json.loads((project / ".claude/settings.json").read_text())
     assert settings["env"]["DISABLE_TELEMETRY"] == "1"
-    assert settings["hooks"]["PreToolUse"][0]["hooks"][0]["onFailure"] == "block"
+    hook = settings["hooks"]["PreToolUse"][0]["hooks"][0]
+    assert hook["type"] == "command" and "joinery hook --agent claude" in hook["command"]
 
 
 def test_new_project_wires_the_gate_for_every_agent(tmp_path: Path) -> None:

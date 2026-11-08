@@ -33,11 +33,13 @@ from __future__ import annotations
 import hashlib
 import json
 import tomllib
+import zipfile
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
+from xml.etree import ElementTree
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from joinery.runner import DEFAULT_TIMEOUT, Result, Runner
 
@@ -68,13 +70,25 @@ for obj in sorted(bpy.data.objects, key=lambda o: o.name):
             "type": obj.type,
             "verts": len(obj.data.vertices) if mesh is not None else 0,
             "polys": len(obj.data.polygons) if mesh is not None else 0,
+            "geometry": hashlib.sha256(json.dumps({
+                "vertices": [[round(x, 6) for x in v.co] for v in obj.data.vertices],
+                "polygons": [list(p.vertices) for p in obj.data.polygons],
+            }, sort_keys=True).encode()).hexdigest() if mesh is not None else "",
             "materials": sorted(s.name for s in obj.material_slots if s.name),
             "modifiers": [m.type for m in obj.modifiers],
             "loc": [round(v, 4) for v in obj.location],
             "scale": [round(v, 4) for v in obj.scale],
+            "matrix": [[round(v, 6) for v in row] for row in obj.matrix_world],
         }
     )
-doc = {"objects": items, "materials": sorted(m.name for m in bpy.data.materials)}
+doc = {"objects": items, "materials": [{
+    "name": m.name, "diffuse": list(m.diffuse_color), "nodes": sorted([
+        {"name": n.name, "type": n.bl_idname, "inputs": [
+            {"name": i.name, "value": list(i.default_value) if hasattr(i.default_value, '__len__') and not isinstance(i.default_value, str) else str(i.default_value)}
+            for i in n.inputs if hasattr(i, 'default_value')
+        ]} for n in m.node_tree.nodes
+    ], key=lambda n: n['name']) if m.use_nodes and m.node_tree else []
+} for m in sorted(bpy.data.materials, key=lambda m: m.name)]}
 blob = json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()
 print("JOINERY_SIG:" + hashlib.sha256(blob).hexdigest())
 """
@@ -93,12 +107,22 @@ class Recipe(BaseModel):
     script: str
     #: Files the script produces, relative to the project.
     outputs: tuple[str, ...] = Field(min_length=1)
+    #: Native documents to open for editing, when they are not recipe outputs.
+    sources: tuple[str, ...] = ()
     #: Outputs that are camera renders, which cannot be compared byte for byte.
     #: Must be a subset of `outputs`. Everything not listed is compared exactly.
     renders: tuple[str, ...] = ()
     #: output path -> fingerprint, e.g. {"art/door.blend": "blend:ab12..."}.
     expect: dict[str, str] = Field(default_factory=dict)
     note: str = ""
+
+    @model_validator(mode="after")
+    def safe_paths(self) -> Recipe:
+        for value in (self.script, *self.outputs, *self.sources, *self.renders):
+            path = Path(value)
+            if not value or path.is_absolute() or ".." in path.parts:
+                raise ValueError("Recipe paths must stay within the project.")
+        return self
 
 
 @dataclass(frozen=True)
@@ -149,16 +173,28 @@ def image_signature(rel: str, project: Path, runner: Runner) -> str:
     scratch = project / ".joinery-fingerprint.raw"
     got = runner.run(
         [
-            "ffmpeg", "-v", "error", "-y", "-i", rel,
-            "-vf", f"scale={width}:{height}:flags=area",
-            "-pix_fmt", "rgb24", "-f", "rawvideo", scratch.name,
+            "ffmpeg",
+            "-v",
+            "error",
+            "-y",
+            "-i",
+            rel,
+            "-vf",
+            f"scale={width}:{height}:flags=area",
+            "-pix_fmt",
+            "rgb24",
+            "-f",
+            "rawvideo",
+            scratch.name,
         ],
         project,
         timeout=DEFAULT_TIMEOUT,
     )
     try:
         if not scratch.is_file():
-            raise RuntimeError(f"ffmpeg produced nothing for {rel}: {got.output[-300:]}")
+            raise RuntimeError(
+                f"ffmpeg produced nothing for {rel}: {got.output[-300:]}"
+            )
         raw = scratch.read_bytes()
     finally:
         scratch.unlink(missing_ok=True)
@@ -169,7 +205,9 @@ def image_signature(rel: str, project: Path, runner: Runner) -> str:
     return "img:" + hashlib.sha256(quantised).hexdigest()
 
 
-def fingerprint(rel: str, project: Path, runner: Runner, *, render: bool = False) -> str:
+def fingerprint(
+    rel: str, project: Path, runner: Runner, *, render: bool = False
+) -> str:
     """Fingerprint one output the strictest way that is stable for its format.
 
     `render=True` marks a camera render, the one case where exactness is not
@@ -186,6 +224,22 @@ def fingerprint(rel: str, project: Path, runner: Runner, *, render: bool = False
         return image_signature(rel, project, runner)
     if suffix == ".blend":
         return blend_signature(path, project, runner)
+    if suffix == ".kra":
+        digest = hashlib.sha256()
+        with zipfile.ZipFile(path) as archive:
+            for name in sorted(archive.namelist()):
+                if name in {"documentinfo.xml", "preview.png"} or name.endswith("/"):
+                    continue
+                data = archive.read(name)
+                if name.endswith(".xml"):
+                    xml = ElementTree.fromstring(data)
+                    for element in xml.iter():
+                        for key in list(element.attrib):
+                            if "uuid" in key.lower():
+                                element.attrib.pop(key)
+                    data = ElementTree.canonicalize(ElementTree.tostring(xml, encoding="unicode"), strip_text=True).encode()
+                digest.update(name.encode() + b"\0" + data)
+        return "kra:" + digest.hexdigest()
     # Everything else is compared exactly, including baked textures.
     return _exact(path)
 
@@ -205,6 +259,12 @@ def _tool_argv(recipe: Recipe) -> list[str]:
         return ["sclang", recipe.script]
     if recipe.tool == "godot":
         return ["godot", "--headless", "--script", recipe.script]
+    if recipe.tool == "krita":
+        return ["joinery-krita", recipe.script]
+    if recipe.tool == "aseprite":
+        return ["aseprite", "--batch", "--script", recipe.script]
+    if recipe.tool in {"material-maker", "inkscape"}:
+        return ["python3", recipe.script]
     raise ValueError(f"no replay command for tool {recipe.tool!r}")
 
 
@@ -288,13 +348,15 @@ def record(path: Path, project: Path, runner: Runner) -> Recipe:
         f"version = {updated.version}",
         f"tool = {json.dumps(updated.tool)}",
         f"script = {json.dumps(updated.script)}",
-        "outputs = ["
-        + ", ".join(json.dumps(o) for o in updated.outputs)
-        + "]",
+        "outputs = [" + ", ".join(json.dumps(o) for o in updated.outputs) + "]",
     ]
     if updated.renders:
         lines.append(
             "renders = [" + ", ".join(json.dumps(r) for r in updated.renders) + "]"
+        )
+    if updated.sources:
+        lines.append(
+            "sources = [" + ", ".join(json.dumps(s) for s in updated.sources) + "]"
         )
     if updated.note:
         lines.append(f"note = {json.dumps(updated.note)}")

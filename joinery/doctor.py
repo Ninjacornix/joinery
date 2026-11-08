@@ -151,7 +151,7 @@ def report(config: Path = CONFIG_PATH) -> tuple[str, int]:
             + ", ".join(missing)
             + "\nBuild or enter the sandbox image, which installs them:"
             "\n  docker build -t joinery-sandbox sandbox/"
-            "\n  docker run --rm -it --network none -v \"$PWD\":/work joinery-sandbox"
+            '\n  docker run --rm -it --network none -v "$PWD":/work joinery-sandbox'
         )
     else:
         lines.append("\nEverything this project needs is present.")

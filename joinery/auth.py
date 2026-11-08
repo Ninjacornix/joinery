@@ -68,7 +68,7 @@ AUTH: dict[str, AgentAuth] = {
         ),
         api_key=AuthPath(
             kind="api-key",
-            how="run `codex login --api-key <key>`, or set the env var",
+            how="pass OPENAI_API_KEY on stdin to `codex login --with-api-key`",
             key_var="OPENAI_API_KEY",
             get_at="https://platform.openai.com/api-keys",
             notes="Metered API billing. Some ChatGPT-workspace features are unavailable.",

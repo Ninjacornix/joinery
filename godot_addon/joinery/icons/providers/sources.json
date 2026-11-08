@@ -1,0 +1,26 @@
+[
+  {
+    "file": "claude.svg",
+    "source": "~/.vscode/extensions/pkief.material-icon-theme-5.40.0/icons/claude.svg",
+    "sha256": "c5c151002782b9e1b3fca196b5f31d82fbf18eec5a8905feadc79a5dbc928ac1",
+    "origin": "user-requested local import"
+  },
+  {
+    "file": "codex.png",
+    "source": "/Applications/ChatGPT.app/Contents/Resources/icon-codex-dark-color.png",
+    "sha256": "69fb4384e161be8a20dcb94a9ac34aea4fbfaeb67514110a71e7b0732eccb0fc",
+    "origin": "user-requested local import"
+  },
+  {
+    "file": "gemini.png",
+    "source": "~/.vscode/extensions/continue.continue-2.0.0-darwin-arm64/gui/logos/gemini.png",
+    "sha256": "64e675e574ca10afc1cd86b250aadaf714ee6b4b9af96214649a95ba49a5e824",
+    "origin": "user-requested local import"
+  },
+  {
+    "file": "opencode.svg",
+    "source": "~/.vscode/extensions/pkief.material-icon-theme-5.40.0/icons/opencode.svg",
+    "sha256": "1d357e98d0127aaa94642cb40d6a0dcb4483ffed041fc3484f9e95044e7ec792",
+    "origin": "user-requested local import"
+  }
+]

@@ -2,14 +2,15 @@
 
 The sidebar does not know which agent is running. It opens a `Bridge` for a
 chosen agent and sends `SidebarMessage`s; the bridge picks the adapter, checks
-the agent is safe to run, and streams back `AgentEvent`s. The local socket
-transport that carries this to the Godot side is Phase 2; the contract and the
-safety checks live here so they hold for every agent from the start.
+the agent is safe to run, and streams back `AgentEvent`s. Framed stdio carries
+Codex chat to Godot; the safety checks apply to every adapter.
 """
 
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from pathlib import Path
+from typing import Any
 
 from bridge.adapters import AgentAdapter, adapter_for
 from bridge.protocol import AgentEvent, SidebarMessage
@@ -39,11 +40,26 @@ class Bridge:
         """Whether this agent can actually run a turn today (adapter built)."""
         return self._adapter.ready
 
+    def bind_gateway(self, path: Path) -> None:
+        self._adapter.bind_gateway(path)
+
+    async def connect(self, project: Path, profile_id: str = "") -> None:
+        await self._adapter.connect(project, profile_id)
+
+    def editor_result(self, request_id: str, result: dict[str, Any]) -> None:
+        self._adapter.editor_result(request_id, result)
+
+    async def close(self) -> None:
+        await self._adapter.close()
+
+    async def cancel(self) -> None:
+        await self._adapter.cancel()
+
     async def send(self, message: SidebarMessage) -> AsyncIterator[AgentEvent]:
         """Forward one message and stream the agent's events back to the sidebar."""
         if not self._adapter.ready:
             raise NotImplementedError(
-                f"the {self.agent.name} adapter is not implemented yet (Phase 2)"
+                f"the {self.agent.name} adapter is not implemented yet"
             )
         async for event in self._adapter.run(message):
             yield event

@@ -12,11 +12,6 @@ extends AcceptDialog
 
 const DIM := Color(0.62, 0.60, 0.56)
 
-var _name_field: LineEdit
-var _tools: Dictionary = {}
-var _status: Label
-var _notice: Label
-
 ## Mirrors policy/preferred_tools.toml. Shown with its real state, including
 ## the tools whose MCP Joinery has not built yet, so the menu never implies a
 ## capability that does not exist.
@@ -30,11 +25,16 @@ const CATALOG: Array[Dictionary] = [
 	{"id": "musescore", "name": "MuseScore", "domain": "audio", "state": "ready"},
 	{"id": "aseprite", "name": "Aseprite", "domain": "2d", "state": "licence"},
 	{"id": "reaper", "name": "REAPER", "domain": "audio", "state": "licence"},
-	{"id": "krita", "name": "Krita", "domain": "2d", "state": "planned"},
+	{"id": "krita", "name": "Krita", "domain": "2d", "state": "ready"},
 	{"id": "surge-xt", "name": "Surge XT", "domain": "audio", "state": "planned"},
-	{"id": "material-maker", "name": "Material Maker", "domain": "materials", "state": "planned"},
+	{"id": "material-maker", "name": "Material Maker", "domain": "materials", "state": "ready"},
 ]
 
+
+var _name_field: LineEdit
+var _tools: Dictionary = {}
+var _status: Label
+var _notice: Label
 
 func _init() -> void:
 	title = "Joinery project setup"

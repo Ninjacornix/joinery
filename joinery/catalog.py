@@ -67,11 +67,12 @@ class Tool(_Strict):
     required: bool = False
     paid: bool = False
     mcp: McpSource | None = None
+    builtin_server: str = ""
     candidates: tuple[str, ...] = ()
 
     @model_validator(mode="after")
     def _status_matches_mcp(self) -> Self:
-        if self.status == "available" and self.mcp is None:
+        if self.status == "available" and self.mcp is None and not self.builtin_server:
             raise ValueError(f"{self.id}: an available tool needs an MCP")
         if self.status != "available" and self.mcp is not None:
             raise ValueError(f"{self.id}: only an available tool may name an MCP")
@@ -104,6 +105,8 @@ class Catalog(_Strict):
             raise ValueError("duplicate tool id")
         banned = {_repo_key(r.repo): r.reason for r in self.rejected}
         for tool in self.tool:
+            if tool.builtin_server and tool.builtin_server not in self.builtin_servers:
+                raise ValueError(f"{tool.id}: first-party server is not in the builtin allowlist")
             if tool.mcp is None:
                 continue
             reason = banned.get(_repo_key(tool.mcp.repo))
@@ -182,11 +185,13 @@ def _check_custom(catalog: Catalog, custom: tuple[CustomTool, ...]) -> None:
     taken_servers = {t.mcp.server for t in catalog.tool if t.mcp} | set(
         catalog.builtin_servers
     )
+    aliases = {server.replace("-", "_") for server in taken_servers}
     for tool in custom:
-        if tool.id in taken_ids or tool.server in taken_servers:
+        if tool.id in taken_ids or tool.server.replace("-", "_") in aliases:
             raise ValueError(f"custom tool {tool.id!r} clashes with a preferred tool")
         taken_ids.add(tool.id)
         taken_servers.add(tool.server)
+        aliases.add(tool.server.replace("-", "_"))
 
 
 def selection_ids(catalog: Catalog, tools: ProjectTools) -> list[str]:

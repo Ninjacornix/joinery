@@ -9,9 +9,10 @@ import sys
 import tempfile
 from pathlib import Path
 
-from joinery import hook
+from joinery import connection, hook
 from joinery.agents import all_agents
 from joinery.agents import get as get_agent
+from joinery.api_profiles import configure as configure_api
 from joinery.auth import for_agent
 from joinery.bible import grouped, write_from_answers_file
 from joinery.catalog import (
@@ -24,9 +25,10 @@ from joinery.catalog import (
     selection_ids,
 )
 from joinery.deps import check_deps
-from joinery.doctor import report
+from joinery.doctor import report as doctor_report
 from joinery.installer import (
     Selection,
+    custom_choices,
     render,
     run_menu,
     tool_menu,
@@ -42,6 +44,7 @@ from joinery.recipe import rebuild_all, recipe_paths, record
 from joinery.runner import pick
 from joinery.vcs import ensure_lfs
 from joinery.wiring import unwireable, write_agent_wiring
+from joinery.workspace import index, open_asset, watch_stamp
 
 
 def check_mcp_config(root: Path, config: Path = CONFIG_PATH) -> list[str]:
@@ -84,10 +87,14 @@ def _check(target: str, project: Path) -> int:
     return 1 if errors else 0
 
 
-def _choose(tools: str | None, config: Path) -> Selection:
+def _choose(
+    tools: str | None, config: Path, custom_mcps: str | None = None
+) -> Selection:
     catalog = load_catalog()
     current = load_project_tools(config) if config.is_file() else None
     custom = list(current.custom) if current else []
+    if custom_mcps is not None:
+        custom = custom_choices(custom_mcps, custom)
     if tools is not None:
         return Selection(
             validate_choice(catalog, [t for t in tools.split(",") if t], custom), custom
@@ -95,9 +102,13 @@ def _choose(tools: str | None, config: Path) -> Selection:
     return run_menu(catalog, current.enabled if current else (), custom)
 
 
-def _setup(tools: str | None, project: Path) -> int:
+def _setup(tools: str | None, project: Path, custom_mcps: str | None = None) -> int:
     config = project / "joinery.toml"
-    selection = _choose(tools, config)
+    try:
+        selection = _choose(tools, config, custom_mcps)
+    except (TypeError, ValueError) as exc:
+        print(f"setup: {exc}", file=sys.stderr)
+        return 1
     write_selection(selection, config)
     write_mcp_config(selection, project)
     # Setting a project up includes gating it. A project created through the
@@ -209,6 +220,35 @@ def _rebuild(project: Path, prefer: str, record_mode: bool, timeout: int) -> int
 def main() -> int:
     parser = argparse.ArgumentParser(prog="joinery")
     commands = parser.add_subparsers(dest="command", required=True)
+    package_cmd = commands.add_parser(
+        "package",
+        help="bundle the current source and matching engine with a measured manifest",
+    )
+    package_cmd.add_argument("--output", type=Path, required=True)
+    launch_cmd = commands.add_parser(
+        "launch",
+        help="start Joinery from its project manager, or safely update and open a closed project",
+    )
+    launch_cmd.add_argument("--project", type=Path)
+    diagnostics = commands.add_parser(
+        "diagnostics",
+        help="show matching build, addon, provider and transaction status without secrets",
+    )
+    diagnostics.add_argument("--project", type=Path, required=True)
+    bootstrap = commands.add_parser(
+        "bootstrap", help="install pinned project servers and offline runtime images"
+    )
+    bootstrap.add_argument("--project", type=Path, required=True)
+    delivery = commands.add_parser(
+        "update-addon", help="update a closed project's addon with a reversible backup"
+    )
+    delivery.add_argument("--project", type=Path, required=True)
+    tx_cmd = commands.add_parser(
+        "transactions", help="inspect, recover or revert durable project transactions"
+    )
+    tx_cmd.add_argument("action", choices=["list", "recover", "revert"])
+    tx_cmd.add_argument("--project", type=Path, required=True)
+    tx_cmd.add_argument("--id", default="")
     hook_cmd = commands.add_parser(
         "hook", help="PreToolUse policy hook (reads JSON on stdin)"
     )
@@ -224,12 +264,34 @@ def main() -> int:
     setup = commands.add_parser("setup", help="change a project's tools")
     setup.add_argument("--tools", help="comma-separated ids; skips the menu")
     setup.add_argument("--project", type=Path, default=ROOT)
+    custom_input = setup.add_mutually_exclusive_group()
+    custom_input.add_argument(
+        "--custom-mcps", help="explicit custom MCP choices as a JSON array"
+    )
+    custom_input.add_argument(
+        "--custom-mcps-file", type=Path, help="JSON file of explicit custom MCP choices"
+    )
     tools = commands.add_parser("tools", help="list tools and their MCP status")
     tools.add_argument("--project", type=Path, default=ROOT)
     tools.add_argument(
         "--json", action="store_true", help="machine-readable, for a UI front end"
     )
-    commands.add_parser("agents", help="list supported agents and gate status")
+    agents_cmd = commands.add_parser(
+        "agents", help="list supported agents and gate status"
+    )
+    agents_cmd.add_argument("--json", action="store_true", help="agent menu data")
+    workspace = commands.add_parser(
+        "workspace", help="list assets and desktop viewers as JSON"
+    )
+    workspace.add_argument("--project", type=Path, required=True)
+    workspace.add_argument("--since", default="", help="skip unchanged workspace data")
+    open_cmd = commands.add_parser(
+        "open", help="open an asset's source in a desktop tool"
+    )
+    open_cmd.add_argument("asset")
+    open_cmd.add_argument("--tool", required=True)
+    open_cmd.add_argument("--project", type=Path, required=True)
+    open_cmd.add_argument("--dry-run", action="store_true")
     doctor = commands.add_parser(
         "doctor", help="check the programs this project's tools need"
     )
@@ -256,6 +318,11 @@ def main() -> int:
     )
     bible.add_argument("--project", type=Path, required=True)
     bible.add_argument(
+        "--approve",
+        metavar="YOUR_NAME",
+        help="explicitly approve the current completed art bible by its content hash",
+    )
+    bible.add_argument(
         "--questions",
         action="store_true",
         help="print the interview questions as JSON, for a UI front end",
@@ -264,21 +331,199 @@ def main() -> int:
     auth.add_argument(
         "agent", nargs="?", choices=[a.id for a in all_agents()], default=None
     )
+    connect = commands.add_parser("connect", help="connect a local agent account")
+    connect.add_argument("action", choices=["status", "login", "use-key", "configure"])
+    connect.add_argument("--agent", choices=[a.id for a in all_agents()])
+    chat = commands.add_parser("chat", help="connect the editor to an agent over stdio")
+    chat.add_argument("--project", type=Path, required=True)
+    chat.add_argument("--agent", choices=[a.id for a in all_agents()], required=True)
+    chat.add_argument("--profile", default="")
+    chat.add_argument("--addon-protocol", type=int, default=0)
+    mcp_cmd = commands.add_parser(
+        "mcp", help="install and inspect real project MCP connections"
+    )
+    mcp_cmd.add_argument("action", choices=["install", "status"])
+    mcp_cmd.add_argument("--project", type=Path, required=True)
+    mcp_cmd.add_argument("--tool", help="preferred tool id to install")
+    mcp_cmd.add_argument(
+        "--probe",
+        action="store_true",
+        help="run the server's read-only inspection probe",
+    )
     check = commands.add_parser("check", help="run policy checks")
     check.add_argument("target", choices=["all", "catalog", "deps", "mcp", "assets"])
     check.add_argument("--project", type=Path, default=ROOT / "testbed")
     args = parser.parse_args()
 
+    if args.command == "diagnostics":
+        from joinery.diagnostics import report as diagnostic_report
+
+        print(json.dumps(diagnostic_report(args.project.resolve())))
+        return 0
+
+    if args.command in {"package", "launch"}:
+        from joinery.distribution import launch, package
+
+        try:
+            artifact = (
+                package(args.output)
+                if args.command == "package"
+                else launch(args.project)
+            )
+            print(json.dumps(artifact))
+            return 0
+        except (OSError, ValueError) as exc:
+            print(json.dumps({"error": str(exc)}))
+            return 1
+
+    if args.command in {"bootstrap", "update-addon", "transactions"}:
+        from joinery.bootstrap import setup as setup_runtime
+        from joinery.bootstrap import transactions, update_addon
+
+        try:
+            if args.command == "bootstrap":
+                outcome = setup_runtime(args.project.resolve())
+            elif args.command == "update-addon":
+                outcome = dict(update_addon(args.project.resolve()))
+            else:
+                if args.action == "revert" and not args.id:
+                    raise ValueError(
+                        "Choose one accepted transaction with --id before reverting."
+                    )
+                outcome = {
+                    "transactions": transactions(
+                        args.project.resolve(), args.action, args.id
+                    )
+                }
+            print(json.dumps(outcome))
+            return 0
+        except (OSError, ValueError, RuntimeError) as exc:
+            print(json.dumps({"error": str(exc)}))
+            return 1
+
+    if args.command == "bible" and args.approve:
+        from joinery.art_approval import approve
+
+        try:
+            approve(args.project.resolve(), args.approve)
+            print(
+                json.dumps({"approved": True, "project": str(args.project.resolve())})
+            )
+            return 0
+        except (OSError, ValueError) as exc:
+            print(json.dumps({"error": str(exc)}))
+            return 1
+
+    if args.command == "mcp":
+        import asyncio
+
+        from joinery.server_install import inspect_servers, install
+
+        try:
+            if args.action == "install":
+                if not args.tool:
+                    raise ValueError(
+                        "Specify --tool with the preferred tool to install."
+                    )
+                spec = install(args.tool)
+                print(json.dumps({"installed": spec.name, "revision": spec.revision}))
+            else:
+                server_states = asyncio.run(
+                    inspect_servers(args.project.resolve(), args.probe)
+                )
+                print(json.dumps({"servers": server_states}))
+                return int(
+                    any(
+                        item["state"] in {"error", "not-installed"}
+                        for item in server_states
+                    )
+                )
+        except (OSError, ValueError, RuntimeError) as exc:
+            print(json.dumps({"error": str(exc)}))
+            return 1
+        return 0
+    if args.command == "chat":
+        from bridge.stdio import run
+
+        if args.addon_protocol != 2:
+            print(
+                json.dumps(
+                    {
+                        "kind": "connection",
+                        "state": "error",
+                        "agent": args.agent,
+                        "message": "This editor addon uses an older tool protocol. Close the project and run joinery update-addon --project <project>, then reopen it.",
+                    }
+                )
+            )
+            return 1
+        return run(args.project, args.agent, args.profile)
+
+    if args.command == "connect":
+        try:
+            if args.action == "status":
+                result = connection.all_statuses()
+            elif args.action == "configure":
+                try:
+                    payload = json.loads(sys.stdin.readline())
+                except ValueError:
+                    raise ValueError("Could not read connection settings.") from None
+                result = {"profile": configure_api(payload)}
+            elif args.agent is None:
+                raise ValueError("Choose an agent first.")
+            elif args.action == "login":
+                result = connection.login(args.agent)
+            else:
+                result = connection.use_key(args.agent)
+        except (TypeError, ValueError, OSError) as exc:
+            print(json.dumps({"error": str(exc)}))
+            return 1
+        print(json.dumps(result))
+        return 0
+
+    if args.command in ("workspace", "open"):
+        try:
+            if args.command == "workspace":
+                stamp = watch_stamp(args.project)
+                data = (
+                    {"unchanged": True} if args.since == stamp else index(args.project)
+                )
+                print(json.dumps({**data, "stamp": stamp}))
+            else:
+                argv = open_asset(
+                    args.project, args.asset, args.tool, dry_run=args.dry_run
+                )
+                print(json.dumps({"command": argv, "opened": not args.dry_run}))
+        except (ValueError, OSError) as exc:
+            print(json.dumps({"error": str(exc)}))
+            return 1
+        return 0
     if args.command == "hook":
         return hook.main(args.agent)
     if args.command == "new":
         return _new(args.path, args.name, args.tools)
     if args.command == "setup":
-        return _setup(args.tools, args.project)
+        try:
+            payload = (
+                args.custom_mcps_file.read_text()
+                if args.custom_mcps_file is not None
+                else args.custom_mcps
+            )
+        except OSError as exc:
+            print(f"setup: {exc}", file=sys.stderr)
+            return 1
+        return _setup(args.tools, args.project, payload)
     if args.command == "agents":
+        if args.json:
+            print(
+                json.dumps(
+                    {"agents": [{"id": a.id, "name": a.name} for a in all_agents()]}
+                )
+            )
+            return 0
         return _agents()
     if args.command == "doctor":
-        text, code = report(args.project / "joinery.toml")
+        text, code = doctor_report(args.project / "joinery.toml")
         print(text)
         return code
     if args.command == "rebuild":

@@ -5,17 +5,21 @@ knows how a specific agent is launched and how its streaming output maps onto
 `AgentEvent`s. Adapters are keyed by the same ids as `joinery.agents`, so the
 gate wiring and the bridge agree on what "codex" means.
 
-These are declared seams, not finished integrations. Each adapter states whether
-it is `ready`; the bridge refuses to start an agent whose adapter is not, rather
-than pretend. Phase 2 implements the transports (Claude via the Agent SDK, the
-others via their CLIs / app-server protocols).
+Provider transports share the same project gateway, live editor operations,
+offline creative workers and review decisions. Authentication and transport
+readiness are checked separately; an absent CLI is never reported connected.
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
+from pathlib import Path
+from typing import Any
 
+from bridge.acp_session import ACPSession
+from bridge.claude_session import ClaudeSession
+from bridge.codex_session import CodexSession
 from bridge.protocol import AgentEvent, SidebarMessage
 from joinery.agents import Agent, get
 
@@ -24,8 +28,25 @@ class AgentAdapter(ABC):
     """Drives one coding agent on behalf of the sidebar."""
 
     agent_id: str
-    #: False until the transport for this agent is implemented (Phase 2).
+    #: Transport implementation, separate from authentication and connected state.
     ready: bool = False
+
+    def bind_gateway(self, path: Path) -> None:
+        """Attach the project MCP gateway before connecting the provider."""
+
+    async def connect(self, project: Path, profile_id: str = "") -> None:
+        raise NotImplementedError(
+            f"the {self.agent.name} chat transport is not implemented yet"
+        )
+
+    def editor_result(self, request_id: str, result: dict[str, Any]) -> None:
+        raise NotImplementedError("Editor tools are not available for this agent.")
+
+    async def close(self) -> None:
+        pass
+
+    async def cancel(self) -> None:
+        pass
 
     @property
     def agent(self) -> Agent:
@@ -37,48 +58,82 @@ class AgentAdapter(ABC):
         raise NotImplementedError
 
 
-class _Unimplemented(AgentAdapter):
-    """Seam for an agent whose transport is not built yet."""
+class _SessionAdapter(AgentAdapter):
+    """One provider transport; all scene and creative tools use the gateway."""
 
-    ready = False
+    ready = True
 
-    def __init__(self, agent_id: str) -> None:
+    def __init__(self, agent_id: str, session: ClaudeSession | ACPSession) -> None:
         self.agent_id = agent_id
+        self.session = session
+
+    def bind_gateway(self, path: Path) -> None:
+        self.session.gateway_socket = path
+
+    async def connect(self, project: Path, profile_id: str = "") -> None:
+        await self.session.connect(project, profile_id)
 
     async def run(self, message: SidebarMessage) -> AsyncIterator[AgentEvent]:
-        raise NotImplementedError(
-            f"the {self.agent.name} adapter is not implemented yet"
-        )
-        # Make the method an async generator for type-checkers.
-        yield  # pragma: no cover  # type: ignore[unreachable]
+        from bridge.protocol import Prompt
+
+        if not isinstance(message, Prompt):
+            raise TypeError("This transport expects a chat prompt.")
+        async for event in self.session.send(message):
+            yield event
+
+    async def cancel(self) -> None:
+        await self.session.cancel()
+
+    async def close(self) -> None:
+        await self.session.close()
 
 
-class ClaudeAdapter(_Unimplemented):
-    """Claude Code via the Agent SDK (local). Transport lands in Phase 2."""
+class ClaudeAdapter(_SessionAdapter):
+    def __init__(self) -> None:
+        super().__init__("claude", ClaudeSession())
+
+
+class CodexAdapter(AgentAdapter):
+    """Persistent Codex chat via the local app-server protocol."""
 
     def __init__(self) -> None:
-        super().__init__("claude")
+        self.agent_id = "codex"
+        self.session = CodexSession()
+
+    ready = True
+
+    def bind_gateway(self, path: Path) -> None:
+        self.session.gateway_socket = path
+
+    async def connect(self, project: Path, profile_id: str = "") -> None:
+        await self.session.connect(project, profile_id)
+
+    async def run(self, message: SidebarMessage) -> AsyncIterator[AgentEvent]:
+        from bridge.protocol import Prompt
+
+        if not isinstance(message, Prompt):
+            raise TypeError("This transport expects a chat prompt.")
+        async for event in self.session.send(message):
+            yield event
+
+    def editor_result(self, request_id: str, result: dict[str, Any]) -> None:
+        self.session.editor_result(request_id, result)
+
+    async def cancel(self) -> None:
+        await self.session.cancel()
+
+    async def close(self) -> None:
+        await self.session.close()
 
 
-class CodexAdapter(_Unimplemented):
-    """Codex CLI via its app-server protocol. Transport lands in Phase 2."""
-
+class GeminiAdapter(_SessionAdapter):
     def __init__(self) -> None:
-        super().__init__("codex")
+        super().__init__("gemini", ACPSession("gemini"))
 
 
-class GeminiAdapter(_Unimplemented):
-    """Gemini CLI. Transport lands in Phase 2."""
-
+class OpencodeAdapter(_SessionAdapter):
     def __init__(self) -> None:
-        super().__init__("gemini")
-
-
-class OpencodeAdapter(_Unimplemented):
-    """opencode via its server API. Transport lands in Phase 2."""
-
-    def __init__(self) -> None:
-        super().__init__("opencode")
+        super().__init__("opencode", ACPSession("opencode"))
 
 
 _ADAPTERS: dict[str, type[AgentAdapter]] = {

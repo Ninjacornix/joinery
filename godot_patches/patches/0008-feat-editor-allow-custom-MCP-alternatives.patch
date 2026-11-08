@@ -1,0 +1,307 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Sat, 7 Nov 2026 23:56:00 +0100
+Subject: [PATCH] feat(editor): allow custom MCP alternatives
+
+Joinery-only setup choices, not intended for upstream. Non-preferred MCPs remain opt-in and require their own executable and argv. They are saved as project custom tools without changing preferred admission rules.
+---
+ editor/project_manager/project_dialog.cpp | 168 +++++++++++++++++++---
+ editor/project_manager/project_dialog.h   |   7 +
+ 2 files changed, 158 insertions(+), 17 deletions(-)
+
+diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
+index 290547e..dd5e5b1 100644
+--- a/editor/project_manager/project_dialog.cpp
++++ b/editor/project_manager/project_dialog.cpp
+@@ -67,6 +67,9 @@
+ 
+ void ProjectDialog::_set_message(const String &p_msg, MessageType p_type, InputType p_input_type) {
+ 	msg->set_text(p_msg);
++	if (mode == MODE_NEW && joinery_available) {
++		msg->set_visible(joinery_page == 0 && !p_msg.is_empty());
++	}
+ 
+ 	if (p_type == MESSAGE_ERROR) {
+ 		invalid_state_flags.set_flag(InvalidStateFlag::INVALID_STATE_FLAG_PATH_INPUT);
+@@ -587,6 +590,9 @@ bool ProjectDialog::_joinery_load_catalog() {
+ 	}
+ 	joinery_boxes.clear();
+ 	joinery_ids.clear();
++	joinery_pickers.clear();
++	joinery_commands.clear();
++	joinery_arguments.clear();
+ 
+ 	String home = _joinery_home();
+ 	if (home.is_empty()) {
+@@ -645,26 +651,33 @@ bool ProjectDialog::_joinery_load_catalog() {
+ 		// The MCP is the thing actually being trusted, so it gets a column.
+ 		// Where the catalog knows alternatives they are all listed, including
+ 		// the ones it turned down, because the rejected servers are often the
+-		// popular ones and why they lost is worth seeing. Anything not usable
+-		// is disabled in place rather than omitted, so the list reads as a
+-		// decision instead of a shortlist.
++		// popular ones and why they lost is worth seeing. Alternatives are
++		// selectable as project-owned custom MCPs with explicit launch details.
+ 		Array options = tool.get("mcp_options", Array());
++		OptionButton *choice_picker = nullptr;
++		LineEdit *choice_command = nullptr;
++		LineEdit *choice_arguments = nullptr;
+ 		bool starred = tool.get("recommended", false);
+-		if (options.size() > 1) {
++		if (options.size() > 1 || (options.size() == 1 && Dictionary(options[0]).has("custom"))) {
+ 			OptionButton *picker = memnew(OptionButton);
++			choice_picker = picker;
++			picker->set_fit_to_longest_item(false);
++			picker->set_clip_text(true);
++			picker->set_custom_minimum_size(Size2(240, 0) * EDSCALE);
++			picker->set_meta("required", required);
++			picker->set_meta("available", available);
+ 			String detail;
+ 			for (int o = 0; o < options.size(); o++) {
+ 				Dictionary option = options[o];
+ 				String label = String(option.get("label", ""));
+ 				String state = String(option.get("state", ""));
+ 				String summary = String(option.get("summary", ""));
+-				// Each line explains itself. "rejected" on its own is Joinery's
+-				// vetting vocabulary and means nothing to someone making a
+-				// project; "blocked: sends telemetry" does.
+-				String prefix = state == "rejected" ? String(TTRC("blocked: ")) : String();
++				// Preference explains the default; it does not forbid a custom MCP.
++				String prefix = state == "alternative" ? String(TTRC("not preferred: ")) : String();
+ 				String item = summary.is_empty() ? label
+ 												 : label + "  (" + prefix + summary + ")";
+ 				picker->add_item(item);
++				picker->set_item_metadata(o, option);
+ 				if (!bool(option.get("usable", false))) {
+ 					picker->set_item_disabled(o, true);
+ 				}
+@@ -672,7 +685,19 @@ bool ProjectDialog::_joinery_load_catalog() {
+ 			}
+ 			picker->select(0);
+ 			picker->set_tooltip_text(detail.strip_edges());
+-			joinery_tool_list->add_child(picker);
++			VBoxContainer *choice = memnew(VBoxContainer);
++			choice->set_h_size_flags(Control::SIZE_EXPAND_FILL);
++			joinery_tool_list->add_child(choice);
++			choice->add_child(picker);
++			choice_command = memnew(LineEdit);
++			choice_command->set_placeholder(TTRC("MCP executable"));
++			choice_command->hide();
++			choice->add_child(choice_command);
++			choice_arguments = memnew(LineEdit);
++			choice_arguments->set_placeholder(TTRC("Arguments as JSON, or []"));
++			choice_arguments->hide();
++			choice->add_child(choice_arguments);
++			picker->connect(SNAME("item_selected"), callable_mp(this, &ProjectDialog::_joinery_mcp_selected).bind(i));
+ 		} else {
+ 			Label *mcp = memnew(Label);
+ 			String label;
+@@ -695,6 +720,13 @@ bool ProjectDialog::_joinery_load_catalog() {
+ 
+ 		joinery_boxes.push_back(box);
+ 		joinery_ids.push_back(tool.get("id", ""));
++		joinery_pickers.push_back(choice_picker);
++		joinery_commands.push_back(choice_command);
++		joinery_arguments.push_back(choice_arguments);
++		if (choice_picker && Dictionary(choice_picker->get_item_metadata(0)).has("custom")) {
++			box->set_disabled(false);
++		}
++		box->connect(SNAME("toggled"), callable_mp(this, &ProjectDialog::_joinery_tool_toggled).bind(i));
+ 	}
+ 
+ 	joinery_available = !joinery_boxes.is_empty();
+@@ -705,6 +737,9 @@ String ProjectDialog::_joinery_selected_tools() const {
+ 	String chosen;
+ 	for (int i = 0; i < joinery_boxes.size(); i++) {
+ 		if (joinery_boxes[i]->is_pressed()) {
++			if (joinery_pickers[i] && Dictionary(joinery_pickers[i]->get_item_metadata(joinery_pickers[i]->get_selected())).has("custom")) {
++				continue; // This application's custom MCP replaces its preferred entry.
++			}
+ 			if (!chosen.is_empty()) {
+ 				chosen += ",";
+ 			}
+@@ -714,6 +749,85 @@ String ProjectDialog::_joinery_selected_tools() const {
+ 	return chosen;
+ }
+ 
++void ProjectDialog::_joinery_mcp_selected(int p_option, int p_row) {
++	Dictionary option = joinery_pickers[p_row]->get_item_metadata(p_option);
++	bool custom = option.has("custom");
++	joinery_commands[p_row]->set_visible(custom);
++	joinery_arguments[p_row]->set_visible(custom);
++	bool required = joinery_pickers[p_row]->get_meta("required", false);
++	bool available = joinery_pickers[p_row]->get_meta("available", false);
++	joinery_boxes[p_row]->set_disabled(!custom && (required || !available));
++	joinery_boxes[p_row]->set_pressed(custom || required || available);
++	joinery_status->set_text("");
++	if (custom) {
++		joinery_commands[p_row]->grab_focus();
++	}
++}
++
++void ProjectDialog::_joinery_tool_toggled(bool p_enabled, int p_row) {
++	OptionButton *picker = joinery_pickers[p_row];
++	if (picker) {
++		bool custom = Dictionary(picker->get_item_metadata(picker->get_selected())).has("custom");
++		joinery_commands[p_row]->set_visible(p_enabled && custom);
++		joinery_arguments[p_row]->set_visible(p_enabled && custom);
++	}
++}
++
++bool ProjectDialog::_joinery_validate_custom() {
++	for (int i = 0; i < joinery_boxes.size(); i++) {
++		if (!joinery_boxes[i]->is_pressed() || !joinery_pickers[i]) {
++			continue;
++		}
++		Dictionary option = joinery_pickers[i]->get_item_metadata(joinery_pickers[i]->get_selected());
++		if (!option.has("custom")) {
++			continue;
++		}
++		if (joinery_commands[i]->get_text().strip_edges().is_empty()) {
++			joinery_status->set_text(TTRC("Enter the selected MCP's executable, or choose the preferred MCP."));
++			joinery_commands[i]->grab_focus();
++			return false;
++		}
++		String text = joinery_arguments[i]->get_text().strip_edges();
++		Ref<JSON> json;
++		json.instantiate();
++		if (text.is_empty()) {
++			text = "[]";
++		}
++		bool valid = json->parse(text) == OK && json->get_data().get_type() == Variant::ARRAY;
++		if (valid) {
++			Array arguments = json->get_data();
++			for (int a = 0; a < arguments.size(); a++) {
++				valid = valid && arguments[a].get_type() == Variant::STRING;
++			}
++		}
++		if (!valid) {
++			joinery_status->set_text(TTRC("MCP arguments must be a JSON array of strings, for example [\"--stdio\"]."));
++			joinery_arguments[i]->grab_focus();
++			return false;
++		}
++	}
++	return true;
++}
++
++Array ProjectDialog::_joinery_custom_tools() const {
++	Array custom;
++	for (int i = 0; i < joinery_boxes.size(); i++) {
++		if (!joinery_boxes[i]->is_pressed() || !joinery_pickers[i]) {
++			continue;
++		}
++		Dictionary option = joinery_pickers[i]->get_item_metadata(joinery_pickers[i]->get_selected());
++		if (!option.has("custom")) {
++			continue;
++		}
++		Dictionary tool = Dictionary(option["custom"]).duplicate();
++		tool["command"] = joinery_commands[i]->get_text().strip_edges();
++		String arguments = joinery_arguments[i]->get_text().strip_edges();
++		tool["args"] = JSON::parse_string(arguments.is_empty() ? String("[]") : arguments);
++		custom.push_back(tool);
++	}
++	return custom;
++}
++
+ // A heading that matches the editor's own type scale, instead of a fixed pixel
+ // size that goes wrong at a different interface scale.
+ Label *ProjectDialog::_joinery_heading(const String &p_text) const {
+@@ -921,14 +1035,15 @@ void ProjectDialog::_joinery_show_step(int p_step) {
+ 	} else {
+ 		set_title(vformat(TTRC("Art bible  (%d of %d)"), p_step + 1, total));
+ 	}
+-	_set_message("", MESSAGE_SUCCESS);
+-	// Width is pinned by set_min_size so pages cannot jump sideways, but height
+-	// has to follow the content. Deferred because calling it now measures the
+-	// page that is still on its way out.
++	if (first) {
++		_validate_path();
++	} else {
++		_set_message("", MESSAGE_SUCCESS);
++	}
+ 	// Joinery keeps one window rectangle throughout the interview. Long pages
+ 	// scroll inside it rather than resizing or repositioning the native window.
+ 	set_title(TTRC("New Joinery project"));
+-	joinery_progress->set_text(vformat(TTRC("Step %d of %d  ·  %s"), p_step + 1, total,
++	joinery_progress->set_text(vformat(TTRC("Step %d of %d  /  %s"), p_step + 1, total,
+ 			p_step == 0 ? TTRC("Project details") : p_step == 1 ? TTRC("Choose your tools") : TTRC("Art direction")));
+ 	joinery_back->set_disabled(first);
+ 	joinery_scroll->set_v_scroll(0);
+@@ -1032,7 +1147,19 @@ void ProjectDialog::_joinery_install(const String &p_path, const String &p_tools
+ 	args.push_back("--project");
+ 	args.push_back(p_path);
+ 	args.push_back("--tools");
+-	args.push_back(p_tools.is_empty() ? String("godot") : p_tools);
++	args.push_back(p_tools);
++	// OS::execute captures output through a shell on Unix. Keep structured
++	// user input in a temporary file, never interpolated into that command.
++	Error choices_error = OK;
++	Ref<FileAccess> choices_file = FileAccess::create_temp(FileAccess::WRITE, "joinery-mcps", "json", false, &choices_error);
++	if (choices_file.is_null()) {
++		WARN_PRINT("Joinery: could not prepare custom MCP choices.");
++		return;
++	}
++	choices_file->store_string(JSON::stringify(_joinery_custom_tools()));
++	choices_file->flush();
++	args.push_back("--custom-mcps-file");
++	args.push_back(choices_file->get_path_absolute());
+ 	String output;
+ 	int exit_code = 0;
+ 	Error cli = OS::get_singleton()->execute("uv", args, &output, &exit_code, true);
+@@ -1063,6 +1190,11 @@ void ProjectDialog::ok_pressed() {
+ 
+ 	String path = project_path->get_text();
+ 
++	if (mode == MODE_NEW && joinery_available && joinery_page >= 1 && !_joinery_validate_custom()) {
++		_joinery_show_step(1);
++		return;
++	}
++
+ 	// Joinery: Next walks the steps. Only Create on the last one falls through
+ 	// to the real creation below.
+ 	if (mode == MODE_NEW && joinery_available && joinery_page < _joinery_total_steps() - 1) {
+@@ -1591,8 +1723,8 @@ ProjectDialog::ProjectDialog() {
+ 	vb->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+ 	vb->set_v_size_flags(Control::SIZE_EXPAND_FILL);
+ 	joinery_scroll->add_child(vb);
+-	joinery_back = add_button(TTRC("Back"), false, "joinery_back");
+-	connect(SNAME("custom_action"), callable_mp(this, &ProjectDialog::_joinery_previous_step));
++	joinery_back = add_button(TTRC("Back"), false);
++	joinery_back->connect(SceneStringName(pressed), callable_mp(this, &ProjectDialog::_joinery_previous_step).bind(StringName("joinery_back")));
+ 	// Joinery: bible pages are built from the CLI at dialog-open time, so the
+ 	// root box has to stay reachable after construction.
+ 	vb_root = vb;
+@@ -1801,6 +1933,8 @@ ProjectDialog::ProjectDialog() {
+ 	joinery_container->add_child(joinery_tool_list);
+ 
+ 	joinery_status = memnew(Label);
++	joinery_status->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
++	joinery_status->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+ 	joinery_container->add_child(joinery_status);
+ 
+ 	l = memnew(Label);
+diff --git a/editor/project_manager/project_dialog.h b/editor/project_manager/project_dialog.h
+index 5d0b0f5..55330f2 100644
+--- a/editor/project_manager/project_dialog.h
++++ b/editor/project_manager/project_dialog.h
+@@ -97,6 +97,9 @@ private:
+ 	Label *joinery_status = nullptr;
+ 	Vector<CheckBox *> joinery_boxes;
+ 	Vector<String> joinery_ids;
++	Vector<OptionButton *> joinery_pickers;
++	Vector<LineEdit *> joinery_commands;
++	Vector<LineEdit *> joinery_arguments;
+ 	// The art bible interview, one page per themed group of questions. Six
+ 	// questions on one screen is a wall nobody reads, so the CLI groups them
+ 	// and this paginates. Built at dialog-open time, hence vb_root.
+@@ -186,6 +189,10 @@ private:
+ 	int _joinery_total_steps() const;
+ 	void _joinery_reset_pages();
+ 	String _joinery_selected_tools() const;
++	void _joinery_mcp_selected(int p_option, int p_row);
++	void _joinery_tool_toggled(bool p_enabled, int p_row);
++	bool _joinery_validate_custom();
++	Array _joinery_custom_tools() const;
+ 	String _joinery_home() const;
+ 	void _joinery_write_bible(const String &p_path, const String &p_title);
+ 	Label *_joinery_heading(const String &p_text) const;

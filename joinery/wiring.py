@@ -22,6 +22,7 @@ any clone. Scaffolded game projects point at the concrete engine install.
 from __future__ import annotations
 
 import json
+import shlex
 from pathlib import Path
 
 from joinery.agents import Agent, all_agents
@@ -47,7 +48,12 @@ def _args(engine: str, agent_id: str = "") -> list[str]:
 
 
 def _command_str(engine: str, agent_id: str = "") -> str:
-    return " ".join(["uv", *_args(engine, agent_id)])
+    return " ".join(
+        '"${CLAUDE_PROJECT_DIR}"'
+        if part == "${CLAUDE_PROJECT_DIR}"
+        else shlex.quote(part)
+        for part in ["uv", *_args(engine, agent_id)]
+    )
 
 
 def unwireable(agents: tuple[Agent, ...] = all_agents()) -> list[str]:
@@ -58,17 +64,13 @@ def unwireable(agents: tuple[Agent, ...] = all_agents()) -> list[str]:
 def _claude_settings(engine: str) -> dict[str, object]:
     hook = {
         "type": "command",
-        "command": "uv",
-        "args": _args(engine, "claude"),
-        "onFailure": "block",
+        "command": _command_str(engine, "claude"),
         "timeout": 30,
     }
     return {
         "enableAllProjectMcpServers": False,
         "env": _TELEMETRY_OFF,
-        "hooks": {
-            "PreToolUse": [{"matcher": _MATCHER_CLAUDE, "hooks": [hook]}]
-        },
+        "hooks": {"PreToolUse": [{"matcher": _MATCHER_CLAUDE, "hooks": [hook]}]},
     }
 
 

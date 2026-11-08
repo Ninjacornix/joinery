@@ -1,0 +1,156 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Sat, 7 Nov 2026 23:54:08 +0100
+Subject: [PATCH] feat(editor): keep project setup steady
+
+Joinery-only setup layout, not intended for upstream. Keep renderer choices in one row and interview pages within a fixed scrollable window.
+---
+ editor/project_manager/project_dialog.cpp | 56 ++++++++++++++++++++---
+ editor/project_manager/project_dialog.h   |  5 ++
+ 2 files changed, 55 insertions(+), 6 deletions(-)
+
+diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
+index d855bf5..290547e 100644
+--- a/editor/project_manager/project_dialog.cpp
++++ b/editor/project_manager/project_dialog.cpp
+@@ -38,6 +38,7 @@
+ // is sized from this, so the dialog never resizes between steps and a text box
+ // on the bible pages lines up with the project name field on the first.
+ #define JOINERY_DIALOG_WIDTH 720
++#define JOINERY_DIALOG_HEIGHT 620
+ #define JOINERY_FIELD_HEIGHT 76
+ #include "core/io/zip_io.h"
+ #include "core/object/callable_mp.h"
+@@ -57,6 +58,8 @@
+ #include "scene/gui/text_edit.h"
+ #include "scene/gui/link_button.h"
+ #include "scene/gui/option_button.h"
++#include "scene/gui/margin_container.h"
++#include "scene/gui/scroll_container.h"
+ #include "scene/gui/separator.h"
+ #include "scene/gui/texture_rect.h"
+ #include "servers/display/display_server.h"
+@@ -775,7 +778,7 @@ bool ProjectDialog::_joinery_load_questions() {
+ 		Dictionary page = pages[p];
+ 		VBoxContainer *container = memnew(VBoxContainer);
+ 		container->hide();
+-		container->add_theme_constant_override(SNAME("separation"), 2 * EDSCALE);
++		container->add_theme_constant_override(SNAME("separation"), 12 * EDSCALE);
+ 		// Take the full height of the dialog. Without this the page sits at its
+ 		// minimum size and the leftover height lands under the last question as
+ 		// dead space, which no amount of resizing the window fixes: the inputs
+@@ -922,7 +925,19 @@ void ProjectDialog::_joinery_show_step(int p_step) {
+ 	// Width is pinned by set_min_size so pages cannot jump sideways, but height
+ 	// has to follow the content. Deferred because calling it now measures the
+ 	// page that is still on its way out.
+-	callable_mp((Window *)this, &Window::reset_size).call_deferred();
++	// Joinery keeps one window rectangle throughout the interview. Long pages
++	// scroll inside it rather than resizing or repositioning the native window.
++	set_title(TTRC("New Joinery project"));
++	joinery_progress->set_text(vformat(TTRC("Step %d of %d  ·  %s"), p_step + 1, total,
++			p_step == 0 ? TTRC("Project details") : p_step == 1 ? TTRC("Choose your tools") : TTRC("Art direction")));
++	joinery_back->set_disabled(first);
++	joinery_scroll->set_v_scroll(0);
++}
++
++void ProjectDialog::_joinery_previous_step(const StringName &p_action) {
++	if (p_action == "joinery_back" && joinery_page > 0) {
++		_joinery_show_step(joinery_page - 1);
++	}
+ }
+ 
+ void ProjectDialog::_joinery_reset_pages() {
+@@ -1514,7 +1529,15 @@ void ProjectDialog::show_dialog(bool p_reset_name, bool p_is_confirmed) {
+ 
+ 	_validate_path();
+ 
+-	popup_centered(Size2(500, 0) * EDSCALE);
++	bool interview = mode == MODE_NEW && joinery_available;
++	joinery_progress->set_visible(interview);
++	joinery_back->set_visible(interview);
++	if (interview) {
++		_joinery_show_step(0);
++	}
++	Size2 desired = Size2(interview ? JOINERY_DIALOG_WIDTH : 500, interview ? JOINERY_DIALOG_HEIGHT : 0) * EDSCALE;
++	desired = desired.min(Size2(get_usable_parent_rect().size) * 0.9);
++	popup_centered(desired);
+ }
+ 
+ void ProjectDialog::_notification(int p_what) {
+@@ -1548,14 +1571,34 @@ void ProjectDialog::_bind_methods() {
+ }
+ 
+ ProjectDialog::ProjectDialog() {
++	MarginContainer *margin = memnew(MarginContainer);
++	for (const StringName &side : { SNAME("margin_left"), SNAME("margin_right"), SNAME("margin_top"), SNAME("margin_bottom") }) {
++		margin->add_theme_constant_override(side, 20 * EDSCALE);
++	}
++	add_child(margin);
++	VBoxContainer *shell = memnew(VBoxContainer);
++	shell->add_theme_constant_override(SNAME("separation"), 20 * EDSCALE);
++	margin->add_child(shell);
++	joinery_progress = memnew(Label);
++	joinery_progress->set_theme_type_variation(SNAME("HeaderMedium"));
++	shell->add_child(joinery_progress);
++	joinery_scroll = memnew(ScrollContainer);
++	joinery_scroll->set_h_size_flags(Control::SIZE_EXPAND_FILL);
++	joinery_scroll->set_v_size_flags(Control::SIZE_EXPAND_FILL);
++	joinery_scroll->set_horizontal_scroll_mode(ScrollContainer::SCROLL_MODE_DISABLED);
++	shell->add_child(joinery_scroll);
+ 	VBoxContainer *vb = memnew(VBoxContainer);
+-	add_child(vb);
++	vb->set_h_size_flags(Control::SIZE_EXPAND_FILL);
++	vb->set_v_size_flags(Control::SIZE_EXPAND_FILL);
++	joinery_scroll->add_child(vb);
++	joinery_back = add_button(TTRC("Back"), false, "joinery_back");
++	connect(SNAME("custom_action"), callable_mp(this, &ProjectDialog::_joinery_previous_step));
+ 	// Joinery: bible pages are built from the CLI at dialog-open time, so the
+ 	// root box has to stay reachable after construction.
+ 	vb_root = vb;
+ 	// Tighter vertical rhythm. The stock separation is tuned for a long form;
+ 	// these pages hold two or three things and the rest reads as padding.
+-	vb->add_theme_constant_override(SNAME("separation"), 4 * EDSCALE);
++	vb->add_theme_constant_override(SNAME("separation"), 16 * EDSCALE);
+ 
+ 	name_container = memnew(VBoxContainer);
+ 	vb->add_child(name_container);
+@@ -1652,7 +1695,8 @@ ProjectDialog::ProjectDialog() {
+ 	renderer_button_group.instantiate();
+ 
+ 	// Left hand side, used for checkboxes to select renderer.
+-	Container *rvb = memnew(VBoxContainer);
++	Container *rvb = memnew(HBoxContainer);
++	rvb->add_theme_constant_override(SNAME("separation"), 16 * EDSCALE);
+ 	rshc->add_child(rvb);
+ 
+ 	String default_renderer_type = "forward_plus";
+diff --git a/editor/project_manager/project_dialog.h b/editor/project_manager/project_dialog.h
+index 566d587..5d0b0f5 100644
+--- a/editor/project_manager/project_dialog.h
++++ b/editor/project_manager/project_dialog.h
+@@ -41,6 +41,7 @@ class EditorFileDialog;
+ class LineEdit;
+ class OptionButton;
+ class TextureRect;
++class ScrollContainer;
+ 
+ class ProjectDialog : public ConfirmationDialog {
+ 	GDCLASS(ProjectDialog, ConfirmationDialog);
+@@ -100,6 +101,9 @@ private:
+ 	// questions on one screen is a wall nobody reads, so the CLI groups them
+ 	// and this paginates. Built at dialog-open time, hence vb_root.
+ 	VBoxContainer *vb_root = nullptr;
++	ScrollContainer *joinery_scroll = nullptr;
++	Label *joinery_progress = nullptr;
++	Button *joinery_back = nullptr;
+ 	// Controls the Joinery flow hides or needs to keep a steady size. Held as
+ 	// members because they are locals upstream and hiding beats deleting.
+ 	HBoxContainer *joinery_renderer_row = nullptr;
+@@ -178,6 +182,7 @@ private:
+ 	bool _joinery_load_catalog();
+ 	bool _joinery_load_questions();
+ 	void _joinery_show_step(int p_step);
++	void _joinery_previous_step(const StringName &p_action);
+ 	int _joinery_total_steps() const;
+ 	void _joinery_reset_pages();
+ 	String _joinery_selected_tools() const;

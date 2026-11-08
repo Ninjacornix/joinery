@@ -1,0 +1,69 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Sat, 7 Nov 2026 23:02:27 +0100
+Subject: [PATCH] feat(editor): simplify app rail and dock chrome
+
+Joinery-only, not for upstream. Keep native editors registered for internal routing while the addon owns app navigation. Hide bottom status chrome and remove assistant-column docking menus.
+---
+ editor/docks/dock_tab_container.cpp | 9 +++++++++
+ editor/editor_node.cpp              | 2 ++
+ editor/gui/editor_bottom_panel.cpp  | 2 ++
+ 3 files changed, 13 insertions(+)
+
+diff --git a/editor/docks/dock_tab_container.cpp b/editor/docks/dock_tab_container.cpp
+index 28a8ea7..f03fe97 100644
+--- a/editor/docks/dock_tab_container.cpp
++++ b/editor/docks/dock_tab_container.cpp
+@@ -150,10 +150,16 @@ EditorDockDragHint::EditorDockDragHint() {
+ }
+ 
+ void DockTabContainer::_pre_popup() {
++	if (dock_slot >= EditorDock::DOCK_SLOT_RIGHT_UL && dock_slot <= EditorDock::DOCK_SLOT_RIGHT_BR) {
++		return; // Joinery's assistant column has no docking menu.
++	}
+ 	dock_context_popup->set_dock(get_dock(get_current_tab()));
+ }
+ 
+ void DockTabContainer::_tab_rmb_clicked(int p_tab_idx) {
++	if (dock_slot >= EditorDock::DOCK_SLOT_RIGHT_UL && dock_slot <= EditorDock::DOCK_SLOT_RIGHT_BR) {
++		return;
++	}
+ 	EditorDock *hovered_dock = get_dock(p_tab_idx);
+ 	if (!hovered_dock) {
+ 		return;
+@@ -222,6 +228,9 @@ void DockTabContainer::load_selected_tab(int p_idx) {
+ void DockTabContainer::set_dock_context_popup(DockContextPopup *p_popup) {
+ 	dock_context_popup = p_popup;
+ 	set_popup(dock_context_popup);
++	if (dock_slot >= EditorDock::DOCK_SLOT_RIGHT_UL && dock_slot <= EditorDock::DOCK_SLOT_RIGHT_BR) {
++		set_popup(nullptr);
++	}
+ }
+ 
+ void DockTabContainer::move_dock_index(EditorDock *p_dock, int p_to_index, bool p_set_current) {
+diff --git a/editor/editor_node.cpp b/editor/editor_node.cpp
+index 420e89b..3cee21a 100644
+--- a/editor/editor_node.cpp
++++ b/editor/editor_node.cpp
+@@ -9111,6 +9111,8 @@ EditorNode::EditorNode() {
+ 	VBoxContainer *main_editor_button_hb = memnew(VBoxContainer);
+ 	main_editor_button_hb->set_mouse_filter(Control::MOUSE_FILTER_STOP);
+ 	main_editor_button_hb->set_name("EditorMainScreenButtons");
++	// Native editors remain routable through Godot; the visible rail contains apps only.
++	main_editor_button_hb->hide();
+ 	editor_main_screen->set_button_container(main_editor_button_hb);
+ 	navigation->add_child(main_editor_button_hb);
+ 
+diff --git a/editor/gui/editor_bottom_panel.cpp b/editor/gui/editor_bottom_panel.cpp
+index 8569fcf..477dcd2 100644
+--- a/editor/gui/editor_bottom_panel.cpp
++++ b/editor/gui/editor_bottom_panel.cpp
+@@ -335,6 +335,8 @@ EditorBottomPanel::EditorBottomPanel() :
+ 	pin_button->set_toggle_mode(true);
+ 	pin_button->set_tooltip_text(TTRC("Pin Bottom Panel Switching"));
+ 	pin_button->connect(SceneStringName(toggled), callable_mp(this, &EditorBottomPanel::_pin_button_toggled));
++	// Joinery keeps the bottom strip for engine tabs, without version/status chrome.
++	bottom_hbox->hide();
+ 
+ 	callable_mp(this, &EditorBottomPanel::_repaint).call_deferred();
+ }

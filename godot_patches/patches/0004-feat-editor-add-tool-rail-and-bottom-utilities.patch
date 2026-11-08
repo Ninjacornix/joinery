@@ -1,0 +1,307 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Sat, 7 Nov 2026 22:45:10 +0100
+Subject: [PATCH] feat(editor): add tool rail and bottom utilities
+
+Joinery-only, not for upstream: center run controls and move workspace selectors into an icon rail. Keep the rail outside dock split accounting so saved dock widths retain their meaning.
+
+Migrate existing utility docks to the bottom once, preserving unrelated docks, closed panels and floating-window settings. Later manual layouts remain intact.
+---
+ editor/docks/groups_dock.cpp    |  3 +-
+ editor/docks/history_dock.cpp   |  3 +-
+ editor/docks/import_dock.cpp    |  3 +-
+ editor/docks/inspector_dock.cpp |  3 +-
+ editor/docks/signals_dock.cpp   |  3 +-
+ editor/editor_main_screen.cpp   | 24 +++++++++++-----
+ editor/editor_main_screen.h     |  6 ++--
+ editor/editor_node.cpp          | 51 ++++++++++++++++++++++++++++++---
+ 8 files changed, 77 insertions(+), 19 deletions(-)
+
+diff --git a/editor/docks/groups_dock.cpp b/editor/docks/groups_dock.cpp
+index de2534e..a43b6d6 100644
+--- a/editor/docks/groups_dock.cpp
++++ b/editor/docks/groups_dock.cpp
+@@ -41,7 +41,8 @@ GroupsDock::GroupsDock() {
+ 	set_name(TTRC("Groups"));
+ 	set_icon_name("Groups");
+ 	set_dock_shortcut(ED_SHORTCUT_AND_COMMAND("docks/open_groups", TTRC("Open Groups Dock")));
+-	set_default_slot(EditorDock::DOCK_SLOT_RIGHT_UL);
++	set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
++	set_available_layouts(DOCK_LAYOUT_ALL);
+ 
+ 	groups = memnew(GroupsEditor);
+ 	groups->set_v_size_flags(SIZE_EXPAND_FILL);
+diff --git a/editor/docks/history_dock.cpp b/editor/docks/history_dock.cpp
+index ac81ee2..22e162d 100644
+--- a/editor/docks/history_dock.cpp
++++ b/editor/docks/history_dock.cpp
+@@ -239,7 +239,8 @@ HistoryDock::HistoryDock() {
+ 	set_name(TTRC("History"));
+ 	set_icon_name("History");
+ 	set_dock_shortcut(ED_SHORTCUT_AND_COMMAND("docks/open_history", TTRC("Open History Dock")));
+-	set_default_slot(EditorDock::DOCK_SLOT_LEFT_BR);
++	set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
++	set_available_layouts(DOCK_LAYOUT_ALL);
+ 
+ 	ur_manager = EditorUndoRedoManager::get_singleton();
+ 	ur_manager->connect("history_changed", callable_mp(this, &HistoryDock::on_history_changed));
+diff --git a/editor/docks/import_dock.cpp b/editor/docks/import_dock.cpp
+index d641dfe..3f235d7 100644
+--- a/editor/docks/import_dock.cpp
++++ b/editor/docks/import_dock.cpp
+@@ -752,7 +752,8 @@ ImportDock::ImportDock() {
+ 	set_name(TTRC("Import"));
+ 	set_icon_name("FileAccess");
+ 	set_dock_shortcut(ED_SHORTCUT_AND_COMMAND("docks/open_import", TTRC("Open Import Dock")));
+-	set_default_slot(EditorDock::DOCK_SLOT_LEFT_UR);
++	set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
++	set_available_layouts(DOCK_LAYOUT_ALL);
+ 
+ 	VBoxContainer *main_vb = memnew(VBoxContainer);
+ 	add_child(main_vb);
+diff --git a/editor/docks/inspector_dock.cpp b/editor/docks/inspector_dock.cpp
+index a7fdaab..6afb844 100644
+--- a/editor/docks/inspector_dock.cpp
++++ b/editor/docks/inspector_dock.cpp
+@@ -708,7 +708,8 @@ InspectorDock::InspectorDock(EditorData &p_editor_data) {
+ 	set_name(TTRC("Inspector"));
+ 	set_icon_name("AnimationTrackList");
+ 	set_dock_shortcut(ED_SHORTCUT_AND_COMMAND("docks/open_inspector", TTRC("Open Inspector Dock")));
+-	set_default_slot(EditorDock::DOCK_SLOT_RIGHT_UL);
++	set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
++	set_available_layouts(DOCK_LAYOUT_ALL);
+ 
+ 	VBoxContainer *main_vb = memnew(VBoxContainer);
+ 	add_child(main_vb);
+diff --git a/editor/docks/signals_dock.cpp b/editor/docks/signals_dock.cpp
+index a037196..b88e340 100644
+--- a/editor/docks/signals_dock.cpp
++++ b/editor/docks/signals_dock.cpp
+@@ -46,7 +46,8 @@ SignalsDock::SignalsDock() {
+ 	set_name(TTRC("Signals"));
+ 	set_icon_name("Signals");
+ 	set_dock_shortcut(ED_SHORTCUT_AND_COMMAND("docks/open_signals", TTRC("Open Signals Dock")));
+-	set_default_slot(EditorDock::DOCK_SLOT_RIGHT_UL);
++	set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
++	set_available_layouts(DOCK_LAYOUT_ALL);
+ 
+ 	connections = memnew(ConnectionsDock);
+ 	connections->set_v_size_flags(SIZE_EXPAND_FILL);
+diff --git a/editor/editor_main_screen.cpp b/editor/editor_main_screen.cpp
+index 730be32..fdc8bb0 100644
+--- a/editor/editor_main_screen.cpp
++++ b/editor/editor_main_screen.cpp
+@@ -33,6 +33,7 @@
+ #include "core/io/config_file.h"
+ #include "core/object/callable_mp.h"
+ #include "editor/editor_node.h"
++#include "editor/themes/editor_scale.h"
+ #include "editor/editor_string_names.h"
+ #include "editor/plugins/editor_plugin.h"
+ #include "editor/settings/editor_settings.h"
+@@ -66,6 +67,9 @@ void EditorMainScreen::_notification(int p_what) {
+ 				Button *tb = buttons[i];
+ 				EditorPlugin *p_editor = editor_table[i];
+ 				Ref<Texture2D> icon = p_editor->get_plugin_icon();
++				if (p_editor->get_plugin_name() == "3D") {
++					icon = get_editor_theme_icon("Godot");
++				}
+ 
+ 				if (icon.is_valid()) {
+ 					tb->set_button_icon(icon);
+@@ -77,7 +81,7 @@ void EditorMainScreen::_notification(int p_what) {
+ 	}
+ }
+ 
+-void EditorMainScreen::set_button_container(HBoxContainer *p_button_hb) {
++void EditorMainScreen::set_button_container(BoxContainer *p_button_hb) {
+ 	button_hb = p_button_hb;
+ }
+ 
+@@ -158,7 +162,7 @@ void EditorMainScreen::select_by_name(const String &p_name) {
+ 	ERR_FAIL_COND(p_name.is_empty());
+ 
+ 	for (int i = 0; i < buttons.size(); i++) {
+-		if (buttons[i]->get_text() == p_name) {
++		if (editor_table[i]->get_plugin_name() == p_name) {
+ 			select(i);
+ 			return;
+ 		}
+@@ -242,12 +246,11 @@ bool EditorMainScreen::can_auto_switch_screens() const {
+ 	}
+ 	// Only allow auto-switching if the selected button is to the left of the Script button.
+ 	for (int i = 0; i < button_hb->get_child_count(); i++) {
+-		Button *button = Object::cast_to<Button>(button_hb->get_child(i));
+-		if (button->get_text() == "Script") {
++		if (editor_table[i]->get_plugin_name() == "Script") {
+ 			// Selected button is at or after the Script button.
+ 			return false;
+ 		}
+-		if (button->get_text() == selected_plugin->get_plugin_name()) {
++		if (editor_table[i] == selected_plugin) {
+ 			// Selected button is before the Script button.
+ 			return true;
+ 		}
+@@ -264,7 +267,11 @@ void EditorMainScreen::add_main_plugin(EditorPlugin *p_editor) {
+ 	tb->set_toggle_mode(true);
+ 	tb->set_theme_type_variation("MainScreenButton");
+ 	tb->set_name(p_editor->get_plugin_name());
+-	tb->set_text(p_editor->get_plugin_name());
++	tb->set_tooltip_text(p_editor->get_plugin_name());
++	tb->set_accessibility_name(p_editor->get_plugin_name());
++	tb->set_custom_minimum_size(Size2(44, 44) * EDSCALE);
++	// Joinery: workspace buttons live in a vertical navigation column.
++	tb->set_text_alignment(HORIZONTAL_ALIGNMENT_LEFT);
+ 
+ 	Ref<Shortcut> shortcut = EditorSettings::get_singleton()->get_shortcut("editor/editor_" + p_editor->get_plugin_name().to_lower());
+ 	if (shortcut.is_valid()) {
+@@ -272,6 +279,9 @@ void EditorMainScreen::add_main_plugin(EditorPlugin *p_editor) {
+ 	}
+ 
+ 	Ref<Texture2D> icon = p_editor->get_plugin_icon();
++	if (p_editor->get_plugin_name() == "3D") {
++		icon = get_editor_theme_icon("Godot");
++	}
+ 	if (icon.is_null() && has_theme_icon(p_editor->get_plugin_name(), EditorStringName(EditorIcons))) {
+ 		icon = get_editor_theme_icon(p_editor->get_plugin_name());
+ 	}
+@@ -293,7 +303,7 @@ void EditorMainScreen::remove_main_plugin(EditorPlugin *p_editor) {
+ 	// Remove the main editor button and update the bindings of
+ 	// all buttons behind it to point to the correct main window.
+ 	for (int i = buttons.size() - 1; i >= 0; i--) {
+-		if (p_editor->get_plugin_name() == buttons[i]->get_text()) {
++		if (p_editor == editor_table[i]) {
+ 			if (buttons[i]->is_pressed()) {
+ 				select(EDITOR_SCRIPT);
+ 			}
+diff --git a/editor/editor_main_screen.h b/editor/editor_main_screen.h
+index 78ec499..3c48a2a 100644
+--- a/editor/editor_main_screen.h
++++ b/editor/editor_main_screen.h
+@@ -35,7 +35,7 @@
+ class Button;
+ class ConfigFile;
+ class EditorPlugin;
+-class HBoxContainer;
++class BoxContainer;
+ class VBoxContainer;
+ 
+ class EditorMainScreen : public PanelContainer {
+@@ -54,7 +54,7 @@ private:
+ 	VBoxContainer *main_screen_vbox = nullptr;
+ 	EditorPlugin *selected_plugin = nullptr;
+ 
+-	HBoxContainer *button_hb = nullptr;
++	BoxContainer *button_hb = nullptr;
+ 	Vector<Button *> buttons;
+ 	Vector<EditorPlugin *> editor_table;
+ 	HashMap<String, EditorPlugin *> main_editor_plugins;
+@@ -65,7 +65,7 @@ protected:
+ 	void _notification(int p_what);
+ 
+ public:
+-	void set_button_container(HBoxContainer *p_button_hb);
++	void set_button_container(BoxContainer *p_button_hb);
+ 
+ 	void save_layout_to_config(Ref<ConfigFile> p_config_file, const String &p_section) const;
+ 	void load_layout_from_config(Ref<ConfigFile> p_config_file, const String &p_section);
+diff --git a/editor/editor_node.cpp b/editor/editor_node.cpp
+index c3b2686..420e89b 100644
+--- a/editor/editor_node.cpp
++++ b/editor/editor_node.cpp
+@@ -6339,6 +6339,29 @@ void EditorNode::_load_editor_layout() {
+ 		}
+ 	} else {
+ 		ep.step(TTR("Loading docks..."), 1, true);
++		// Joinery: migrate existing projects once, retaining unrelated docks,
++		// closed panels, scene tabs and floating-window choices. Later manual
++		// layout changes remain the user's own.
++		if (int(config->get_value(EDITOR_NODE_CONFIG_SECTION, "joinery_shell_layout", 0)) < 1) {
++			PackedStringArray utilities = { "Scene", "FileSystem", "Import", "History", "Inspector", "Signals", "Groups" };
++			PackedStringArray bottom;
++			for (int slot = 1; slot <= EditorDock::DOCK_SLOT_MAX; slot++) {
++				String key = "dock_" + itos(slot);
++				PackedStringArray names = String(config->get_value("docks", key, "")).split(",", false);
++				PackedStringArray retained;
++				for (const String &name : names) {
++					if (!utilities.has(name)) {
++						retained.append(name);
++					}
++				}
++				config->set_value("docks", key, String(",").join(retained));
++				if (slot == EditorDock::DOCK_SLOT_BOTTOM + 1) {
++					bottom = retained;
++				}
++			}
++			utilities.append_array(bottom);
++			config->set_value("docks", "dock_9", String(",").join(utilities));
++		}
+ 		editor_dock_manager->load_docks_from_config(config, "docks", true);
+ 
+ 		ep.step(TTR("Reopening scenes..."), 2, true);
+@@ -6356,6 +6379,7 @@ void EditorNode::_load_editor_layout() {
+ }
+ 
+ void EditorNode::_save_central_editor_layout_to_config(Ref<ConfigFile> p_config_file) {
++	p_config_file->set_value(EDITOR_NODE_CONFIG_SECTION, "joinery_shell_layout", 1);
+ 	// Bottom panel.
+ 
+ 	bottom_panel->save_layout_to_config(p_config_file, EDITOR_NODE_CONFIG_SECTION);
+@@ -8704,7 +8728,12 @@ EditorNode::EditorNode() {
+ 	main_hsplit = memnew(DockSplitContainer);
+ 	main_hsplit->set_name("DockHSplitMain");
+ 	main_hsplit->set_v_size_flags(Control::SIZE_EXPAND_FILL);
+-	main_vsplit->add_child(main_hsplit);
++	// Keep the icon rail outside dock split accounting.
++	HBoxContainer *workspace_shell = memnew(HBoxContainer);
++	workspace_shell->set_v_size_flags(Control::SIZE_EXPAND_FILL);
++	main_vsplit->add_child(workspace_shell);
++	main_hsplit->set_h_size_flags(Control::SIZE_EXPAND_FILL);
++	workspace_shell->add_child(main_hsplit);
+ 
+ 	left_l_vsplit = memnew(DockSplitContainer);
+ 	left_l_vsplit->set_name("DockVSplitLeftL");
+@@ -9072,12 +9101,18 @@ EditorNode::EditorNode() {
+ 	project_title->set_visible(can_expand && menu_type == MENU_TYPE_GLOBAL);
+ 	left_spacer->add_child(project_title);
+ 
+-	HBoxContainer *main_editor_button_hb = memnew(HBoxContainer);
++	// Joinery: workspace navigation uses the cleared left column. Keep the
++	// actual buttons and their shortcuts so plugins register here unchanged.
++	VBoxContainer *navigation = memnew(VBoxContainer);
++	navigation->set_name("JoineryNavigation");
++	navigation->set_custom_minimum_size(Size2(48, 0) * EDSCALE);
++	workspace_shell->add_child(navigation);
++	workspace_shell->move_child(navigation, 0);
++	VBoxContainer *main_editor_button_hb = memnew(VBoxContainer);
+ 	main_editor_button_hb->set_mouse_filter(Control::MOUSE_FILTER_STOP);
+ 	main_editor_button_hb->set_name("EditorMainScreenButtons");
+ 	editor_main_screen->set_button_container(main_editor_button_hb);
+-	title_bar->add_child(main_editor_button_hb);
+-	title_bar->set_center_control(main_editor_button_hb);
++	navigation->add_child(main_editor_button_hb);
+ 
+ 	// Spacer to center 2D / 3D / Script buttons.
+ 	right_spacer = memnew(Control);
+@@ -9088,6 +9123,9 @@ EditorNode::EditorNode() {
+ 	project_run_bar = memnew(EditorRunBar);
+ 	project_run_bar->set_mouse_filter(Control::MOUSE_FILTER_STOP);
+ 	title_bar->add_child(project_run_bar);
++	// Run controls take the former centered workspace-selector position.
++	title_bar->move_child(project_run_bar, right_spacer->get_index());
++	title_bar->set_center_control(project_run_bar);
+ 	project_run_bar->connect("play_pressed", callable_mp(this, &EditorNode::_project_run_started));
+ 	project_run_bar->connect("stop_pressed", callable_mp(this, &EditorNode::_project_run_stopped));
+ 
+@@ -9235,6 +9273,11 @@ EditorNode::EditorNode() {
+ 		default_layout->set_value(docks_section, "dock_9", vformat("%s,%s", scene_key, filesystem_key));
+ 		default_layout->set_value(docks_section, "dock_9_selected_tab_idx", 0);
+ 	}
++	// Joinery: native utility panels now default to the bottom. The READY
++	// notification records their full bottom order after every dock exists.
++	default_layout->set_value(docks_section, "dock_3", String());
++	default_layout->set_value(docks_section, "dock_4", String());
++	default_layout->set_value(docks_section, "dock_5", String());
+ 
+ 	int hsplits[] = { 0, dock_hsize, -dock_hsize, 0 };
+ 	for (int i = 0; i < (int)std_size(hsplits); i++) {

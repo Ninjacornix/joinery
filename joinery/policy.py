@@ -46,6 +46,7 @@ class Verdict:
     def __str__(self) -> str:
         return self.reason
 
+
 _SEGMENTS = re.compile(r"&&|\|\||[;|\n]")
 _INSTALLERS = re.compile(
     r"^(?:\S+=\S+\s+)*(?:sudo\s+)?"
@@ -118,7 +119,5 @@ def command_violation(command: str, denylist: Denylist) -> Verdict | None:
         for token in tokens:
             name = normalise(_VERSION_SUFFIX.sub("", token))
             if name in denylist.packages:
-                return Verdict(
-                    Severity.STOP, f"{name} is a denied generative package"
-                )
+                return Verdict(Severity.STOP, f"{name} is a denied generative package")
     return None

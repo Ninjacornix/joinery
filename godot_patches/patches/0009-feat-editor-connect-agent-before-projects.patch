@@ -1,0 +1,134 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Sun, 8 Nov 2026 00:08:43 +0100
+Subject: [PATCH] feat(editor): connect agent before projects
+
+Joinery-only startup flow, not intended for upstream. Load the addon connection screen before exposing project actions, remember the selected agent, and allow changing it from the project list. Login stays with each provider CLI.
+---
+ editor/project_manager/project_manager.cpp | 71 ++++++++++++++++++++++
+ editor/project_manager/project_manager.h   |  3 +
+ 2 files changed, 74 insertions(+)
+
+diff --git a/editor/project_manager/project_manager.cpp b/editor/project_manager/project_manager.cpp
+index af3aeec..f6b61ac 100644
+--- a/editor/project_manager/project_manager.cpp
++++ b/editor/project_manager/project_manager.cpp
+@@ -36,7 +36,10 @@
+ #include "core/io/config_file.h"
+ #include "core/io/dir_access.h"
+ #include "core/io/file_access.h"
++#include "core/io/resource_loader.h"
++#include "core/object/script_language.h"
+ #include "core/object/callable_mp.h"
++#include "core/object/class_db.h"
+ #include "core/os/keyboard.h"
+ #include "core/os/os.h"
+ #include "core/version.h"
+@@ -563,6 +566,9 @@ void ProjectManager::_run_project_confirm() {
+ }
+ 
+ void ProjectManager::_open_selected_projects() {
++	if (joinery_connect && joinery_connect->is_visible_in_tree()) {
++		return;
++	}
+ 	// Show loading text to tell the user that the project manager is busy loading.
+ 	// This is especially important for the Web project manager.
+ 	loading_label->show();
+@@ -758,11 +764,17 @@ void ProjectManager::_install_project(const String &p_zip_path, const String &p_
+ }
+ 
+ void ProjectManager::_import_project() {
++	if (joinery_connect && joinery_connect->is_visible_in_tree()) {
++		return;
++	}
+ 	project_dialog->set_mode(ProjectDialog::MODE_IMPORT);
+ 	project_dialog->ask_for_path_and_show();
+ }
+ 
+ void ProjectManager::_new_project() {
++	if (joinery_connect && joinery_connect->is_visible_in_tree()) {
++		return;
++	}
+ 	project_dialog->set_mode(ProjectDialog::MODE_NEW);
+ 	project_dialog->show_dialog();
+ }
+@@ -1985,6 +1997,65 @@ ProjectManager::ProjectManager() {
+ 	_update_size_limits();
+ 
+ 	_joinery_simplify();
++	_joinery_show_connection();
++}
++
++void ProjectManager::_joinery_show_connection() {
++	if (joinery_connect) {
++		main_view_container->hide();
++		joinery_connect->call("open_settings");
++		return;
++	}
++	String home = OS::get_singleton()->get_environment("JOINERY_HOME");
++	String parent = OS::get_singleton()->get_executable_path().get_base_dir();
++	for (int i = 0; home.is_empty() && i < 4; i++) {
++		if (FileAccess::exists(parent.path_join("godot_addon/joinery/agent_connect.gd"))) {
++			home = parent;
++		}
++		parent = parent.path_join("..").simplify_path();
++	}
++	if (home.is_empty()) {
++		return;
++	}
++	Ref<Script> script = ResourceLoader::load(home.path_join("godot_addon/joinery/agent_connect.gd"));
++	if (script.is_null() || !script->is_valid()) {
++		return;
++	}
++	Object *instance = ClassDB::instantiate(script->get_instance_base_type());
++	joinery_connect = Object::cast_to<Control>(instance);
++	if (!joinery_connect) {
++		memdelete(instance);
++		return;
++	}
++	joinery_connect->set_script(script);
++	joinery_connect->set("engine_home", home);
++	if (EditorSettings::get_singleton()->has_setting("joinery/agent")) {
++		joinery_connect->set("initial_agent", EditorSettings::get_singleton()->get_setting("joinery/agent"));
++	}
++	if (EditorSettings::get_singleton()->has_setting("joinery/connection")) {
++		joinery_connect->set("initial_profile", EditorSettings::get_singleton()->get_setting("joinery/connection"));
++	}
++	joinery_connect->connect(SNAME("connected"), callable_mp(this, &ProjectManager::_joinery_agent_connected));
++	main_vbox->add_child(joinery_connect);
++	main_view_container->hide();
++	Button *change_agent = memnew(Button);
++	change_agent->set_text(TTRC("Change agent"));
++	change_agent->set_h_size_flags(Control::SIZE_SHRINK_BEGIN);
++	change_agent->connect(SceneStringName(pressed), callable_mp(this, &ProjectManager::_joinery_show_connection));
++	local_projects_vb->add_child(change_agent);
++	local_projects_vb->move_child(change_agent, 0);
++}
++
++void ProjectManager::_joinery_agent_connected(const String &p_agent, const String &p_method) {
++	EditorSettings::get_singleton()->set_setting("joinery/agent", p_agent);
++	EditorSettings::get_singleton()->set_setting("joinery/auth_method", p_method);
++	String profile = joinery_connect->get("selected_profile");
++	EditorSettings::get_singleton()->set_setting("joinery/connection", profile);
++	EditorSettings::get_singleton()->save();
++	OS::get_singleton()->set_environment("JOINERY_AGENT", p_agent);
++	OS::get_singleton()->set_environment("JOINERY_MODEL_PROFILE", profile);
++	joinery_connect->hide();
++	main_view_container->show();
+ }
+ 
+ // Joinery: strip the Project Manager back to opening and creating projects.
+diff --git a/editor/project_manager/project_manager.h b/editor/project_manager/project_manager.h
+index 5ab10b9..44152de 100644
+--- a/editor/project_manager/project_manager.h
++++ b/editor/project_manager/project_manager.h
+@@ -171,6 +171,9 @@ class ProjectManager : public Control {
+ 	// stays reversible. Keeping a handle on the sidebar is why this is here.
+ 	VBoxContainer *joinery_project_sidebar = nullptr;
+ 	void _joinery_simplify();
++	Control *joinery_connect = nullptr;
++	void _joinery_show_connection();
++	void _joinery_agent_connected(const String &p_agent, const String &p_method);
+ 
+ 	HBoxContainer *open_btn_container = nullptr;
+ 	PopupMenu *open_options_popup = nullptr;

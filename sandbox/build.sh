@@ -89,4 +89,4 @@ for tool in ${selectable}; do
 done
 
 echo "building ${tag} with:${wanted:- (core only)}"
-exec docker build -t "${tag}" "$@" "${here}"
+exec docker build --platform "${JOINERY_PLATFORM:-linux/amd64}" -t "${tag}" "$@" "${here}"

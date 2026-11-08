@@ -62,7 +62,7 @@ def _reader(path: Path) -> Iterator[str] | None:
         return _pyproject(path)
     if path.name == "uv.lock":
         return _uv_lock(path)
-    if path.name.startswith("requirements") and path.suffix == ".txt":
+    if "requirements" in path.name and path.suffix == ".txt":
         return _requirements(path)
     if path.name == "package.json":
         return _package_json(path)

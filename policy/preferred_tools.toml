@@ -47,7 +47,7 @@ ref = "2cea8d566dde07fbac28a61d698909d69724e853"
 tier = "official"
 stars = 37
 last_push = 2026-09-29
-licence = "unverified"
+licence = "GPL-3.0-or-later"
 notes = "v1.0.3, needs Blender 5.1+. Runs LLM code unguarded, so use it only inside the sandbox. Materials via shader nodes and bake."
 
 [[tool]]
@@ -160,7 +160,8 @@ licence = "Apache-2.0"
 id = "krita"
 name = "Krita"
 domain = "2d"
-status = "first-party-planned"
+status = "available"
+builtin_server = "joinery-paint"
 candidates = [
   "nanayax3/krita-mcp: 52 stars, last push 2026-02-26, stale",
   "SanSaSane/krita-mcp: 12 stars",
@@ -182,7 +183,8 @@ candidates = ["redsquidleader/surge-xt-mcp: 1 star"]
 id = "material-maker"
 name = "Material Maker"
 domain = "materials"
-status = "first-party-planned"
+status = "available"
+builtin_server = "joinery-materialmaker"
 candidates = [
   "graysonchalmers/Tool-MaterialMaker-MCP: base for our hardened fork, MIT, no telemetry, 10 stars, self-described alpha",
   "SS-360/materialpilot: 9 stars, no clear licence",

@@ -136,18 +136,23 @@ def normalise_event(raw: dict[str, Any]) -> Event:
     return Event("other", "", "", "", "", project_dir)
 
 
-def _mcp_violation(server: str, tool: str, project_dir: Path) -> Verdict | None:
+def mcp_violation(server: str, tool: str, project_dir: Path) -> Verdict | None:
     if not server:
         return Verdict(Severity.DENY, "MCP call with no resolvable server name")
     catalog = load_catalog()
     config = project_dir / "joinery.toml"
-    if server not in allowed_servers(catalog, config):
+    enabled = allowed_servers(catalog, config)
+    if server not in enabled:
+        # Some providers normalize MCP namespaces from '-' to '_'. Resolve
+        # only an unambiguous enabled identity; this grants no new server.
+        aliases = [name for name in enabled if name.replace("-", "_") == server]
+        if len(aliases) == 1:
+            server = aliases[0]
+    if server not in enabled:
         # A server named after a known generative service is a Rule Zero
         # attempt, not a configuration gap, so it stops the turn.
         if normalise(server) in generative_names(load_denylist()):
-            return Verdict(
-                Severity.STOP, f"{server} is a generative asset service"
-            )
+            return Verdict(Severity.STOP, f"{server} is a generative asset service")
         return Verdict(
             Severity.DENY, f"MCP server {server!r} is not enabled for this project"
         )
@@ -161,7 +166,7 @@ def _mcp_violation(server: str, tool: str, project_dir: Path) -> Verdict | None:
 def violation(raw: dict[str, Any]) -> Verdict | None:
     event = normalise_event(raw)
     if event.kind == "mcp":
-        return _mcp_violation(event.server, event.tool, event.project_dir)
+        return mcp_violation(event.server, event.tool, event.project_dir)
     if event.kind == "bash":
         return command_violation(event.command, load_denylist())
     if event.kind == "fetch":

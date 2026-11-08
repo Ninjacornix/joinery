@@ -34,12 +34,11 @@ def test_adapters_exist_for_all_agents() -> None:
         assert adapter_for(agent.id).agent_id == agent.id
 
 
-def test_adapters_declare_not_ready_yet() -> None:
-    # Transports are Phase 2; the bridge must not pretend an agent can run.
-    assert ready_agents() == []
+def test_supported_transports_are_implemented() -> None:
+    assert ready_agents() == ["claude", "codex", "gemini", "opencode"]
 
 
-def test_send_on_unbuilt_adapter_raises() -> None:
+def test_unconnected_transport_cannot_send() -> None:
     bridge = Bridge("claude")
     prompt = Prompt(text="make the door rustier", project_dir="/tmp/game")
 
@@ -47,7 +46,7 @@ def test_send_on_unbuilt_adapter_raises() -> None:
         async for _ in bridge.send(prompt):
             pass
 
-    with pytest.raises(NotImplementedError):
+    with pytest.raises(ValueError, match="not connected"):
         asyncio.run(drive())
 
 

@@ -6,4 +6,4 @@ note = "Modular room: floor, ceiling, four walls, doorway cut by boolean to fit 
 
 # Measured from the real outputs by `joinery rebuild --record`.
 [expect]
-"art/kit/room.blend" = "blend:167359c50db7e774e6ac9f6994ba1802e762bc36761961888299fa8afb5540f9"
+"art/kit/room.blend" = "blend:1d54df1b023595862ad808f48aae8cfc610b4f00afd72c38eeb85c6eb6bb68e5"

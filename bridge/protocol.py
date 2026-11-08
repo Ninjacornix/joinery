@@ -7,8 +7,8 @@ translates to and from the agent's own interface. The messages here are the
 stable surface the sidebar codes against.
 
 Only the message schema and direction live here, so both the sidebar (Godot
-side, over a local socket) and the host (Python side) agree on the wire format.
-The transport is in `bridge.host`; the agent-specific translation is in
+side, over framed stdio) and the host (Python side) agree on the wire format.
+The transport is in `bridge.stdio`; the agent-specific translation is in
 `bridge.adapters`.
 """
 
@@ -35,6 +35,8 @@ class Prompt(_Msg):
     targets: tuple[str, ...] = ()
     # The game project this turn operates on; the gate reads its joinery.toml.
     project_dir: str
+    target_context: tuple[dict[str, str], ...] = ()
+    editor_context: dict[str, str] = {}
 
 
 class Decision(_Msg):
@@ -105,7 +107,23 @@ class Done(_Msg):
     ok: bool = True
 
 
-AgentEvent = Step | ToolActivity | Preview | Message | Done
+class MessageDelta(_Msg):
+    kind: Literal["message_delta"] = "message_delta"
+    text: str
+    new_message: bool = False
+
+
+class EditorAction(_Msg):
+    kind: Literal["editor_action"] = "editor_action"
+    request_id: str
+    payload: dict[str, object]
+    context: dict[str, str]
+    targets: tuple[str, ...]
+
+
+AgentEvent = (
+    Step | ToolActivity | Preview | Message | MessageDelta | EditorAction | Done
+)
 
 
 class Envelope(_Msg):

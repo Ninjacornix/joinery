@@ -19,6 +19,7 @@ against a project directory.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import time
@@ -26,7 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
 
-SANDBOX_IMAGE = "joinery-sandbox"
+SANDBOX_IMAGE = "joinery-creative-worker"
 #: Where the project is mounted inside the container.
 WORKDIR = "/work"
 DEFAULT_TIMEOUT = 900
@@ -76,7 +77,9 @@ def _timed(cmd: list[str], timeout: int, cwd: Path | None = None) -> Result:
             cwd=cwd,
         )
     except subprocess.TimeoutExpired:
-        return Result(False, "", f"timed out after {timeout}s", time.monotonic() - start)
+        return Result(
+            False, "", f"timed out after {timeout}s", time.monotonic() - start
+        )
     except OSError as exc:
         return Result(False, "", str(exc), time.monotonic() - start)
     return Result(
@@ -105,8 +108,12 @@ class SandboxRunner:
             "docker",
             "run",
             "--rm",
+            "--platform",
+            "linux/amd64",
             "--network",
             "none",
+            "--label",
+            "joinery.scope=" + os.environ.get("JOINERY_WORKER_SCOPE", "recipe-cli"),
             "-v",
             f"{project.resolve()}:{WORKDIR}",
             "-w",
@@ -141,4 +148,4 @@ def pick(prefer: str = "auto") -> Runner:
     sandbox = SandboxRunner()
     if prefer == "sandbox":
         return sandbox
-    return sandbox if sandbox.available() else HostRunner()
+    return sandbox
