@@ -160,10 +160,20 @@ async def handshake(executable: str, directory: Path, mode: str) -> dict[str, An
             "exit_code": process.returncode,
         }
     finally:
-        await cleanup(process)
-        for task in readers:
-            task.cancel()
-        await asyncio.gather(*readers, return_exceptions=True)
+        try:
+            await cleanup(process)
+            # A wrapper exiting is insufficient: an orphaned native child can
+            # retain inherited pipes. Require real EOF before deleting its home.
+            try:
+                await asyncio.wait_for(asyncio.gather(*readers), 5)
+            except TimeoutError as exc:
+                raise RuntimeError(
+                    "Provider output pipes remained open after process shutdown"
+                ) from exc
+        finally:
+            for task in readers:
+                task.cancel()
+            await asyncio.gather(*readers, return_exceptions=True)
 
 
 async def smoke(
@@ -185,6 +195,7 @@ async def smoke(
         for mode in ("eof", "cancel"):
             cases.append(await handshake(executable, directory / mode, mode))
     return {
+        "status": "passed",
         "provider": "codex",
         "version": version,
         "platform": platform.system(),
@@ -206,7 +217,25 @@ def main() -> int:
     executable = args.codex or shutil.which("codex")
     if executable is None:
         parser.error("Install the pinned Codex CLI before running this smoke test")
-    report = asyncio.run(smoke(executable, args.expected_version))
+    try:
+        report = asyncio.run(smoke(executable, args.expected_version))
+    except Exception as exc:
+        # Keep failed native evidence too. No provider stderr or credentials are
+        # included, and the original exception still fails the CI step below.
+        failure = {
+            "status": "failed",
+            "provider": "codex",
+            "expected_version": args.expected_version,
+            "platform": platform.system(),
+            "error_type": type(exc).__name__,
+            "error": str(exc),
+        }
+        if args.output:
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(
+                json.dumps(failure, indent=2) + "\n", encoding="utf-8"
+            )
+        raise
     text = json.dumps(report, indent=2) + "\n"
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)

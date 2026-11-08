@@ -1,12 +1,12 @@
 """Release provider checks must neither inherit credentials nor accept another CLI."""
 
-import asyncio
+import json
 import sys
 from pathlib import Path
 
 import pytest
 
-from release.provider_smoke import isolated_environment, smoke
+from release.provider_smoke import isolated_environment, main
 
 
 def test_native_smoke_environment_excludes_auth_and_uses_empty_private_paths(
@@ -37,8 +37,20 @@ def test_native_smoke_environment_excludes_auth_and_uses_empty_private_paths(
         assert list(path.iterdir()) == []
 
 
-def test_smoke_refuses_wrong_executable_before_any_protocol_request() -> None:
+def test_smoke_retains_failure_evidence_for_wrong_native_executable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     # A real subprocess with the wrong version must fail at preflight, before
     # app-server can be invoked. No Python protocol simulator is involved.
+    destination = tmp_path / "evidence" / "provider.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["provider_smoke", "--codex", sys.executable, "--output", str(destination)],
+    )
     with pytest.raises(RuntimeError, match="Expected codex-cli"):
-        asyncio.run(smoke(sys.executable))
+        main()
+    report = json.loads(destination.read_text())
+    assert report["status"] == "failed" and report["error_type"] == "RuntimeError"
+    assert "Expected codex-cli" in report["error"]
+    assert "stdout" not in report and "stderr" not in report

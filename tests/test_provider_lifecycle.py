@@ -59,7 +59,7 @@ def test_windows_provider_cancel_reaps_owned_descendant() -> None:
             assert process.returncode is not None
             # taskkill /T must stop descendants too, rather than just allowing
             # the parent pipe to close and reporting apparent success.
-            result = await asyncio.to_thread(kernel.WaitForSingleObject, handle, 5000)
+            result = kernel.WaitForSingleObject(handle, 0)
             assert result == 0, "Cancelled provider left a running descendant"
             await stop_process(process)  # Closing an already-exited child is safe.
         finally:

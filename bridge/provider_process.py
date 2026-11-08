@@ -142,26 +142,43 @@ async def stop_process(process: asyncio.subprocess.Process | None) -> None:
     if process is None or process.returncode is not None:
         return
     if os.name == "nt":
+        from joinery.windows_process import WindowsProcessTree
+
+        tree = await asyncio.to_thread(WindowsProcessTree, process.pid)
+        waiting = False
         # Stop only the tree rooted at this owned child. This also handles a
         # provider launched by a user-installed CLI wrapper without orphaning it.
-        cleanup = await asyncio.create_subprocess_exec(
-            "taskkill.exe",
-            "/PID",
-            str(process.pid),
-            "/T",
-            "/F",
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
         try:
-            await asyncio.wait_for(cleanup.wait(), 5)
-        except TimeoutError:
-            cleanup.kill()
-            await cleanup.wait()
-        if process.returncode is None:
-            with contextlib.suppress(ProcessLookupError):
-                process.kill()
-        await process.wait()
+            cleanup = await asyncio.create_subprocess_exec(
+                "taskkill.exe",
+                "/PID",
+                str(process.pid),
+                "/T",
+                "/F",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            try:
+                await asyncio.wait_for(cleanup.wait(), 5)
+            except TimeoutError:
+                cleanup.kill()
+                await cleanup.wait()
+            if process.returncode is None:
+                with contextlib.suppress(ProcessLookupError):
+                    process.kill()
+            await process.wait()
+            # taskkill returns after requesting child termination. The Node
+            # wrapper can exit before its native provider has released files.
+            waiter = asyncio.create_task(asyncio.to_thread(tree.wait_and_close, 5))
+            waiting = True
+            try:
+                await asyncio.shield(waiter)
+            except asyncio.CancelledError:
+                await waiter
+                raise
+        finally:
+            if not waiting:
+                tree.close()
         return
     with contextlib.suppress(ProcessLookupError):
         os.killpg(process.pid, signal.SIGTERM)
