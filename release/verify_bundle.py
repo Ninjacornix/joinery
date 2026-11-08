@@ -59,7 +59,7 @@ def verify(archive: Path) -> dict[str, object]:
         }:
             raise ValueError("The bundle contains unmeasured files.")
         if any(
-            part in {".private", ".venv", ".joinery", ".DS_Store", ".env"}
+            part in {".private", ".venv", ".joinery", ".git", ".DS_Store", ".env"}
             for name in shipped
             for part in Path(name).parts
         ):

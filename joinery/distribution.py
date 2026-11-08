@@ -102,6 +102,10 @@ def _source_files() -> dict[str, Path]:
                 ".pytest_cache",
                 ".godot",
                 ".joinery",
+                ".private",
+                ".venv",
+                ".git",
+                ".env",
             }.intersection(path.parts):
                 if not path.resolve().is_relative_to(ROOT):
                     raise ValueError(

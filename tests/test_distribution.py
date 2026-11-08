@@ -59,6 +59,10 @@ def source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     for name in (
         "testbed/.joinery/private.json",
         "testbed/.godot/cache",
+        "testbed/.private/notes.txt",
+        "testbed/.venv/pyvenv.cfg",
+        "testbed/.git/config",
+        "testbed/.env",
         "docs/.DS_Store",
     ):
         target = root / name
@@ -112,6 +116,7 @@ def test_macos_desktop_bundle_has_working_layout_and_measured_manifest(
             ".joinery/" not in name
             and ".godot/" not in name
             and ".DS_Store" not in name
+            and not {".private", ".venv", ".git", ".env"}.intersection(Path(name).parts)
             for name in names
         )
         assert runtime + "licenses/GODOT-LICENSE.txt" in names
