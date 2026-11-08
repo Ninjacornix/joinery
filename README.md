@@ -2,7 +2,9 @@
 
 **Made in the Joinery, not generated.**
 
-![The Joinery editor: the 3D viewport, a staged change with Accept and Reject in the Review panel, and the chat sidebar](docs/images/joinery-editor.jpg)
+![The Joinery editor with a low-poly hammer made in Blender placed in the scene, the Godot and Blender icons on the left, and the chat with Codex on the right](docs/images/joinery-editor.jpg)
+
+*A hammer modelled in Blender through chat, reviewed and placed in the scene.*
 
 Joinery is a game editor built on Godot 4.7 that you direct by chatting with it.
 You select something, say what should change, and the AI sidebar, **Journeyman**,
