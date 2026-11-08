@@ -2,10 +2,15 @@
 
 **Made in the Joinery, not generated.**
 
+![The Joinery editor: the 3D viewport, a staged scene change with Accept and Reject in the Review panel, and the chat sidebar connected to Codex](docs/images/joinery-editor.jpg)
+
+*The editor during review of a large test change: the viewport, the staged diff
+with Accept and Reject, and the chat sidebar.*
+
 Joinery is a Godot 4.7.2-based game editor you direct through its AI sidebar,
 **Journeyman**. It operates real creative tools and keeps editable native sources,
-exports and replay recipes. Blender, Krita, Material Maker, Inkscape and
-SuperCollider have verified native authoring workflows. Changes are staged for
+exports and replay recipes. Blender, Krita, Material Maker, Inkscape,
+SuperCollider and Surge XT have verified native authoring workflows. Changes are staged for
 your review; asset workers run offline and the shared policy gate excludes
 generative asset services. Optional desktop apps and custom tools have different
 levels of integration; see the [support matrix](docs/support-matrix.md).
