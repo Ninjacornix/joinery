@@ -20,6 +20,7 @@ const COMMAND_SCRIPT := preload("res://addons/joinery/command_job.gd")
 const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
 const INPUT_SCRIPT := preload("res://addons/joinery/message_input.gd")
 const HISTORY_SCRIPT := preload("res://addons/joinery/chat_history.gd")
+const SETTINGS_SCRIPT := preload("res://addons/joinery/journeyman_settings.gd")
 const COMMANDS := {
 	"/agents": ["Supported agents", "cli"],
 	"/doctor": ["Check installed tools", "cli"],
@@ -36,6 +37,7 @@ const COMMANDS := {
 
 var _content: VBoxContainer
 var _transcript: HISTORY_SCRIPT
+var _settings: SETTINGS_SCRIPT
 var _prompt: INPUT_SCRIPT
 var _chips: HFlowContainer
 var _command_popup: PanelContainer
@@ -93,7 +95,7 @@ func _ready() -> void:
 	add_child(_content)
 	var font_size := get_theme_default_font_size()
 	_content.add_theme_constant_override("separation", maxi(8, int(font_size * 0.6)))
-	custom_minimum_size.x = get_theme_default_font_size() * 28
+	custom_minimum_size.x = get_theme_default_font_size() * 22
 	var connection_row := HBoxContainer.new()
 	connection_row.add_theme_constant_override("separation", maxi(6, int(font_size * 0.45)))
 	_content.add_child(connection_row)
@@ -116,6 +118,7 @@ func _ready() -> void:
 	_reconnect.hide()
 	_reconnect.pressed.connect(func() -> void: reconnect_requested.emit())
 	connection_row.add_child(_reconnect)
+	_settings = SETTINGS_SCRIPT.attach(self, connection_row, _content)
 	var controls := HBoxContainer.new()
 	controls.add_theme_constant_override("separation", 6)
 	_mode = OptionButton.new()
@@ -136,7 +139,8 @@ func _ready() -> void:
 	_model.tooltip_text = (
 		"Models reported by your connected provider. " + "Automatic follows the chosen mode."
 	)
-	_model.fit_to_longest_item = true
+	_model.fit_to_longest_item = false
+	_model.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_model.clip_text = true
 	_model.add_item("Automatic model")
 	_model.set_item_metadata(0, "")
@@ -304,6 +308,7 @@ func _ready() -> void:
 	_command_list.item_clicked.connect(_on_command_clicked)
 	_command_popup.add_child(_command_list)
 	_command_popup.hide()
+	_settings.apply_all()
 
 
 func _exit_tree() -> void:

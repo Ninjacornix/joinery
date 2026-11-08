@@ -109,6 +109,16 @@ func _run() -> void:
 			chat.hide_edit_review("Accepted: fixture")
 			var last: Node = chat._transcript._body.get_child(-1)
 			_check(last is Label, "Decisions appear as quiet status lines, not chat messages")
+			chat._settings.set_open(true)
+			_check(chat._settings.visible, "Settings open from the sidebar")
+			_check(not chat._transcript.visible, "Settings take the place of the chat")
+			_check(not chat._composer.visible, "The composer is hidden while in settings")
+			chat._settings.set_open(false)
+			_check(chat._transcript.visible and chat._composer.visible, "Back restores the chat")
+			chat._transcript.set_text_scale(1.15)
+			var size: int = records[1]["label"].get_theme_font_size("normal_font_size")
+			_check(size > chat.get_theme_default_font_size(), "Text size applies to replies")
+			chat._transcript.set_text_scale(1.0)
 			_check(
 				chat._chips.get_child(0).size.y <= chat.get_theme_default_font_size() * 2.25,
 				"Selected resources must remain compact above the message"
@@ -146,6 +156,17 @@ func _run() -> void:
 				RenderingServer.force_draw()
 				image = root.get_texture().get_image()
 				_check(image.save_png(capture.path_join(filename)) == OK, "Save completed UI")
+				chat._settings.set_open(true)
+				await process_frame
+				await process_frame
+				RenderingServer.force_draw()
+				image = root.get_texture().get_image()
+				_check(
+					image.save_png(capture.path_join("settings-" + filename)) == OK,
+					"Save settings page"
+				)
+				chat._settings.set_open(false)
+				await process_frame
 				chat.set_chat_busy(true)
 				chat.set_chat_state("working", "Exporting the model…")
 		chat.set_chat_busy(false)

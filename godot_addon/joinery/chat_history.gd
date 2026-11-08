@@ -11,6 +11,8 @@ var _follow := true
 var _welcome: Label
 var _layout_dirty := true
 var _bold := RegEx.new()
+var _text_scale := 1.0
+var _show_timings := true
 
 
 func _ready() -> void:
@@ -103,7 +105,30 @@ func add_message(who: String, text: String) -> void:
 	_dirty = true
 
 
+func set_text_scale(scale: float) -> void:
+	_text_scale = scale
+	for record: Dictionary in _messages:
+		_apply_scale(record["label"])
+	_layout_dirty = true
+	_dirty = true
+
+
+func set_show_timings(on: bool) -> void:
+	_show_timings = on
+	for record: Dictionary in _messages:
+		record["summary"].visible = on and not str(record["summary"].text).is_empty()
+		if not on:
+			record["details"].hide()
+
+
+func _apply_scale(label: RichTextLabel) -> void:
+	var size := int(get_theme_default_font_size() * _text_scale)
+	for key: String in ["normal_font_size", "bold_font_size", "mono_font_size"]:
+		label.add_theme_font_size_override(key, size)
+
+
 func _configure_text(label: RichTextLabel) -> void:
+	_apply_scale(label)
 	label.fit_content = true
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.scroll_active = false
@@ -156,7 +181,7 @@ func show_timing(event: Dictionary) -> void:
 	record["summary"].text = "%s in %.1fs" % [status, elapsed]
 	record["summary"].tooltip_text = "Show timing details"
 	record["summary"].accessibility_name = "Show response timing details"
-	record["summary"].show()
+	record["summary"].visible = _show_timings
 	var lines := PackedStringArray()
 	if not str(event.get("model", "")).is_empty():
 		lines.append(
