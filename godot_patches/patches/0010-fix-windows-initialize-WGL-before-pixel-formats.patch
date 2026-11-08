@@ -1,0 +1,63 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Joinery Build <build@joinery.invalid>
+Date: Sun, 8 Nov 2026 17:01:41 +0100
+Subject: [PATCH] fix(windows): initialize WGL before pixel formats
+
+Per-application WGL drivers need initialization before GDI selects the
+window format. Configure each window once; repeating SetPixelFormat
+rejects Mesa's context even when OpenGL 3.3 is supported.
+---
+ .../windows/gl_manager_windows_native.cpp     | 33 +++++++++----------
+ 1 file changed, 16 insertions(+), 17 deletions(-)
+
+diff --git a/platform/windows/gl_manager_windows_native.cpp b/platform/windows/gl_manager_windows_native.cpp
+index 3323be1..49c28b5 100644
+--- a/platform/windows/gl_manager_windows_native.cpp
++++ b/platform/windows/gl_manager_windows_native.cpp
+@@ -352,23 +352,8 @@ PFNWGLDELETECONTEXT gd_wglDeleteContext;
+ PFNWGLGETPROCADDRESS gd_wglGetProcAddress;
+ 
+ Error GLManagerNative_Windows::_create_context(GLWindow &win, GLDisplay &gl_display) {
+-	Error err = _configure_pixel_format(win.hDC);
+-	if (err != OK) {
+-		return err;
+-	}
+-
+-	HMODULE module = LoadLibraryW(L"opengl32.dll");
+-	if (!module) {
+-		return ERR_CANT_CREATE;
+-	}
+-	gd_wglCreateContext = (PFNWGLCREATECONTEXT)(void *)GetProcAddress(module, "wglCreateContext");
+-	gd_wglMakeCurrent = (PFNWGLMAKECURRENT)(void *)GetProcAddress(module, "wglMakeCurrent");
+-	gd_wglDeleteContext = (PFNWGLDELETECONTEXT)(void *)GetProcAddress(module, "wglDeleteContext");
+-	gd_wglGetProcAddress = (PFNWGLGETPROCADDRESS)(void *)GetProcAddress(module, "wglGetProcAddress");
+-	if (!gd_wglCreateContext || !gd_wglMakeCurrent || !gd_wglDeleteContext || !gd_wglGetProcAddress) {
+-		return ERR_CANT_CREATE;
+-	}
+-
++	// window_create() already configured this DC's immutable pixel format.
++	// Configure it once per window, before creating the shared OpenGL context.
+ 	gl_display.hRC = gd_wglCreateContext(win.hDC);
+ 	if (!gl_display.hRC) // Are We Able To Get A Rendering Context?
+ 	{
+@@ -505,6 +490,20 @@ void GLManagerNative_Windows::swap_buffers() {
+ }
+ 
+ Error GLManagerNative_Windows::initialize() {
++	// App-local OpenGL implementations must initialize before GDI selects a
++	// window pixel format, otherwise their context cannot use the configured DC.
++	HMODULE module = LoadLibraryW(L"opengl32.dll");
++	if (!module) {
++		return ERR_CANT_CREATE;
++	}
++	gd_wglCreateContext = (PFNWGLCREATECONTEXT)(void *)GetProcAddress(module, "wglCreateContext");
++	gd_wglMakeCurrent = (PFNWGLMAKECURRENT)(void *)GetProcAddress(module, "wglMakeCurrent");
++	gd_wglDeleteContext = (PFNWGLDELETECONTEXT)(void *)GetProcAddress(module, "wglDeleteContext");
++	gd_wglGetProcAddress = (PFNWGLGETPROCADDRESS)(void *)GetProcAddress(module, "wglGetProcAddress");
++	if (!gd_wglCreateContext || !gd_wglMakeCurrent || !gd_wglDeleteContext || !gd_wglGetProcAddress) {
++		return ERR_CANT_CREATE;
++	}
++
+ 	_nvapi_setup_profile();
+ 	return OK;
+ }
