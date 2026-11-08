@@ -50,7 +50,36 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential pkg-config libx11-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev libglu1-mesa-dev libasound2-dev libpulse-dev libudev-dev libxi-dev libxrandr-dev libwayland-dev xvfb xauth bubblewrap
+          sudo apt-get install -y build-essential pkg-config libx11-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev libglu1-mesa-dev libasound2-dev libpulse-dev libudev-dev libxi-dev libxrandr-dev libwayland-dev xvfb xauth bubblewrap libvulkan1 mesa-vulkan-drivers vulkan-tools
+      - name: Select the native Linux software Vulkan driver
+        if: runner.os == 'Linux'
+        run: |
+          uv run python - <<'PY'
+          import os
+          from pathlib import Path
+          candidates = sorted(Path('/usr/share/vulkan/icd.d').glob('lvp_icd*.json'))
+          selected = [path for path in candidates if 'x86_64' in path.name]
+          selected = selected or [path for path in candidates if path.name == 'lvp_icd.json']
+          selected = selected or candidates
+          assert len(selected) == 1, f'Expected one native Lavapipe ICD, found {candidates}'
+          runtime = Path(os.environ['RUNNER_TEMP']) / 'joinery-graphics-runtime'
+          runtime.mkdir(mode=0o700, exist_ok=True)
+          runtime.chmod(0o700)
+          with Path(os.environ['GITHUB_ENV']).open('a', encoding='utf-8') as destination:
+              destination.write(f'VK_DRIVER_FILES={selected[0]}\nVK_ICD_FILENAMES={selected[0]}\nXDG_RUNTIME_DIR={runtime}\n')
+          PY
+      - name: Prove software Vulkan presentation support before the cold build
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p out/native-evidence
+          xvfb-run -a vulkaninfo --summary 2>&1 | tee out/native-evidence/vulkan-summary.log
+          uv run python - <<'PY'
+          from pathlib import Path
+          text = Path('out/native-evidence/vulkan-summary.log').read_text(encoding='utf-8')
+          assert 'VK_KHR_surface' in text, 'Software Vulkan must provide presentation extensions'
+          assert any(name in text.lower() for name in ('llvmpipe', 'lavapipe')), 'Expected the Mesa CPU Vulkan driver'
+          assert 'ERROR' not in text, 'Software Vulkan preflight reported an error'
+          PY
       - name: Restore native compiler cache
         id: compiler_cache
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
