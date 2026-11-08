@@ -36,6 +36,7 @@ def test_codex_existing_account_is_detected_without_leaking_output(
 def test_claude_status_hides_account_information(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(connection.sys, "platform", "linux")
     monkeypatch.setattr(connection.shutil, "which", lambda _: "/bin/claude")
     output = json.dumps(
         {"loggedIn": True, "authMethod": "oauth", "email": "PRIVATE", "token": "SECRET"}
@@ -53,6 +54,7 @@ def test_claude_status_hides_account_information(
 def test_key_detection_does_not_expose_or_validate_the_key(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(connection.sys, "platform", "linux")
     monkeypatch.setenv("GEMINI_API_KEY", "DO_NOT_EXPOSE")
     monkeypatch.setattr(connection.shutil, "which", lambda _: "/bin/gemini")
     monkeypatch.setattr(Path, "is_file", lambda _: False)
@@ -140,6 +142,7 @@ def test_gemini_saved_signin_is_only_detected_from_credentials(
     contents: str,
     ready: bool,
 ) -> None:
+    monkeypatch.setattr(connection.sys, "platform", "linux")
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
     monkeypatch.setattr(connection.shutil, "which", lambda _: "/bin/gemini")
     (tmp_path / ".gemini").mkdir()
@@ -147,3 +150,40 @@ def test_gemini_saved_signin_is_only_detected_from_credentials(
     result = connection.status("gemini")
     assert result["connected"] is ready
     assert "PRIVATE" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("agent", ["claude", "gemini", "opencode"])
+def test_windows_unsupported_provider_cannot_advance_even_with_saved_auth(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, agent: str
+) -> None:
+    monkeypatch.setattr(connection.sys, "platform", "win32")
+    monkeypatch.setattr(connection.shutil, "which", lambda _: "installed.exe")
+    for name in connection.KEY_VARS[agent]:
+        monkeypatch.setenv(name, "PRIVATE")
+    credentials = tmp_path / ".gemini/oauth_creds.json"
+    credentials.parent.mkdir()
+    credentials.write_text('{"refresh_token":"PRIVATE"}')
+    monkeypatch.setattr(connection, "_probe", Mock(side_effect=AssertionError("No CLI probe")))
+    result = connection.status(agent)
+    assert result["installed"] and result["api_key_configured"]
+    assert result["supported"] is False and result["connected"] is False
+    assert result["authenticated"] is None  # Authentication was deliberately not probed.
+    assert "Windows read-only host boundary" in result["reason"]
+    assert not result["requires_key_confirmation"] and result["method"] == ""
+    assert "PRIVATE" not in json.dumps(result)
+    for action in (connection.login, connection.use_key):
+        with pytest.raises(ValueError, match="Windows read-only host boundary"):
+            action(agent)
+
+
+def test_windows_codex_existing_auth_remains_a_usable_connection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(connection.sys, "platform", "win32")
+    monkeypatch.setattr(connection.shutil, "which", lambda _: "codex.exe")
+    probe = Mock(return_value=(0, "Logged in using ChatGPT"))
+    monkeypatch.setattr(connection, "_probe", probe)
+    result = connection.status("codex")
+    assert result["supported"] and result["connected"] and result["authenticated"]
+    assert result["reason"] == "" and result["method"] == "ChatGPT account"
+    probe.assert_called_once_with(["codex.exe", "login", "status"])

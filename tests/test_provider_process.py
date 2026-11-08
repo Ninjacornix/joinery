@@ -85,3 +85,20 @@ for line in sys.stdin:
             await session.close()
 
     asyncio.run(asyncio.wait_for(run(), 10))
+
+
+@pytest.mark.parametrize("agent", ["claude", "gemini", "opencode"])
+def test_windows_requires_supported_backend_before_auth_or_hook_checks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, agent: str
+) -> None:
+    from unittest.mock import Mock
+
+    from bridge import provider_process
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(provider_process.shutil, "which", Mock(side_effect=AssertionError("No lookup")))
+    monkeypatch.setattr(provider_process, "status", Mock(side_effect=AssertionError("No auth probe")))
+    with pytest.raises(ValueError, match="Windows read-only host boundary"):
+        asyncio.run(provider_process.require_provider(agent, tmp_path))
+    with pytest.raises(ValueError, match="Windows read-only host boundary"):
+        provider_process.readonly_command(["unrestricted.exe"], tmp_path)

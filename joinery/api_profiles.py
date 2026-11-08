@@ -16,6 +16,7 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 from pydantic import BaseModel, ConfigDict, SecretStr, ValidationError
 
 from joinery.platform_support import private_file
+from joinery.provider_support import require_supported, usability
 
 
 class Profile(BaseModel):
@@ -91,7 +92,9 @@ def _read() -> list[Profile]:
 
 
 def public(profile: Profile) -> dict[str, Any]:
+    support = usability(profile.driver)
     installed = shutil.which(profile.driver) is not None
+    authenticated = profile.verified and bool(profile.key.get_secret_value())
     return {
         "id": profile.id,
         "name": profile.model,
@@ -100,9 +103,9 @@ def public(profile: Profile) -> dict[str, Any]:
         "model": profile.model,
         "profile": True,
         "installed": installed,
-        "connected": installed
-        and profile.verified
-        and bool(profile.key.get_secret_value()),
+        "connected": installed and authenticated and support["supported"],
+        "authenticated": authenticated,
+        **support,
         "method": "API: " + profile.model,
         "requires_key_confirmation": False,
     }
@@ -126,6 +129,7 @@ def configure(data: Any) -> dict[str, Any]:
     key = str(data.get("key", "")).strip()
     if driver not in ("codex", "opencode"):
         raise ValueError("Choose Codex or opencode to run this connection.")
+    require_supported(driver)
     if shutil.which(driver) is None:
         raise ValueError("Install the selected agent before connecting this model.")
     try:
@@ -203,6 +207,7 @@ def runtime(profile_id: str) -> tuple[str, list[str], dict[str, str]]:
     profile = next((p for p in _read() if p.id == profile_id), None)
     if profile is None:
         raise ValueError("API connection not found.")
+    require_supported(profile.driver)
     if not profile.verified:
         raise ValueError("Verify this API connection before using it.")
     env = {"JOINERY_MODEL_API_KEY": profile.key.get_secret_value()}

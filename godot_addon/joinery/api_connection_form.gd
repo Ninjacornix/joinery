@@ -15,6 +15,7 @@ var _hint: Label
 var _save: Button
 var _environment: Button
 var _profile_id := ""
+var _driver_hints: Dictionary = {}
 
 
 func _ready() -> void:
@@ -83,11 +84,28 @@ func configure(agents: Dictionary, selected: String) -> void:
 			_saved.add_item(str(data["model"]))
 			_saved.set_item_metadata(_saved.item_count - 1, data)
 	_saved.visible = _saved.item_count > 1
+	_driver_hints.clear()
+	var first_available := 0
+	var found_available := false
 	for index: int in _driver.item_count:
 		var id := str(_driver.get_item_metadata(index))
-		_driver.set_item_disabled(index, not agents.get(id, {}).get("installed", false))
-	_driver.select(0 if agents.get("codex", {}).get("installed", false) else 1)
-	_environment.visible = agents.get(selected, {}).get("api_key_configured", false)
+		var data: Dictionary = agents.get(id, {})
+		var supported := bool(data.get("supported", true))
+		var available := supported and bool(data.get("installed", false))
+		_driver.set_item_disabled(index, not available)
+		_driver_hints[index] = (
+			str(data.get("reason", "This connection is unavailable on this platform."))
+			if not supported else "Install the selected agent to use this connection."
+		)
+		_driver.set_item_tooltip(index, "" if available else str(_driver_hints[index]))
+		if available and not found_available:
+			first_available = index
+			found_available = true
+	_driver.select(first_available)
+	_environment.visible = (
+		agents.get(selected, {}).get("api_key_configured", false)
+		and agents.get(selected, {}).get("supported", true)
+	)
 	_choose_saved(0)
 	for index: int in _saved.item_count:
 		if _saved.get_item_metadata(index).get("id", "") == selected:
@@ -114,7 +132,8 @@ func _update_hint() -> void:
 		return
 	_save.disabled = _driver.is_item_disabled(_driver.selected)
 	_hint.text = (
-		"Install the selected agent to use this connection." if _save.disabled else
+		str(_driver_hints.get(_driver.selected, "Install the selected agent to use this connection."))
+		if _save.disabled else
 		"Use a Responses-compatible endpoint. The key is saved privately on this computer."
 		if _driver.selected == 0 else
 		"Use an OpenAI-compatible endpoint. The key is saved privately on this computer."

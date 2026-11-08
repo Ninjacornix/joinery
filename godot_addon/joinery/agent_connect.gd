@@ -142,10 +142,13 @@ func _update() -> void:
 		_detail.text = "An API key is available in API settings."
 	elif data.get("profile", false) and not ready:
 		_detail.text = "Check this model's API settings to connect."
-	_login.visible = installed and not ready and AGENT_NAMES.has(_selected)
+	var supported := bool(data.get("supported", true))
+	if not supported:
+		_detail.text = str(data.get("reason", "This connection is unavailable on this platform."))
+	_login.visible = supported and installed and not ready and AGENT_NAMES.has(_selected)
 	_login.disabled = _job != null
 	_api.disabled = _job != null
-	_install.visible = not installed and not data.is_empty()
+	_install.visible = supported and not installed and not data.is_empty()
 	if ready and _job == null and _auto_redirect and not _api_form.visible and not _redirecting:
 		_message.text = ""
 		_redirecting = true
@@ -154,7 +157,7 @@ func _update() -> void:
 
 func _can_continue(data: Dictionary) -> bool:
 	return (
-		not _selected.is_empty() and data.get("installed", false)
+		not _selected.is_empty() and data.get("supported", true) and data.get("installed", false)
 		and data.get("connected", false) and (
 			not data.get("requires_key_confirmation", false) or _accepted_keys.has(_selected)
 		)

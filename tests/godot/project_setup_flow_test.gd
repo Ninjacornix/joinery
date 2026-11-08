@@ -75,6 +75,16 @@ func _run() -> void:
 	connect._finish()
 	_check(connect.is_visible_in_tree(), "Enter or synthetic press cannot bypass sign-in")
 	connect._agents["codex"]["connected"] = true
+	connect._agents["codex"]["supported"] = false
+	connect._agents["codex"]["reason"] = "Fixture connection is unavailable here."
+	connect._update()
+	_check(not connect._can_continue(connect._agents["codex"]),
+		"An authenticated unsupported connection must not advance")
+	_check(connect._detail.text == "Fixture connection is unavailable here.",
+		"Explain the platform restriction instead of asking for another sign-in")
+	_check(not connect._login.visible, "Do not offer sign-in for an unavailable connection")
+	connect._agents["codex"].erase("supported")
+	connect._agents["codex"].erase("reason")
 	connect._agents["codex"]["method"] = "Test account"
 	connect._agents["codex"]["requires_key_confirmation"] = true
 	connect._update()
@@ -89,6 +99,20 @@ func _run() -> void:
 	connect._show_api()
 	_check(connect._api_form.visible, "API settings must open as a submenu")
 	_check(connect._api_form._key.secret, "The key input must be masked")
+	connect._agents["opencode"] = {
+		"connected": true, "installed": true, "supported": false,
+		"reason": "Fixture API backend is unavailable here.",
+	}
+	connect._api_form.configure(connect._agents, "codex")
+	_check(connect._api_form._driver.is_item_disabled(1),
+		"API submenu must disable an installed unsupported backend")
+	connect._api_form._driver.select(1)
+	connect._api_form._update_hint()
+	_check(connect._api_form._save.disabled, "An unavailable backend cannot save and connect")
+	_check(connect._api_form._hint.text == "Fixture API backend is unavailable here.",
+		"Explain the API backend restriction")
+	connect._api_form._driver.select(0)
+	connect._api_form._update_hint()
 	connect._api_form._endpoint.text = OS.get_environment("JOINERY_TEST_MODEL_ENDPOINT")
 	connect._api_form._model.text = "fixture-model"
 	connect._api_form._key.text = "TEST_ONLY"

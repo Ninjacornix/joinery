@@ -16,6 +16,7 @@ from bridge.protocol import Prompt
 from joinery.agents import get
 from joinery.catalog import ROOT
 from joinery.connection import status
+from joinery.provider_support import WINDOWS_BOUNDARY_REASON, require_supported
 from joinery.wiring import _command_str
 
 INSTRUCTIONS = (
@@ -48,6 +49,7 @@ def prompt_text(prompt: Prompt) -> str:
 
 
 async def require_provider(agent: str, project: Path) -> str:
+    require_supported(agent)
     executable = shutil.which(agent)
     if executable is None:
         raise ValueError(f"{get(agent).name} CLI is not installed.")
@@ -101,9 +103,7 @@ async def require_provider(agent: str, project: Path) -> str:
 def readonly_command(argv: list[str], project: Path) -> list[str]:
     """The API process may use its credential store, but cannot save game files."""
     if sys.platform == "win32":
-        raise ValueError(
-            "This provider does not yet have a native Windows read-only host boundary. Use Codex on Windows, or run this provider in a supported Linux/macOS host."
-        )
+        raise ValueError(WINDOWS_BOUNDARY_REASON)
     if sys.platform == "darwin" and Path("/usr/bin/sandbox-exec").is_file():
         profile = (
             "(version 1)(allow default)(deny file-write* (subpath "

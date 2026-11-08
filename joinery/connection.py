@@ -16,6 +16,7 @@ from typing import Any
 from joinery.agents import all_agents, get
 from joinery.api_profiles import list_public
 from joinery.platform_support import launch_argv
+from joinery.provider_support import require_supported, usability
 
 KEY_VARS = {
     "claude": ("ANTHROPIC_API_KEY",),
@@ -50,11 +51,14 @@ def _probe(argv: list[str]) -> tuple[int, str]:
 
 def status(agent_id: str) -> dict[str, Any]:
     agent = get(agent_id)
+    support = usability(agent_id)
     executable = shutil.which(agent_id)
     key_set = any(os.environ.get(name) for name in KEY_VARS[agent_id])
     connected = False
     method = ""
-    if executable and agent_id == "codex":
+    if not support["supported"]:
+        pass  # Do not probe unusable providers or their credentials.
+    elif executable and agent_id == "codex":
         code, text = _probe([executable, "login", "status"])
         connected = code == 0 and "logged in" in text.lower()
         method = "ChatGPT account" if "chatgpt" in text.lower() else "API key"
@@ -87,13 +91,21 @@ def status(agent_id: str) -> dict[str, Any]:
             re.search(r"[1-9]\d* credentials?", plain, re.IGNORECASE)
         )
         method = "Saved provider sign-in"
-    if executable and key_set and agent_id != "codex" and not connected:
+    if (
+        support["supported"]
+        and executable
+        and key_set
+        and agent_id != "codex"
+        and not connected
+    ):
         connected, method = True, "API key configured"
     return {
         "id": agent_id,
         "name": agent.name,
         "installed": executable is not None,
         "connected": connected,
+        "authenticated": connected if support["supported"] else None,
+        **support,
         "method": method if connected else "",
         "api_key_configured": key_set,
         "requires_key_confirmation": method == "API key configured",
@@ -113,7 +125,7 @@ def all_statuses() -> dict[str, Any]:
 
 
 def login(agent_id: str) -> dict[str, Any]:
-    get(agent_id)
+    require_supported(agent_id)
     executable = shutil.which(agent_id)
     if executable is None:
         raise ValueError("Install this agent's CLI first.")
@@ -173,7 +185,7 @@ def login(agent_id: str) -> dict[str, Any]:
 
 
 def use_key(agent_id: str) -> dict[str, Any]:
-    get(agent_id)
+    require_supported(agent_id)
     executable = shutil.which(agent_id)
     key = next(
         (os.environ[name] for name in KEY_VARS[agent_id] if os.environ.get(name)), ""

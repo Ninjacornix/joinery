@@ -81,7 +81,10 @@ def test_runtime_uses_existing_gated_driver_and_a_separate_secret_environment() 
     assert provider["wire_api"] == "responses"
 
 
-def test_opencode_model_configuration_references_secret_without_embedding_it() -> None:
+def test_opencode_model_configuration_references_secret_without_embedding_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "platform", "linux")
     profile = api_profiles.configure(settings(driver="opencode"))
     driver, args, env = api_profiles.runtime(profile["id"])
     assert driver == "opencode" and args == []
@@ -226,3 +229,42 @@ def test_redirects_cannot_forward_the_authorization_header() -> None:
         )
         is None
     )
+
+
+def test_windows_saved_opencode_profile_stays_authenticated_but_is_unusable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic import SecretStr
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    profile = api_profiles.Profile(
+        id="api_saved",
+        driver="opencode",
+        endpoint="https://example.invalid/v1",
+        model="model",
+        key=SecretStr("PRIVATE"),
+        verified=True,
+    )
+    monkeypatch.setattr(api_profiles, "_read", lambda: [profile])
+    result = api_profiles.list_public()[0]
+    assert result["installed"] and result["authenticated"]
+    assert result["supported"] is False and result["connected"] is False
+    assert "Windows read-only host boundary" in result["reason"]
+    assert "PRIVATE" not in json.dumps(result)
+    with pytest.raises(ValueError, match="Windows read-only host boundary"):
+        api_profiles.runtime(profile.id)
+
+
+def test_windows_unsupported_profile_configuration_fails_before_io_or_network(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    for target, name in (
+        (api_profiles, "_read"),
+        (api_profiles, "_verify_model"),
+        (api_profiles.shutil, "which"),
+    ):
+        monkeypatch.setattr(target, name, Mock(side_effect=AssertionError("No unsupported I/O")))
+    with pytest.raises(ValueError, match="Windows read-only host boundary"):
+        api_profiles.configure(settings(driver="opencode"))
+    assert not api_profiles.store_path().exists()
