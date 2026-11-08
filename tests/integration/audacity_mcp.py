@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from joinery.catalog import ROOT, load_catalog
+from joinery.worker_identity import docker_owner_args
 
 
 def run(source: Path) -> dict[str, Any]:
@@ -30,6 +31,9 @@ def run(source: Path) -> dict[str, Any]:
                     "docker",
                     "run",
                     "--rm",
+                    # Native Linux: run as the caller so the private scratch
+                    # folder is readable; Docker Desktop maps ownership itself.
+                    *docker_owner_args(),
                     "--name",
                     name,
                     "--platform",
