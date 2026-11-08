@@ -220,7 +220,9 @@ def test_native_windows_hook_preserves_argv_stdin_and_exit_code(tmp_path: Path) 
         text=True,
         encoding="utf-8",
         check=False,
-        timeout=15,
+        # Cold Windows PowerShell/AMSI startup on hosted runners can exceed
+        # 15 seconds. Execute once and retain all argv/stdin/exit assertions.
+        timeout=45,
     )
     assert result.returncode == 7
     returned = json.loads(result.stdout)

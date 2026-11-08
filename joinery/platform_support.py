@@ -11,12 +11,17 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import BinaryIO
 
 
 def lock_file(stream: BinaryIO) -> None:
-    """Hold one exclusive, nonblocking OS lock until release or process death."""
+    """Hold an exclusive OS lock until release or process death.
+
+    Allow a short Windows lock handoff after process termination. Every attempt
+    remains nonblocking; a live owner's lock is never bypassed or replaced.
+    """
     if sys.platform == "win32":
         msvcrt = importlib.import_module("msvcrt")
 
@@ -25,12 +30,18 @@ def lock_file(stream: BinaryIO) -> None:
             stream.write(b"\0")
             stream.flush()
         stream.seek(0)
-        try:
-            msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
-        except OSError as exc:
-            if exc.errno in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
-                raise BlockingIOError("The project lock is already held.") from exc
-            raise
+        deadline = time.monotonic() + 1.0
+        while True:
+            try:
+                stream.seek(0)
+                msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                break
+            except OSError as exc:
+                if exc.errno not in {errno.EACCES, errno.EAGAIN, errno.EDEADLK}:
+                    raise
+                if time.monotonic() >= deadline:
+                    raise BlockingIOError("The project lock is already held.") from exc
+                time.sleep(0.01)
     else:
         import fcntl
 
