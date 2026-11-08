@@ -20,7 +20,7 @@ EVIDENCE = ROOT / "out/audacity-native"
 def _keep_evidence(scratch: Path) -> None:
     """Copy the failure screenshot and Audacity's log out of the scratch folder."""
     EVIDENCE.mkdir(parents=True, exist_ok=True)
-    for name in ("failure.png", "audacity.log"):
+    for name in ("failure.png", "audacity.log", "processes.txt"):
         if (scratch / name).is_file():
             shutil.copy2(scratch / name, EVIDENCE / name)
 
@@ -36,42 +36,16 @@ def run(source: Path) -> dict[str, Any]:
         scratch = Path(directory).resolve()
         shutil.copy2(ROOT / "tests/upstream/audacity_native.py", scratch / "check.py")
         try:
-            got = subprocess.run(
-                [
-                    "docker",
-                    "run",
-                    "--rm",
-                    # Native Linux: run as the caller so the private scratch
-                    # folder is readable; Docker Desktop maps ownership itself.
-                    *docker_owner_args(),
-                    "--name",
-                    name,
-                    "--platform",
-                    "linux/amd64",
-                    "--network",
-                    "none",
-                    "--memory",
-                    "4g",
-                    "--pids-limit",
-                    "512",
-                    "-e",
-                    "PYTHONPATH=/opt/audacity-mcp",
-                    "-v",
-                    str(source) + ":/opt/audacity-mcp:ro",
-                    "-v",
-                    str(scratch) + ":/work",
-                    "-w",
-                    "/work",
-                    "joinery-mcp-conformance",
-                    "/opt/joinery-mcp-test-python/bin/python",
-                    "-u",
-                    "/work/check.py",
-                ],
-                capture_output=True,
-                text=True,
-                timeout=240,
-                check=False,
-            )
+            try:
+                got = _run(name, source, scratch)
+            except subprocess.TimeoutExpired as error:
+                # The probe can hang too hard to report; capture from outside.
+                _capture(name)
+                _keep_evidence(scratch)
+                raise RuntimeError(
+                    "Audacity native probe hung; screen and log kept in "
+                    f"{EVIDENCE}.\n" + _text(error.stdout)[-3000:]
+                ) from error
             if got.returncode or "AUDACITY_NATIVE_MCP_OK" not in got.stdout:
                 _keep_evidence(scratch)
                 raise RuntimeError(
@@ -89,6 +63,87 @@ def run(source: Path) -> dict[str, Any]:
                 timeout=10,
                 check=False,
             )
+
+
+def _text(value: str | bytes | None) -> str:
+    return value.decode(errors="replace") if isinstance(value, bytes) else value or ""
+
+
+def _capture(name: str) -> None:
+    """Screenshot the container's display into /work, which is the scratch folder."""
+    subprocess.run(
+        [
+            "docker",
+            "exec",
+            name,
+            "ffmpeg",
+            "-v",
+            "error",
+            "-y",
+            "-f",
+            "x11grab",
+            "-i",
+            ":99",
+            "-frames:v",
+            "1",
+            "/work/failure.png",
+        ],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=30,
+        check=False,
+    )
+    subprocess.run(
+        [
+            "docker",
+            "exec",
+            name,
+            "sh",
+            "-c",
+            "ps -eo pid,stat,etime,wchan:24,args > /work/processes.txt",
+        ],
+        timeout=15,
+        check=False,
+    )
+
+
+def _run(name: str, source: Path, scratch: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            "docker",
+            "run",
+            "--rm",
+            # Native Linux: run as the caller so the private scratch
+            # folder is readable; Docker Desktop maps ownership itself.
+            *docker_owner_args(),
+            "--name",
+            name,
+            "--platform",
+            "linux/amd64",
+            "--network",
+            "none",
+            "--memory",
+            "4g",
+            "--pids-limit",
+            "512",
+            "-e",
+            "PYTHONPATH=/opt/audacity-mcp",
+            "-v",
+            str(source) + ":/opt/audacity-mcp:ro",
+            "-v",
+            str(scratch) + ":/work",
+            "-w",
+            "/work",
+            "joinery-mcp-conformance",
+            "/opt/joinery-mcp-test-python/bin/python",
+            "-u",
+            "/work/check.py",
+        ],
+        capture_output=True,
+        text=True,
+        timeout=240,
+        check=False,
+    )
 
 
 if __name__ == "__main__":
