@@ -47,6 +47,12 @@ def make_server(socket: Path) -> MCPServer[Any]:
         """Read the current project's live editor scene, node identities, selection and unsaved scene context. Use these identities for edit_scene. Saved-file MCP tools and game_* runtime tools are different targets."""
         return await rpc(socket, "editor_context", {})
 
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True))
+    @tool_errors
+    async def inspect_in_parallel(tasks: list[dict[str, str]]) -> dict[str, Any]:
+        """Delegate one or two independent read-only inspection/validation questions to fast specialist agents. Each task has name and question. No edits or nested delegation; use the main agent for all changes. Results can fail independently and must be checked."""
+        return await rpc(socket, "delegate", {"tasks": tasks})
+
     @server.tool()
     @tool_errors
     async def call_tool(
