@@ -62,7 +62,7 @@ audit ran on macOS.
 | Aseprite | Native Lua adapter exists; bring your own licensed executable | Not packaged or exercised with an actual licensed app in this audit |
 | GIMP 3.0.4 | Desktop open/view; app installed in the development worker | No evaluated first-party native authoring adapter or complete pinned MCP installer |
 | Audacity, REAPER, MuseScore | Optional desktop open/view when installed | Not installed or verified for automated authoring in this audit; REAPER requires your own licence |
-| Surge XT | Planned integration | No packaged/evaluated native authoring runtime; use the verified SuperCollider lane |
+| Surge XT | Supported through `joinery-sound` | Offline render of named parameters and notes to WAV, exact replay; no factory `.fxp` loading or random sources yet ([ADR 0021](adr/0021-surge-xt.md)) |
 | Custom tools | Explicit project MCP/desktop configuration | Readiness and provenance remain tool-specific; never inferred from a catalog entry |
 
 Application versions here identify the evaluated worker, not guaranteed future

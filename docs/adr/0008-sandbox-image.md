@@ -28,7 +28,8 @@ four artifacts are downloaded directly. Every package name was checked against
 Debian trixie rather than assumed; Krita is 5.2.9 and SuperCollider 3.13.0,
 both above what PLAN requires.
 
-**A tool that the OS does not package is replaced, not forced.** Surge XT is
+**A tool that the OS does not package is replaced, not forced.** (The Surge XT
+example below was wrong; see [ADR 0021](0021-surge-xt.md).) Surge XT is
 not in Debian, and upstream publishes only nightly Linux builds under a moving
 `Nightly` tag, so there is no stable artifact to pin or hash. Rather than
 compile it or pin a nightly whose hash changes daily, the sandbox synthesises

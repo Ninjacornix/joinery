@@ -57,7 +57,7 @@ scope and omissions; zero-pass and timeout results fail the runner.
 | Audacity | `audacity` | Contracts pass. Native probe: two harness causes fixed (module never loaded; fresh-install "What's new" dialog blocked commands). Under x86 emulation, first commands still stall during startup; the native x86 CI run is the deciding result |
 | REAPER | `reaper` | Contracts pass; native checks unavailable without the licensed executable |
 | MuseScore | `musescore` | Contracts and score-file edits pass; native GUI/plugin executable unavailable |
-| Surge XT | No MCP; planned entry | Unsupported capability behavior tested; no native integration claimed |
+| Surge XT | `joinery-sound` | Native create, parameter edit, inspect, exact replay and named-parameter refusal pass in the offline worker (`tests/integration/surge_native.py`) |
 
 All ten currently configured integrated servers expose schemas. All ten read-only
 probes are expected to pass; `claude-collider` failed until its worker fix. The probe command exits nonzero for that

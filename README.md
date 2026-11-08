@@ -82,8 +82,8 @@ and SuperCollider NRT patches. Their offline workers save native sources and
 exports, record replay/provenance, validate Godot import, and show before/after
 images or audio for review. Existing source edits preserve the owning document;
 replay preimages are kept separately from editable sources. Aseprite still needs
-a user-licensed executable in the worker image. Surge XT remains unavailable in
-the packaged runtime; SuperCollider is the packaged synth.
+a user-licensed executable in the worker image. Surge XT renders offline in
+the worker from named parameters and notes; SuperCollider remains available too.
 
 Art creation requires approval of the project's completed `art/bible.md`.
 Use `/art` to review and approve its current version. Changing its content

@@ -65,7 +65,7 @@ visual correctness or execute arbitrary live editor operations.
 ## Every catalogued program and MCP
 
 The [explicit test plan](../tests/upstream/plan.py) accounts for all **12 catalog
-programs and 15 MCP servers**, including the planned Surge XT entry. The default
+programs and 15 MCP servers**, including Surge XT through `joinery-sound`. The default
 suite includes 26 additional completeness/source-integrity/runner cases: a new program
 or MCP cannot silently disappear from the plan, and empty, failed or timed-out
 suites cannot report success. This inventory is separate from
@@ -158,7 +158,7 @@ Native Aseprite and REAPER checks require user-provided licensed executables;
 none were supplied. Native MuseScore is unavailable here. The five additional
 upstream suites do not install these MCPs into Joinery's production server cache
 or implement the missing application-specific authoring adapters/installers.
-Surge XT remains explicitly planned with unsupported behavior covered.
+Surge XT runs natively in the creative worker: `uv run python tests/integration/surge_native.py`.
 
 Tests cannot establish every operation exposed by a third-party application or
 MCP. These scenarios cover Joinery's implemented contracts and representative
