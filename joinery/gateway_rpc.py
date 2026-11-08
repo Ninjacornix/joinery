@@ -18,6 +18,7 @@ from typing import Any, Literal
 from joinery.gateway import ProjectGateway
 from joinery.mcp_runtime import PolicyStop
 from joinery.platform_support import private_directory
+from joinery.read_access import read_only
 
 
 def search_tools(data: dict[str, Any], query: str) -> dict[str, Any]:
@@ -79,6 +80,7 @@ class GatewayRPC:
         on_stop: Callable[[str], Awaitable[None]] | None = None,
         *,
         transport: Literal["unix", "tcp"] | None = None,
+        inspection_only: bool = False,
     ) -> None:
         self.gateway = gateway
         self.transport = transport or ("tcp" if os.name == "nt" else "unix")
@@ -102,6 +104,10 @@ class GatewayRPC:
         self.tasks: set[asyncio.Task[Any]] = set()
         self.on_stop = on_stop
         self.stop_reason = ""
+        self.inspection_only = inspection_only
+        self.delegate: (
+            Callable[[list[dict[str, str]]], Awaitable[list[dict[str, str]]]] | None
+        ) = None
 
     async def start(self) -> None:
         if self.transport == "tcp":
@@ -152,8 +158,22 @@ class GatewayRPC:
                 raise TypeError("Invalid gateway parameters.")
             if self.stop_reason:
                 raise PolicyStop(self.stop_reason)
+            if method == "policy_stop" and self.inspection_only:
+                reason = params.get("reason")
+                if not isinstance(reason, str) or not reason:
+                    raise ValueError("Missing specialist policy-stop reason.")
+                raise PolicyStop(reason[:1000])
             if method == "inventory":
                 data = await self.gateway.discover()
+                if self.inspection_only:
+                    data = {
+                        **data,
+                        "tools": [
+                            t
+                            for t in data["tools"]
+                            if read_only(t["server"], t["name"])
+                        ],
+                    }
                 data = search_tools(data, str(params.get("query", "")))
             elif method == "schema":
                 connection = await self.gateway.connection(str(params["server"]))
@@ -161,6 +181,12 @@ class GatewayRPC:
                     by_alias=True, exclude_none=True
                 )
             elif method == "call":
+                if self.inspection_only and not read_only(
+                    str(params["server"]), str(params["tool"])
+                ):
+                    raise ValueError(
+                        "Specialists can only inspect project tools; mutations stay on the main thread."
+                    )
                 arguments = params.get("arguments", {})
                 if not isinstance(arguments, dict):
                     raise ValueError("Tool arguments must be an object.")
@@ -184,9 +210,32 @@ class GatewayRPC:
             elif method == "editor_context":
                 data = {"editor": self.gateway.editor_context}
             elif method == "editor_edit":
+                if self.inspection_only:
+                    raise ValueError("Specialists cannot change the live editor.")
                 if self.gateway.edit_scene is None:
                     raise ValueError("No live editor is connected to this gateway.")
                 data = await self.gateway.edit_scene(params)
+            elif method == "delegate":
+                if self.inspection_only or self.delegate is None:
+                    raise ValueError("Nested specialist delegation is unavailable.")
+                jobs = params.get("tasks")
+                if (
+                    not isinstance(jobs, list)
+                    or not 1 <= len(jobs) <= 2
+                    or any(
+                        not isinstance(job, dict)
+                        or set(job) != {"name", "question"}
+                        or any(
+                            not isinstance(v, str) or not 1 <= len(v) <= 4000
+                            for v in job.values()
+                        )
+                        for job in jobs
+                    )
+                ):
+                    raise ValueError(
+                        "Supply one or two named read-only inspection questions (up to 4000 characters)."
+                    )
+                data = {"results": await self.delegate(jobs)}
             else:
                 raise ValueError(
                     "The model interface supports inventory, schema and call; no approval methods."
@@ -230,7 +279,8 @@ class GatewayRPC:
         for task in self.tasks:
             task.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)
-        await self.gateway.close()
+        if not self.inspection_only:
+            await self.gateway.close()
         shutil.rmtree(self.directory, ignore_errors=True)
 
 
@@ -256,7 +306,9 @@ async def rpc(path: Path, method: str, params: dict[str, Any]) -> dict[str, Any]
         if sys.platform == "win32":
             raise ValueError("Native Windows requires a local gateway endpoint file.")
         else:
-            reader, writer = await asyncio.open_unix_connection(str(path), limit=4_000_000)
+            reader, writer = await asyncio.open_unix_connection(
+                str(path), limit=4_000_000
+            )
     try:
         writer.write((json.dumps(payload) + "\n").encode())
         await writer.drain()

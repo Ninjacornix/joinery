@@ -9,6 +9,7 @@ import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
 
+from bridge.models import ModelChoice
 from bridge.protocol import (
     AgentEvent,
     Done,
@@ -38,6 +39,8 @@ class ClaudeSession:
         self.session_id = str(uuid.uuid4())
         self.started = False
         self.process: asyncio.subprocess.Process | None = None
+        self.inspection_only = False
+        self.effort_supported = False
 
     async def connect(self, project: Path, profile_id: str = "") -> None:
         if profile_id:
@@ -48,6 +51,29 @@ class ClaudeSession:
         self.project = project.resolve()
         if self.gateway_socket is None:
             raise ValueError("Connect the project gateway before starting Claude.")
+        probe = await asyncio.create_subprocess_exec(
+            *launch_argv(self.executable, ["--help"]),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        try:
+            output, _ = await asyncio.wait_for(probe.communicate(), 5)
+            self.effort_supported = b"--effort" in output
+        finally:
+            await stop_process(probe)
+
+    async def models(self) -> list[ModelChoice]:
+        # Print mode does not expose an account model inventory. Keep its
+        # configured model, only offering effort if this CLI advertises it.
+        return [
+            ModelChoice(
+                id="",
+                name="Claude configured model",
+                efforts=("low", "medium", "high") if self.effort_supported else (),
+                default_effort="medium" if self.effort_supported else "",
+                is_default=True,
+            )
+        ]
 
     async def send(self, prompt: Prompt) -> AsyncIterator[AgentEvent]:
         if not self.executable or self.gateway_socket is None:
@@ -87,6 +113,12 @@ class ClaudeSession:
             self.session_id,
         ]
         env = dict(os.environ, DISABLE_TELEMETRY="1", DISABLE_ERROR_REPORTING="1")
+        if prompt.effort:
+            args += ["--effort", prompt.effort]
+        if self.inspection_only:
+            env["JOINERY_INSPECTION_ONLY"] = "1"
+            env["JOINERY_INSPECTION_ENDPOINT"] = str(self.gateway_socket)
+            args += ["--disallowedTools", "Task", "Agent"]
         self.process = await asyncio.create_subprocess_exec(
             *readonly_command(launch_argv(args[0], args[1:]), self.project),
             cwd=self.project,

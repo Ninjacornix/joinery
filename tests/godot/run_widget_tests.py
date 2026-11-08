@@ -19,6 +19,7 @@ CASES = {
     "chatup_test.gd": "sidebar chat: ok",
     "audio_preview_test.gd": "audio playback: ok",
     "scene_edits_test.gd": "scene edits: ok",
+    "responsive_assistant_test.gd": "responsive assistant: ok",
 }
 
 

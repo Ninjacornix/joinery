@@ -20,6 +20,7 @@ from typing import Any
 from bridge.acp_session import ACPSession
 from bridge.claude_session import ClaudeSession
 from bridge.codex_session import CodexSession
+from bridge.models import ModelChoice
 from bridge.protocol import AgentEvent, SidebarMessage
 from joinery.agents import Agent, get
 
@@ -44,6 +45,14 @@ class AgentAdapter(ABC):
 
     async def close(self) -> None:
         pass
+
+    async def models(self) -> list[ModelChoice]:
+        return []
+
+    def restrict_to_inspection(self) -> None:
+        raise NotImplementedError(
+            "This provider has no read-only specialist transport."
+        )
 
     async def cancel(self) -> None:
         pass
@@ -72,6 +81,12 @@ class _SessionAdapter(AgentAdapter):
 
     async def connect(self, project: Path, profile_id: str = "") -> None:
         await self.session.connect(project, profile_id)
+
+    async def models(self) -> list[ModelChoice]:
+        return await self.session.models()
+
+    def restrict_to_inspection(self) -> None:
+        self.session.inspection_only = True
 
     async def run(self, message: SidebarMessage) -> AsyncIterator[AgentEvent]:
         from bridge.protocol import Prompt
@@ -107,6 +122,12 @@ class CodexAdapter(AgentAdapter):
 
     async def connect(self, project: Path, profile_id: str = "") -> None:
         await self.session.connect(project, profile_id)
+
+    async def models(self) -> list[ModelChoice]:
+        return await self.session.models()
+
+    def restrict_to_inspection(self) -> None:
+        self.session.inspection_only = True
 
     async def run(self, message: SidebarMessage) -> AsyncIterator[AgentEvent]:
         from bridge.protocol import Prompt

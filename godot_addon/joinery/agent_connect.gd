@@ -7,8 +7,12 @@ signal connected(agent_id: String, method: String)
 const COMMAND_SCRIPT := preload("command_job.gd")
 const ICON_SCRIPT := preload("agent_icon.gd")
 const API_SCRIPT := preload("api_connection_form.gd")
+const UI_THEME := preload("ui_theme.gd")
 const AGENT_NAMES := {
-	"claude": "Claude Code", "codex": "Codex", "gemini": "Gemini", "opencode": "opencode",
+	"claude": "Claude Code",
+	"codex": "Codex",
+	"gemini": "Gemini",
+	"opencode": "opencode",
 }
 var engine_home := ""
 var initial_agent := ""
@@ -38,6 +42,7 @@ var _group := ButtonGroup.new()
 
 
 func _ready() -> void:
+	theme = UI_THEME.build(self)
 	name = "JoineryAgentConnect"
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var content := VBoxContainer.new()
@@ -132,9 +137,17 @@ func _update() -> void:
 	var installed := bool(data.get("installed", false))
 	var ready := _can_continue(data)
 	_detail.text = (
-		"Connected: " + str(data.get("method", "")) if ready else
-		"Sign in with this agent to continue." if installed else
-		"Checking your local agents…" if data.is_empty() else "Install this agent's CLI to connect."
+		"Connected: " + str(data.get("method", ""))
+		if ready
+		else (
+			"Sign in with this agent to continue."
+			if installed
+			else (
+				"Checking your local agents…"
+				if data.is_empty()
+				else "Install this agent's CLI to connect."
+			)
+		)
 	)
 	if _selected.is_empty():
 		_detail.text = "Choose an agent to continue."
@@ -157,10 +170,11 @@ func _update() -> void:
 
 func _can_continue(data: Dictionary) -> bool:
 	return (
-		not _selected.is_empty() and data.get("supported", true) and data.get("installed", false)
-		and data.get("connected", false) and (
-			not data.get("requires_key_confirmation", false) or _accepted_keys.has(_selected)
-		)
+		not _selected.is_empty()
+		and data.get("supported", true)
+		and data.get("installed", false)
+		and data.get("connected", false)
+		and (not data.get("requires_key_confirmation", false) or _accepted_keys.has(_selected))
 	)
 
 
@@ -237,8 +251,10 @@ func _apply_status(payload: Dictionary) -> void:
 	if not _restored:
 		_restored = true
 		if (
-			not _chosen_by_user and not initial_profile.is_empty()
-			and _agents.has(initial_profile) and not _api_form.visible
+			not _chosen_by_user
+			and not initial_profile.is_empty()
+			and _agents.has(initial_profile)
+			and not _api_form.visible
 		):
 			_select(initial_profile, false)
 		elif not initial_profile.is_empty() and not _agents.has(initial_profile):

@@ -1,5 +1,5 @@
 @tool
-extends VBoxContainer
+extends PanelContainer
 ## Journeyman's earlier sidebar layout, with explicit targets and command completion.
 
 signal setup_requested
@@ -13,9 +13,13 @@ signal reconnect_requested
 signal art_review_requested
 signal review_requested
 signal review_closed
+signal selection_options_changed(selection: Dictionary)
+signal models_refresh_requested
 
 const COMMAND_SCRIPT := preload("res://addons/joinery/command_job.gd")
 const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
+const INPUT_SCRIPT := preload("res://addons/joinery/message_input.gd")
+const HISTORY_SCRIPT := preload("res://addons/joinery/chat_history.gd")
 const COMMANDS := {
 	"/agents": ["Supported agents", "cli"],
 	"/doctor": ["Check installed tools", "cli"],
@@ -27,10 +31,12 @@ const COMMANDS := {
 	"/toolbar": ["Viewport controls", "ui"],
 	"/help": ["All commands", "ui"],
 	"/art": ["Review and approve project art direction", "ui"],
+	"/models": ["Refresh available models", "ui"],
 }
 
-var _transcript: RichTextLabel
-var _prompt: LineEdit
+var _content: VBoxContainer
+var _transcript: HISTORY_SCRIPT
+var _prompt: INPUT_SCRIPT
 var _chips: HFlowContainer
 var _command_popup: PanelContainer
 var _command_layer: CanvasLayer
@@ -53,26 +59,46 @@ var _review_media: VBoxContainer
 var _review_pending := false
 var _agent_name := "Codex"
 var _assistant_open := false
+var _mode: OptionButton
+var _model: OptionButton
+var _effort: OptionButton
+var _model_choices: Array = []
+var _progress: Label
+var _elapsed_label: Label
+var _started_msec := 0
+var _last_elapsed_second := -1
+var _route_label: Label
+var _composer: PanelContainer
+var _composer_style: StyleBoxFlat
+var _send: Button
+var _attach: Button
+var _selection_options: Dictionary = {"mode": "auto", "model": "", "effort": ""}
 
 
 func _init() -> void:
 	name = "Journeyman"
 	custom_minimum_size = Vector2(300, 0)
-	add_theme_constant_override("separation", 6)
 
 
 func _ready() -> void:
 	theme = UI_THEME.build(self)
+	var padding := float(get_theme_default_font_size())
+	add_theme_stylebox_override(
+		"panel",
+		UI_THEME.panel(get_theme_color("inset", "Joinery"), Color.TRANSPARENT, padding, 8, 0)
+	)
+	_content = VBoxContainer.new()
+	add_child(_content)
 	var font_size := get_theme_default_font_size()
-	add_theme_constant_override("separation", maxi(8, int(font_size * 0.6)))
-	custom_minimum_size.x = get_theme_default_font_size() * 24
+	_content.add_theme_constant_override("separation", maxi(8, int(font_size * 0.6)))
+	custom_minimum_size.x = get_theme_default_font_size() * 28
 	var heading := Label.new()
-	heading.text = "Journeyman"
+	heading.text = "Chat"
 	heading.add_theme_font_size_override("font_size", int(font_size * 1.15))
-	add_child(heading)
+	_content.add_child(heading)
 	var connection_row := HBoxContainer.new()
 	connection_row.add_theme_constant_override("separation", maxi(6, int(font_size * 0.45)))
-	add_child(connection_row)
+	_content.add_child(connection_row)
 	_connection_icon = TextureRect.new()
 	_connection_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_connection_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
@@ -91,17 +117,64 @@ func _ready() -> void:
 	_reconnect.hide()
 	_reconnect.pressed.connect(func() -> void: reconnect_requested.emit())
 	connection_row.add_child(_reconnect)
-	_transcript = RichTextLabel.new()
-	_transcript.scroll_following = true
-	_transcript.selection_enabled = true
+	var controls := HBoxContainer.new()
+	controls.add_theme_constant_override("separation", 6)
+	_mode = OptionButton.new()
+	_mode.clip_text = true
+	_mode.fit_to_longest_item = true
+	_mode.custom_minimum_size.x = font_size * 4.5
+	_mode.accessibility_name = "Assistant mode"
+	_mode.tooltip_text = (
+		"Auto adapts to your request. Fast favors short replies. " + "Thorough favors complex work."
+	)
+	for mode_name: String in ["Auto", "Fast", "Thorough"]:
+		_mode.add_item(mode_name)
+	_mode.item_selected.connect(_options_changed)
+	controls.add_child(_mode)
+	_model = OptionButton.new()
+	_model.custom_minimum_size.x = font_size * 5
+	_model.accessibility_name = "Assistant model"
+	_model.tooltip_text = (
+		"Models reported by your connected provider. " + "Automatic follows the chosen mode."
+	)
+	_model.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_model.fit_to_longest_item = false
+	_model.clip_text = true
+	_model.add_item("Automatic model")
+	_model.set_item_metadata(0, "")
+	_model.item_selected.connect(_model_changed)
+	controls.add_child(_model)
+	_effort = OptionButton.new()
+	_effort.clip_text = true
+	_effort.fit_to_longest_item = false
+	_effort.custom_minimum_size.x = font_size * 5.5
+	_effort.accessibility_name = "Reasoning effort"
+	_effort.tooltip_text = "Supported reasoning levels for the selected model"
+	_effort.add_item("Auto")
+	_effort.set_item_metadata(0, "")
+	_effort.hide()
+	_effort.item_selected.connect(_options_changed)
+	controls.add_child(_effort)
+	for picker: OptionButton in [_mode, _model, _effort]:
+		picker.theme_type_variation = "JoineryPicker"
+		picker.add_theme_font_size_override("font_size", int(font_size * 0.85))
+		picker.custom_minimum_size.y = font_size * 2.25
+	_route_label = Label.new()
+	_route_label.text = "Auto adapts to your request"
+	_route_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_route_label.add_theme_font_size_override("font_size", int(font_size * 0.85))
+	_route_label.add_theme_color_override("font_color", get_theme_color("secondary", "Joinery"))
+	_route_label.hide()
+	_content.add_child(_route_label)
+	_transcript = HISTORY_SCRIPT.new()
 	_transcript.accessibility_name = "Conversation"
 	_transcript.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	add_child(_transcript)
+	_content.add_child(_transcript)
 	_review = VBoxContainer.new()
 	_review.theme = theme
 	_review.add_theme_constant_override("separation", maxi(8, int(font_size * 0.6)))
 	_review.hide()
-	add_child(_review)
+	_content.add_child(_review)
 	_review_label = Label.new()
 	_review_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_review_label.add_theme_font_size_override("font_size", int(font_size * 1.1))
@@ -124,6 +197,7 @@ func _ready() -> void:
 	_review_details.hide()
 	review_body.add_child(_review_details)
 	_review_media = VBoxContainer.new()
+	_review_media.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	review_body.add_child(_review_media)
 	review_body.move_child(_review_media, 0)
 	var choices := HBoxContainer.new()
@@ -144,24 +218,75 @@ func _ready() -> void:
 	reject_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	reject_button.pressed.connect(func() -> void: reject_edit_requested.emit())
 	choices.add_child(reject_button)
+	_composer = PanelContainer.new()
+	_composer_style = UI_THEME.panel(
+		get_theme_color("inset", "Joinery"),
+		get_theme_color("border", "Joinery"),
+		font_size * 0.6,
+		10
+	)
+	_composer.add_theme_stylebox_override("panel", _composer_style)
+	_content.add_child(_composer)
+	var composer_body := VBoxContainer.new()
+	composer_body.add_theme_constant_override("separation", 6)
+	_composer.add_child(composer_body)
 	_chips = HFlowContainer.new()
 	_chips.hide()
-	add_child(_chips)
-	_prompt = LineEdit.new()
+	composer_body.add_child(_chips)
+	_prompt = INPUT_SCRIPT.new()
 	_prompt.accessibility_name = "Message to your coding agent"
 	_prompt.tooltip_text = "Describe a change. Enter sends; type / for commands."
-	_prompt.custom_minimum_size.y = font_size * 2.5
-	_prompt.placeholder_text = "Say what to change, or / for commands"
-	_prompt.text_changed.connect(_update_commands)
+	_prompt.custom_minimum_size.y = font_size * 5
+	_prompt.placeholder_text = ("Chat with " + _agent_name)
+	_prompt.text_changed.connect(func() -> void: _update_commands(_prompt.text))
 	_prompt.text_submitted.connect(_on_submit)
 	_prompt.gui_input.connect(_on_prompt_input)
-	add_child(_prompt)
+	composer_body.add_child(_prompt)
+	_prompt.focus_entered.connect(_composer_focus.bind(true))
+	_prompt.focus_exited.connect(_composer_focus.bind(false))
+	_attach = Button.new()
+	_attach.text = "+"
+	_attach.flat = true
+	_attach.theme_type_variation = "JoineryIconButton"
+	_attach.accessibility_name = "Use selected scene objects"
+	_attach.tooltip_text = "Use selected scene objects as context"
+	_attach.custom_minimum_size = Vector2(font_size * 2.25, font_size * 2.25)
+	_attach.pressed.connect(on_selection_changed)
+	controls.add_child(_attach)
+	controls.move_child(_attach, 0)
+	_send = Button.new()
+	_send.text = "Send"
+	_send.accessibility_name = "Send message"
+	_send.tooltip_text = "Send message (Enter). Shift+Enter adds a line."
+	_send.theme_type_variation = "JoinerySendButton"
+	_send.custom_minimum_size = Vector2(font_size * 2.25, font_size * 2.25)
+	_send.add_theme_font_size_override("font_size", int(font_size * 0.85))
+	if has_theme_icon("ArrowUp", "EditorIcons"):
+		_send.icon = get_theme_icon("ArrowUp", "EditorIcons")
+		_send.text = ""
+	_send.pressed.connect(func() -> void: _on_submit(_prompt.text))
+	controls.add_child(_send)
+	composer_body.add_child(controls)
+	var progress_row := HBoxContainer.new()
+	_content.add_child(progress_row)
+	_progress = Label.new()
+	_progress.text = "Ready"
+	_progress.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_progress.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_progress.add_theme_color_override("font_color", get_theme_color("secondary", "Joinery"))
+	progress_row.add_child(_progress)
+	_elapsed_label = Label.new()
+	_elapsed_label.accessibility_name = "Response time"
+	progress_row.add_child(_elapsed_label)
 	_stop = Button.new()
 	_stop.text = "Stop"
+	_stop.theme_type_variation = "JoineryPicker"
+	_stop.custom_minimum_size.y = font_size * 2.25
+	_stop.add_theme_font_size_override("font_size", int(font_size * 0.85))
 	_stop.accessibility_name = "Stop the current agent response"
 	_stop.hide()
-	_stop.pressed.connect(func() -> void: cancel_requested.emit())
-	add_child(_stop)
+	_stop.pressed.connect(_request_cancel)
+	controls.add_child(_stop)
 	_command_layer = CanvasLayer.new()
 	_command_layer.layer = 100
 	add_child(_command_layer)
@@ -177,7 +302,6 @@ func _ready() -> void:
 	_command_list.item_clicked.connect(_on_command_clicked)
 	_command_popup.add_child(_command_list)
 	_command_popup.hide()
-	_say("Journeyman", "Ready. Select something and say what to change.")
 
 
 func _exit_tree() -> void:
@@ -187,6 +311,11 @@ func _exit_tree() -> void:
 
 
 func _process(_delta: float) -> void:
+	if _busy and _started_msec > 0:
+		var seconds := int((Time.get_ticks_msec() - _started_msec) / 1000.0)
+		if seconds != _last_elapsed_second:
+			_last_elapsed_second = seconds
+			_elapsed_label.text = "%ds" % seconds
 	if _command_popup.visible:
 		_position_commands()
 	if _command_job == null:
@@ -197,7 +326,7 @@ func _process(_delta: float) -> void:
 	_command_job = null
 	_busy = false
 	_prompt.editable = true
-	_prompt.placeholder_text = "Say what to change, or / for commands"
+	_prompt.placeholder_text = ("Chat with " + _agent_name)
 	var output := str(result["output"])
 	print("[Joinery] ", _running_command, "\n", output)
 	_say("Journeyman", _command_reply(_running_command, int(result["code"]), output))
@@ -234,14 +363,18 @@ func _position_commands() -> void:
 	var height := minf(row_height * _matches.size() + 16, get_viewport_rect().size.y * 0.4)
 	_command_popup.size = Vector2(_prompt.size.x, height)
 	var prompt_rect := (
-		_prompt.get_global_transform_with_canvas() * Rect2(Vector2.ZERO, _prompt.size)
+		_composer.get_global_transform_with_canvas() * Rect2(Vector2.ZERO, _composer.size)
 	)
+	_command_popup.size.x = _composer.size.x
 	_command_popup.global_position = Vector2(
 		prompt_rect.position.x, maxf(4, prompt_rect.position.y - _command_popup.size.y - 6)
 	)
 
 
 func _on_prompt_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.shift_pressed:
+		_command_popup.hide()
+		return
 	if not event is InputEventKey or not event.pressed or not _command_popup.visible:
 		return
 	var selected := _command_list.get_selected_items()
@@ -341,21 +474,59 @@ func _set_targets(targets: Array[Dictionary]) -> void:
 		child.queue_free()
 	for target: Dictionary in _target_context:
 		_targets.append(str(target["id"]))
+		var badge := PanelContainer.new()
+		badge.add_theme_stylebox_override(
+			"panel",
+			UI_THEME.panel(
+				get_theme_color("inset", "Joinery").lerp(get_theme_color("focus", "Joinery"), 0.08),
+				get_theme_color("border", "Joinery").lerp(get_theme_color("focus", "Joinery"), 0.4),
+				4,
+				5
+			)
+		)
+		_chips.add_child(badge)
 		var context := HBoxContainer.new()
-		context.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		context.add_theme_constant_override("separation", 6)
 		context.tooltip_text = "%s: %s" % [target["kind"], target["id"]]
-		_chips.add_child(context)
+		badge.add_child(context)
+		var kind_icon := (
+			{"Audio": "AudioStreamPlayer", "Object": "PackedScene", "Image": "Image"}
+			. get(str(target["kind"]), "File")
+		)
+		if has_theme_icon(kind_icon, "EditorIcons"):
+			var icon := TextureRect.new()
+			icon.texture = get_theme_icon(kind_icon, "EditorIcons")
+			icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			icon.custom_minimum_size = Vector2.ONE * get_theme_default_font_size()
+			context.add_child(icon)
 		var label := Label.new()
-		label.text = "Editing · " + str(target["label"])
+		var resource := str(target.get("resource", ""))
+		label.text = resource.get_file() if not resource.is_empty() else str(target["label"])
 		label.add_theme_font_size_override("font_size", int(get_theme_default_font_size() * 0.85))
-		label.add_theme_color_override("font_color", get_theme_color("secondary", "Joinery"))
+		label.add_theme_color_override("font_color", get_theme_color("text", "Joinery"))
 		label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-		label.custom_minimum_size.x = 60
+		label.custom_minimum_size.x = clampf(
+			(
+				get_theme_default_font()
+				. get_string_size(
+					label.text,
+					HORIZONTAL_ALIGNMENT_LEFT,
+					-1,
+					int(get_theme_default_font_size() * 0.85)
+				)
+				. x
+			),
+			40,
+			get_theme_default_font_size() * 12
+		)
 		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		context.add_child(label)
 		var clear := Button.new()
 		clear.text = "×"
 		clear.flat = true
+		clear.theme_type_variation = "JoineryIconButton"
+		clear.custom_minimum_size = Vector2.ONE * get_theme_default_font_size() * 1.5
 		clear.tooltip_text = "Clear selection for this message"
 		clear.accessibility_name = "Clear target " + str(target["label"])
 		clear.pressed.connect(_remove_target.bind(str(target["id"])))
@@ -390,9 +561,15 @@ func _on_submit(text: String) -> void:
 
 func set_chat_agent(agent: String) -> void:
 	_agent_name = agent.capitalize()
+	if _prompt != null and not _busy and not _review_pending:
+		_prompt.placeholder_text = "Chat with " + _agent_name
 
 
 func set_chat_state(state: String, detail: String) -> void:
+	if state == "working":
+		_progress.text = detail
+		_progress.tooltip_text = detail
+		return
 	_connection.text = detail
 	_connection.tooltip_text = detail
 	_reconnect.visible = state == "error"
@@ -404,17 +581,147 @@ func set_chat_state(state: String, detail: String) -> void:
 
 func set_chat_busy(busy: bool) -> void:
 	_busy = busy
+	_mode.disabled = busy
+	_model.disabled = busy
+	_effort.disabled = busy
+	if busy:
+		_started_msec = Time.get_ticks_msec()
+		_last_elapsed_second = -1
+		_progress.text = "Preparing your request…"
+	else:
+		_started_msec = 0
+		_progress.text = "Review changes" if _review_pending else "Ready"
 	_prompt.editable = not _review_pending
 	_stop.visible = busy
+	_send.visible = not busy
+	_attach.disabled = busy
+	_stop.disabled = false
 	_prompt.placeholder_text = (
 		"Review changes below the viewport"
 		if _review_pending
-		else "%s is responding…" % _agent_name if busy else "Say what to change, or / for commands"
+		else "%s is responding…" % _agent_name if busy else ("Chat with " + _agent_name)
+	)
+
+
+func _request_cancel() -> void:
+	_progress.text = "Stopping…"
+	_stop.disabled = true
+	cancel_requested.emit()
+
+
+func set_model_options(models: Array) -> void:
+	_model_choices = models.duplicate(true)
+	_model.clear()
+	_model.add_item("Automatic model")
+	_model.set_item_metadata(0, "")
+	for item: Dictionary in models:
+		if str(item.get("id", "")).is_empty():
+			continue
+		_model.add_item(str(item.get("name", item["id"])))
+		_model.set_item_metadata(_model.item_count - 1, str(item["id"]))
+	var saved := str(_selection_options.get("model", ""))
+	if (
+		not saved.is_empty()
+		and not models.any(func(item: Dictionary) -> bool: return str(item.get("id", "")) == saved)
+	):
+		_model.add_item("Unavailable: " + saved)
+		_model.set_item_metadata(_model.item_count - 1, saved)
+		_model.set_item_disabled(_model.item_count - 1, true)
+	restore_selection_options(_selection_options)
+	_model.tooltip_text = (
+		"Uses your provider's configured model; no model list is exposed."
+		if _model.item_count == 1
+		else "Choose an available model, or let Auto select one."
+	)
+
+
+func restore_selection_options(selection: Dictionary) -> void:
+	_selection_options = selection.duplicate()
+	var modes: Array[String] = ["auto", "fast", "thorough"]
+	_mode.select(maxi(0, modes.find(str(selection.get("mode", "auto")))))
+	_model.select(0)
+	for index: int in _model.item_count:
+		if _model.get_item_metadata(index) == selection.get("model", ""):
+			_model.select(index)
+	_update_efforts()
+
+
+func _model_changed(_index: int) -> void:
+	_selection_options["effort"] = ""
+	_update_efforts()
+	_options_changed(0)
+
+
+func _update_efforts() -> void:
+	_effort.clear()
+	_effort.add_item("Auto")
+	_effort.set_item_metadata(0, "")
+	var model_id := str(_model.get_item_metadata(_model.selected))
+	var found := false
+	for item: Dictionary in _model_choices:
+		if str(item.get("id", "")) != model_id:
+			continue
+		for value: String in item.get("efforts", []):
+			_effort.add_item(value.capitalize())
+			_effort.set_item_metadata(_effort.item_count - 1, value)
+			if value == _selection_options.get("effort", ""):
+				_effort.select(_effort.item_count - 1)
+				found = true
+	var saved := str(_selection_options.get("effort", ""))
+	if not saved.is_empty() and not found:
+		_effort.add_item("Unavailable: " + saved)
+		_effort.set_item_metadata(_effort.item_count - 1, saved)
+		_effort.set_item_disabled(_effort.item_count - 1, true)
+		_effort.select(_effort.item_count - 1)
+	_effort.visible = _effort.item_count > 1
+
+
+func _options_changed(_index: int) -> void:
+	_selection_options = {
+		"mode": ["auto", "fast", "thorough"][_mode.selected],
+		"model": str(_model.get_item_metadata(_model.selected)),
+		"effort": str(_effort.get_item_metadata(_effort.selected)),
+	}
+	selection_options_changed.emit(_selection_options.duplicate())
+
+
+func show_execution(event: Dictionary) -> void:
+	var description := (
+		"%s · %s"
+		% [str(event.get("name", "Provider default")), str(event.get("mode", "auto")).capitalize()]
+	)
+	if not str(event.get("effort", "")).is_empty():
+		description += " · " + str(event["effort"])
+	_mode.tooltip_text = description
+	_model.set_item_text(0, "Auto · " + str(event.get("name", "Provider default")))
+	_route_label.text = description
+	_route_label.tooltip_text = description
+	_progress.text = "Thinking…"
+	_elapsed_label.tooltip_text = description
+
+
+func show_timing(event: Dictionary) -> void:
+	_transcript.show_timing(event)
+	_elapsed_label.text = "%.1fs" % (float(event.get("total_ms", 0)) / 1000.0)
+	var detail := "Total: " + _elapsed_label.text
+	if event.get("first_response_ms") != null:
+		detail += "\nFirst response: %.1fs" % (float(event["first_response_ms"]) / 1000.0)
+	for phase: String in event.get("phases_ms", {}):
+		detail += "\n%s: %.1fs" % [phase.capitalize(), float(event["phases_ms"][phase]) / 1000.0]
+	_elapsed_label.tooltip_text += "\n" + detail
+	_progress.text = (
+		"Stopped"
+		if event.get("outcome") == "cancelled"
+		else (
+			"Review changes"
+			if _review_pending
+			else "Ready" if event.get("outcome") == "done" else "Request failed"
+		)
 	)
 
 
 func take_review_panel() -> Control:
-	remove_child(_review)
+	_content.remove_child(_review)
 	_review.name = "Review"
 	_review.custom_minimum_size.y = get_theme_default_font_size() * 18
 	return _review
@@ -423,6 +730,7 @@ func take_review_panel() -> Control:
 func show_edit_review(summary: String) -> void:
 	_review_details.hide()
 	_review_pending = true
+	_send.disabled = true
 	_review_label.text = "Preview · " + summary
 	_review.show()
 	_prompt.editable = false
@@ -459,7 +767,7 @@ func show_file_review(summary: String, text_diff: String, media: Array = []) -> 
 				if image != null:
 					var view := TextureRect.new()
 					view.texture = ImageTexture.create_from_image(image)
-					view.custom_minimum_size = Vector2(100, 160)
+					view.custom_minimum_size = Vector2(100, get_theme_default_font_size() * 14)
 					view.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 					view.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 					column.add_child(view)
@@ -487,11 +795,12 @@ func hide_edit_review(message: String = "") -> void:
 	var was_visible := _review.is_visible_in_tree()
 	_review_details.hide()
 	_review_pending = false
+	_send.disabled = false
 	_review.hide()
 	for child: Node in _review_media.get_children():
 		child.queue_free()
 	_prompt.editable = true
-	_prompt.placeholder_text = "Say what to change, or / for commands"
+	_prompt.placeholder_text = ("Chat with " + _agent_name)
 	if was_visible:
 		review_closed.emit()
 	if not message.is_empty():
@@ -499,14 +808,8 @@ func hide_edit_review(message: String = "") -> void:
 
 
 func append_agent_text(text: String, new_message: bool) -> void:
-	if new_message or not _assistant_open:
-		if _assistant_open:
-			_transcript.add_text("\n\n")
-		_transcript.push_color(get_theme_color("accent", "Joinery"))
-		_transcript.add_text(_agent_name + "  ")
-		_transcript.pop()
-		_assistant_open = true
-	_transcript.add_text(text)
+	_transcript.append_delta(_agent_name, text, new_message or not _assistant_open)
+	_assistant_open = true
 
 
 func show_agent_message(text: String) -> void:
@@ -515,9 +818,8 @@ func show_agent_message(text: String) -> void:
 
 
 func finish_agent_response(_ok: bool) -> void:
-	if _assistant_open:
-		_transcript.add_text("\n\n")
-		_assistant_open = false
+	_transcript.finish_response()
+	_assistant_open = false
 
 
 func _run_slash(entry: String) -> void:
@@ -542,6 +844,8 @@ func _run_slash(entry: String) -> void:
 			setup_requested.emit()
 		"/art":
 			art_review_requested.emit()
+		"/models":
+			models_refresh_requested.emit()
 		"/focus":
 			focus_toggle_requested.emit()
 		"/toolbar":
@@ -644,17 +948,14 @@ func _engine_dir() -> String:
 
 
 func _say(who: String, what: String) -> void:
-	_transcript.push_color(
-		(
-			get_theme_color("accent", "Joinery")
-			if who in ["Journeyman", _agent_name]
-			else get_theme_color("secondary", "Joinery")
-		)
-	)
-	_transcript.add_text(who + "  ")
-	_transcript.pop()
-	_transcript.add_text(what + "\n\n")
+	_transcript.add_message(who, what)
 
 
 func log_system(what: String) -> void:
 	print("[Joinery] ", what)
+
+
+func _composer_focus(focused: bool) -> void:
+	_composer_style.border_color = (
+		get_theme_color("focus", "Joinery") if focused else get_theme_color("border", "Joinery")
+	)

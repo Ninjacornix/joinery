@@ -6,8 +6,10 @@ import asyncio
 import difflib
 import json
 import ntpath
+import time
 import uuid
 from collections.abc import Awaitable, Callable
+from contextlib import nullcontext
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from typing import Any, cast
 
@@ -22,8 +24,10 @@ from joinery.lockfile import asset_files, check_assets
 from joinery.locking import record_custom_outputs
 from joinery.mcp_runtime import MCPConnection, PolicyStop, validate_arguments
 from joinery.policy import load_denylist
+from joinery.read_access import read_only
 from joinery.review import evidence
 from joinery.server_install import configured, installation
+from joinery.timing import TurnTiming
 from joinery.transactions import DIRECTORY, FileTransaction, ProjectLease, inventory
 from joinery.workers import (
     blender_worker,
@@ -32,33 +36,6 @@ from joinery.workers import (
     supercollider_worker,
 )
 
-GODOT_READS = {
-    "get_godot_version",
-    "get_project_info",
-    "list_project_files",
-    "read_file",
-    "read_scene",
-    "read_project_settings",
-    "get_uid",
-    "validate_script",
-    "validate_scripts",
-}
-BLENDER_READS = {
-    "get_blendfile_summary_datablocks",
-    "get_objects_summary",
-    "get_blendfile_summary_missing_files",
-    "get_blendfile_summary_linked_libraries",
-    "get_blendfile_summary_paths",
-    "get_python_api_docs",
-    "search_api_docs",
-    "search_manual_docs",
-}
-FIRST_PARTY_READS = {
-    "document_capabilities",
-    "inspect_document",
-    "validate_project",
-    "transaction_status",
-}
 PROTECTED = {
     "joinery.toml",
     ".mcp.json",
@@ -138,6 +115,9 @@ class ProjectGateway:
         ) = None
         self._call_lock = asyncio.Lock()
         self.progress: Callable[[str], None] = lambda _text: None
+        self.timing: TurnTiming | None = None
+        self._discovery_cache: tuple[float, dict[str, Any]] | None = None
+        self._discovery_lock = asyncio.Lock()
 
     async def connection(self, server: str) -> MCPConnection:
         """Start just the requested server; unrelated creative apps stay idle."""
@@ -152,42 +132,73 @@ class ProjectGateway:
                 spec.env["JOINERY_WORKER_SCOPE"] = spec.worker_scope
             connection = MCPConnection(spec, self.project)
             self.connections[server] = connection
-        await connection.connect()
+        with self.timing.span("tool_connection") if self.timing else nullcontext():
+            await connection.connect()
         return connection
 
     async def discover(self) -> dict[str, Any]:
+        async with self._discovery_lock:
+            if (
+                self._discovery_cache
+                and time.monotonic() - self._discovery_cache[0] < 15
+                and all(connection.readiness.connected for connection in self.connections.values())
+            ):
+                return self._discovery_cache[1]
+            with self.timing.span("discovery") if self.timing else nullcontext():
+                result = await self._discover()
+            if all(s.get("connected") for s in result["servers"]):
+                self._discovery_cache = (time.monotonic(), result)
+            return result
+
+    async def _discover(self) -> dict[str, Any]:
         self.progress("Connecting project tools…")
         tools = []
         states = [state.model_dump() for state in self.unavailable]
-        for spec in self.specs:
-            connection = self.connections.get(spec.name)
-            if connection is None:
-                if spec.source == "first-party":
-                    spec.worker_scope = uuid.uuid4().hex
-                    spec.env["JOINERY_WORKER_SCOPE"] = spec.worker_scope
-                connection = MCPConnection(spec, self.project)
-                self.connections[spec.name] = connection
-            try:
-                await connection.connect()
-                tools += [
-                    {
-                        "server": spec.name,
-                        **tool.model_dump(by_alias=True, exclude_none=True),
-                    }
-                    for tool in connection.tools.values()
-                ]
-                states.append(connection.readiness.model_dump())
-            except PolicyStop:
-                raise
-            except (OSError, RuntimeError, ValueError, TimeoutError):
-                states.append(connection.readiness.model_dump())
+        limit = asyncio.Semaphore(3)
+
+        async def start(spec: Any) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+            async with limit:
+                connection = self.connections.get(spec.name)
+                if connection is None:
+                    if spec.source == "first-party":
+                        spec.worker_scope = uuid.uuid4().hex
+                        spec.env["JOINERY_WORKER_SCOPE"] = spec.worker_scope
+                    connection = MCPConnection(spec, self.project)
+                    self.connections[spec.name] = connection
+                try:
+                    await connection.connect()
+                    discovered = [
+                        {
+                            "server": spec.name,
+                            **tool.model_dump(by_alias=True, exclude_none=True),
+                        }
+                        for tool in connection.tools.values()
+                    ]
+                    return discovered, connection.readiness.model_dump()
+                except PolicyStop:
+                    raise
+                except (OSError, RuntimeError, ValueError, TimeoutError):
+                    return [], connection.readiness.model_dump()
+
+        tasks = [asyncio.create_task(start(spec)) for spec in self.specs]
+        try:
+            results = await asyncio.gather(*tasks)
+        except BaseException:
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
+        for discovered, state in results:
+            tools += discovered
+            states.append(state)
         return {"servers": states, "tools": tools}
 
     async def call(
         self, server: str, tool: str, arguments: dict[str, Any]
     ) -> CallToolResult:
         async with self._call_lock:
-            return await self._call(server, tool, arguments)
+            with self.timing.span("tools") if self.timing else nullcontext():
+                return await self._call(server, tool, arguments)
 
     async def _call(
         self, server: str, tool: str, arguments: dict[str, Any]
@@ -207,13 +218,7 @@ class ProjectGateway:
             raise ValueError(
                 "This call needs a project-owned running-game session; it cannot target an arbitrary global port."
             )
-        readonly = (
-            (server == "godot" and tool in GODOT_READS)
-            or (server == "blender" and tool in BLENDER_READS)
-            or server == "joinery-registry"
-            or (server == "claude-collider" and tool == "cc_status")
-            or (server.startswith("joinery-") and tool in FIRST_PARTY_READS)
-        )
+        readonly = read_only(server, tool)
         if not readonly and server == "godot":
             unsaved = json.loads(self.editor_context.get("unsaved_scenes", "[]"))
             scene_path = "res://" + str(arguments.get("scenePath", "")).removeprefix(
@@ -273,7 +278,9 @@ class ProjectGateway:
             connection = staged
             arguments = _map_paths(arguments, self.project, self.transaction.stage)
         if connection.spec.container_name and self.transaction is not None:
-            arguments = _map_paths(arguments, self.transaction.stage, PurePosixPath("/work"))
+            arguments = _map_paths(
+                arguments, self.transaction.stage, PurePosixPath("/work")
+            )
         if server == "godot" and tool == "run_project":
             self._prepare_runtime()
         definition = connection.tools.get(tool)
@@ -320,11 +327,12 @@ class ProjectGateway:
             # Subsequent saved-scene operations can immediately reference the
             # new portable resources; import must precede their first load.
             self.progress("Importing the result into Godot…")
-            imported = await run_offline(
-                ["godot", "--headless", "--path", "/work", "--editor", "--import"],
-                self.transaction.stage,
-                180,
-            )
+            with self.timing.span("import") if self.timing else nullcontext():
+                imported = await run_offline(
+                    ["godot", "--headless", "--path", "/work", "--editor", "--import"],
+                    self.transaction.stage,
+                    180,
+                )
             if (
                 not imported.ok
                 or "SCRIPT ERROR:" in imported.output

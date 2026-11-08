@@ -52,6 +52,10 @@ def confined(project: Path, relative: str) -> Path:
 async def run_offline(
     argv: list[str], project: Path, timeout: int = 600, *, readonly: bool = False
 ) -> Result:
+    if os.environ.get("JOINERY_WORKER_SCOPE"):
+        from joinery.warm_workers import execute
+
+        return await execute(argv, project, timeout, readonly, IMAGE)
     name = "joinery-mcp-" + uuid.uuid4().hex
     start = asyncio.get_running_loop().time()
     process = await asyncio.create_subprocess_exec(

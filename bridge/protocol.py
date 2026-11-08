@@ -18,6 +18,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from bridge.models import ModelChoice, Selection
+
 
 class _Msg(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -37,6 +39,9 @@ class Prompt(_Msg):
     project_dir: str
     target_context: tuple[dict[str, str], ...] = ()
     editor_context: dict[str, str] = {}
+    selection: Selection = Selection()
+    model: str = ""
+    effort: str = ""
 
 
 class Decision(_Msg):
@@ -113,6 +118,19 @@ class MessageDelta(_Msg):
     new_message: bool = False
 
 
+class Execution(_Msg):
+    kind: Literal["execution"] = "execution"
+    model: str
+    name: str
+    effort: str = ""
+    mode: str
+
+
+class Models(_Msg):
+    kind: Literal["models"] = "models"
+    models: list[ModelChoice]
+
+
 class EditorAction(_Msg):
     kind: Literal["editor_action"] = "editor_action"
     request_id: str
@@ -122,7 +140,15 @@ class EditorAction(_Msg):
 
 
 AgentEvent = (
-    Step | ToolActivity | Preview | Message | MessageDelta | EditorAction | Done
+    Step
+    | ToolActivity
+    | Preview
+    | Message
+    | MessageDelta
+    | EditorAction
+    | Execution
+    | Models
+    | Done
 )
 
 

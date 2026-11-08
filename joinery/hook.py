@@ -21,6 +21,7 @@ Any internal error also exits 2 (fail-closed).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import subprocess
@@ -41,6 +42,7 @@ from joinery.policy import (
     normalise,
     url_violation,
 )
+from joinery.read_access import read_only
 
 # Env vars an agent may set to tell the hook its project directory, in order.
 _PROJECT_DIR_ENVS = ("CLAUDE_PROJECT_DIR", "CODEX_PROJECT_DIR")
@@ -165,6 +167,33 @@ def mcp_violation(server: str, tool: str, project_dir: Path) -> Verdict | None:
 
 def violation(raw: dict[str, Any]) -> Verdict | None:
     event = normalise_event(raw)
+    if os.environ.get("JOINERY_INSPECTION_ONLY") == "1":
+        values = raw.get("tool_input") or raw.get("args") or {}
+        allowed = event.kind == "other"
+        if event.kind == "mcp" and event.server.replace("_", "-") == "joinery-registry":
+            allowed = event.tool in {"discover_tools", "tool_schema", "inspect_editor"}
+            if event.tool == "call_tool" and isinstance(values, dict):
+                allowed = read_only(
+                    str(values.get("server", "")), str(values.get("tool", ""))
+                )
+        if not allowed:
+            # Still check Rule Zero first: a forbidden asset service stops the
+            # entire user turn, even when attempted by an inspection specialist.
+            verdict = (
+                mcp_violation(event.server, event.tool, event.project_dir)
+                if event.kind == "mcp"
+                else command_violation(event.command, load_denylist())
+                if event.kind == "bash"
+                else url_violation(event.url, load_denylist())
+                if event.kind == "fetch"
+                else None
+            )
+            if verdict and verdict.severity == Severity.STOP:
+                return verdict
+            return Verdict(
+                Severity.DENY,
+                "This specialist is read-only. Use the main thread for changes.",
+            )
     if event.kind == "mcp":
         return mcp_violation(event.server, event.tool, event.project_dir)
     if event.kind == "bash":
@@ -221,6 +250,29 @@ def main(agent_id: str | None = None) -> int:
         verdict = violation(raw)
         if verdict is None:
             return 0
+        endpoint = os.environ.get("JOINERY_INSPECTION_ENDPOINT")
+        if verdict.severity == Severity.STOP and endpoint:
+            # Inform the parent directly: stopping only the child must not let
+            # the parent retry a forbidden asset request through another tool.
+            from joinery.gateway_rpc import rpc
+
+            async def notify() -> None:
+                await asyncio.wait_for(
+                    rpc(
+                        Path(endpoint),
+                        "policy_stop",
+                        {
+                            "reason": "STOP, Rule Zero by Joinery policy: "
+                            + verdict.reason
+                        },
+                    ),
+                    5,
+                )
+
+            try:
+                asyncio.run(notify())
+            except (OSError, RuntimeError, TimeoutError):
+                pass  # The original hook verdict still stops/denies the child.
         stop_mode: StopMode = "exit"
         if agent_id:
             stop_mode = get_agent(agent_id).stop_mode

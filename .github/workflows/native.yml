@@ -115,6 +115,13 @@ jobs:
           else
             uv run python tests/godot/run_scene_edit_test.py | tee out/native-evidence/editor.log
           fi
+      - name: Capture responsive assistant controls in both themes
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a uv run python tests/godot/run_assistant_ui_test.py | tee out/native-evidence/assistant-ui.log
+          else
+            uv run python tests/godot/run_assistant_ui_test.py | tee out/native-evidence/assistant-ui.log
+          fi
       - name: Require retained framebuffers and the Windows software renderer
         run: |
           uv run python - <<'PY'

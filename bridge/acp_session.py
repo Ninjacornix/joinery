@@ -10,7 +10,16 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-from bridge.protocol import AgentEvent, Done, MessageDelta, Prompt, ToolActivity
+from bridge.models import ModelChoice, route
+from bridge.protocol import (
+    AgentEvent,
+    Done,
+    Execution,
+    MessageDelta,
+    Models,
+    Prompt,
+    ToolActivity,
+)
 from bridge.provider_process import (
     prompt_text,
     proxy_config,
@@ -18,7 +27,7 @@ from bridge.provider_process import (
     require_provider,
     stop_process,
 )
-from joinery.api_profiles import runtime
+from joinery.api_profiles import list_public, runtime
 from joinery.mcp_runtime import PolicyStop, validate_arguments
 from joinery.platform_support import launch_argv
 
@@ -34,6 +43,11 @@ class ACPSession:
         self.pending: dict[int, asyncio.Future[dict[str, Any]]] = {}
         self.events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self.tasks: list[asyncio.Task[Any]] = []
+        self.inspection_only = False
+        self.model_choices: list[ModelChoice] = []
+        self.current_model = ""
+        self.profile_model = ""
+        self.config_options: list[dict[str, Any]] = []
 
     async def connect(self, project: Path, profile_id: str = "") -> None:
         executable = (
@@ -42,12 +56,19 @@ class ACPSession:
             else self.agent
         )
         env = dict(os.environ)
+        if self.inspection_only:
+            env["JOINERY_INSPECTION_ONLY"] = "1"
+            if self.gateway_socket is not None:
+                env["JOINERY_INSPECTION_ENDPOINT"] = str(self.gateway_socket)
         extra: list[str] = []
         if profile_id:
             driver, extra, values = runtime(profile_id)
             if driver != self.agent:
                 raise ValueError("Select the API profile's configured provider.")
             env.update(values)
+            self.profile_model = str(
+                next(p for p in list_public() if p["id"] == profile_id)["model"]
+            )
         self.project = project.resolve()
         if self.gateway_socket is None:
             raise ValueError(
@@ -95,9 +116,111 @@ class ACPSession:
                 "session/new", {"cwd": str(project), "mcpServers": [config]}
             )
             self.session_id = str(session["sessionId"])
+            models = session.get("models") or {}
+            self.current_model = str(models.get("currentModelId") or "")
+            self.model_choices = [
+                ModelChoice(
+                    id=str(m["modelId"]),
+                    name=str(m.get("name") or m["modelId"]),
+                    is_default=m["modelId"] == self.current_model,
+                )
+                for m in models.get("availableModels", [])
+            ]
+            self.load_config(session.get("configOptions", []))
         except BaseException:
             await self.close()
             raise
+
+    async def models(self) -> list[ModelChoice]:
+        return self.model_choices
+
+    @staticmethod
+    def values(option: dict[str, Any]) -> list[dict[str, str]]:
+        values = []
+        for group in option.get("options", []):
+            for entry in group.get("options", [group]):
+                if isinstance(entry.get("value"), str):
+                    values.append(
+                        {
+                            "id": entry["value"],
+                            "name": str(entry.get("name") or entry["value"]),
+                        }
+                    )
+        return values
+
+    def config(self, category: str) -> dict[str, Any] | None:
+        return next(
+            (
+                item
+                for item in self.config_options
+                if item.get("type") == "select"
+                and (item.get("category") or item.get("id")) == category
+            ),
+            None,
+        )
+
+    def load_config(self, options: list[dict[str, Any]]) -> None:
+        self.config_options = options
+        model = self.config("model")
+        thought = self.config("thought_level")
+        self.model_choices = [
+            choice.model_copy(update={"efforts": (), "default_effort": ""})
+            for choice in self.model_choices
+        ]
+        if model:
+            self.current_model = str(model.get("currentValue") or "")
+            self.model_choices = [
+                ModelChoice(
+                    id=value["id"],
+                    name=value["name"],
+                    is_default=value["id"] == self.current_model,
+                )
+                for value in self.values(model)
+            ]
+        if thought:
+            self.model_choices = [
+                choice.model_copy(
+                    update={
+                        "efforts": tuple(value["id"] for value in self.values(thought)),
+                        "default_effort": str(thought.get("currentValue") or ""),
+                    }
+                )
+                for choice in self.model_choices
+            ]
+        if self.profile_model:
+            self.model_choices = [
+                choice
+                for choice in self.model_choices
+                if choice.id in {self.profile_model, "joinery/" + self.profile_model}
+            ]
+
+    async def set_config(self, option: dict[str, Any], value: str) -> None:
+        if value not in {entry["id"] for entry in self.values(option)}:
+            raise ValueError(
+                "This provider no longer offers the selected configuration value."
+            )
+        if option.get("currentValue") != value:
+            result = await self.request(
+                "session/set_config_option",
+                {
+                    "sessionId": self.session_id,
+                    "configId": option["id"],
+                    "value": value,
+                },
+            )
+            self.load_config(result.get("configOptions", self.config_options))
+            accepted = next(
+                (
+                    item
+                    for item in self.config_options
+                    if item.get("id") == option["id"]
+                ),
+                None,
+            )
+            if accepted is None or accepted.get("currentValue") != value:
+                raise ValueError(
+                    "The provider did not accept the requested model or reasoning setting."
+                )
 
     async def _write(self, value: dict[str, Any]) -> None:
         if (
@@ -206,6 +329,27 @@ class ACPSession:
     async def send(self, prompt: Prompt) -> AsyncIterator[AgentEvent]:
         if not self.session_id:
             raise ValueError("The provider session is not connected.")
+        if prompt.model and prompt.model != self.current_model:
+            model = self.config("model")
+            if model:
+                await self.set_config(model, prompt.model)
+            else:
+                await self.request(
+                    "session/set_model",
+                    {"sessionId": self.session_id, "modelId": prompt.model},
+                )
+            self.current_model = prompt.model
+        if self.config_options:
+            choice, effort, mode = route(
+                prompt.selection.model_copy(update={"model": prompt.model}),
+                prompt.text,
+                self.model_choices,
+            )
+            thought = self.config("thought_level")
+            if thought and effort:
+                await self.set_config(thought, effort)
+            yield Models(models=self.model_choices)
+            yield Execution(model=choice.id, name=choice.name, effort=effort, mode=mode)
         task = asyncio.create_task(
             self.request(
                 "session/prompt",
@@ -232,6 +376,9 @@ class ACPSession:
                     await self.cancel()
                     raise PolicyStop(event["params"]["reason"])
                 update = event.get("params", {}).get("update", {})
+                if update.get("sessionUpdate") == "config_option_update":
+                    self.load_config(update.get("configOptions", []))
+                    yield Models(models=self.model_choices)
                 if (
                     update.get("sessionUpdate") == "agent_message_chunk"
                     and update.get("content", {}).get("type") == "text"

@@ -144,6 +144,19 @@ func _connect_chat(settings: EditorSettings) -> void:
 	_chat.message_delta.connect(_dock.append_agent_text)
 	_chat.message_received.connect(_dock.show_agent_message)
 	_chat.completed.connect(_dock.finish_agent_response)
+	_chat.models_received.connect(_dock.set_model_options)
+	_chat.execution_changed.connect(_dock.show_execution)
+	_chat.timing_received.connect(_dock.show_timing)
+	var selection: Dictionary = settings.get_project_metadata(
+		"joinery", "assistant", {"mode": "auto", "model": "", "effort": ""}
+	)
+	_dock.restore_selection_options(selection)
+	_chat.set_selection(selection)
+	_dock.selection_options_changed.connect(
+		func(options: Dictionary) -> void:
+			_chat.set_selection(options)
+			settings.set_project_metadata("joinery", "assistant", options)
+	)
 	_dock.prompt_submitted.connect(_chat.submit)
 	_dock.cancel_requested.connect(_chat.cancel_turn)
 	_dock.cancel_requested.connect(_on_cancel_scene_edit)
@@ -151,6 +164,7 @@ func _connect_chat(settings: EditorSettings) -> void:
 	_dock.reject_edit_requested.connect(_reject_scene_edit)
 	_dock.reconnect_requested.connect(_chat.reconnect)
 	_dock.art_review_requested.connect(_chat.review_art)
+	_dock.models_refresh_requested.connect(_chat.refresh_models)
 	_chat.start(agent, profile, _dock._engine_dir(), ProjectSettings.globalize_path("res://"))
 
 

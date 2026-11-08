@@ -15,11 +15,22 @@ from pathlib import Path
 from typing import Any, BinaryIO, Protocol
 
 from bridge.host import Bridge
-from bridge.protocol import Done, EditorAction, Message, Prompt
+from bridge.models import Selection
+from bridge.protocol import (
+    Done,
+    EditorAction,
+    Execution,
+    Message,
+    MessageDelta,
+    Prompt,
+    ToolActivity,
+)
+from bridge.specialists import Specialists
 from joinery.art_approval import approve, review
 from joinery.editor_ops import validate_edit
 from joinery.gateway import ProjectGateway
 from joinery.gateway_rpc import GatewayRPC
+from joinery.timing import TurnTiming
 
 
 def emit(event: dict[str, Any]) -> None:
@@ -84,6 +95,7 @@ async def input_reader(stream: BinaryIO) -> tuple[asyncio.StreamReader, InputTra
 async def serve(project: Path, agent_id: str, profile_id: str = "") -> int:
     bridge: Bridge | None = None
     active: asyncio.Task[None] | None = None
+    specialists: Specialists | None = None
     try:
         gateway = ProjectGateway(project)
     except (OSError, ValueError) as exc:
@@ -170,6 +182,9 @@ async def serve(project: Path, agent_id: str, profile_id: str = "") -> int:
 
     async def turn(data: dict[str, Any]) -> None:
         assert bridge is not None
+        timing = TurnTiming()
+        gateway.timing = timing
+        outcome = "failed"
         try:
             context = data.get("targets", [])
             if not isinstance(context, list):
@@ -188,11 +203,22 @@ async def serve(project: Path, agent_id: str, profile_id: str = "") -> int:
                 targets=tuple(entry.get("id", "") for entry in targets),
                 target_context=targets,
                 editor_context={str(k): str(v) for k, v in editor.items()},
+                selection=Selection.model_validate(data.get("selection", {})),
             )
             gateway.editor_context = prompt.editor_context
             gateway.request_summary = prompt.text
             gateway.progress("Thinking through your request…")
             async for event in bridge.send(prompt):
+                if isinstance(event, Execution):
+                    timing.model, timing.effort, timing.mode = (
+                        event.model,
+                        event.effort,
+                        event.mode,
+                    )
+                if isinstance(event, (MessageDelta, Message)):
+                    timing.response()
+                if isinstance(event, ToolActivity):
+                    gateway.progress("Using " + event.server.capitalize() + "…")
                 if isinstance(event, EditorAction):
                     if gateway.transaction is not None and any(
                         change["path"]
@@ -212,12 +238,17 @@ async def serve(project: Path, agent_id: str, profile_id: str = "") -> int:
                     gateway.live_edit_pending = True
                 if isinstance(event, Done):
                     if event.ok:
-                        preview = await gateway.finish()
+                        with timing.span("review"):
+                            preview = await gateway.finish()
                         if preview is not None:
                             emit(preview)
+                        outcome = "done"
                     else:
                         await gateway.cancel()
                 emit(event.model_dump())
+        except asyncio.CancelledError:
+            outcome = "cancelled"
+            raise
         except (
             OSError,
             RuntimeError,
@@ -238,6 +269,15 @@ async def serve(project: Path, agent_id: str, profile_id: str = "") -> int:
             emit(Done(ok=False).model_dump())
             if isinstance(exc, OSError):
                 emit({"kind": "connection", "state": "error", "message": str(exc)})
+        finally:
+            if specialists is not None:
+                await specialists.close()
+            gateway.timing = None
+            # Diagnostics must never turn successful project work into failure.
+            try:
+                emit(timing.save(project, outcome))
+            except (OSError, ValueError, UnicodeError):
+                emit(timing.report(outcome))
 
     try:
         bridge = Bridge(agent_id)
@@ -245,13 +285,25 @@ async def serve(project: Path, agent_id: str, profile_id: str = "") -> int:
             raise ValueError("Open a Godot project before connecting chat.")
         await rpc_server.start()
         bridge.bind_gateway(rpc_server.path)
+        connection_timing = TurnTiming()
         await bridge.connect(project, profile_id)
+        specialists = Specialists(gateway, agent_id, profile_id, policy_stop)
+
+        async def delegate(jobs: list[dict[str, str]]) -> list[dict[str, str]]:
+            assert specialists is not None
+            if active is None or active.done():
+                raise ValueError("Specialists require an active user request.")
+            return await specialists.inspect(jobs)
+
+        rpc_server.delegate = delegate
         emit(
             {
                 "kind": "connection",
                 "state": "connected",
                 "agent": agent_id,
                 "mode": "reviewed-scene-edits",
+                "models": [model.model_dump() for model in bridge.model_choices],
+                "elapsed_ms": connection_timing.report("connected")["total_ms"],
             }
         )
         while line := await reader.readline():
@@ -275,6 +327,21 @@ async def serve(project: Path, agent_id: str, profile_id: str = "") -> int:
                     emit(gateway.rollback_decision(str(data.get("transaction_id", ""))))
                 elif data.get("kind") == "art_review":
                     emit(review(project))
+                elif data.get("kind") == "models_request":
+                    if active is not None and not active.done():
+                        raise ValueError(
+                            "Wait for the current response before refreshing models."
+                        )
+                    await bridge.refresh_models()
+                    emit(
+                        {
+                            "kind": "models",
+                            "models": [
+                                model.model_dump() for model in bridge.model_choices
+                            ],
+                        }
+                    )
+                    gateway.progress("Available models updated")
                 elif data.get("kind") == "art_approval":
                     expected_sha256 = str(data.get("sha256", ""))
                     if not expected_sha256:
@@ -301,13 +368,15 @@ async def serve(project: Path, agent_id: str, profile_id: str = "") -> int:
                     else:
                         bridge.editor_result(request_id, result)
                 elif data.get("kind") == "cancel":
-                    await gateway.cancel()
+                    if specialists is not None:
+                        await specialists.close()
                     if active is not None and not active.done():
                         with contextlib.suppress(Exception):
                             await bridge.cancel()
                         active.cancel()
                         await asyncio.gather(active, return_exceptions=True)
                         emit(Done(ok=False).model_dump())
+                    await gateway.cancel()
                 elif data.get("kind") == "prompt":
                     if active is not None and not active.done():
                         emit(
@@ -346,6 +415,8 @@ async def serve(project: Path, agent_id: str, profile_id: str = "") -> int:
             await asyncio.gather(active, return_exceptions=True)
         if bridge is not None:
             await bridge.close()
+        if specialists is not None:
+            await specialists.close()
         await rpc_server.close()
         transport.close()
 

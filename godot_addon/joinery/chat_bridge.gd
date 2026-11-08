@@ -11,6 +11,9 @@ signal editor_action(event: Dictionary)
 signal file_preview(event: Dictionary)
 signal file_decision(event: Dictionary)
 signal art_review(event: Dictionary)
+signal models_received(models: Array)
+signal execution_changed(event: Dictionary)
+signal timing_received(event: Dictionary)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 var context_provider: Callable
@@ -22,6 +25,7 @@ var _profile := ""
 var _engine := ""
 var _project := ""
 var _error_detail := ""
+var _selection: Dictionary = {"mode": "auto", "model": "", "effort": ""}
 
 
 func start(agent: String, profile: String, engine: String, project: String) -> void:
@@ -66,6 +70,7 @@ func submit(text: String, targets: Array) -> void:
 		"kind": "prompt",
 		"text": text,
 		"targets": targets.duplicate(true),
+		"selection": _selection.duplicate(),
 		"editor_context": context_provider.call(targets) if context_provider.is_valid() else {},
 	}
 	busy_changed.emit(true)
@@ -118,6 +123,7 @@ func _process(_delta: float) -> void:
 func _handle(event: Dictionary) -> void:
 	match str(event.get("kind", "")):
 		"connection":
+			models_received.emit(event.get("models", []))
 			_connected = event.get("state") == "connected"
 			if not _connected:
 				_error_detail = str(event.get("message", "Disconnected"))
@@ -137,6 +143,12 @@ func _handle(event: Dictionary) -> void:
 			message_received.emit(str(event.get("text", "")))
 		"progress":
 			status_changed.emit("working", str(event.get("text", "")))
+		"execution":
+			execution_changed.emit(event)
+		"models":
+			models_received.emit(event.get("models", []))
+		"timing":
+			timing_received.emit(event)
 		"file_preview":
 			file_preview.emit(event)
 		"art_review":
@@ -149,6 +161,17 @@ func _handle(event: Dictionary) -> void:
 			status_changed.emit("connected", _agent.capitalize() + " connected")
 			completed.emit(bool(event.get("ok", false)))
 			busy_changed.emit(false)
+
+
+func set_selection(selection: Dictionary) -> void:
+	_selection = selection.duplicate()
+
+
+func refresh_models() -> void:
+	if _job != null and _connected:
+		_job.send_line(JSON.stringify({"kind": "models_request"}))
+	else:
+		message_received.emit("Connect your agent before refreshing its model list.")
 
 
 func send_editor_result(request_id: String, result: Dictionary) -> void:

@@ -3,9 +3,11 @@ extends RefCounted
 ## Local native-control tokens. Keep Godot's fonts, scaling and input semantics.
 
 
-static func palette(context: Control) -> Dictionary:
+static func palette(context: Node) -> Dictionary:
 	var dark := true
-	if context.has_theme_color("base_color", "Editor"):
+	if context is Control and context.has_theme_color("base_color", "Editor"):
+		dark = context.get_theme_color("base_color", "Editor").get_luminance() < 0.45
+	elif context is Window and context.has_theme_color("base_color", "Editor"):
 		dark = context.get_theme_color("base_color", "Editor").get_luminance() < 0.45
 	return {
 		"surface": Color("202123") if dark else Color("f7f6f3"),
@@ -15,6 +17,7 @@ static func palette(context: Control) -> Dictionary:
 		"secondary": Color("b9b9b3") if dark else Color("575950"),
 		"border": Color("777a82") if dark else Color("85877f"),
 		"accent": Color("e6b66b") if dark else Color("875309"),
+		"focus": Color("5ba8d6") if dark else Color("1d6f99"),
 		"primary": Color("e6b66b") if dark else Color("875309"),
 		"on_primary": Color("222018") if dark else Color("ffffff"),
 	}
@@ -32,11 +35,16 @@ static func panel(
 	return box
 
 
-static func build(context: Control) -> Theme:
+static func build(context: Node) -> Theme:
 	var colors := palette(context)
 	var result := Theme.new()
-	var unit := maxf(context.get_theme_default_font_size() / 14.0, 1.0)
-	result.default_font_size = context.get_theme_default_font_size()
+	var font_size := 14
+	if context is Control:
+		font_size = context.get_theme_default_font_size()
+	elif context is Window:
+		font_size = context.get_theme_default_font_size()
+	var unit := maxf(font_size / 14.0, 1.0)
+	result.default_font_size = font_size
 	for name: String in colors:
 		result.set_color(name, "Joinery", colors[name])
 	result.set_color("font_color", "Label", colors["text"])
@@ -44,6 +52,9 @@ static func build(context: Control) -> Theme:
 	result.set_color("font_color", "LineEdit", colors["text"])
 	result.set_color("font_placeholder_color", "LineEdit", colors["secondary"])
 	result.set_color("caret_color", "LineEdit", colors["accent"])
+	result.set_color("font_color", "TextEdit", colors["text"])
+	result.set_color("font_placeholder_color", "TextEdit", colors["secondary"])
+	result.set_color("caret_color", "TextEdit", colors["focus"])
 	result.set_stylebox(
 		"normal", "LineEdit", panel(colors["inset"], colors["border"], 10 * unit, 8 * unit)
 	)
@@ -90,4 +101,44 @@ static func build(context: Control) -> Theme:
 		"selected_focus", "ItemList", panel(selected, colors["accent"], 4 * unit, 4 * unit)
 	)
 	result.set_constant("v_separation", "ItemList", int(8 * unit))
+	_chat_controls(result, colors, unit)
 	return result
+
+
+static func _chat_controls(result: Theme, colors: Dictionary, unit: float) -> void:
+	result.set_type_variation("JoineryPicker", "OptionButton")
+	result.set_type_variation("JoineryIconButton", "Button")
+	result.set_type_variation("JoinerySendButton", "Button")
+	var on_send: Color = colors["on_primary"]
+	for type_name: String in ["JoineryPicker", "JoineryIconButton", "JoinerySendButton"]:
+		var send := type_name == "JoinerySendButton"
+		for state: String in ["normal", "hover", "pressed", "disabled"]:
+			var fill: Color = colors["focus"] if send else colors["surface"]
+			if state == "hover":
+				fill = fill.lerp(colors["text"], 0.1)
+			elif state == "pressed":
+				fill = fill.lerp(colors["inset"], 0.2)
+			elif state == "disabled":
+				fill = colors["raised"]
+			var border: Color = fill if send else colors["border"].lerp(fill, 0.55)
+			var box := panel(fill, border, 6 * unit, 6 * unit)
+			box.content_margin_top = 4 * unit
+			box.content_margin_bottom = 4 * unit
+			if type_name == "JoineryIconButton":
+				box.set_content_margin_all(2 * unit)
+				box.border_color = Color.TRANSPARENT
+			result.set_stylebox(state, type_name, box)
+			var ink: Color = on_send if send and state != "disabled" else colors["secondary"]
+			if not send and state in ["hover", "pressed"]:
+				ink = colors["text"]
+			result.set_color("font_" + state + "_color", type_name, ink)
+			result.set_color("icon_" + state + "_color", type_name, ink)
+		result.set_color("font_color", type_name, on_send if send else colors["text"])
+		result.set_color("icon_normal_color", type_name, on_send if send else colors["text"])
+		result.set_stylebox(
+			"focus",
+			type_name,
+			panel(Color.TRANSPARENT, on_send if send else colors["focus"], 0, 6 * unit, 2)
+		)
+	result.set_constant("arrow_margin", "JoineryPicker", int(6 * unit))
+	result.set_constant("h_separation", "JoineryPicker", int(6 * unit))

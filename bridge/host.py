@@ -13,7 +13,8 @@ from pathlib import Path
 from typing import Any
 
 from bridge.adapters import AgentAdapter, adapter_for
-from bridge.protocol import AgentEvent, SidebarMessage
+from bridge.models import ModelChoice, route
+from bridge.protocol import AgentEvent, Execution, Models, Prompt, SidebarMessage
 from joinery.agents import get
 from joinery.wiring import unwireable
 
@@ -25,7 +26,7 @@ class GateUnavailable(RuntimeError):
 class Bridge:
     """Routes one sidebar session to one agent, with the gate enforced first."""
 
-    def __init__(self, agent_id: str) -> None:
+    def __init__(self, agent_id: str, *, inspection_only: bool = False) -> None:
         self.agent = get(agent_id)
         if agent_id in unwireable():
             # Fail-closed: never run an agent whose Rule Zero gate cannot hold.
@@ -34,6 +35,9 @@ class Bridge:
                 f"so Rule Zero stays enforced. Use a gated agent (see `joinery agents`)."
             )
         self._adapter: AgentAdapter = adapter_for(agent_id)
+        self.model_choices: list[ModelChoice] = []
+        if inspection_only:
+            self._adapter.restrict_to_inspection()
 
     @property
     def ready(self) -> bool:
@@ -45,6 +49,10 @@ class Bridge:
 
     async def connect(self, project: Path, profile_id: str = "") -> None:
         await self._adapter.connect(project, profile_id)
+        await self.refresh_models()
+
+    async def refresh_models(self) -> None:
+        self.model_choices = await self._adapter.models()
 
     def editor_result(self, request_id: str, result: dict[str, Any]) -> None:
         self._adapter.editor_result(request_id, result)
@@ -61,5 +69,13 @@ class Bridge:
             raise NotImplementedError(
                 f"the {self.agent.name} adapter is not implemented yet"
             )
+        if isinstance(message, Prompt):
+            model, effort, mode = route(
+                message.selection, message.text, self.model_choices
+            )
+            message = message.model_copy(update={"model": model.id, "effort": effort})
+            yield Execution(model=model.id, name=model.name, effort=effort, mode=mode)
         async for event in self._adapter.run(message):
+            if isinstance(event, Models):
+                self.model_choices = event.models
             yield event

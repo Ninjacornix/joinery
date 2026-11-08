@@ -84,9 +84,40 @@ jobs:
         run: uv run joinery rebuild --project testbed --runner sandbox
       - name: Exercise real creative edits, replay and review lifecycle
         run: uv run python tests/integration/creative_updates.py
+      - name: Measure reused workers and exercise native cancellation
+        run: uv run python tests/integration/assistant_latency.py --all-native
+      - name: Retain native worker performance evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: creative-worker-latency
+          path: out/assistant-latency.json
+          if-no-files-found: warn
 
   native:
     # Called workflows retain the caller event name. Test the actual input so
     # release push runs can disable this duplicate matrix too.
     if: ${{ toJSON(inputs.native) != 'false' }}
     uses: ./.github/workflows/native.yml
+
+  upstream-mcp:
+    name: Upstream MCP contracts (${{ matrix.tool }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        tool: [aseprite, audacity, gimp, musescore, reaper]
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - run: uv sync --frozen --python 3.12
+      - name: Test exact catalog source with isolated pinned SDK dependencies
+        run: uv run python -m tests.upstream.run --tool "${{ matrix.tool }}"
+      - name: Retain per-program test counts, scope and failures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: upstream-mcp-${{ matrix.tool }}
+          path: out/upstream-mcp-tests/
+          if-no-files-found: warn

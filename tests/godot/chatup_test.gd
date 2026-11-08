@@ -16,12 +16,14 @@ func _check(condition: bool, message: String) -> void:
 
 func _run() -> void:
 	root.size = Vector2i(800, 800)
-	var chat := load("res://addons/joinery/journeyman_dock.gd").new() as VBoxContainer
+	var chat := load("res://addons/joinery/journeyman_dock.gd").new() as Control
 	root.add_child(chat)
 	chat.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	await process_frame
-	_check(chat.custom_minimum_size.x >= chat.get_theme_default_font_size() * 24,
-		"Chat must start wide enough to read comfortably")
+	_check(
+		chat.custom_minimum_size.x >= chat.get_theme_default_font_size() * 24,
+		"Chat must start wide enough to read comfortably"
+	)
 	_check(chat.name == "Journeyman", "Restore the earlier sidebar identity")
 	var before: String = chat._transcript.get_parsed_text()
 	chat.log_system("Viewport toolbar shown.")
@@ -29,18 +31,24 @@ func _run() -> void:
 	chat.set_resource_target("res://audio/sfx/door_creak.wav", "AudioStreamWAV")
 	_check(chat._chips.visible, "Selected audio must be visible in the composer")
 	_check(
-		chat._chips.get_index() > chat._transcript.get_index(),
+		(
+			chat._composer.is_ancestor_of(chat._chips)
+			and chat._composer.get_index() > chat._transcript.get_index()
+		),
 		"Selection context must sit near the input, below the conversation"
 	)
 	_check(chat.target_snapshot()[0]["kind"] == "Audio", "Identify audio targets")
 	var snapshot: Array[Dictionary] = chat.target_snapshot()
 	snapshot[0]["id"] = "wrong"
 	_check(chat.target_snapshot()[0]["id"] != "wrong", "Target snapshots must be independent")
-	chat.prompt_submitted.connect(func(text: String, targets: Array) -> void:
-		_prompts.append({"text": text, "targets": targets})
+	chat.prompt_submitted.connect(
+		func(text: String, targets: Array) -> void:
+			_prompts.append({"text": text, "targets": targets})
 	)
 	chat._on_submit("Make this quieter")
-	_check(_prompts[0]["targets"][0]["id"] == "res://audio/sfx/door_creak.wav", "Route audio context")
+	_check(
+		_prompts[0]["targets"][0]["id"] == "res://audio/sfx/door_creak.wav", "Route audio context"
+	)
 	chat._prompt.text = "/"
 	chat._update_commands("/")
 	await process_frame
@@ -93,8 +101,10 @@ func _run() -> void:
 	chat.append_agent_text("世界", false)
 	chat.finish_agent_response(true)
 	chat.set_chat_busy(false)
-	_check(chat._transcript.get_parsed_text().contains("Codex  Hello 世界"),
-		"Stream one agent message without repeated headers")
+	_check(
+		chat._transcript.get_parsed_text().contains("Codex  Hello 世界"),
+		"Stream one agent message without repeated headers"
+	)
 	chat.set_chat_state("error", "Codex signed out")
 	_check(chat._reconnect.visible, "Failed connections must have a recovery action")
 	chat.queue_free()

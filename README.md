@@ -24,6 +24,13 @@ Status: **0.1 alpha** (`0.1.0a1`), unsigned. Native macOS ARM64, Linux x86_64
 and Windows x86_64 editor, startup, review/undo, extracted bundle and exported-game
 runtime checks pass. See the [desktop verification report](evals/results/desktop-release.md)
 for the measured candidate, CI evidence and limits.
+
+Program and MCP regression scenarios and native test commands are documented in
+[the testing guide](docs/testing.md).
+
+[Assistant modes and performance](docs/assistant-performance.md) covers model
+routing, read-only specialists, native worker reuse and the updated editor UI.
+
 Read the [alpha release notes and installation steps](docs/releases/0.1.0-alpha.1.md)
 before using a release bundle. This alpha requires **uv, a running Docker engine,
 Git, Node.js/npm, and a signed-in supported agent CLI or a verified API profile**.

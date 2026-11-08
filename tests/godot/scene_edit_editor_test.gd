@@ -41,6 +41,14 @@ func _run() -> void:
 		await _empty_scene(plugin, box)
 	else:
 		await _existing_scene(plugin, box)
+	# This fixture exits the SceneTree directly rather than using the editor's
+	# window-close flow. Drain owned preview viewports before renderer shutdown.
+	plugin._workspace._clear_preview()
+	plugin._dock.hide_edit_review()
+	plugin._chat.close()
+	await get_tree().process_frame
+	await get_tree().process_frame
+	RenderingServer.force_draw()
 	print("editor scene edits: ", "FAILED" if _failed else "ok")
 	get_tree().quit(1 if _failed else 0)
 
