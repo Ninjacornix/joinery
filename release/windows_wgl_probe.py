@@ -24,6 +24,7 @@ SOURCE = r"""
 #include <cstdio>
 #include <cstring>
 #include <cstdint>
+#include <cwchar>
 #pragma comment(lib, "user32.lib")
 #pragma comment(lib, "gdi32.lib")
 
@@ -50,7 +51,18 @@ int main(int argc, char **argv) {
     HMODULE gl = nullptr;
     if (strcmp(mode, "gdi-first") != 0) {
         SetLastError(0);
-        gl = LoadLibraryW(L"opengl32.dll");
+        if (!strcmp(mode, "mesa-direct") || !strcmp(mode, "mesa-pixel-format")) {
+            wchar_t private_path[32768] = {};
+            GetModuleFileNameW(nullptr, private_path, 32768);
+            wchar_t *filename = std::wcsrchr(private_path, L'\\');
+            if (filename) {
+                wcscpy_s(filename + 1, 32768 - static_cast<size_t>((filename + 1) - private_path), L"opengl32.dll");
+                SetLastError(0);
+                gl = LoadLibraryW(private_path);
+            }
+        } else {
+            gl = LoadLibraryW(L"opengl32.dll");
+        }
         number("preload_error", GetLastError());
         module_path("opengl_preloaded", gl);
     }
@@ -210,7 +222,7 @@ def probe(directory: Path, cache: Path) -> dict[str, Any]:
         raise ValueError("This diagnostic requires actual native Windows")
     executable = prepare(directory.resolve(), cache.resolve())
     cases = {}
-    modes = ("gdi-first", "mesa-preloaded", "mesa-pixel-format")
+    modes = ("gdi-first", "mesa-preloaded", "mesa-direct", "mesa-pixel-format")
     variants = [(mode, False) for mode in modes] + [(mode, True) for mode in modes]
     marker = executable.with_name(executable.name + ".local")
     try:
