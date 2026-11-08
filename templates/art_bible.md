@@ -69,6 +69,12 @@ lufs_tolerance = 1.0        # allowed distance from a folder's loudness target
 [models.max_triangles]
 # "art/characters" = 15000
 # "art/props" = 3000
+
+[palette]
+colours = []                # e.g. ["#2b2d42", "#8d99ae", "#edf2f4", "#ef233c"]
+max_delta_e = 12.0          # CIEDE2000 distance that still counts as on-palette
+max_off_palette = 0.05      # share of image colours allowed beyond that
+folders = ["art"]           # where images are checked
 ```
 
 ## 8. Never (hard bans)

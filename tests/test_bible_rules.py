@@ -11,6 +11,7 @@ from joinery.art_approval import approve
 from joinery.bible import render
 from joinery.bible_rules import (
     check_rules,
+    delta_e_2000,
     glb_triangles,
     load_rules,
     parse_loudness,
@@ -180,3 +181,70 @@ def test_unchanged_and_deleted_assets_are_not_measured(tmp_path: Path) -> None:
 
     assert asyncio.run(check_rules(root, ["audio/sfx/deleted.wav"], measure)) == []
     assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("lab1", "lab2", "expected"),
+    [
+        # Reference pairs from Sharma, Wu and Dalal (2005), table 1.
+        ((50.0, 2.6772, -79.7751), (50.0, 0.0, -82.7485), 2.0425),
+        ((50.0, 3.1571, -77.2803), (50.0, 0.0, -82.7485), 2.8615),
+        ((50.0, 2.5, 0.0), (73.0, 25.0, -18.0), 27.1492),
+        ((2.0776, 0.0795, -1.1350), (0.9033, -0.0636, -0.5514), 0.9082),
+    ],
+)
+def test_delta_e_2000_matches_reference_pairs(
+    lab1: tuple[float, float, float], lab2: tuple[float, float, float], expected: float
+) -> None:
+    assert delta_e_2000(lab1, lab2) == pytest.approx(expected, abs=1e-4)
+
+
+def palette_stage(tmp_path: Path, colours: str) -> Path:
+    (tmp_path / "art/textures").mkdir(parents=True)
+    (tmp_path / "art/bible.md").write_text(
+        f"```toml\n[palette]\ncolours = {colours}\nmax_off_palette = 0.25\n```\n"
+    )
+    (tmp_path / "art/textures/wall.png").write_bytes(b"x")
+    return tmp_path
+
+
+def samples(*pixels: str) -> str:
+    return "JOINERY_FILE:art/textures/wall.png\n" + "".join(pixels) + "\n"
+
+
+def test_palette_counts_opaque_pixels_far_from_every_colour(tmp_path: Path) -> None:
+    root = palette_stage(tmp_path, '["#ff0000", "#0000ff"]')
+    near_red, blue, green, clear_green = "fa0505ff", "0000ffff", "00ff00ff", "00ff0000"
+    within = samples(near_red, blue, blue, green, clear_green)
+    assert (
+        asyncio.run(check_rules(root, ["art/textures/wall.png"], measured(within)))
+        == []
+    )
+    beyond = samples(near_red, green, green, blue)
+    assert asyncio.run(
+        check_rules(root, ["art/textures/wall.png"], measured(beyond))
+    ) == [
+        (
+            "art/textures/wall.png: 50% of its colours are more than ΔE 12 from the "
+            "palette (allowed 25%)"
+        )
+    ]
+
+
+def test_empty_palette_checks_no_images(tmp_path: Path) -> None:
+    root = palette_stage(tmp_path, "[]")
+    assert (
+        asyncio.run(
+            check_rules(root, ["art/textures/wall.png"], measured("", ok=False))
+        )
+        == []
+    )
+
+
+def test_bad_palette_colour_is_reported(tmp_path: Path) -> None:
+    (tmp_path / "art").mkdir()
+    (tmp_path / "art/bible.md").write_text(
+        '```toml\n[palette]\ncolours = ["red"]\n```\n'
+    )
+    with pytest.raises(ValueError, match="checked rules are invalid"):
+        load_rules(tmp_path)
