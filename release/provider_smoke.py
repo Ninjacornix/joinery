@@ -16,7 +16,9 @@ import json
 import os
 import platform
 import shutil
+import sys
 import tempfile
+import time
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +26,54 @@ from bridge.provider_process import stop_process
 from joinery.platform_support import launch_argv
 
 CODEX_VERSION = "0.167.0"
+
+
+class IsolatedHomeCleanupError(RuntimeError):
+    def __init__(self, diagnostics: dict[str, Any]) -> None:
+        super().__init__("The isolated provider home remained locked after shutdown")
+        self.diagnostics = diagnostics
+
+
+def remove_isolated_home(
+    directory: Path, *, lifecycle_complete: bool, process_ids: list[int]
+) -> dict[str, Any]:
+    """Wait only for Windows' observed post-exit directory sharing handoff.
+
+    Provider initialization, process-handle waits and output EOF are never
+    retried. The directory-release allowance applies only after all those gates
+    passed, and only to the native sharing-violation error (WinError 32).
+    """
+    deadline = time.monotonic() + 2.0
+    sharing_violations = 0
+    while True:
+        try:
+            shutil.rmtree(directory)
+            break
+        except OSError as exc:
+            if not (
+                sys.platform == "win32"
+                and lifecycle_complete
+                and getattr(exc, "winerror", None) == 32
+            ):
+                raise
+            sharing_violations += 1
+            if time.monotonic() >= deadline:
+                from release.windows_lock_diagnostics import diagnose_locks
+
+                resource = Path(exc.filename) if exc.filename else directory
+                if not resource.is_relative_to(directory):
+                    resource = directory
+                raise IsolatedHomeCleanupError(
+                    diagnose_locks(resource, process_ids)
+                ) from exc
+            time.sleep(0.025)
+    if directory.exists():
+        raise RuntimeError("The isolated provider home was not removed")
+    return {
+        "directory_removed": True,
+        "sharing_violations": sharing_violations,
+        "release_deadline_seconds": 2.0,
+    }
 
 
 def isolated_environment(directory: Path) -> dict[str, str]:
@@ -158,6 +208,7 @@ async def handshake(executable: str, directory: Path, mode: str) -> dict[str, An
             "response_fields": sorted(result),
             "shutdown": mode,
             "exit_code": process.returncode,
+            "process_id": process.pid,
         }
     finally:
         try:
@@ -179,9 +230,12 @@ async def handshake(executable: str, directory: Path, mode: str) -> dict[str, An
 async def smoke(
     executable: str, expected_version: str = CODEX_VERSION
 ) -> dict[str, Any]:
-    with tempfile.TemporaryDirectory(prefix="joinery-native-provider-") as temporary:
-        directory = Path(temporary)
+    directory = Path(tempfile.mkdtemp(prefix="joinery-native-provider-"))
+    lifecycle_complete = False
+    process_ids: list[int] = []
+    try:
         process = await launch(executable, ["--version"], directory)
+        process_ids.append(process.pid)
         try:
             output, _ = await asyncio.wait_for(process.communicate(), 12)
             version = output.decode("utf-8", errors="replace").strip()
@@ -193,7 +247,17 @@ async def smoke(
             await cleanup(process)
         cases = []
         for mode in ("eof", "cancel"):
-            cases.append(await handshake(executable, directory / mode, mode))
+            case = await handshake(executable, directory / mode, mode)
+            cases.append(case)
+            process_ids.append(case["process_id"])
+        lifecycle_complete = True
+    finally:
+        release = await asyncio.to_thread(
+            remove_isolated_home,
+            directory,
+            lifecycle_complete=lifecycle_complete,
+            process_ids=process_ids,
+        )
     return {
         "status": "passed",
         "provider": "codex",
@@ -203,6 +267,7 @@ async def smoke(
         "authentication": "not requested; isolated empty credential store",
         "inference": "not requested",
         "cases": cases,
+        "isolated_home_release": release,
     }
 
 
@@ -230,6 +295,8 @@ def main() -> int:
             "error_type": type(exc).__name__,
             "error": str(exc),
         }
+        if isinstance(exc, IsolatedHomeCleanupError):
+            failure["lock_diagnostics"] = exc.diagnostics
         if args.output:
             args.output.parent.mkdir(parents=True, exist_ok=True)
             args.output.write_text(
