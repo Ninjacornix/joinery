@@ -49,6 +49,16 @@ class PolicyStop(RuntimeError):
     """A Rule Zero stop must propagate to the agent turn, not become a retry."""
 
 
+def host_environment() -> dict[str, str]:
+    """Inherit host runtime paths, never provider keys or arbitrary settings."""
+    names = (
+        "PATH", "HOME", "LANG", "TMPDIR", "SYSTEMROOT", "SystemRoot",
+        "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "COMSPEC",
+        "HOMEDRIVE", "HOMEPATH", "ProgramFiles", "ProgramFiles(x86)",
+    )
+    return {key: os.environ[key] for key in names if key in os.environ}
+
+
 def validate_schema(schema: Any) -> None:
     """MCP schemas are data, never permission to retrieve remote references."""
     if isinstance(schema, dict):
@@ -156,11 +166,7 @@ class MCPConnection:
     async def _serve(self) -> None:
         # The SDK's process/cancel scope is opened and closed in this same task.
         # Neither model API keys nor the host's complete environment are inherited.
-        env = {
-            key: os.environ[key]
-            for key in ("PATH", "HOME", "LANG", "TMPDIR", "SYSTEMROOT")
-            if key in os.environ
-        }
+        env = host_environment()
         env.update(self.spec.env)
         parameters = StdioServerParameters(
             command=self.spec.command,

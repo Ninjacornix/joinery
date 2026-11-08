@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -9,6 +10,7 @@ import pytest
 from bridge.codex_session import CodexSession, require_gate
 from bridge.protocol import Done, MessageDelta, Prompt
 from joinery.catalog import ROOT
+from joinery.wiring import _command_str
 
 
 @pytest.fixture
@@ -17,7 +19,7 @@ def game(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (game / ".codex").mkdir(parents=True)
     (game / "project.godot").write_text('[application]\nconfig/name="Test"\n')
     (game / "joinery.toml").write_text('[tools]\nenabled=["godot"]\n')
-    command = f"uv run --frozen --quiet --project {ROOT} joinery hook --agent codex"
+    command = _command_str(str(ROOT), "codex")
     (game / ".codex/hooks.json").write_text(
         json.dumps(
             {
@@ -29,7 +31,10 @@ def game(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             }
         )
     )
-    executable = tmp_path / "codex"
+    executable = tmp_path / ("codex.py" if os.name == "nt" else "codex")
+    monkeypatch.setenv("PYTHONUTF8", "1")
+    if os.name == "nt":
+        monkeypatch.setenv("PATHEXT", os.environ.get("PATHEXT", ".EXE;.CMD") + ";.PY")
     executable.write_text("""#!/usr/bin/env python3
 import json,sys,os
 from pathlib import Path
@@ -199,7 +204,8 @@ def test_cli_stdio_conversation_and_eof_cleanup(
     async def run() -> None:
         process = await asyncio.create_subprocess_exec(
             sys.executable,
-            str(ROOT / ".venv/bin/joinery"),
+            "-c",
+            "from joinery.cli import main; raise SystemExit(main())",
             "chat",
             "--addon-protocol",
             "2",

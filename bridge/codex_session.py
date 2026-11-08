@@ -22,9 +22,11 @@ from bridge.protocol import (
     MessageDelta,
     Prompt,
 )
+from bridge.provider_process import stop_process
 from joinery.api_profiles import runtime
 from joinery.catalog import ROOT
 from joinery.editor_ops import SCENE_TOOL, validate_edit
+from joinery.platform_support import launch_argv
 from joinery.wiring import _command_str
 
 
@@ -112,12 +114,9 @@ class CodexSession:
 
         async def launch(*flags: str) -> None:
             self.process = await asyncio.create_subprocess_exec(
-                executable,
-                *args,
-                *flags,
-                "app-server",
-                "--listen",
-                "stdio://",
+                *launch_argv(
+                    executable, [*args, *flags, "app-server", "--listen", "stdio://"]
+                ),
                 cwd=project,
                 env=env,
                 stdin=asyncio.subprocess.PIPE,
@@ -475,6 +474,8 @@ class CodexSession:
 
     async def close(self) -> None:
         process, self.process = self.process, None
+        if os.name == "nt":
+            await stop_process(process)
         if process is not None and process.returncode is None:
             with contextlib.suppress(ProcessLookupError):
                 if os.name != "nt":

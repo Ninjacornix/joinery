@@ -26,6 +26,7 @@ from bridge.provider_process import (
     stop_process,
 )
 from joinery.catalog import ROOT
+from joinery.platform_support import launch_argv
 from joinery.wiring import _command_str
 
 
@@ -87,13 +88,13 @@ class ClaudeSession:
         ]
         env = dict(os.environ, DISABLE_TELEMETRY="1", DISABLE_ERROR_REPORTING="1")
         self.process = await asyncio.create_subprocess_exec(
-            *readonly_command(args, self.project),
+            *readonly_command(launch_argv(args[0], args[1:]), self.project),
             cwd=self.project,
             env=env,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            start_new_session=True,
+            start_new_session=os.name != "nt",
             limit=16_000_000,
         )
         assert self.process.stdin and self.process.stdout and self.process.stderr

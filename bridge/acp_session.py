@@ -20,6 +20,7 @@ from bridge.provider_process import (
 )
 from joinery.api_profiles import runtime
 from joinery.mcp_runtime import PolicyStop, validate_arguments
+from joinery.platform_support import launch_argv
 
 
 class ACPSession:
@@ -52,15 +53,19 @@ class ACPSession:
             raise ValueError(
                 "Connect the project gateway before starting the provider."
             )
-        args = [executable, *extra, "--acp"] if self.agent == "gemini" else [executable, *extra, "--standalone", "acp"]
+        args = (
+            [executable, *extra, "--acp"]
+            if self.agent == "gemini"
+            else [executable, *extra, "--standalone", "acp"]
+        )
         self.process = await asyncio.create_subprocess_exec(
-            *readonly_command(args, project),
+            *readonly_command(launch_argv(args[0], args[1:]), project),
             cwd=project,
             env=env,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            start_new_session=True,
+            start_new_session=os.name != "nt",
             limit=16_000_000,
         )
         assert self.process.stderr

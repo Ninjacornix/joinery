@@ -6,10 +6,13 @@ import asyncio
 import contextlib
 import getpass
 import json
+import os
 import sys
+import threading
 import uuid
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO, Protocol
 
 from bridge.host import Bridge
 from bridge.protocol import Done, EditorAction, Message, Prompt
@@ -21,6 +24,61 @@ from joinery.gateway_rpc import GatewayRPC
 
 def emit(event: dict[str, Any]) -> None:
     print(json.dumps(event), flush=True)
+
+
+class ThreadInput:
+    """Read synchronous Windows anonymous stdin pipes without blocking asyncio.
+
+    Godot uses CreatePipe, not overlapped named pipes. Proactor connect_read_pipe
+    cannot safely register those handles. This daemon owns no editor state and
+    exits on EOF; shutdown never waits for a blocked executor thread.
+    """
+
+    def __init__(self, stream: BinaryIO, reader: asyncio.StreamReader) -> None:
+        self.closed = threading.Event()
+        loop = asyncio.get_running_loop()
+
+        def deliver(callback: Callable[..., None], *values: Any) -> None:
+            if not self.closed.is_set():
+                with contextlib.suppress(RuntimeError):
+                    loop.call_soon_threadsafe(callback, *values)
+
+        def pump() -> None:
+            try:
+                while not self.closed.is_set():
+                    line = stream.readline(1_000_001)
+                    if len(line) > 1_000_000:
+                        deliver(
+                            reader.set_exception,
+                            ValueError("Chat input exceeds the message size limit."),
+                        )
+                        return
+                    if not line:
+                        deliver(reader.feed_eof)
+                        return
+                    deliver(reader.feed_data, line)
+            except OSError:
+                deliver(reader.set_exception, ConnectionError("Chat input closed."))
+
+        self.thread = threading.Thread(target=pump, name="joinery-stdin", daemon=True)
+        self.thread.start()
+
+    def close(self) -> None:
+        self.closed.set()
+
+
+class InputTransport(Protocol):
+    def close(self) -> None: ...
+
+
+async def input_reader(stream: BinaryIO) -> tuple[asyncio.StreamReader, InputTransport]:
+    reader = asyncio.StreamReader(limit=1_000_000)
+    if os.name == "nt":
+        return reader, ThreadInput(stream, reader)
+    transport, _ = await asyncio.get_running_loop().connect_read_pipe(
+        lambda: asyncio.StreamReaderProtocol(reader), stream
+    )
+    return reader, transport
 
 
 async def serve(project: Path, agent_id: str, profile_id: str = "") -> int:
@@ -90,12 +148,25 @@ async def serve(project: Path, agent_id: str, profile_id: str = "") -> int:
         )
         emit(Done(ok=False).model_dump())
 
-    rpc_server = GatewayRPC(gateway, policy_stop)
-    reader = asyncio.StreamReader(limit=1_000_000)
-    transport, _ = await asyncio.get_running_loop().connect_read_pipe(
-        lambda: asyncio.StreamReaderProtocol(reader),
-        sys.stdin.buffer,
-    )
+    rpc_server: GatewayRPC | None = None
+    try:
+        rpc_server = GatewayRPC(gateway, policy_stop)
+        reader, transport = await input_reader(sys.stdin.buffer)
+    except (OSError, ValueError) as exc:
+        if rpc_server is not None:
+            await rpc_server.close()
+        else:
+            await gateway.close()
+        emit(
+            {
+                "kind": "connection",
+                "state": "error",
+                "agent": agent_id,
+                "message": str(exc),
+            }
+        )
+        return 1
+    assert rpc_server is not None
 
     async def turn(data: dict[str, Any]) -> None:
         assert bridge is not None

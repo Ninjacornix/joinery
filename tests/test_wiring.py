@@ -1,11 +1,37 @@
 """Agent hook wiring: every supported agent, portable repo config, fail-closed."""
 
+import base64
 import json
 from pathlib import Path
 
 from joinery.agents import all_agents
 from joinery.catalog import ROOT
 from joinery.wiring import unwireable, write_agent_wiring
+
+
+def config_text(path: Path) -> str:
+    """Inspect the actual hook payload on both Unix shells and PowerShell."""
+    text = path.read_text()
+    if path.suffix == ".js":
+        return text
+    value = json.loads(text)
+    commands: list[str] = []
+
+    def visit(node: object) -> None:
+        if isinstance(node, dict):
+            command = node.get("command")
+            if isinstance(command, str) and " -EncodedCommand " in command:
+                commands.append(
+                    base64.b64decode(command.split()[-1]).decode("utf-16-le")
+                )
+            for child in node.values():
+                visit(child)
+        elif isinstance(node, list):
+            for child in node:
+                visit(child)
+
+    visit(value)
+    return text + "\n" + "\n".join(commands)
 
 
 def test_writes_config_for_every_wireable_agent(tmp_path: Path) -> None:
@@ -22,7 +48,11 @@ def test_scaffolded_config_pins_engine_install(tmp_path: Path) -> None:
     # concrete engine install to find `joinery`.
     claude = json.loads((tmp_path / ".claude/settings.json").read_text())
     command = claude["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
-    assert str(ROOT) in command and "joinery hook --agent claude" in command
+    assert command
+    semantic = config_text(tmp_path / ".claude/settings.json")
+    assert str(ROOT) in semantic and all(
+        token in semantic for token in ("joinery", "hook", "--agent", "claude")
+    )
 
 
 def test_portable_config_has_no_machine_path(tmp_path: Path) -> None:
@@ -36,16 +66,16 @@ def test_portable_config_has_no_machine_path(tmp_path: Path) -> None:
 
 def test_portable_claude_uses_project_dir_var(tmp_path: Path) -> None:
     write_agent_wiring(tmp_path, portable=True)
-    text = (tmp_path / ".claude/settings.json").read_text()
-    assert "${CLAUDE_PROJECT_DIR}" in text
+    text = config_text(tmp_path / ".claude/settings.json")
+    assert "${CLAUDE_PROJECT_DIR}" in text or "$env:CLAUDE_PROJECT_DIR" in text
 
 
 def test_every_agent_runs_joinery_hook(tmp_path: Path) -> None:
     write_agent_wiring(tmp_path)
     for agent in all_agents():
         if agent.blocking_hook:
-            assert "joinery" in (tmp_path / agent.config_path).read_text()
-            assert "hook" in (tmp_path / agent.config_path).read_text()
+            assert "joinery" in config_text(tmp_path / agent.config_path)
+            assert "hook" in config_text(tmp_path / agent.config_path)
 
 
 def test_all_supported_agents_are_wireable() -> None:
@@ -84,7 +114,7 @@ def test_every_config_declares_its_agent(tmp_path: Path) -> None:
     # --agent tells the hook how to signal a Rule Zero stop in that agent.
     write_agent_wiring(tmp_path)
     for agent in all_agents():
-        text = (tmp_path / agent.config_path).read_text()
+        text = config_text(tmp_path / agent.config_path)
         assert "--agent" in text and agent.id in text
 
 

@@ -100,6 +100,10 @@ async def require_provider(agent: str, project: Path) -> str:
 
 def readonly_command(argv: list[str], project: Path) -> list[str]:
     """The API process may use its credential store, but cannot save game files."""
+    if sys.platform == "win32":
+        raise ValueError(
+            "This provider does not yet have a native Windows read-only host boundary. Use Codex on Windows, or run this provider in a supported Linux/macOS host."
+        )
     if sys.platform == "darwin" and Path("/usr/bin/sandbox-exec").is_file():
         profile = (
             "(version 1)(allow default)(deny file-write* (subpath "
@@ -136,6 +140,28 @@ def proxy_config(socket: Path) -> dict[str, Any]:
 
 async def stop_process(process: asyncio.subprocess.Process | None) -> None:
     if process is None or process.returncode is not None:
+        return
+    if os.name == "nt":
+        # Stop only the tree rooted at this owned child. This also handles a
+        # provider launched by a user-installed CLI wrapper without orphaning it.
+        cleanup = await asyncio.create_subprocess_exec(
+            "taskkill.exe",
+            "/PID",
+            str(process.pid),
+            "/T",
+            "/F",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        try:
+            await asyncio.wait_for(cleanup.wait(), 5)
+        except TimeoutError:
+            cleanup.kill()
+            await cleanup.wait()
+        if process.returncode is None:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+        await process.wait()
         return
     with contextlib.suppress(ProcessLookupError):
         os.killpg(process.pid, signal.SIGTERM)

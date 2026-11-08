@@ -12,13 +12,14 @@ from pathlib import Path
 from typing import Any
 
 from joinery.catalog import ROOT, load_catalog, load_project_tools, selection_ids
+from joinery.platform_support import bash_script_argv, editor_running
 from joinery.server_install import install
 from joinery.transactions import FileTransaction, atomic_json
 from joinery.wiring import _args, _command_str, _opencode_plugin
 
 
 def _run(argv: list[str], timeout: int = 1800) -> None:
-    result = subprocess.run(argv, cwd=ROOT, check=False, timeout=timeout)
+    result = subprocess.run(bash_script_argv(argv), cwd=ROOT, check=False, timeout=timeout)
     if result.returncode:
         raise ValueError("Setup command failed: " + argv[0])
 
@@ -114,15 +115,10 @@ def update_addon(project: Path) -> dict[str, str]:
     """Call with the project editor closed; stage first, keep a local backup."""
     if not (project / "project.godot").is_file():
         raise ValueError("Expected a Godot project.")
-    processes = subprocess.run(
-        ["ps", "-A", "-o", "comm=,args="], capture_output=True, text=True, check=False
-    )
-    for line in processes.stdout.splitlines():
-        command = line.split(maxsplit=1)[0].lower() if line.strip() else ""
-        if "godot" in command and ("--path " + str(project.resolve())) in line:
-            raise ValueError(
-                "Close this project's editor before updating its addon; this preserves unsaved work and avoids script hot-reload during a live session."
-            )
+    if editor_running(project):
+        raise ValueError(
+            "Close this project's editor before updating its addon; this preserves unsaved work and avoids script hot-reload during a live session."
+        )
     target = project / "addons/joinery"
     version = addon_version()
     uids_present = all(

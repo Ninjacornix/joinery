@@ -15,6 +15,8 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from pydantic import BaseModel, ConfigDict, SecretStr, ValidationError
 
+from joinery.platform_support import private_file
+
 
 class Profile(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -179,6 +181,7 @@ def configure(data: Any) -> dict[str, Any]:
     descriptor, filename = tempfile.mkstemp(prefix=".connections-", dir=path.parent)
     try:
         with os.fdopen(descriptor, "w") as stream:
+            private_file(Path(filename))
             json.dump(
                 [
                     {**p.model_dump(exclude={"key"}), "key": p.key.get_secret_value()}

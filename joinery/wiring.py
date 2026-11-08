@@ -22,11 +22,13 @@ any clone. Scaffolded game projects point at the concrete engine install.
 from __future__ import annotations
 
 import json
+import os
 import shlex
 from pathlib import Path
 
 from joinery.agents import Agent, all_agents
 from joinery.catalog import ROOT
+from joinery.platform_support import hook_command
 
 # The command every agent runs. `uv run --project <engine>` keeps it on
 # Joinery's pinned env. `{engine}` is an explicit engine dir; the empty string
@@ -48,6 +50,8 @@ def _args(engine: str, agent_id: str = "") -> list[str]:
 
 
 def _command_str(engine: str, agent_id: str = "") -> str:
+    if os.name == "nt":
+        return hook_command(["uv", *_args(engine, agent_id)])
     return " ".join(
         '"${CLAUDE_PROJECT_DIR}"'
         if part == "${CLAUDE_PROJECT_DIR}"

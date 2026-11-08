@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import os
@@ -11,6 +10,8 @@ import tempfile
 import uuid
 from pathlib import Path
 from typing import Any, BinaryIO
+
+from joinery.platform_support import lock_file, unlock_file
 
 EXCLUDED = {".git", ".godot", ".joinery", "__pycache__", ".pytest_cache", ".venv"}
 DIRECTORY = "directory"
@@ -24,7 +25,7 @@ class ProjectLease:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.file: BinaryIO = path.open("a+b")
         try:
-            fcntl.flock(self.file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            lock_file(self.file)
         except BlockingIOError:
             self.file.close()
             raise ValueError(
@@ -33,7 +34,7 @@ class ProjectLease:
 
     def close(self) -> None:
         if not self.file.closed:
-            fcntl.flock(self.file.fileno(), fcntl.LOCK_UN)
+            unlock_file(self.file)
             self.file.close()
 
 

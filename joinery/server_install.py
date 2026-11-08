@@ -15,6 +15,7 @@ from typing import Any
 from joinery.catalog import ROOT, load_catalog, load_project_tools, selection_ids
 from joinery.deps import check_deps
 from joinery.mcp_runtime import MCPConnection, Readiness, ServerSpec
+from joinery.platform_support import npm_argv, private_file
 from joinery.policy import command_violation, load_denylist
 
 
@@ -35,14 +36,21 @@ def installation(tool_id: str) -> Path:
 
 def _run(args: list[str], cwd: Path, timeout: int = 600) -> str:
     result = subprocess.run(
-        args, cwd=cwd, capture_output=True, text=True, timeout=timeout, check=False
+        npm_argv(args), cwd=cwd, capture_output=True, text=True, encoding="utf-8",
+        errors="replace", timeout=timeout, check=False
     )
     if result.returncode:
         # Subprocess output can contain user/private configuration. Keep it local.
         log = cache_root() / "install-failure.log"
         log.parent.mkdir(parents=True, exist_ok=True)
-        log.write_text(result.stdout + "\n" + result.stderr)
-        log.chmod(0o600)
+        descriptor, filename = tempfile.mkstemp(prefix=".install-log-", dir=log.parent)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+                private_file(Path(filename))
+                stream.write(result.stdout + "\n" + result.stderr)
+            os.replace(filename, log)
+        finally:
+            Path(filename).unlink(missing_ok=True)
         raise RuntimeError(f"Installation command {args[0]} failed; see {log}.")
     return result.stdout.strip()
 

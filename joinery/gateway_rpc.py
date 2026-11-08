@@ -7,14 +7,16 @@ import contextlib
 import json
 import os
 import re
+import secrets
 import shutil
 import tempfile
 from collections.abc import Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from joinery.gateway import ProjectGateway
 from joinery.mcp_runtime import PolicyStop
+from joinery.platform_support import private_directory
 
 
 def search_tools(data: dict[str, Any], query: str) -> dict[str, Any]:
@@ -74,20 +76,54 @@ class GatewayRPC:
         self,
         gateway: ProjectGateway,
         on_stop: Callable[[str], Awaitable[None]] | None = None,
+        *,
+        transport: Literal["unix", "tcp"] | None = None,
     ) -> None:
         self.gateway = gateway
-        self.directory = Path(tempfile.mkdtemp(prefix="joinery-rpc-", dir="/tmp"))
-        self.path = self.directory / "gateway.sock"
+        self.transport = transport or ("tcp" if os.name == "nt" else "unix")
+        # Unix socket names have a short OS limit. Windows uses its user's temp
+        # directory instead; its ACL is tightened before creating the endpoint.
+        self.directory = Path(
+            tempfile.mkdtemp(
+                prefix="joinery-rpc-", dir=None if os.name == "nt" else "/tmp"
+            )
+        )
+        try:
+            private_directory(self.directory)
+        except BaseException:
+            shutil.rmtree(self.directory, ignore_errors=True)
+            raise
+        self.path = self.directory / (
+            "gateway.endpoint.json" if self.transport == "tcp" else "gateway.sock"
+        )
+        self._token = secrets.token_urlsafe(32) if self.transport == "tcp" else ""
         self.server: asyncio.Server | None = None
         self.tasks: set[asyncio.Task[Any]] = set()
         self.on_stop = on_stop
         self.stop_reason = ""
 
     async def start(self) -> None:
-        self.server = await asyncio.start_unix_server(
-            self._client, str(self.path), limit=4_000_000
-        )
-        os.chmod(self.path, 0o600)
+        if self.transport == "tcp":
+            self.server = await asyncio.start_server(
+                self._client, "127.0.0.1", 0, limit=4_000_000
+            )
+            port = self.server.sockets[0].getsockname()[1]
+            descriptor = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+            with os.fdopen(descriptor, "w") as stream:
+                json.dump(
+                    {
+                        "version": 1,
+                        "host": "127.0.0.1",
+                        "port": port,
+                        "token": self._token,
+                    },
+                    stream,
+                )
+        else:
+            self.server = await asyncio.start_unix_server(
+                self._client, str(self.path), limit=4_000_000
+            )
+            os.chmod(self.path, 0o600)
 
     async def _client(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
@@ -98,8 +134,18 @@ class GatewayRPC:
         try:
             line = await asyncio.wait_for(reader.readline(), timeout=30)
             request = json.loads(line)
+            if not isinstance(request, dict):
+                raise TypeError("Invalid gateway request.")
+            if self._token:
+                token = request.get("token")
+                if not isinstance(token, str) or not secrets.compare_digest(
+                    token, self._token
+                ):
+                    raise ValueError("Gateway authentication failed.")
             method = request.get("method")
             params = request.get("params", {})
+            if not isinstance(params, dict):
+                raise TypeError("Invalid gateway parameters.")
             if self.stop_reason:
                 raise PolicyStop(self.stop_reason)
             if method == "inventory":
@@ -148,7 +194,14 @@ class GatewayRPC:
             response = {"ok": False, "stop": True, "error": self.stop_reason}
             if first and self.on_stop is not None:
                 asyncio.ensure_future(self.on_stop(self.stop_reason))
-        except (OSError, ValueError, KeyError, RuntimeError, TimeoutError) as exc:
+        except (
+            OSError,
+            ValueError,
+            TypeError,
+            KeyError,
+            RuntimeError,
+            TimeoutError,
+        ) as exc:
             response = {"ok": False, "error": str(exc)}
         except asyncio.CancelledError:
             writer.close()
@@ -178,9 +231,27 @@ class GatewayRPC:
 
 
 async def rpc(path: Path, method: str, params: dict[str, Any]) -> dict[str, Any]:
-    reader, writer = await asyncio.open_unix_connection(str(path), limit=4_000_000)
+    payload: dict[str, Any] = {"method": method, "params": params}
+    if path.name.endswith(".endpoint.json"):
+        endpoint = json.loads(path.read_text())
+        if (
+            not isinstance(endpoint, dict)
+            or endpoint.get("version") != 1
+            or endpoint.get("host") != "127.0.0.1"
+            or type(endpoint.get("port")) is not int
+            or not 1 <= endpoint["port"] <= 65535
+            or not isinstance(endpoint.get("token"), str)
+            or len(endpoint["token"]) < 32
+        ):
+            raise ValueError("Invalid local gateway endpoint.")
+        reader, writer = await asyncio.open_connection(
+            "127.0.0.1", endpoint["port"], limit=4_000_000
+        )
+        payload["token"] = endpoint["token"]
+    else:
+        reader, writer = await asyncio.open_unix_connection(str(path), limit=4_000_000)
     try:
-        writer.write((json.dumps({"method": method, "params": params}) + "\n").encode())
+        writer.write((json.dumps(payload) + "\n").encode())
         await writer.drain()
         data = json.loads(await asyncio.wait_for(reader.readline(), timeout=900))
         if not data["ok"]:

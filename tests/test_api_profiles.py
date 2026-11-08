@@ -42,8 +42,27 @@ def test_configuration_round_trip_keeps_key_out_of_public_data() -> None:
     assert "PRIVATE_TEST_KEY" not in json.dumps(api_profiles.list_public())
     assert api_profiles.list_public() == [result]
     path = api_profiles.store_path()
-    assert stat.S_IMODE(path.stat().st_mode) == 0o600
-    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+    if os.name != "nt":
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+        assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+
+
+def test_private_storage_failure_preserves_previous_profile_and_writes_no_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    api_profiles.configure(settings())
+    path = api_profiles.store_path()
+    previous = path.read_bytes()
+
+    def unavailable(temporary: Path) -> None:
+        assert temporary.read_bytes() == b""
+        raise ValueError("Fixture private storage unavailable")
+
+    monkeypatch.setattr(api_profiles, "private_file", unavailable)
+    with pytest.raises(ValueError, match="private storage unavailable"):
+        api_profiles.configure(settings(model="another-model"))
+    assert path.read_bytes() == previous
+    assert list(path.parent.glob(".connections-*")) == []
 
 
 def test_runtime_uses_existing_gated_driver_and_a_separate_secret_environment() -> None:
@@ -142,10 +161,12 @@ def test_cli_configuration_reads_secrets_from_stdin_not_arguments(
     tmp_path: Path,
 ) -> None:
     # The helper needs only an installed driver for configuration; no model call occurs.
-    executable = tmp_path / "codex"
-    executable.write_text("#!/bin/sh\nexit 0\n")
+    executable = tmp_path / ("codex.py" if os.name == "nt" else "codex")
+    executable.write_text("#!/usr/bin/env python3\npass\n")
     executable.chmod(0o700)
     env = dict(os.environ, PATH=str(tmp_path) + os.pathsep + os.environ["PATH"])
+    if os.name == "nt":
+        env["PATHEXT"] = env.get("PATHEXT", ".COM;.EXE;.BAT;.CMD") + ";.PY"
     result = subprocess.run(
         [
             sys.executable,

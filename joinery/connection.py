@@ -15,6 +15,7 @@ from typing import Any
 
 from joinery.agents import all_agents, get
 from joinery.api_profiles import list_public
+from joinery.platform_support import launch_argv
 
 KEY_VARS = {
     "claude": ("ANTHROPIC_API_KEY",),
@@ -39,9 +40,9 @@ INSTALL_URLS = {
 def _probe(argv: list[str]) -> tuple[int, str]:
     try:
         result = subprocess.run(
-            argv, capture_output=True, text=True, timeout=5, check=False
+            launch_argv(argv[0], argv[1:]), capture_output=True, text=True, timeout=5, check=False
         )
-    except (OSError, subprocess.TimeoutExpired):
+    except (OSError, ValueError, subprocess.TimeoutExpired):
         return 1, ""
     # Never return this text to the UI: a provider may include account details.
     return result.returncode, result.stdout + result.stderr
@@ -116,7 +117,7 @@ def login(agent_id: str) -> dict[str, Any]:
     executable = shutil.which(agent_id)
     if executable is None:
         raise ValueError("Install this agent's CLI first.")
-    argv = [executable, *LOGIN_ARGS[agent_id]]
+    argv = launch_argv(executable, list(LOGIN_ARGS[agent_id]))
     # Interactive provider-owned login needs a terminal. No key goes in argv.
     if sys.platform == "darwin":
         descriptor, filename = tempfile.mkstemp(
@@ -141,6 +142,11 @@ def login(agent_id: str) -> dict[str, Any]:
         if result.returncode:
             script_path.unlink(missing_ok=True)
             raise ValueError("Could not open Terminal for the provider's sign-in.")
+    elif sys.platform == "win32":
+        subprocess.Popen(
+            argv,
+            creationflags=getattr(subprocess, "CREATE_NEW_CONSOLE", 0x00000010),
+        )
     else:
         terminal = next(
             (
@@ -177,7 +183,7 @@ def use_key(agent_id: str) -> dict[str, Any]:
     if agent_id == "codex":
         try:
             result = subprocess.run(
-                [executable, "login", "--with-api-key"],
+                launch_argv(executable, ["login", "--with-api-key"]),
                 input=key,
                 capture_output=True,
                 text=True,
