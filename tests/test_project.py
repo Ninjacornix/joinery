@@ -1,9 +1,12 @@
+import base64
 import json
+import os
+import shlex
 from pathlib import Path
 
 import pytest
 
-from joinery.catalog import CustomTool, enabled_tools, load_catalog
+from joinery.catalog import ROOT, CustomTool, enabled_tools, load_catalog
 from joinery.deps import check_deps
 from joinery.installer import Selection
 from joinery.lockfile import check_assets
@@ -29,7 +32,30 @@ def test_new_project_inherits_hook_and_telemetry_off(tmp_path: Path) -> None:
     settings = json.loads((project / ".claude/settings.json").read_text())
     assert settings["env"]["DISABLE_TELEMETRY"] == "1"
     hook = settings["hooks"]["PreToolUse"][0]["hooks"][0]
-    assert hook["type"] == "command" and "joinery hook --agent claude" in hook["command"]
+    assert hook["type"] == "command"
+    command = hook["command"]
+    if os.name == "nt":
+        prefix = "powershell.exe -NoProfile -NonInteractive -EncodedCommand "
+        assert command.startswith(prefix)
+        script = base64.b64decode(command[len(prefix) :]).decode("utf-16-le")
+        assert "$info.FileName='uv'" in script
+        assert "'joinery', 'hook', '--agent', 'claude'" in script
+        engine = str(ROOT).replace("'", "''")
+        assert "'--project', '" + engine + "'" in script
+        assert "exit $process.ExitCode" in script
+    else:
+        assert shlex.split(command) == [
+            "uv",
+            "run",
+            "--frozen",
+            "--quiet",
+            "--project",
+            str(ROOT),
+            "joinery",
+            "hook",
+            "--agent",
+            "claude",
+        ]
 
 
 def test_new_project_wires_the_gate_for_every_agent(tmp_path: Path) -> None:

@@ -1,6 +1,7 @@
 """Guards the repo layout."""
 
 import importlib
+import os
 import subprocess
 from pathlib import Path
 
@@ -55,10 +56,24 @@ def test_layout_path_exists(path: str) -> None:
 )
 def test_sandbox_scripts_are_executable_and_valid(script: str) -> None:
     path = ROOT / "sandbox" / script
-    assert path.stat().st_mode & 0o111, f"{script} is not executable"
+    if os.name == "nt":
+        # NTFS does not expose POSIX executable bits. Check the Git mode that
+        # survives cloning/building the Linux worker, without skipping syntax.
+        entry = subprocess.run(
+            ["git", "ls-files", "--stage", "--", path.relative_to(ROOT).as_posix()],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        assert entry.startswith("100755 "), (
+            f"{script} lacks its committed executable bit"
+        )
+    else:
+        assert path.stat().st_mode & 0o111, f"{script} is not executable"
     # macOS ships bash 3.2, and build.sh/fetch-checksums.sh run on the host,
     # so every script must parse under the oldest bash we expect to meet.
-    subprocess.run(["bash", "-n", str(path)], check=True)
+    subprocess.run(["bash", "-n", path.as_posix()], check=True)
 
 
 def test_checksums_are_never_hand_written() -> None:

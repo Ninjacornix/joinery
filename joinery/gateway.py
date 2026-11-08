@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import difflib
 import json
+import ntpath
 import uuid
 from collections.abc import Awaitable, Callable
-from pathlib import Path
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from typing import Any, cast
 
 from mcp.types import CallToolResult, TextContent
@@ -75,17 +76,32 @@ def result_text(result: CallToolResult) -> str:
     )
 
 
-def _map_paths(value: Any, project: Path, stage: Path) -> Any:
+def _map_paths(value: Any, project: PurePath, stage: PurePath) -> Any:
     if isinstance(value, dict):
         return {k: _map_paths(v, project, stage) for k, v in value.items()}
     if isinstance(value, list):
         return [_map_paths(v, project, stage) for v in value]
     if isinstance(value, str):
-        if value.startswith("/"):
-            value = str(Path(value).resolve())
-        original = str(project)
-        if value == original or value.startswith(original + "/"):
-            return str(stage) + value[len(original) :]
+        candidate: PurePath
+        original: PurePath
+        if isinstance(project, PureWindowsPath):
+            # PureWindowsPath also permits exercising Windows drive/UNC/case
+            # behavior on other hosts without changing the host's os.name.
+            candidate = PureWindowsPath(ntpath.normpath(value))
+            original = PureWindowsPath(ntpath.normpath(str(project)))
+        else:
+            candidate = Path(value)
+            original = Path(project)
+        if not candidate.is_absolute():
+            return value
+        if isinstance(project, Path):
+            candidate = Path(value).resolve()
+            original = project.resolve()
+        try:
+            relative = candidate.relative_to(original)
+        except ValueError:
+            return value
+        return str(stage.joinpath(*relative.parts))
     return value
 
 
@@ -257,7 +273,7 @@ class ProjectGateway:
             connection = staged
             arguments = _map_paths(arguments, self.project, self.transaction.stage)
         if connection.spec.container_name and self.transaction is not None:
-            arguments = _map_paths(arguments, self.transaction.stage, Path("/work"))
+            arguments = _map_paths(arguments, self.transaction.stage, PurePosixPath("/work"))
         if server == "godot" and tool == "run_project":
             self._prepare_runtime()
         definition = connection.tools.get(tool)

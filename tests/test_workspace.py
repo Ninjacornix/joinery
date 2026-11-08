@@ -185,11 +185,12 @@ def test_mac_app_bundle_discovery(
 ) -> None:
     monkeypatch.setattr(desktop.sys, "platform", "darwin")
     monkeypatch.setattr(desktop.shutil, "which", lambda _: None)
-    monkeypatch.setattr(Path, "is_dir", lambda p: str(p) == "/Applications/krita.app")
+    app = Path("/Applications") / "krita.app"
+    monkeypatch.setattr(Path, "is_dir", lambda p: p == app)
     assert desktop.launcher("krita", {}) == [
         "/usr/bin/open",
         "-a",
-        "/Applications/krita.app",
+        str(app),
     ]
 
 

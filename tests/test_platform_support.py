@@ -138,7 +138,7 @@ def test_project_lease_survives_contending_process_and_releases_on_death(
         stderr=subprocess.PIPE,
     )
     try:
-        assert child.stdout is not None and child.stdout.readline() == b"ready\n"
+        assert child.stdout is not None and child.stdout.readline().rstrip(b"\r\n") == b"ready"
         child.kill()
         child.wait(timeout=5)
         next_lease = ProjectLease(tmp_path)
@@ -319,18 +319,14 @@ def test_worker_host_environment_has_windows_paths_without_provider_credentials(
 def test_native_windows_private_storage_has_only_owner_and_system_access(
     tmp_path: Path,
 ) -> None:
+    import win32security
+
     directory = tmp_path / "private & endpoint"
     directory.mkdir()
     platform_support.private_directory(directory)
     secret = directory / "secret.txt"
     secret.touch()
     platform_support.private_file(secret)
-    script = (
-        "$acl=Get-Acl -LiteralPath $env:JOINERY_FIXTURE_ACL; "
-        "@{protected=$acl.AreAccessRulesProtected; rules=@($acl.Access | "
-        "ForEach-Object { @{sid=$_.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value; "
-        "inherited=$_.IsInherited} })} | ConvertTo-Json -Depth 5 -Compress"
-    )
     identity = subprocess.run(
         ["whoami.exe", "/user", "/fo", "csv", "/nh"],
         capture_output=True, check=True,
@@ -341,12 +337,19 @@ def test_native_windows_private_storage_has_only_owner_and_system_access(
     assert match is not None
     owner = match.group().decode("ascii")
     for path in (directory, secret):
-        result = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
-            env={**os.environ, "JOINERY_FIXTURE_ACL": str(path)},
-            capture_output=True, text=True, check=True,
+        # Query the native descriptor directly. Get-Acl can emit nonterminating
+        # errors and serialize missing properties as null despite exit code 0.
+        descriptor = win32security.GetNamedSecurityInfo(
+            str(path), win32security.SE_FILE_OBJECT,
+            win32security.DACL_SECURITY_INFORMATION,
         )
-        acl = json.loads(result.stdout)
-        assert acl["protected"]
-        assert {rule["sid"] for rule in acl["rules"]} == {owner, "S-1-5-18"}
-        assert not any(rule["inherited"] for rule in acl["rules"])
+        control, _revision = descriptor.GetSecurityDescriptorControl()
+        assert control & win32security.SE_DACL_PROTECTED
+        acl = descriptor.GetSecurityDescriptorDacl()
+        assert acl is not None
+        rules = [acl.GetAce(index) for index in range(acl.GetAceCount())]
+        assert {win32security.ConvertSidToStringSid(rule[2]) for rule in rules} == {
+            owner, "S-1-5-18",
+        }
+        assert all(rule[0][0] == win32security.ACCESS_ALLOWED_ACE_TYPE for rule in rules)
+        assert not any(rule[0][1] & win32security.INHERITED_ACE for rule in rules)

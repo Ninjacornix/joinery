@@ -3,7 +3,7 @@
 import asyncio
 import json
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from unittest.mock import AsyncMock
 
 import pytest
@@ -194,6 +194,26 @@ def test_path_mapping_keeps_siblings_and_embedded_code_intact(tmp_path: Path) ->
     assert mapped["other"] == data["other"]
     assert mapped["code"] == data["code"]
     assert json.loads(json.dumps(mapped))["projectPath"] == str(stage)
+
+
+def test_windows_paths_map_case_slashes_and_drive_to_native_stage_and_posix_worker() -> None:
+    original = PureWindowsPath("C:/Game Project")
+    stage = PureWindowsPath("D:/Private Stage")
+    values = {
+        "root": "c:/GAME PROJECT",
+        "file": "c:\\game project\\art\\model.glb",
+        "sibling": "C:/Game Project-other/model.glb",
+        "other_drive": "E:/Game Project/model.glb",
+        "code": "print('C:/Game Project/model.glb')",
+    }
+    mapped = _map_paths(values, original, stage)
+    assert mapped["root"] == str(stage)
+    assert mapped["file"] == str(stage / "art/model.glb")
+    for key in ("sibling", "other_drive", "code"):
+        assert mapped[key] == values[key]
+    worker = _map_paths(mapped, stage, PurePosixPath("/work"))
+    assert worker["root"] == "/work"
+    assert worker["file"] == "/work/art/model.glb"
 
 
 def test_sentence_tool_search_finds_native_operations_without_dumping_every_schema(

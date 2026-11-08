@@ -34,8 +34,8 @@ def test_windows_provider_cancel_reaps_owned_descendant() -> None:
             "import json,subprocess,sys; "
             "child=subprocess.Popen([sys.executable,'-u','-c',"
             + repr(child_code)
-            + "],stdout=subprocess.PIPE); "
-            "assert child.stdout.readline()==b'ready\\n'; "
+            + "],stdout=subprocess.PIPE,stderr=subprocess.DEVNULL); "
+            "assert child.stdout.readline().strip()==b'ready'; "
             "print(json.dumps({'child':child.pid}),flush=True); sys.stdin.readline()"
         )
         process = await asyncio.create_subprocess_exec(
