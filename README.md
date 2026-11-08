@@ -20,10 +20,10 @@ providers require `sandbox-exec`; on Linux they require bubblewrap (`bwrap`).
 - Agent rules (read by every agent): [CLAUDE.md](CLAUDE.md)
 - Per-project art bible template: [templates/art_bible.md](templates/art_bible.md)
 
-Status: **0.1 alpha** (`0.1.0a1`), unsigned. macOS ARM64 has local native
-verification; Linux x86_64 and Windows x86_64 native release checks are
-**pending**. A Linux AMD64 game export has run successfully in offline Docker;
-that does not validate the native Linux editor or its desktop bundle.
+Status: **0.1 alpha** (`0.1.0a1`), unsigned. Native macOS ARM64, Linux x86_64
+and Windows x86_64 editor, startup, review/undo, extracted bundle and exported-game
+runtime checks pass. See the [desktop verification report](evals/results/desktop-release.md)
+for the measured candidate, CI evidence and limits.
 Read the [alpha release notes and installation steps](docs/releases/0.1.0-alpha.1.md)
 before using a release bundle. This alpha requires **uv, a running Docker engine,
 Git, Node.js/npm, and a signed-in supported agent CLI or a verified API profile**.

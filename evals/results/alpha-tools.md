@@ -267,3 +267,21 @@ hosted Linux worker and asset evidence, distinct from local emulation and from
 native desktop editor/build/package verification. It resolves the asset-job
 ownership failure; it does not turn the original failed run green or certify
 other pending platform jobs.
+
+
+## Final desktop candidate
+
+Candidate `437566e`, [run 42505422247](https://github.com/Ninjacornix/joinery/actions/runs/42505422247),
+passes all six unchanged recipe fingerprints and all four rich native creative
+lifecycles on hosted Ubuntu. Its first asset attempt stopped before any asset
+test because the pinned Blender download returned HTTP 403. The exact URL
+responded normally afterward; retrying only that failed job on a fresh runner
+passed with the same source, download pins and verification gates. No checksum
+or asset fingerprint was changed to obtain a pass.
+
+The same candidate passes native editor widgets, isolated startup/API setup,
+graphical scene/review/undo, imported-preview refresh/reimport, Godot MCP, fresh
+desktop extraction, and exported-game runtime checks on macOS ARM64, Linux
+x86_64 and Windows x86_64. See [desktop-release.md](desktop-release.md) for the
+platform evidence and corrections; these smoke checks do not expand the
+creative application or live-provider capability claims above.

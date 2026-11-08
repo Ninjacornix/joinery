@@ -1,23 +1,23 @@
 # 0.1 alpha support matrix
 
 This matrix distinguishes measured local/hosted behavior from intended release targets.
-The latest native validation is recorded below; final release gates remain pending.
+Native validation is recorded below; publishing requires the complete release workflow.
 
 ## Platforms and distribution
 
 | Target | Editor/package evidence | Game export evidence | Status |
 | --- | --- | --- | --- |
-| macOS ARM64 | Patched editor builds; native widget/startup tests pass locally and on macOS 15; latest preview refresh regression pending | Desktop export produced and local native macOS game smoke exercised | Final graphical/bundle gate pending |
-| Linux x86_64 | Ubuntu 24.04 patched editor, widgets, startup, graphical review/undo, MCP and fresh bundle checks pass | Linux AMD64 export executed in offline Docker: `JOINERY_EXPORT_OK geometry=1`; final native runtime job pending | Native editor/bundle verified; final runtime gate pending |
-| Windows x86_64 | Native MSVC build, private IPC/ACL/process tests, real Codex startup, widgets and isolated project creation pass; latest preview refresh regression pending | Windows executable produced; final native runtime job pending | Final graphical/bundle/runtime gate pending |
+| macOS ARM64 | Patched editor, native widgets/startup, graphical review/undo, MCP and fresh app bundle checks pass on macOS 15 runner | All desktop exports produced; macOS game executed natively | Verified unsigned alpha target |
+| Linux x86_64 | Ubuntu 24.04 patched editor, widgets/startup, graphical review/undo, MCP and fresh bundle checks pass | Linux game executed on native Ubuntu and in offline AMD64 Docker | Verified alpha target; Ubuntu 24.04 baseline |
+| Windows x86_64 | Native MSVC build, private IPC/ACL/process tests, real Codex startup, widgets/startup, graphical review/undo, MCP and fresh bundle checks pass | Windows game executed natively on Windows 2025 runner | Verified unsigned alpha target; Codex chat only |
 
 Hosted Ubuntu 24.04 offline worker builds, measured asset checks, all six clean
 testbed recipe rebuilds and all four native creative-tool update/review lifecycles
 **passed** in [run 42488962130](https://github.com/Ninjacornix/joinery/actions/runs/42488962130/job/128756906863)
 for candidate `37e2679` on 2026-11-08. Existing recipe fingerprints remained
 unchanged. The latest [run 42503383271](https://github.com/Ninjacornix/joinery/actions/runs/42503383271)
-also passes the Linux graphical editor and fresh bundle gates. macOS and Windows
-are held by the same catalog refresh/camera regression; see the
+passes all three native graphical editors, fresh bundle checks and exported-game
+runtimes, including the corrected catalog refresh/reimport regression; see the
 [desktop verification report](../evals/results/desktop-release.md).
 
 `release/build_editor.py` sets the macOS deployment target to 13.0 for new native

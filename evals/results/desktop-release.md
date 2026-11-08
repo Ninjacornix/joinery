@@ -6,12 +6,12 @@ checks below are not reported as successes.
 
 ## Latest hosted evidence
 
-Candidate `d3a1850`, [run 42503383271](https://github.com/Ninjacornix/joinery/actions/runs/42503383271),
+Candidate `437566e`, [run 42505422247](https://github.com/Ninjacornix/joinery/actions/runs/42505422247),
 2026-11-08:
 
 - All three operating systems pass Ruff, strict mypy (75 source files), Python
-  tests and policy checks: macOS/Windows **408 passed, 4 platform skips**;
-  Linux **407 passed, 5 platform skips**.
+  tests and policy checks: macOS/Windows **408 passed, 4 skipped**;
+  Linux **407 passed, 5 skipped**.
 - Pinned real Codex CLI **0.167.0** passes initialization, normal pipe EOF and
   cancellation without authentication or inference on all three hosts.
 - All three patched native editors build and pass the five native widget/pipe
@@ -19,14 +19,19 @@ Candidate `d3a1850`, [run 42503383271](https://github.com/Ninjacornix/joinery/ac
 - All three pass isolated provider/API connection and project creation with five
   retained screenshots: provider gating, API submenu, horizontal renderers,
   stable wizard geometry and custom tool configuration.
-- Linux passes its full graphical scene/review/undo, Godot MCP installation and
-  probe, measured desktop packaging and fresh extraction/launcher checks.
-- macOS and Windows fail the same two preview refresh assertions: retaining a
-  confirmed catalog stamp and preserving the model camera after an unchanged
-  refresh. These failures block their later package/export steps and the three
-  exported-runtime jobs. A correction is being verified.
-- Hosted Ubuntu passes all **six unchanged testbed recipe fingerprints** and all
-  **four native creative-tool create/edit/replay/reject/accept/revert lifecycles**.
+- All three pass graphical scene/review/undo, Godot MCP installation and probe,
+  measured desktop packaging and fresh extraction checks. POSIX launchers also
+  execute from the extracted bundle. The preview regression verifies both forced
+  and stamped unchanged refreshes preserve the camera, then a genuine model
+  reimport updates geometry with identical raw GLB bytes and catalog data.
+- macOS produces all three desktop game exports. Each exported game then runs
+  on its actual native macOS, Linux or Windows runner and proves GLB loading.
+- The first asset attempt stopped on an upstream HTTP 403 during the pinned
+  Blender archive download, before checksum verification or any asset test. The
+  exact URL subsequently responded HTTP 200. Retrying only that job on a fresh
+  runner, with the same pins and gates, passed all **six unchanged recipe
+  fingerprints** and all **four native creative create/edit/replay/reject/accept/
+  revert lifecycles**. The complete candidate workflow is green after that retry.
 
 The successful Linux accepted-model framebuffer shows the imported technical
 GLB, selected resource context, wider sidebar and separate Review workspace.
@@ -46,6 +51,7 @@ provider or change the user's open project.
 | Linux native tool saves | Worker UID 1000 could not write host UID 1001 files although Blender returned zero | Map the regular invoking Linux UID:GID and use an ephemeral private home. All six recipes and four richer creative lifecycles pass on hosted Ubuntu; output ownership remains with the invoking user. |
 | macOS hosted display | Native OpenGL was rejected by the hosted virtual Mac | Build upstream ANGLE with verified dependencies and retain its license. Actual macOS graphical widget/startup tests pass. |
 | Linux hosted display | Missing/ambiguous software Vulkan presentation setup | Select the installed native Lavapipe ICD and require a successful presentation preflight. Full Linux graphical/bundle gate passes. |
+| Preview refresh/reimport | Filesystem notifications cleared the confirmed catalog stamp and rebuilt an identical preview; cached scenes also hid genuine import-setting changes | Retain the confirmed stamp, skip identical payload application and repeated ready-model selections, explicitly reload a reimported selected resource. Observe initial native import completion before camera assertions. Existing and empty scene tests pass on all three systems, including actual 2x geometry reload with unchanged raw GLB/catalog. |
 | Audio fixture clock | A fixed UI-timer delay assumed the audio mixer had already finished | Wait for the actual finished signal with a finite deadline; verify seek, pause, speed and loop restart. Three intentional broken-player mutations fail, and real native fixtures pass on all three hosts. |
 
 The two Windows engine exceptions are exact-file, documented ADR exceptions to
@@ -61,13 +67,16 @@ See [alpha-tools.md](alpha-tools.md) for commands, timings and supporting-tool
 boundaries. Hosted provider smoke uses no account credentials and does not imply
 all providers or endpoints have a verified live authoring workflow.
 
-All three official-runtime game exports were produced locally. macOS ran
-natively and Linux ran in an offline AMD64 container, both reporting
-`JOINERY_EXPORT_OK geometry=1`. Final native exported-runtime release validation
-remains pending. Editor packages use the patched engine; game export templates
+All three official-runtime game exports were produced and executed on their
+actual native macOS, Linux and Windows CI hosts, proving the technical GLB
+geometry loads. The Linux export additionally ran in offline AMD64 Docker. Editor packages use the patched engine; game export templates
 are stock upstream Godot 4.7.2.
 
-Final candidate, native archive hashes and publication/download verification will
-be recorded here only after those gates complete. Builds are unsigned and not
+The release workflow repeats the native, asset and unit gates on the release tag
+before publishing. The tag adds documentation updates to the verified source
+candidate. Archive checksums accompany the
+[prerelease downloads](https://github.com/Ninjacornix/joinery/releases/tag/v0.1.0-alpha.1);
+its release notes link the actual publication workflow. Native CI checks measured
+contents of every fresh extraction before an archive can be published. Builds are unsigned and not
 notarized. Windows alpha chat supports Codex; other provider sandbox adapters
 remain explicitly unsupported there.
