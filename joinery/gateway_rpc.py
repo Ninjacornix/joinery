@@ -9,6 +9,7 @@ import os
 import re
 import secrets
 import shutil
+import sys
 import tempfile
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -120,10 +121,13 @@ class GatewayRPC:
                     stream,
                 )
         else:
-            self.server = await asyncio.start_unix_server(
-                self._client, str(self.path), limit=4_000_000
-            )
-            os.chmod(self.path, 0o600)
+            if sys.platform == "win32":
+                raise ValueError("Native Windows gateways require local TCP transport.")
+            else:
+                self.server = await asyncio.start_unix_server(
+                    self._client, str(self.path), limit=4_000_000
+                )
+                os.chmod(self.path, 0o600)
 
     async def _client(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
@@ -249,7 +253,10 @@ async def rpc(path: Path, method: str, params: dict[str, Any]) -> dict[str, Any]
         )
         payload["token"] = endpoint["token"]
     else:
-        reader, writer = await asyncio.open_unix_connection(str(path), limit=4_000_000)
+        if sys.platform == "win32":
+            raise ValueError("Native Windows requires a local gateway endpoint file.")
+        else:
+            reader, writer = await asyncio.open_unix_connection(str(path), limit=4_000_000)
     try:
         writer.write((json.dumps(payload) + "\n").encode())
         await writer.drain()

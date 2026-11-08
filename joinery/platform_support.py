@@ -17,7 +17,7 @@ from typing import BinaryIO
 
 def lock_file(stream: BinaryIO) -> None:
     """Hold one exclusive, nonblocking OS lock until release or process death."""
-    if os.name == "nt":
+    if sys.platform == "win32":
         msvcrt = importlib.import_module("msvcrt")
 
         stream.seek(0, os.SEEK_END)
@@ -38,7 +38,7 @@ def lock_file(stream: BinaryIO) -> None:
 
 
 def unlock_file(stream: BinaryIO) -> None:
-    if os.name == "nt":
+    if sys.platform == "win32":
         msvcrt = importlib.import_module("msvcrt")
 
         stream.seek(0)

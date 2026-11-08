@@ -474,18 +474,18 @@ class CodexSession:
 
     async def close(self) -> None:
         process, self.process = self.process, None
-        if os.name == "nt":
+        if sys.platform == "win32":
             await stop_process(process)
         if process is not None and process.returncode is None:
             with contextlib.suppress(ProcessLookupError):
-                if os.name != "nt":
+                if sys.platform != "win32":
                     os.killpg(process.pid, signal.SIGTERM)
                 else:
                     process.terminate()
             try:
                 await asyncio.wait_for(process.wait(), timeout=3)
             except TimeoutError:
-                if os.name != "nt":
+                if sys.platform != "win32":
                     with contextlib.suppress(ProcessLookupError):
                         os.killpg(process.pid, signal.SIGKILL)
                 else:

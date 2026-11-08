@@ -141,7 +141,7 @@ def proxy_config(socket: Path) -> dict[str, Any]:
 async def stop_process(process: asyncio.subprocess.Process | None) -> None:
     if process is None or process.returncode is not None:
         return
-    if os.name == "nt":
+    if sys.platform == "win32":
         from joinery.windows_process import WindowsProcessTree
 
         tree = await asyncio.to_thread(WindowsProcessTree, process.pid)
