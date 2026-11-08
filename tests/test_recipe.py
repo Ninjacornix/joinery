@@ -140,6 +140,76 @@ def test_output_not_produced_is_reported(tmp_path: Path) -> None:
     assert any("not produced" in p for p in result.problems)
 
 
+def test_noop_recipe_cannot_pass_using_existing_outputs(tmp_path: Path) -> None:
+    path = wav_recipe(tmp_path)
+    put(tmp_path, "audio/sfx/tone.wav", b"existing accepted audio")
+    runner = FakeRunner()
+    record(path, tmp_path, runner)
+    result = rebuild_one(path, tmp_path, runner)
+    assert not result.ok
+    assert "audio/sfx/tone.wav: not produced" in result.problems
+    assert (tmp_path / "audio/sfx/tone.wav").read_bytes() == b"existing accepted audio"
+
+
+def test_clean_replay_retains_preimage_and_never_changes_working_outputs(
+    tmp_path: Path,
+) -> None:
+    path = wav_recipe(tmp_path)
+    path.write_text(path.read_text() + 'sources=["recipes/inputs/source.bin"]\n')
+    put(tmp_path, "recipes/inputs/source.bin", b"immutable original")
+    put(tmp_path, "audio/sfx/tone.wav", b"accepted output")
+
+    class SourceRunner(FakeRunner):
+        def run(self, argv: list[str], project: Path, timeout: int = 900) -> Result:
+            assert project != tmp_path
+            assert (
+                project / "recipes/inputs/source.bin"
+            ).read_bytes() == b"immutable original"
+            assert not (project / "audio/sfx/tone.wav").exists()
+            return super().run(argv, project, timeout)
+
+    runner = SourceRunner(writes={"audio/sfx/tone.wav": b"accepted output"})
+    record(path, tmp_path, runner)
+    assert rebuild_one(path, tmp_path, runner).ok
+    assert (tmp_path / "audio/sfx/tone.wav").read_bytes() == b"accepted output"
+    assert (
+        tmp_path / "recipes/inputs/source.bin"
+    ).read_bytes() == b"immutable original"
+
+
+def test_replay_refuses_symlink_escape_before_running_or_removing(
+    tmp_path: Path,
+) -> None:
+    project = tmp_path / "project"
+    project.mkdir()
+    path = wav_recipe(project)
+    outside = tmp_path / "outside.wav"
+    outside.write_bytes(b"manual external work")
+    (project / "audio/sfx").mkdir(parents=True)
+    (project / "audio/sfx/tone.wav").symlink_to(outside)
+    runner = FakeRunner()
+    result = rebuild_one(path, project, runner)
+    assert not result.ok
+    assert any("cannot link outside" in problem for problem in result.problems)
+    assert not runner.calls
+    assert outside.read_bytes() == b"manual external work"
+
+
+def test_replay_does_not_follow_absolute_internal_parent_link_back_to_original(
+    tmp_path: Path,
+) -> None:
+    path = wav_recipe(tmp_path)
+    put(tmp_path, "stored/tone.wav", b"accepted original")
+    (tmp_path / "audio").mkdir()
+    (tmp_path / "audio/sfx").symlink_to(tmp_path / "stored", target_is_directory=True)
+    runner = FakeRunner()
+    result = rebuild_one(path, tmp_path, runner)
+    assert not result.ok
+    assert any("outside the scratch copy" in problem for problem in result.problems)
+    assert not runner.calls
+    assert (tmp_path / "stored/tone.wav").read_bytes() == b"accepted original"
+
+
 def test_missing_script_is_reported(tmp_path: Path) -> None:
     path = write_recipe(
         tmp_path,

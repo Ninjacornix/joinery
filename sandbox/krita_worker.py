@@ -17,6 +17,11 @@ with tempfile.TemporaryDirectory(prefix="joinery-krita-") as directory:
     plugin.joinpath("__init__.py").write_text('''from krita import Krita, Extension
 from PyQt5.QtCore import QTimer
 import os, traceback
+def report(text):
+    path = os.environ["JOINERY_KRITA_RESULT"]
+    with open(path + ".tmp", "w") as output:
+        output.write(text)
+    os.replace(path + ".tmp", path)
 class Worker(Extension):
     def setup(self):
         QTimer.singleShot(1000, self.run)
@@ -26,16 +31,19 @@ class Worker(Extension):
         try:
             path = os.environ["JOINERY_KRITA_SCRIPT"]
             exec(compile(open(path).read(), path, "exec"), {"__name__": "__main__"})
-            open(os.environ["JOINERY_KRITA_RESULT"], "w").write("ok")
+            report("ok")
         except BaseException:
-            open(os.environ["JOINERY_KRITA_RESULT"], "w").write(traceback.format_exc())
+            report(traceback.format_exc())
         # The supervisor terminates this disposable app after the document
         # has finished saving. Avoid unloading PyKrita from inside its callback.
 Krita.instance().addExtension(Worker(Krita.instance()))
 ''')
     config = root / "config"
     config.mkdir()
-    (config / "kritarc").write_text("[python]\nenable_joinery_worker=true\n")
+    # KisConfig's unnamed group reads CreateBackupFile (Krita 5.2.9).
+    # The transaction already keeps the original document; a .kra~ inside art/
+    # would be an unrecorded output and correctly fail the provenance gate.
+    (config / "kritarc").write_text("CreateBackupFile=false\n[python]\nenable_joinery_worker=true\n")
     result_path = root / "result"
     env = dict(os.environ, XDG_DATA_HOME=str(root / "data"), XDG_CONFIG_HOME=str(config), JOINERY_KRITA_SCRIPT=script, JOINERY_KRITA_RESULT=str(result_path))
     result = subprocess.Popen(["krita", "--nosplash"], env=env)

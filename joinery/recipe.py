@@ -32,6 +32,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
+import tempfile
 import tomllib
 import zipfile
 from collections.abc import Mapping
@@ -237,7 +239,9 @@ def fingerprint(
                         for key in list(element.attrib):
                             if "uuid" in key.lower():
                                 element.attrib.pop(key)
-                    data = ElementTree.canonicalize(ElementTree.tostring(xml, encoding="unicode"), strip_text=True).encode()
+                    data = ElementTree.canonicalize(
+                        ElementTree.tostring(xml, encoding="unicode"), strip_text=True
+                    ).encode()
                 digest.update(name.encode() + b"\0" + data)
         return "kra:" + digest.hexdigest()
     # Everything else is compared exactly, including baked textures.
@@ -280,9 +284,8 @@ def rebuild_one(
 ) -> Rebuilt:
     """Replay one recipe and check every output still fingerprints the same.
 
-    The outputs are rebuilt in place, which is the point: a recipe that cannot
-    reproduce the committed asset is a broken recipe, and we want to find that
-    out here rather than trust a note in a file.
+    Outputs are removed only in a disposable copy. Keeping the old outputs
+    around would let a no-op recipe pass without recreating anything.
     """
     name = path.name
     try:
@@ -294,9 +297,60 @@ def rebuild_one(
         return Rebuilt(name, False, 0.0, (f"script {recipe.script} not found",))
 
     try:
-        got = run_recipe(recipe, project, runner, timeout=timeout)
-    except ValueError as exc:
+        root = project.resolve()
+        inputs = {recipe.script, *recipe.sources}
+        for relative in (*inputs, *recipe.outputs):
+            target = project / relative
+            if not target.resolve().is_relative_to(root):
+                raise ValueError(
+                    f"{relative}: replay paths cannot link outside the project"
+                )
+        if inputs & set(recipe.outputs):
+            raise ValueError(
+                "Recipe outputs cannot overwrite their script or source inputs"
+            )
+        with tempfile.TemporaryDirectory(prefix="joinery-recipe-") as directory:
+            scratch = Path(directory) / "project"
+            shutil.copytree(
+                project,
+                scratch,
+                symlinks=True,
+                ignore=shutil.ignore_patterns(
+                    ".git", ".joinery", ".venv", "__pycache__"
+                ),
+            )
+            # An absolute symlink that pointed inside the original project can
+            # point back out of this copy. Recheck here before removing anything.
+            scratch_root = scratch.resolve()
+            for relative in (*inputs, *recipe.outputs):
+                if not (scratch / relative).resolve().is_relative_to(scratch_root):
+                    raise ValueError(
+                        f"{relative}: replay paths cannot link outside the scratch copy"
+                    )
+            input_paths = {(scratch / relative).resolve() for relative in inputs}
+            if any(
+                (scratch / relative).resolve() in input_paths
+                for relative in recipe.outputs
+            ):
+                raise ValueError(
+                    "Recipe outputs cannot alias their script or source inputs"
+                )
+            for relative in recipe.outputs:
+                output = scratch / relative
+                if output.is_symlink() or (output.exists() and not output.is_file()):
+                    raise ValueError(
+                        f"{relative}: recipe outputs must be regular files"
+                    )
+                output.unlink(missing_ok=True)
+            return _verify_rebuilt(name, recipe, scratch, runner, timeout)
+    except (OSError, ValueError) as exc:
         return Rebuilt(name, False, 0.0, (str(exc),))
+
+
+def _verify_rebuilt(
+    name: str, recipe: Recipe, project: Path, runner: Runner, timeout: int
+) -> Rebuilt:
+    got = run_recipe(recipe, project, runner, timeout=timeout)
     if not got.ok:
         tail = got.output[-600:] or "no output"
         return Rebuilt(name, False, got.seconds, (f"{recipe.tool} failed: {tail}",))

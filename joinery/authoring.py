@@ -239,9 +239,18 @@ def _script(tool: str, source: str, base: str, code: str, exports: list[str]) ->
             ]
         )
     if tool == "supercollider":
-        # A native .scd is the patch/score. The author supplies an NRT render,
-        # including completionAction and exit; no sound device is required.
-        return code
+        # The log recreates the exact native patch before interpreting it, so a
+        # clean replay never depends on the previous source output remaining.
+        # Rendering is NRT with a completion action; no sound device is needed.
+        return (
+            "(\nFile.use("
+            + json.dumps(source, ensure_ascii=False)
+            + ', "w", { |file| file.write('
+            + json.dumps(code, ensure_ascii=False)
+            + "); });\n"
+            + json.dumps(code, ensure_ascii=False)
+            + ".interpret;\n)\n"
+        )
     raise ValueError("Use the graph or vector document operation for this application.")
 
 
@@ -396,6 +405,12 @@ func run() -> void:
     var count := 0
     for node in graph.get_children():
         if node.has_method("export_material"):
+            # Material Maker 1.8's command-line export otherwise skips existing
+            # files marked prompt_overwrite. This document is already isolated
+            # in transaction staging; refresh its declared native exports.
+            var profile: Dictionary = node.get_export("Godot/Godot 4 Standard")
+            for file: Dictionary in profile.get("files", []):
+                file["prompt_overwrite"] = false
             await node.export_material(PREFIX, "Godot/Godot 4 Standard", 0, true)
             count += 1
     graph.free()
@@ -442,6 +457,13 @@ async def _scripted_export(
     directory: str,
     outputs: list[str] | None = None,
 ) -> dict[str, Any]:
+    before = _export_inventory(project, directory) if outputs is None else {}
+    previous_outputs: set[str] = set()
+    if outputs is None:
+        for path in recipe_paths(project):
+            previous = load_recipe(path)
+            if previous.tool == tool and source in previous.outputs:
+                previous_outputs.update(previous.outputs)
     identifier = hashlib.sha256((source + code).encode()).hexdigest()[:32]
     script = project / "recipes" / (identifier + ".py")
     script.parent.mkdir(exist_ok=True)
@@ -452,11 +474,13 @@ async def _scripted_export(
     if not result.ok:
         raise RuntimeError(result.output[-2000:])
     if outputs is None:
-        outputs = [
-            p.relative_to(project).as_posix()
-            for p in confined(project, directory).rglob("*")
-            if p.is_file() and p != project / source
-        ]
+        after = _export_inventory(project, directory)
+        outputs = sorted(
+            relative
+            for relative, digest in after.items()
+            if relative != source
+            and (before.get(relative) != digest or relative in previous_outputs)
+        )
     if not outputs:
         raise ValueError("The application produced no exports.")
     recipe = Recipe(
@@ -465,3 +489,14 @@ async def _scripted_export(
         outputs=(source, *outputs),
     )
     return await _record(project, recipe, script.with_suffix(".toml"))
+
+
+def _export_inventory(project: Path, directory: str) -> dict[str, str]:
+    outputs = {}
+    for path in confined(project, directory).rglob("*"):
+        if path.is_file():
+            relative = path.relative_to(project).as_posix()
+            target = confined(project, relative)
+            with target.open("rb") as output:
+                outputs[relative] = hashlib.file_digest(output, "sha256").hexdigest()
+    return outputs
