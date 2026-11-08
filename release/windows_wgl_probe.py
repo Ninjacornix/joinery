@@ -113,6 +113,12 @@ int main(int argc, char **argv) {
     number("set_pixel_format", configured);
     number("set_error", GetLastError());
     module_path("opengl_after_set", GetModuleHandleW(L"opengl32.dll"));
+    number("gdi_current_pixel_format", GetPixelFormat(dc));
+    if (gl) {
+        typedef int (WINAPI *GetPF)(HDC);
+        auto get_pf = reinterpret_cast<GetPF>(GetProcAddress(gl, "wglGetPixelFormat"));
+        number("mesa_current_pixel_format", get_pf ? get_pf(dc) : 0);
+    }
     // Godot configures this same window once in window_create and again when
     // constructing the first display/context. Record the repeated call too.
     SetLastError(0);
