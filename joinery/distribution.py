@@ -74,6 +74,37 @@ def binary_target(binary: Path) -> str:
     raise ValueError("Unsupported or invalid editor executable header.")
 
 
+def windows_runtime_files(binary: Path) -> list[Path]:
+    """Select only matching original Godot runtime DLLs, never CI Mesa DLLs."""
+    names = ("D3D12Core.dll", "d3d12SDKLayers.dll", "WinPixEventRuntime.dll")
+    files = [binary.with_name(name) for name in names if binary.with_name(name).is_file()]
+    if any(path.name == names[0] for path in files) != any(
+        path.name == names[1] for path in files
+    ):
+        raise ValueError("The native Windows D3D12 runtime is incomplete.")
+    target = binary_target(binary)
+    for runtime in files:
+        if binary_target(runtime) != target:
+            raise ValueError("Windows runtime DLL architecture mismatch: " + runtime.name)
+    return files
+
+
+def windows_runtime_notices(binary: Path) -> list[Path]:
+    """Shipping runtime SDK binaries requires their accompanying upstream terms."""
+    names = []
+    if binary.with_name("D3D12Core.dll").is_file():
+        names += [
+            "MICROSOFT-DIRECTX-LICENSE.txt", "MICROSOFT-DIRECTX-CODE-LICENSE.txt",
+            "MICROSOFT-DIRECTX-DISTRIBUTABLES.txt", "MICROSOFT-DIRECTX-README.md",
+        ]
+    if binary.with_name("WinPixEventRuntime.dll").is_file():
+        names += ["WINPIX-LICENSE.txt", "WINPIX-THIRD-PARTY-NOTICES.txt"]
+    notices = [binary.parent / "runtime-licenses" / name for name in names]
+    if any(not path.is_file() for path in notices):
+        raise ValueError("Windows runtime SDK notices are missing from the build output.")
+    return notices
+
+
 def _source_files() -> dict[str, Path]:
     files: dict[str, Path] = {}
     folders = [
@@ -233,6 +264,10 @@ def package(
         console = binary.with_name(binary.stem + ".console.exe")
         if console.is_file():
             entries[root + "bin/" + console.name] = _Entry(console, True)
+        for runtime in windows_runtime_files(binary):
+            entries[root + "bin/" + runtime.name] = _Entry(runtime)
+        for notice in windows_runtime_notices(binary):
+            entries[root + "licenses/" + notice.name] = _Entry(notice)
     if desktop and actual_target.startswith("macos-"):
         entries["Joinery.app/Contents/MacOS/Joinery"] = _Entry(
             _launcher(binary.name, macos=True), True

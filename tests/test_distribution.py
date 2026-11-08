@@ -168,6 +168,50 @@ def test_linux_desktop_launcher_and_source_modes_survive_tar(
         )
 
 
+def test_windows_bundle_measures_original_runtime_dlls_and_excludes_ci_mesa(
+    source: Path, tmp_path: Path
+) -> None:
+    binary = executable(source / "godot.windows.editor.x86_64.exe", "windows-x86_64")
+    names = ("D3D12Core.dll", "d3d12SDKLayers.dll", "WinPixEventRuntime.dll")
+    for name in (*names, "opengl32.dll", "libgallium_wgl.dll", "unrelated.dll"):
+        executable(source / name, "windows-x86_64")
+    notices = source / "runtime-licenses"
+    notices.mkdir()
+    for name in (
+        "MICROSOFT-DIRECTX-LICENSE.txt", "MICROSOFT-DIRECTX-CODE-LICENSE.txt",
+        "MICROSOFT-DIRECTX-DISTRIBUTABLES.txt", "MICROSOFT-DIRECTX-README.md",
+        "WINPIX-LICENSE.txt", "WINPIX-THIRD-PARTY-NOTICES.txt",
+    ):
+        (notices / name).write_text("Technical license fixture: " + name)
+    output = tmp_path / "windows-runtime.zip"
+    distribution.package(output, desktop=True, binary=binary)
+    with zipfile.ZipFile(output) as archive:
+        manifest = json.loads(archive.read("joinery/manifest.json"))
+        assert {name for name in archive.namelist() if name.lower().endswith('.dll')} == {
+            "joinery/bin/" + name for name in names
+        }
+        for name in names:
+            entry = "joinery/bin/" + name
+            assert archive.read(entry) == (source / name).read_bytes()
+            assert manifest["files"][entry] == hashlib.sha256(archive.read(entry)).hexdigest()
+        for notice in notices.iterdir():
+            entry = "joinery/licenses/" + notice.name
+            assert archive.read(entry) == notice.read_bytes()
+            assert manifest["files"][entry] == hashlib.sha256(notice.read_bytes()).hexdigest()
+
+
+def test_windows_bundle_refuses_incomplete_or_wrong_architecture_runtime(
+    source: Path, tmp_path: Path
+) -> None:
+    binary = executable(source / "godot.windows.editor.x86_64.exe", "windows-x86_64")
+    executable(source / "D3D12Core.dll", "windows-x86_64")
+    with pytest.raises(ValueError, match="runtime is incomplete"):
+        distribution.package(tmp_path / "bad.zip", binary=binary)
+    executable(source / "d3d12SDKLayers.dll", "linux-x86_64")
+    with pytest.raises(ValueError, match="architecture mismatch"):
+        distribution.package(tmp_path / "bad.zip", binary=binary)
+
+
 def test_release_version_matches_project_metadata() -> None:
     from joinery.catalog import ROOT
 

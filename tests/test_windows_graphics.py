@@ -40,10 +40,16 @@ def test_failed_download_cannot_become_a_cached_release(
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.parametrize("with_runtime", [False, True])
 def test_provision_uses_fresh_private_exe_folder_and_only_required_x64_dlls(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, with_runtime: bool
 ) -> None:
     engine = pe(tmp_path / "editor.exe")
+    runtime_names = ["D3D12Core.dll", "d3d12SDKLayers.dll", "WinPixEventRuntime.dll"]
+    if with_runtime:
+        for name in runtime_names:
+            pe(tmp_path / name)
+    pe(tmp_path / "unrelated.dll")
     source_digest = graphics.sha256(engine)
     sample = pe(tmp_path / "sample.dll")
     expected = hashlib.sha256(sample.read_bytes()).hexdigest()
@@ -71,15 +77,22 @@ def test_provision_uses_fresh_private_exe_folder_and_only_required_x64_dlls(
         "JOINERY_RENDERING_DRIVER": "opengl3",
         "GALLIUM_DRIVER": "llvmpipe",
     }
-    assert sorted(p.name for p in output.iterdir()) == [
-        "editor.exe",
-        "libgallium_wgl.dll",
-        "mesa-ci.json",
-        "opengl32.dll",
-    ]
+    assert sorted(p.name for p in output.iterdir()) == sorted(
+        [
+            "editor.exe",
+            "libgallium_wgl.dll",
+            "mesa-ci.json",
+            "opengl32.dll",
+            *(runtime_names if with_runtime else []),
+        ]
+    )
     assert graphics.sha256(engine) == source_digest
     report = json.loads((output / "mesa-ci.json").read_text())
     assert "must run separately" in report["validation"]
+    assert report["engine_runtime_sha256"] == {
+        name: graphics.sha256(tmp_path / name)
+        for name in (runtime_names if with_runtime else [])
+    }
     with pytest.raises(ValueError, match="fresh private"):
         graphics.provision(engine, output, tmp_path / "cache")
 
@@ -103,5 +116,19 @@ def test_invalid_extraction_cannot_create_a_deployment(
     monkeypatch.setattr(graphics.subprocess, "run", lambda *args, **kwargs: None)
     output = tmp_path / "private"
     with pytest.raises(ValueError, match="DLL content"):
+        graphics.provision(engine, output, tmp_path / "cache")
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("incomplete", [True, False])
+def test_original_engine_runtime_must_be_complete_and_match_native_architecture(
+    tmp_path: Path, incomplete: bool
+) -> None:
+    engine = pe(tmp_path / "editor.exe")
+    pe(tmp_path / "D3D12Core.dll")
+    if not incomplete:
+        pe(tmp_path / "d3d12SDKLayers.dll", machine=0xAA64)
+    output = tmp_path / "private"
+    with pytest.raises(ValueError, match="incomplete|architecture mismatch"):
         graphics.provision(engine, output, tmp_path / "cache")
     assert not output.exists()

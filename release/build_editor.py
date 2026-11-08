@@ -64,6 +64,15 @@ def main() -> None:
     ]
     if system == "macos":
         argv += ["vulkan=no", "angle=no", "macos_deployment_target=13.0"]
+    elif system == "windows":
+        from release.windows_build_deps import provision
+
+        if arch != "x86_64":
+            raise ValueError("The Windows release SDK pins currently support x86_64 only.")
+        argv += provision(
+            ROOT / "out/windows-build-deps",
+            Path.home() / ".cache/joinery/windows-build-deps",
+        )
     command(argv, source)
     suffix = ".exe" if system == "windows" else ""
     binary = source / "bin" / f"godot.{system}.editor.{arch}{suffix}"
@@ -71,6 +80,15 @@ def main() -> None:
         raise ValueError(
             "The native build did not produce the expected editor: " + str(binary)
         )
+    if system == "windows":
+        from release.windows_build_deps import install_runtime_notices
+
+        if not all(
+            (binary.parent / name).is_file()
+            for name in ("D3D12Core.dll", "d3d12SDKLayers.dll")
+        ):
+            raise ValueError("The Windows D3D12 build did not produce its required runtime DLLs.")
+        install_runtime_notices(binary.parent, ROOT / "out/windows-build-deps")
     version = subprocess.run(
         [str(binary), "--version"], check=True, capture_output=True, text=True
     ).stdout.strip()
@@ -87,6 +105,10 @@ def main() -> None:
             text=True,
         ).stdout.strip(),
     }
+    if system == "windows":
+        metadata["build_dependencies"] = json.loads(
+            (ROOT / "out/windows-build-deps/sdk-manifest.json").read_text()
+        )
     output = ROOT / "out/build-engine.json"
     output.parent.mkdir(exist_ok=True)
     output.write_text(json.dumps(metadata, indent=2) + "\n")

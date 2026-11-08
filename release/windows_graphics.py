@@ -24,7 +24,7 @@ import tempfile
 import urllib.request
 from pathlib import Path
 
-from joinery.distribution import binary_target
+from joinery.distribution import binary_target, windows_runtime_files
 
 VERSION = "26.2.6"
 ARCHIVE_NAME = f"mesa3d-{VERSION}-release-mingw.7z"
@@ -74,6 +74,9 @@ def provision(engine: Path, output: Path, cache: Path) -> dict[str, str]:
         raise ValueError("Software OpenGL requires a native Windows x86_64 executable")
     if output.exists():
         raise ValueError("Use a fresh private output directory for CI software OpenGL")
+    # Preserve only validated runtime siblings from the original engine build.
+    # The native executable can import D3D12 even when CI selects OpenGL.
+    runtime_files = windows_runtime_files(engine)
     extractor = shutil.which("7z") or shutil.which("7zz")
     if not extractor:
         raise ValueError("7-Zip is required to extract the verified Mesa release")
@@ -105,6 +108,8 @@ def provision(engine: Path, output: Path, cache: Path) -> dict[str, str]:
         output.mkdir(parents=True)
         target = output / engine.name
         shutil.copy2(engine, target)
+        for runtime in runtime_files:
+            shutil.copy2(runtime, output / runtime.name)
         for name in DLL_SHA256:
             shutil.copy2(extracted / "x64" / name, output / name)
     environment = {
@@ -119,6 +124,9 @@ def provision(engine: Path, output: Path, cache: Path) -> dict[str, str]:
                 "source": ARCHIVE_URL,
                 "sha256": ARCHIVE_SHA256,
                 "dll_sha256": DLL_SHA256,
+                "engine_runtime_sha256": {
+                    path.name: sha256(path) for path in runtime_files
+                },
                 "environment": environment,
                 "validation": "provisioned; native graphical harness must run separately",
             },
