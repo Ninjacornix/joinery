@@ -37,8 +37,10 @@ def prepare(
         )
         local_objects = local / ".git/objects" if local is not None else None
         if local_objects is not None and local_objects.is_dir():
-            (metadata / "objects/info/alternates").write_text(
-                str(local_objects.resolve()) + "\n"
+            # Bytes, not text: Windows text mode would write "\r\n", and Git
+            # would then read the path with a trailing "\r".
+            (metadata / "objects/info/alternates").write_bytes(
+                (local_objects.resolve().as_posix() + "\n").encode()
             )
         else:
             subprocess.run(
