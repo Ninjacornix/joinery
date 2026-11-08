@@ -57,7 +57,7 @@ def main() -> None:
         "arch=" + arch,
         "dev_build=no",
         "debug_symbols=no",
-        "use_lto=no",
+        "lto=none",
         "cache_path=" + str(cache),
         "cache_limit=3",
         "-j" + str(args.jobs),
