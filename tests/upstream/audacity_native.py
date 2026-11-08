@@ -63,10 +63,13 @@ async def main(process):
     started = time.monotonic()
     while True:
         try:
-            await upstream.mcp.call_tool("track_get_info", {})
+            # One call can wait minutes for a reply; bound each attempt.
+            await asyncio.wait_for(
+                upstream.mcp.call_tool("track_get_info", {}), timeout=20
+            )
             break
         except Exception as error:
-            if process.poll() is not None or time.monotonic() > started + 180:
+            if process.poll() is not None or time.monotonic() > started + 120:
                 raise RuntimeError(
                     f"Audacity never accepted script commands: {error}\n"
                     + Path("/work/audacity.log").read_text()[-3000:]
@@ -151,6 +154,24 @@ with Path("/work/audacity.log").open("w") as application_log:
         status = 0
     except BaseException:  # noqa: BLE001 - report any failure, then exit hard below.
         traceback.print_exc()
+        # Keep what the screen showed, so the next diagnosis starts from evidence.
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-v",
+                "error",
+                "-y",
+                "-f",
+                "x11grab",
+                "-i",
+                ":99",
+                "-frames:v",
+                "1",
+                "/work/failure.png",
+            ],
+            check=False,
+            timeout=30,
+        )
     finally:
         process.terminate()
         try:

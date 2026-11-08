@@ -14,6 +14,16 @@ from typing import Any
 from joinery.catalog import ROOT, load_catalog
 from joinery.worker_identity import docker_owner_args
 
+EVIDENCE = ROOT / "out/audacity-native"
+
+
+def _keep_evidence(scratch: Path) -> None:
+    """Copy the failure screenshot and Audacity's log out of the scratch folder."""
+    EVIDENCE.mkdir(parents=True, exist_ok=True)
+    for name in ("failure.png", "audacity.log"):
+        if (scratch / name).is_file():
+            shutil.copy2(scratch / name, EVIDENCE / name)
+
 
 def run(source: Path) -> dict[str, Any]:
     tool = load_catalog().get("audacity")
@@ -59,10 +69,11 @@ def run(source: Path) -> dict[str, Any]:
                 ],
                 capture_output=True,
                 text=True,
-                timeout=300,
+                timeout=240,
                 check=False,
             )
             if got.returncode or "AUDACITY_NATIVE_MCP_OK" not in got.stdout:
+                _keep_evidence(scratch)
                 raise RuntimeError(
                     "Audacity native probe failed:\n"
                     + got.stdout[-3000:]
