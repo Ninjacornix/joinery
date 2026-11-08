@@ -1,0 +1,16 @@
+[project]
+name = "joinery-upstream-sdk2-tests"
+version = "0.0.0"
+requires-python = ">=3.13,<3.14"
+dependencies = [
+  "mcp==2.3.0",
+  "pytest==9.2.0",
+  "pytest-asyncio==1.4.1.post1",
+  "fastmcp==4.1.6",
+  "websockets==17.4",
+  "python-reapy==0.10.0",
+  "numpy==2.5.2",
+  "librosa==1.0.0",
+  "pyloudnorm==0.2.0",
+  "soundfile==0.14.0",
+]

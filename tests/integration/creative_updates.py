@@ -1,4 +1,4 @@
-"""Real painted layers, vector exports and audible synth edits in temporary projects.
+"""Real model, layer, vector, material and synth edits in temporary projects.
 
 These are technical fixtures; they never approve art direction or create content
 in a user's game. Recipe replay runs in a separate copy, as the public CLI does.
@@ -10,11 +10,15 @@ import argparse
 import array
 import asyncio
 import json
+import math
 import shutil
 import tempfile
 import wave
 from pathlib import Path
 from typing import Any
+
+from mcp import Client
+from mcp.types import TextContent
 
 from joinery.authoring import (
     edit_document,
@@ -28,6 +32,7 @@ from joinery.lockfile import check_assets
 from joinery.recipe import rebuild_one
 from joinery.runner import SandboxRunner
 from joinery.transactions import EXCLUDED, FileTransaction, inventory
+from servers.authoring import make_server
 
 
 def project_at(directory: str, tool: str) -> Path:
@@ -66,6 +71,92 @@ async def pixel(project: Path, path: str) -> list[int]:
     got = await run_offline(["python3", "-c", code], project, readonly=True)
     assert got.ok, got.output
     return list(json.loads(got.stdout))
+
+
+async def blender() -> None:
+    """Real MCP named-part editing, without model calls or user project access."""
+    with tempfile.TemporaryDirectory(prefix="joinery-blender-parts-") as directory:
+        project = project_at(directory, "blender")
+        source = "art/sources/assembly.blend"
+        exports = ["art/models/assembly.glb"]
+
+        async def call(
+            tx: FileTransaction, name: str, arguments: dict[str, Any]
+        ) -> dict[str, Any]:
+            async with Client(make_server(tx.stage, "joinery-blender-ops")) as client:
+                result = await client.call_tool(name, arguments)
+            assert not result.is_error, result.content
+            content = result.content[0]
+            assert isinstance(content, TextContent)
+            data: dict[str, Any] = json.loads(content.text)
+            assert data["status"] == "staged" and data["requires_review"]
+            return data
+
+        async def objects(root: Path) -> dict[str, Any]:
+            document = await inspect_document(root, "blender", source)
+            return {item["name"]: item for item in document["objects"]}
+
+        tx = FileTransaction(project)
+        tx.begin("Create a technical two-part assembly")
+        result = await call(
+            tx,
+            "operate_document",
+            {
+                "tool": "blender",
+                "source": source,
+                "exports": exports,
+                "code": 'bpy.ops.mesh.primitive_cube_add(size=1)\nbpy.context.object.name="Head"\n'
+                "bpy.context.object.location.z=1\n"
+                'bpy.ops.mesh.primitive_cube_add(size=0.25)\nbpy.context.object.name="Grip"',
+            },
+        )
+        original = await objects(tx.stage)
+        assert set(original) == {"Head", "Grip"}
+        assert all(part["vertices"] == 8 for part in original.values())
+        await verify_replay(tx, result)
+        tx.review()
+        tx.accept()
+        accepted = inventory(project)
+        changes = {
+            "source": source,
+            "exports": exports,
+            "transforms": [
+                {
+                    "name": "Head",
+                    "position": [1, 2, 3],
+                    "scale": [2, 1, 1],
+                    "rotation_degrees": [0, 0, 90],
+                }
+            ],
+        }
+        tx = FileTransaction(project)
+        tx.begin("Move, resize and rotate only the named head")
+        result = await call(tx, "transform_parts", changes)
+        updated = await objects(tx.stage)
+        assert updated["Head"]["position"] == [1, 2, 3]
+        assert updated["Head"]["scale"] == [2, 1, 1]
+        assert math.isclose(updated["Head"]["rotation"][2], math.pi / 2, rel_tol=1e-6)
+        assert updated["Head"]["vertices"] == 8
+        assert updated["Grip"] == original["Grip"], (
+            "Unselected source part must be preserved"
+        )
+        assert (tx.stage / exports[0]).is_file()
+        assert inventory(project) == accepted, "MCP mutation is still only a preview"
+        await verify_replay(tx, result)
+        tx.review()
+        tx.reject()
+        assert inventory(project) == accepted
+        tx = FileTransaction(project)
+        tx.begin("Accept the same named-part change")
+        await call(tx, "transform_parts", changes)
+        tx.review()
+        tx.accept()
+        assert (await objects(project)) == updated
+        tx.revert()
+        assert inventory(project) == accepted
+        print(
+            "Blender real MCP named-part transforms/GLB/source retention/replay/reject/accept/revert: PASS"
+        )
 
 
 async def krita() -> None:
@@ -248,7 +339,7 @@ async def inkscape() -> None:
 async def material_maker() -> None:
     with tempfile.TemporaryDirectory(prefix="joinery-material-update-") as directory:
         project = project_at(directory, "material-maker")
-        graph = {
+        graph: dict[str, Any] = {
             "type": "graph",
             "name": "Fixture",
             "nodes": [
@@ -319,6 +410,7 @@ async def material_maker() -> None:
 
 async def main(app: str) -> None:
     for name, operation in (
+        ("blender", blender),
         ("krita", krita),
         ("supercollider", supercollider),
         ("inkscape", inkscape),
@@ -332,7 +424,14 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "app",
-        choices=["all", "krita", "supercollider", "inkscape", "material-maker"],
+        choices=[
+            "all",
+            "blender",
+            "krita",
+            "supercollider",
+            "inkscape",
+            "material-maker",
+        ],
         default="all",
         nargs="?",
     )

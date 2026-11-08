@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -34,12 +35,17 @@ def make_server(project: Path, family: str) -> MCPServer[Any]:
         ) -> dict[str, Any]:
             """Change named Blender source parts with typed position/rotation_degrees/scale arrays. Preserves the native model and refreshes existing GLB exports with a replayable operation record."""
             for change in transforms:
-                if not isinstance(change.get("name"), str) or set(change) - {
-                    "name",
-                    "position",
-                    "rotation_degrees",
-                    "scale",
-                }:
+                if (
+                    not isinstance(change.get("name"), str)
+                    or not change["name"].strip()
+                    or set(change)
+                    - {
+                        "name",
+                        "position",
+                        "rotation_degrees",
+                        "scale",
+                    }
+                ):
                     raise ValueError(
                         "Each transform needs a source object name and supported transform fields."
                     )
@@ -47,10 +53,15 @@ def make_server(project: Path, family: str) -> MCPServer[Any]:
                     if key != "name" and (
                         not isinstance(value, list)
                         or len(value) != 3
-                        or not all(isinstance(x, (int, float)) for x in value)
+                        or not all(
+                            isinstance(x, (int, float))
+                            and not isinstance(x, bool)
+                            and math.isfinite(x)
+                            for x in value
+                        )
                     ):
                         raise ValueError(
-                            "Transform values must be numeric arrays of length three."
+                            "Transform values must be finite numeric arrays of length three."
                         )
             import json
 
