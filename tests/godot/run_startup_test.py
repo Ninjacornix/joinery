@@ -39,6 +39,8 @@ def isolated_environment(directory: Path, root: Path, capture: Path) -> dict[str
         "GALLIUM_DRIVER",
         "LIBGL_ALWAYS_SOFTWARE",
         "MESA_LOADER_DRIVER_OVERRIDE",
+        "VK_DRIVER_FILES",
+        "VK_ICD_FILENAMES",
         "JOINERY_RENDERING_DRIVER",
     }
     environment = {
@@ -54,12 +56,15 @@ def isolated_environment(directory: Path, root: Path, capture: Path) -> dict[str
         "XDG_CACHE_HOME": "cache",
         "XDG_DATA_HOME": "data",
         "XDG_STATE_HOME": "state",
+        "XDG_RUNTIME_DIR": "runtime",
         "TMP": "temp",
         "TEMP": "temp",
         "TMPDIR": "temp",
     }.items():
         path = directory / name
         path.mkdir(parents=True, exist_ok=True)
+        if key == "XDG_RUNTIME_DIR":
+            path.chmod(0o700)
         environment[key] = str(path)
     environment.update(
         JOINERY_HOME=str(root),

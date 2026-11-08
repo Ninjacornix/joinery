@@ -50,11 +50,14 @@ class PolicyStop(RuntimeError):
 
 
 def host_environment() -> dict[str, str]:
-    """Inherit host runtime paths, never provider keys or arbitrary settings."""
+    """Inherit runtime paths and selected graphics config, never provider keys."""
     names = (
         "PATH", "HOME", "LANG", "TMPDIR", "SYSTEMROOT", "SystemRoot",
         "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "COMSPEC",
         "HOMEDRIVE", "HOMEPATH", "ProgramFiles", "ProgramFiles(x86)",
+        "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR",
+        "VK_DRIVER_FILES", "VK_ICD_FILENAMES", "LIBGL_ALWAYS_SOFTWARE",
+        "GALLIUM_DRIVER", "MESA_LOADER_DRIVER_OVERRIDE",
     )
     return {key: os.environ[key] for key in names if key in os.environ}
 

@@ -317,6 +317,22 @@ def test_worker_host_environment_has_windows_paths_without_provider_credentials(
     assert not forbidden.intersection(inherited)
 
 
+def test_native_server_inherits_selected_graphics_but_not_unrestricted_loaders(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    graphics = {
+        "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR",
+        "VK_DRIVER_FILES", "VK_ICD_FILENAMES", "LIBGL_ALWAYS_SOFTWARE",
+        "GALLIUM_DRIVER", "MESA_LOADER_DRIVER_OVERRIDE",
+    }
+    excluded = {"OPENAI_API_KEY", "JOINERY_MODEL_API_KEY", "LD_PRELOAD", "LD_LIBRARY_PATH", "VK_LAYER_PATH"}
+    for key in graphics | excluded:
+        monkeypatch.setenv(key, "fixture-" + key)
+    inherited = host_environment()
+    assert all(inherited[key] == "fixture-" + key for key in graphics)
+    assert not excluded.intersection(inherited)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="native Windows private-storage DACL")
 def test_native_windows_private_storage_has_only_owner_and_system_access(
     tmp_path: Path,
