@@ -66,6 +66,11 @@ def isolated_environment(directory: Path, root: Path, capture: Path) -> dict[str
         if key == "XDG_RUNTIME_DIR":
             path.chmod(0o700)
         environment[key] = str(path)
+    # Windows verifies these known folders under the isolated USERPROFILE.
+    # Populate only empty fixture directories; never alter shell-folder registry
+    # settings or fall back to the real user's profile.
+    for name in ("Desktop", "Documents", "Downloads", "Music", "Pictures", "Videos"):
+        (directory / "home" / name).mkdir(exist_ok=True)
     environment.update(
         JOINERY_HOME=str(root),
         JOINERY_SETUP_CHECK_DIR=str(directory / "project"),
