@@ -1,6 +1,6 @@
 # 0.1 alpha support matrix
 
-This matrix distinguishes measured local behavior from intended release targets.
+This matrix distinguishes measured local/hosted behavior from intended release targets.
 Native CI entries remain pending until actual target-host jobs complete.
 
 ## Platforms and distribution
@@ -10,6 +10,13 @@ Native CI entries remain pending until actual target-host jobs complete.
 | macOS ARM64 | Native local editor and source/desktop archives exercised; unsigned app | Desktop export produced and native macOS game smoke exercised | Locally verified alpha target |
 | Linux x86_64 | Packaging/build path implemented; native editor and clean-install release CI **pending** | Linux AMD64 export executed in offline Docker: `JOINERY_EXPORT_OK geometry=1`; native desktop CI **pending** | Pending native editor release validation |
 | Windows x86_64 | Packaging/build path, private IPC/ACL and process adapters implemented; native editor and clean-install release CI **pending** | Windows executable produced; native target-host release CI **pending** | Pending native release validation |
+
+Hosted Ubuntu 24.04 offline worker builds, measured asset checks, all six clean
+testbed recipe rebuilds and all four native creative-tool update/review lifecycles
+**passed** in [run 42488962130](https://github.com/Ninjacornix/joinery/actions/runs/42488962130/job/128756906863)
+for candidate `37e2679` on 2026-11-08. Existing recipe fingerprints remained
+unchanged. This verifies the Linux worker/asset path; native graphical editor,
+desktop bundle and target-host release checks remain separate pending gates.
 
 `release/build_editor.py` sets the macOS deployment target to 13.0 for new native
 CI builds. This is a build setting, not evidence that every existing local binary

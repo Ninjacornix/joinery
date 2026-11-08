@@ -248,6 +248,22 @@ by UID 1001, rather than Mac bind-mount ownership semantics:
 
 Evidence: `/tmp/joinery-alpha-ci-linux-owner.log`,
 `/tmp/joinery-alpha-ci-linux-mcp-owner.log` and the
-`/tmp/joinery-alpha-ci-owner-*-build.log` files. The local Linux-filesystem
-verification is complete; an actual Ubuntu CI rerun of the corrected candidate
-is still required. The original failed CI run is not presented as passing.
+`/tmp/joinery-alpha-ci-owner-*-build.log` files.
+
+The corrected candidate `37e2679` subsequently passed the actual hosted Ubuntu
+24.04 [assets job in run 42488962130](https://github.com/Ninjacornix/joinery/actions/runs/42488962130/job/128756906863),
+completed 2026-11-08 at 14:21:03 UTC. Its offline worker build passed in 151
+seconds, measured lock/assets checks passed, all six recipes clean-replayed
+without changing any expected fingerprint, and all four real native creative
+lifecycles passed. Hosted recipe measurements: door 2.5s, stone material 20.7s,
+music 0.9s, room 2.3s, door SFX 0.9s and sky 6.1s; the complete replay step took
+43s including verification overhead. Krita painted pixels/layer retention,
+audible SuperCollider, Inkscape SVG/PNG pixels and Material Maker red/blue texture
+plus roughness updates all passed their replay/reject/accept/revert checks in
+the subsequent 91-second lifecycle step.
+
+Completed job log: `/tmp/joinery-alpha-hosted-assets-pass.log`. This is actual
+hosted Linux worker and asset evidence, distinct from local emulation and from
+native desktop editor/build/package verification. It resolves the asset-job
+ownership failure; it does not turn the original failed run green or certify
+other pending platform jobs.

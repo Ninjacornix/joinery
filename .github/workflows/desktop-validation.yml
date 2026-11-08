@@ -1,0 +1,21 @@
+name: Focused native validation
+
+on:
+  push:
+    branches: [release/windows-validation, release/macos-validation, release/linux-validation]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+    with:
+      native: false
+  native:
+    uses: ./.github/workflows/native.yml
+    with:
+      editors: >-
+        ${{ github.ref_name == 'release/macos-validation' && '{"include":[{"os":"macos-15","target":"macos-arm64","archive":"zip","jobs":2}]}' || github.ref_name == 'release/linux-validation' && '{"include":[{"os":"ubuntu-24.04","target":"linux-x86_64","archive":"tar.gz","jobs":4}]}' || '{"include":[{"os":"windows-2025","target":"windows-x86_64","archive":"zip","jobs":4}]}' }}
+      runtimes: false
