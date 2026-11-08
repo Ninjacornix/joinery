@@ -1,6 +1,6 @@
 [project]
 name = "joinery"
-version = "0.0.0"
+version = "0.1.0a1"
 description = "Godot-based engine directed through real creative tools. Creation, not generation."
 requires-python = ">=3.12,<3.13"
 dependencies = [
@@ -24,6 +24,7 @@ dev = [
     "mypy",
     "pytest",
     "ruff",
+    "scons==4.11.1",
     "types-jsonschema==4.26.0.20261006",
 ]
 

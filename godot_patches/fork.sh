@@ -33,7 +33,7 @@ cmd_sync() {
   shopt -s nullglob
   local patches=("$HERE"/patches/*.patch)
   if ((${#patches[@]})); then
-    g am --quiet --3way "${patches[@]}"
+    g -c user.name="Joinery Build" -c user.email="build@joinery.invalid" am --quiet --3way "${patches[@]}"
   fi
   echo "$JOINERY_BRANCH = $GODOT_TAG + ${#patches[@]} patch(es) in $SRC"
 }
@@ -70,7 +70,7 @@ cmd_rebase() {
 cmd_build() {
   [[ -d "$SRC" ]] || die "no godot-src/. Run 'sync' first."
   local jobs
-  jobs="$(getconf _NPROCESSORS_ONLN)"
+  jobs="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
 
   # Cache aggressively: patching the engine means rebuilding it repeatedly, and
   # almost nothing changes between those builds. Two independent caches:
@@ -96,7 +96,7 @@ cmd_build() {
     cache_args+=("cache_path=$scons_cache" "cache_limit=${JOINERY_SCONS_CACHE_GIB:-8}")
   fi
 
-  (cd "$SRC" && uv tool run scons target=editor -j"$jobs" "${cache_args[@]}" "$@")
+  (cd "$SRC" && uv run --frozen --project "$HERE/.." scons target=editor -j"$jobs" "${cache_args[@]}" "$@")
 }
 
 cmd_cachestats() {

@@ -2,14 +2,34 @@
 
 **Made in the Joinery, not generated.**
 
-Joinery is a Godot 4.7-based game engine you direct by talking to it. Its AI sidebar, **Journeyman**, works real creative tools for you (Blender, Material Maker, Krita, Aseprite, Surge XT, SuperCollider) to *create* every asset; every preferred tool is non-generative and sends no telemetry, and you can add your own, with their output labelled. Every asset can be rebuilt from its recipe, and every change is a before/after you accept or reject.
+Joinery is a Godot 4.7.2-based game editor you direct through its AI sidebar,
+**Journeyman**. It operates real creative tools and keeps editable native sources,
+exports and replay recipes. Blender, Krita, Material Maker, Inkscape and
+SuperCollider have verified native authoring workflows. Changes are staged for
+your review; asset workers run offline and the shared policy gate excludes
+generative asset services. Optional desktop apps and custom tools have different
+levels of integration; see the [support matrix](docs/support-matrix.md).
 
 Joinery is agent-agnostic: run it with Claude Code, Codex, Gemini CLI, or opencode, on your own subscription or API key (`joinery auth`). The creation-only gate is wired into whichever agent you use (`joinery agents`).
+
+On native Windows, this alpha supports **Codex only**: its built-in read-only
+sandbox supplies the host project boundary. Claude, Gemini and opencode are
+explicitly refused there until an equivalent boundary exists. On macOS those
+providers require `sandbox-exec`; on Linux they require bubblewrap (`bwrap`).
 
 - Agent rules (read by every agent): [CLAUDE.md](CLAUDE.md)
 - Per-project art bible template: [templates/art_bible.md](templates/art_bible.md)
 
-Status: pre-alpha.
+Status: **0.1 alpha** (`0.1.0a1`), unsigned. macOS ARM64 has local native
+verification; Linux x86_64 and Windows x86_64 native release checks are
+**pending**. A Linux AMD64 game export has run successfully in offline Docker;
+that does not validate the native Linux editor or its desktop bundle.
+Read the [alpha release notes and installation steps](docs/releases/0.1.0-alpha.1.md)
+before using a release bundle. This alpha requires **uv, a running Docker engine,
+Git, Node.js/npm, and a signed-in supported agent CLI or a verified API profile**.
+Windows worker setup also requires Git Bash. Initial dependency and worker setup
+needs internet access and several GB of storage; creative workers subsequently
+execute with networking disabled.
 
 See the [implementation map](docs/implementation-map.md) for audited capability
 status, the remaining integration work, and readiness checks for each delivery.
@@ -63,15 +83,23 @@ Use `/art` to review and approve its current version. Changing its content
 invalidates approval. An agent cannot approve its own direction or file changes.
 Use `/tools` for actual MCP connection/probe status; diagnostics stay in Output.
 
-For a clean source/engine installation:
+For an installation with a matching Joinery editor already built or bundled:
 
 ```sh
 uv sync --frozen
+uv run joinery new /path/to/game --name "My Game" --tools godot,blender
 uv run joinery bootstrap --project /path/to/game
 uv run joinery mcp status --project /path/to/game --probe
 uv run joinery launch                     # start at agent connection/project manager
 uv run joinery launch --project /path/to/game  # update and open a closed project
 ```
+
+Run commands from the extracted runtime/source folder. For an existing project,
+use `joinery setup --project /path/to/game` instead of `new`. A source checkout
+also needs the patched editor built first; the release notes cover that path.
+Bootstrap installs the configured servers and offline worker images, and may
+take a while on the first run. Review its `unavailable` results and the MCP probe;
+having a desktop application installed does not establish MCP readiness.
 
 `update-addon --project ...` keeps an addon backup and updates only managed gate
 commands; it refuses to hot-replace the addon in a running project editor.
@@ -83,8 +111,11 @@ hosts for one project are refused.
 
 `diagnostics --project ...` reports the engine build/UUID, addon revision, provider
 state and transaction summaries without credentials. `package --output ...tar.gz`
-bundles the matching engine and source with measured file hashes; source bundles
-are the supported distribution format. The engine binary is platform-specific.
+bundles the matching engine and source with measured file hashes;
+`package --desktop --output ...zip` adds the platform launcher/application layout.
+These alpha bundles contain source and a platform-specific editor, and use uv
+for their Python runtime. They do not bundle agent subscriptions, Docker, or all
+optional desktop applications.
 
 Model previews support drag to orbit, wheel scrolling and trackpad zoom without
 extra buttons. Audio previews include a clickable waveform, seeking, play/pause,

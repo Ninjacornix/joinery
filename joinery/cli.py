@@ -9,7 +9,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from joinery import connection, hook
+from joinery import __version__, connection, hook
 from joinery.agents import all_agents
 from joinery.agents import get as get_agent
 from joinery.api_profiles import configure as configure_api
@@ -219,12 +219,26 @@ def _rebuild(project: Path, prefer: str, record_mode: bool, timeout: int) -> int
 
 def main() -> int:
     parser = argparse.ArgumentParser(prog="joinery")
+    parser.add_argument("--version", action="version", version="Joinery " + __version__)
     commands = parser.add_subparsers(dest="command", required=True)
     package_cmd = commands.add_parser(
         "package",
         help="bundle the current source and matching engine with a measured manifest",
     )
     package_cmd.add_argument("--output", type=Path, required=True)
+    package_cmd.add_argument(
+        "--desktop",
+        action="store_true",
+        help="create the platform desktop launcher and application layout",
+    )
+    package_cmd.add_argument(
+        "--target",
+        default="",
+        help="require a matching executable target, such as macos-arm64",
+    )
+    package_cmd.add_argument(
+        "--binary", type=Path, help="package this measured editor binary"
+    )
     launch_cmd = commands.add_parser(
         "launch",
         help="start Joinery from its project manager, or safely update and open a closed project",
@@ -366,7 +380,12 @@ def main() -> int:
 
         try:
             artifact = (
-                package(args.output)
+                package(
+                    args.output,
+                    desktop=args.desktop,
+                    target=args.target,
+                    binary=args.binary,
+                )
                 if args.command == "package"
                 else launch(args.project)
             )
