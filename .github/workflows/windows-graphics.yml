@@ -1,0 +1,36 @@
+name: Windows graphics diagnostic
+
+on:
+  push:
+    branches: [release/windows-graphics-probe]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: windows-2025
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          arch: x64
+      - run: uv sync --frozen --python 3.12
+      - name: Diagnose private Mesa DLL loading and native WGL contexts
+        run: uv run python release/windows_wgl_probe.py --directory out/wgl-probe --cache "$RUNNER_TEMP/mesa" --output out/wgl-probe.json
+      - name: Retain diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: windows-wgl-diagnostic
+          path: out/wgl-probe.json
+          if-no-files-found: warn
+          retention-days: 14
