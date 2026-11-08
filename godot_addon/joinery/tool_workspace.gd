@@ -180,7 +180,12 @@ func refresh() -> void:
 	var since := "" if _invalidated else _stamp
 	_refresh_elapsed = 0.0
 	_invalidated = false
-	_start_job("refresh", PackedStringArray(["workspace", "--since", since]))
+	# The CLI defaults to an empty stamp. Godot's native Windows argv builder
+	# drops empty arguments, so omit this optional flag until a stamp exists.
+	var arguments := PackedStringArray(["workspace"])
+	if not since.is_empty():
+		arguments.append_array(["--since", since])
+	_start_job("refresh", arguments)
 
 
 func _apply_data(data: Dictionary) -> void:

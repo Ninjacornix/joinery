@@ -133,8 +133,19 @@ func _accepted_model_preview(plugin: EditorPlugin) -> void:
 		await get_tree().process_frame
 	_check(plugin._workspace.visible, "Accepted model opens the main asset viewer")
 	_check(
+		(
+			not plugin._workspace._status.visible
+			or not plugin._workspace._status.text.begins_with("Could not")
+		),
+		"Accepted-model catalog must load: " + plugin._workspace._status.tooltip_text
+	)
+	_check(
 		plugin._workspace._selected_path == "art/models/accepted.glb",
 		"Accepted model is selected for preview"
+	)
+	_check(
+		plugin._workspace._current.get("path") == "art/models/accepted.glb",
+		"Accepted model must resolve to a loaded asset catalog entry"
 	)
 	_check(
 		not (
@@ -146,6 +157,46 @@ func _accepted_model_preview(plugin: EditorPlugin) -> void:
 		),
 		"Accepted model has visible 3D geometry preview"
 	)
+	# Finish any queued import/index invalidation before testing an unchanged
+	# stamped refresh. Initial import completion may legitimately rebuild a view.
+	var filesystem := EditorInterface.get_resource_filesystem()
+	deadline = Time.get_ticks_msec() + 10000
+	while (
+		(
+			plugin._workspace._command_job != null
+			or plugin._workspace._invalidated
+			or plugin._workspace._stamp.is_empty()
+			or filesystem.is_scanning()
+			or filesystem.is_importing()
+		)
+		and Time.get_ticks_msec() < deadline
+	):
+		await get_tree().process_frame
+	for index: int in 2:
+		await get_tree().process_frame
+	var viewers: Array[Node] = plugin._workspace._preview.find_children(
+		"*", "SubViewportContainer", true, false
+	)
+	if not viewers.is_empty():
+		var viewer: SubViewportContainer = viewers[0]
+		var viewport: SubViewport = viewer.get_child(0)
+		var camera := viewport.get_camera_3d()
+		camera.position.z *= 0.8
+		var camera_transform := camera.transform
+		_check(not plugin._workspace._stamp.is_empty(), "Catalog returns a nonempty refresh stamp")
+		plugin._workspace.refresh()
+		deadline = Time.get_ticks_msec() + 10000
+		while plugin._workspace._command_job != null and Time.get_ticks_msec() < deadline:
+			await get_tree().process_frame
+		_check(plugin._workspace._command_job == null, "Stamped catalog refresh completes")
+		_check(
+			(
+				is_instance_valid(viewer)
+				and is_instance_valid(camera)
+				and camera.transform == camera_transform
+			),
+			"Unchanged stamped refresh preserves the imported model and camera"
+		)
 	await _capture("joinery-accepted-model.png")
 	EditorInterface.set_main_screen_editor("3D")
 
