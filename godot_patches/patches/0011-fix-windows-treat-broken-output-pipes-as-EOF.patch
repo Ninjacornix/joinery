@@ -1,0 +1,32 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Joinery Build <build@joinery.invalid>
+Date: Sun, 8 Nov 2026 17:11:51 +0100
+Subject: [PATCH] fix(windows): treat broken output pipes as EOF
+
+PeekNamedPipe reports ERROR_BROKEN_PIPE once a child closes its output and buffered data is drained. Return zero available bytes and ERR_FILE_EOF for that normal lifecycle event, keeping buffered reads and all other errors unchanged.
+
+Upstream candidate: this fixes native Windows process-pipe EOF handling independently of Joinery.
+---
+ drivers/windows/file_access_windows_pipe.cpp | 9 ++++++++-
+ 1 file changed, 8 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/windows/file_access_windows_pipe.cpp b/drivers/windows/file_access_windows_pipe.cpp
+index 049b8e7..53633eb 100644
+--- a/drivers/windows/file_access_windows_pipe.cpp
++++ b/drivers/windows/file_access_windows_pipe.cpp
+@@ -107,7 +107,14 @@ uint64_t FileAccessWindowsPipe::get_length() const {
+ 	ERR_FAIL_COND_V_MSG(fd[0] == nullptr, -1, "Pipe must be opened before use.");
+ 
+ 	DWORD buf_rem = 0;
+-	ERR_FAIL_COND_V(!PeekNamedPipe(fd[0], nullptr, 0, nullptr, &buf_rem, nullptr), 0);
++	if (!PeekNamedPipe(fd[0], nullptr, 0, nullptr, &buf_rem, nullptr)) {
++		// A drained pipe whose writer exited has reached EOF, not a read failure.
++		if (GetLastError() == ERROR_BROKEN_PIPE) {
++			last_error = ERR_FILE_EOF;
++			return 0;
++		}
++		ERR_FAIL_V(0);
++	}
+ 	return buf_rem;
+ }
+ 

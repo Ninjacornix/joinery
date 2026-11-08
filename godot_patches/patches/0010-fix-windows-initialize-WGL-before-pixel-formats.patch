@@ -3,9 +3,9 @@ From: Joinery Build <build@joinery.invalid>
 Date: Sun, 8 Nov 2026 17:01:41 +0100
 Subject: [PATCH] fix(windows): initialize WGL before pixel formats
 
-Per-application WGL drivers need initialization before GDI selects the
-window format. Configure each window once; repeating SetPixelFormat
-rejects Mesa's context even when OpenGL 3.3 is supported.
+Per-application WGL drivers need initialization before GDI selects the window format. Configure each window once; repeating SetPixelFormat rejects Mesa contexts even when OpenGL 3.3 is supported.
+
+Upstream candidate: this fixes native Windows OpenGL initialization ordering and pixel-format ownership independently of Joinery.
 ---
  .../windows/gl_manager_windows_native.cpp     | 33 +++++++++----------
  1 file changed, 16 insertions(+), 17 deletions(-)

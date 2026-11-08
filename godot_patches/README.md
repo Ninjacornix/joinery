@@ -43,3 +43,8 @@ Intended series: 3D editor context-menu slot and viewport pick hook, meant for
 upstream, plus Joinery-only patches that restructure the editor (ADR 0005) and
 route project creation through Joinery's questionnaire (ADR 0004). Projects must
 stay openable in stock Godot; the addon degrades without these.
+
+The Windows native OpenGL initialization fix is a separate upstream candidate
+with an exact-file scope exception ([ADR 0018](../docs/adr/0018-windows-software-opengl.md)).
+Normal Windows process-pipe EOF handling is another independent upstream
+candidate ([ADR 0019](../docs/adr/0019-windows-process-pipe-eof.md)).

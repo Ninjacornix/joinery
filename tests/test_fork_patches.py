@@ -101,9 +101,22 @@ def test_patch_says_whether_it_is_for_upstream(patch: Path) -> None:
 def test_patches_target_only_expected_areas() -> None:
     """The series should not sprawl across the engine without a decision."""
     allowed = ("editor/",)
+    exceptions = {
+        "0010-fix-windows-initialize-WGL-before-pixel-formats.patch": {
+            "platform/windows/gl_manager_windows_native.cpp":
+                "docs/adr/0018-windows-software-opengl.md",
+        },
+        "0011-fix-windows-treat-broken-output-pipes-as-EOF.patch": {
+            "drivers/windows/file_access_windows_pipe.cpp":
+                "docs/adr/0019-windows-process-pipe-eof.md",
+        },
+    }
     for patch in patches():
         for match in re.findall(r"^\+\+\+ b/(.+)$", patch.read_text(), re.MULTILINE):
-            assert match.startswith(allowed), (
+            if match.startswith(allowed):
+                continue
+            decision = exceptions.get(patch.name, {}).get(match)
+            assert decision is not None and (ROOT / decision).is_file(), (
                 f"{patch.name} touches {match}, outside {allowed}. "
-                "Widening the fork's blast radius deserves an ADR."
+                "An exact-file exception requires its own ADR."
             )
