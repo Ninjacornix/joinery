@@ -56,7 +56,7 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
         with:
           path: ~/.cache/joinery/scons
-          key: scons-${{ matrix.target }}-${{ hashFiles('godot_patches/UPSTREAM', 'godot_patches/patches/*.patch', 'release/build_editor.py', 'release/windows_build_deps.py') }}
+          key: scons-${{ matrix.target }}-${{ hashFiles('godot_patches/UPSTREAM', 'godot_patches/patches/*.patch', 'release/build_editor.py', 'release/windows_build_deps.py', 'release/macos_build_deps.py') }}
           restore-keys: scons-${{ matrix.target }}-
       - name: Build and measure the pinned patched native editor
         id: native_build

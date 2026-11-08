@@ -63,7 +63,14 @@ def main() -> None:
         "-j" + str(args.jobs),
     ]
     if system == "macos":
-        argv += ["vulkan=no", "angle=no", "macos_deployment_target=13.0"]
+        from release.macos_build_deps import provision as provision_macos
+
+        argv += ["vulkan=no", "macos_deployment_target=13.0"]
+        argv += provision_macos(
+            ROOT / "out/macos-build-deps",
+            Path.home() / ".cache/joinery/macos-build-deps",
+            arch,
+        )
     elif system == "windows":
         from release.windows_build_deps import provision
 
@@ -108,6 +115,10 @@ def main() -> None:
     if system == "windows":
         metadata["build_dependencies"] = json.loads(
             (ROOT / "out/windows-build-deps/sdk-manifest.json").read_text()
+        )
+    elif system == "macos":
+        metadata["build_dependencies"] = json.loads(
+            (ROOT / "out/macos-build-deps/sdk-manifest.json").read_text()
         )
     output = ROOT / "out/build-engine.json"
     output.parent.mkdir(exist_ok=True)
