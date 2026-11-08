@@ -51,6 +51,10 @@ async def evidence(
         suffix = Path(relative).suffix.lower()
         if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".wav", ".ogg", ".blend"}:
             continue
+        # Recipe snapshots (recipes/inputs) and Joinery's own files are
+        # bookkeeping, not the asset under review.
+        if Path(relative).parts[0] not in {"art", "audio"}:
+            continue
         item: dict[str, Any] = {
             "path": relative,
             "media": "audio" if suffix in {".wav", ".ogg"} else "image",
