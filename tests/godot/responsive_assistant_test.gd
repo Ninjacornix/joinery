@@ -119,6 +119,19 @@ func _run() -> void:
 			var size: int = records[1]["label"].get_theme_font_size("normal_font_size")
 			_check(size > chat.get_theme_default_font_size(), "Text size applies to replies")
 			chat._transcript.set_text_scale(1.0)
+			var opened: Array[String] = []
+			chat.target_opened.connect(func(path: String) -> void: opened.append(path))
+			var chip_row: Control = chat._chips.get_child(0).get_child(0)
+			var click := InputEventMouseButton.new()
+			click.button_index = MOUSE_BUTTON_LEFT
+			click.pressed = true
+			chip_row.gui_input.emit(click)
+			_check(opened.size() == 1 and opened[0].ends_with(".glb"), "A chip opens its asset")
+			var chip_label: Label = chip_row.get_child(chip_row.get_child_count() - 2)
+			_check(
+				chip_label.size.x >= chip_label.get_minimum_size().x,
+				"Chip names are not cut short"
+			)
 			_check(
 				chat._chips.get_child(0).size.y <= chat.get_theme_default_font_size() * 2.25,
 				"Selected resources must remain compact above the message"

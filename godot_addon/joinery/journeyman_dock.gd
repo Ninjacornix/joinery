@@ -15,12 +15,14 @@ signal review_requested
 signal review_closed
 signal selection_options_changed(selection: Dictionary)
 signal models_refresh_requested
+signal target_opened(path: String)
 
 const COMMAND_SCRIPT := preload("res://addons/joinery/command_job.gd")
 const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
 const INPUT_SCRIPT := preload("res://addons/joinery/message_input.gd")
 const HISTORY_SCRIPT := preload("res://addons/joinery/chat_history.gd")
 const SETTINGS_SCRIPT := preload("res://addons/joinery/journeyman_settings.gd")
+const CHIP_SCRIPT := preload("res://addons/joinery/target_chip.gd")
 const COMMANDS := {
 	"/agents": ["Supported agents", "cli"],
 	"/doctor": ["Check installed tools", "cli"],
@@ -481,63 +483,11 @@ func _set_targets(targets: Array[Dictionary]) -> void:
 		child.queue_free()
 	for target: Dictionary in _target_context:
 		_targets.append(str(target["id"]))
-		var badge := PanelContainer.new()
-		badge.add_theme_stylebox_override(
-			"panel",
-			UI_THEME.panel(
-				get_theme_color("inset", "Joinery").lerp(get_theme_color("focus", "Joinery"), 0.08),
-				get_theme_color("border", "Joinery").lerp(get_theme_color("focus", "Joinery"), 0.4),
-				4,
-				5
+		_chips.add_child(
+			CHIP_SCRIPT.build(
+				self, target, target_opened.emit, _remove_target.bind(str(target["id"]))
 			)
 		)
-		_chips.add_child(badge)
-		var context := HBoxContainer.new()
-		context.add_theme_constant_override("separation", 6)
-		context.tooltip_text = "%s: %s" % [target["kind"], target["id"]]
-		badge.add_child(context)
-		var kind_icon := (
-			{"Audio": "AudioStreamPlayer", "Object": "PackedScene", "Image": "Image"}
-			. get(str(target["kind"]), "File")
-		)
-		if has_theme_icon(kind_icon, "EditorIcons"):
-			var icon := TextureRect.new()
-			icon.texture = get_theme_icon(kind_icon, "EditorIcons")
-			icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-			icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-			icon.custom_minimum_size = Vector2.ONE * get_theme_default_font_size()
-			context.add_child(icon)
-		var label := Label.new()
-		var resource := str(target.get("resource", ""))
-		label.text = resource.get_file() if not resource.is_empty() else str(target["label"])
-		label.add_theme_font_size_override("font_size", int(get_theme_default_font_size() * 0.85))
-		label.add_theme_color_override("font_color", get_theme_color("text", "Joinery"))
-		label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-		label.custom_minimum_size.x = clampf(
-			(
-				get_theme_default_font()
-				. get_string_size(
-					label.text,
-					HORIZONTAL_ALIGNMENT_LEFT,
-					-1,
-					int(get_theme_default_font_size() * 0.85)
-				)
-				. x
-			),
-			40,
-			get_theme_default_font_size() * 12
-		)
-		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		context.add_child(label)
-		var clear := Button.new()
-		clear.text = "×"
-		clear.flat = true
-		clear.theme_type_variation = "JoineryIconButton"
-		clear.custom_minimum_size = Vector2.ONE * get_theme_default_font_size() * 1.5
-		clear.tooltip_text = "Clear selection for this message"
-		clear.accessibility_name = "Clear target " + str(target["label"])
-		clear.pressed.connect(_remove_target.bind(str(target["id"])))
-		context.add_child(clear)
 	_chips.visible = not _target_context.is_empty()
 
 

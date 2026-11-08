@@ -70,6 +70,7 @@ func _enter_tree() -> void:
 	_dock.review_requested.connect(_show_edit_review_panel)
 	_dock.review_closed.connect(_hide_edit_review_panel)
 	_workspace.asset_selected.connect(_on_asset_selected)
+	_dock.target_opened.connect(_on_target_opened)
 	_raise_dock.call_deferred()
 
 	_setup = SETUP_SCRIPT.new()
@@ -264,6 +265,14 @@ func _on_asset_selected(asset: Dictionary) -> void:
 	if not sources.is_empty():
 		source = "res://" + str(sources[0])
 	_dock.set_resource_target("res://" + str(asset["path"]), "Resource", source)
+
+
+## A chip in the chat opens its asset in the Tools view, under the tool that made it.
+func _on_target_opened(path: String) -> void:
+	if _workspace == null or path.is_empty():
+		return
+	get_editor_interface().set_main_screen_editor("Tools")
+	_workspace.select_resource(path)
 
 
 func _on_workspace_selection() -> void:
