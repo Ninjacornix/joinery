@@ -94,7 +94,7 @@ jobs:
         if: runner.os == 'Windows'
         run: uv run python release/windows_graphics.py --engine "$JOINERY_RELEASE_ENGINE" --output out/windows-software-gl --cache "$RUNNER_TEMP/mesa" --github-env "$GITHUB_ENV"
       - name: Lint native addon
-        run: uvx --from gdtoolkit==4.5.0 gdlint godot_addon/joinery/*.gd tests/godot/project_setup_flow_test.gd tests/godot/command_job_test.gd tests/godot/chat_transport_test.gd
+        run: uvx --from gdtoolkit==4.5.0 gdlint godot_addon/joinery/*.gd tests/godot/project_setup_flow_test.gd tests/godot/command_job_test.gd tests/godot/chat_transport_test.gd tests/godot/audio_preview_test.gd
       - name: Exercise native controls and real chat pipes
         run: uv run python tests/godot/run_widget_tests.py | tee out/widget-tests.log
       - name: Install the pinned provider for the local API startup fixture

@@ -17,6 +17,9 @@ func _run() -> void:
 	root.size = Vector2i(1000, 700)
 	var workspace := load("res://addons/joinery/tool_workspace.gd").new() as VBoxContainer
 	root.add_child(workspace)
+	# This exercises one transport directly, without selecting an indexed asset.
+	# An unrelated automatic catalog refresh would replace that preview midway.
+	workspace.set_process(false)
 	workspace.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	workspace._show_preview("res://audio/sfx/door_creak.wav")
 	var panel: VBoxContainer = workspace._audio_panel
@@ -79,19 +82,53 @@ func _run() -> void:
 	panel.stop()
 	panel.speed.select(2)
 	panel.speed.item_selected.emit(2)
+	var finished_events: Array[int] = [0]
+	player.finished.connect(func() -> void: finished_events[0] += 1)
 	panel.loop_button.button_pressed = true
 	panel.seek_to(player.stream.get_length() - 0.1)
 	panel.toggle_play()
-	await create_timer(0.3).timeout
+	var loop_started := Time.get_ticks_msec()
+	var deadline := loop_started + 3000
+	while (
+		finished_events[0] == 0 or not player.playing or player.get_playback_position() >= 0.8
+	) and Time.get_ticks_msec() < deadline:
+		await process_frame
+	_check(finished_events[0] > 0, "Loop must observe a real playback-end event")
 	_check(player.playing and player.get_playback_position() < 0.8, "Loop must restart after the end")
+	print("Audio loop end events=", finished_events[0], " elapsed_ms=",
+		Time.get_ticks_msec() - loop_started)
 	panel.loop_button.button_pressed = false
+	var previous_finished := finished_events[0]
+	var end_started := Time.get_ticks_msec()
 	panel.seek_to(player.stream.get_length() - 0.1)
-	await create_timer(0.3).timeout
+	# Seek must actually affect playback; waiting for the full unseeked clip to
+	# finish would hide a broken seek. Mixer commands and finished notifications
+	# are asynchronous, and SceneTree timer time is not the audio driver's clock.
+	deadline = end_started + 1000
+	while (
+		finished_events[0] == previous_finished
+		and player.get_playback_position() < player.stream.get_length() - 0.2
+	) and Time.get_ticks_msec() < deadline:
+		await process_frame
+	_check(
+		finished_events[0] > previous_finished
+		or player.get_playback_position() >= player.stream.get_length() - 0.2,
+		"Playing seek must reach the requested end region"
+	)
+	deadline = end_started + 3000
+	while (
+		finished_events[0] == previous_finished or player.playing
+	) and Time.get_ticks_msec() < deadline:
+		await process_frame
+	_check(finished_events[0] > previous_finished, "Non-looping playback must emit its end event")
 	_check(not player.playing, "Non-looping audio must stop at the end")
 	_check(
 		is_equal_approx(panel.seek_slider.value, panel.seek_slider.max_value), "End position must remain"
 	)
-	var deadline := Time.get_ticks_msec() + 3000
+	print("Audio final end events=", finished_events[0], " elapsed_ms=",
+		Time.get_ticks_msec() - end_started, " position=", panel.seek_slider.value,
+		" length=", panel.seek_slider.max_value)
+	deadline = Time.get_ticks_msec() + 3000
 	while panel.timeline._decoder != null and Time.get_ticks_msec() < deadline:
 		await process_frame
 	var peak := 0.0
