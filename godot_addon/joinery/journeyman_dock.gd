@@ -56,6 +56,9 @@ var _review_label: Label
 var _review_details: RichTextLabel
 var _review_scroll: ScrollContainer
 var _review_media: VBoxContainer
+var _review_paths: VBoxContainer
+var _details_toggle: Button
+var _details_open := false  # Remembered while the editor runs.
 var _review_pending := false
 var _agent_name := "Codex"
 var _assistant_open := false
@@ -179,16 +182,31 @@ func _ready() -> void:
 	_review_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_review_label.add_theme_font_size_override("font_size", int(font_size * 1.1))
 	_review.add_child(_review_label)
+	_review_media = VBoxContainer.new()
+	_review_media.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_review_media.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_review_media.accessibility_name = "Preview of the proposed change"
+	_review.add_child(_review_media)
+	_details_toggle = Button.new()
+	_details_toggle.toggle_mode = true
+	_details_toggle.flat = true
+	_details_toggle.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_details_toggle.accessibility_name = "Show or hide file details"
+	_details_toggle.toggled.connect(_set_details_open)
+	_review.add_child(_details_toggle)
 	_review_scroll = ScrollContainer.new()
 	_review_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_review_scroll.follow_focus = true
-	_review_scroll.accessibility_name = "Proposed changes and previews"
+	_review_scroll.accessibility_name = "Changed files and recipes"
 	_review_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_review_scroll.custom_minimum_size.y = get_theme_default_font_size() * 8
+	_review_scroll.custom_minimum_size.y = get_theme_default_font_size() * 6
+	_review_scroll.hide()
 	_review.add_child(_review_scroll)
 	var review_body := VBoxContainer.new()
 	review_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_review_scroll.add_child(review_body)
+	_review_paths = VBoxContainer.new()
+	review_body.add_child(_review_paths)
 	_review_details = RichTextLabel.new()
 	_review_details.fit_content = true
 	_review_details.scroll_active = false
@@ -196,10 +214,6 @@ func _ready() -> void:
 	_review_details.accessibility_name = "File changes"
 	_review_details.hide()
 	review_body.add_child(_review_details)
-	_review_media = VBoxContainer.new()
-	_review_media.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	review_body.add_child(_review_media)
-	review_body.move_child(_review_media, 0)
 	var choices := HBoxContainer.new()
 	choices.add_theme_constant_override("separation", maxi(8, int(font_size * 0.6)))
 	_review.add_child(choices)
@@ -727,8 +741,20 @@ func take_review_panel() -> Control:
 	return _review
 
 
+func _set_details_open(open: bool, remember := true) -> void:
+	if remember:
+		_details_open = open
+	_details_toggle.set_pressed_no_signal(open)
+	_details_toggle.text = ("▾  Hide details" if open else "▸  Show details")
+	_review_scroll.visible = open
+	_review_media.size_flags_stretch_ratio = 1.0 if open else 3.0
+
+
 func show_edit_review(summary: String) -> void:
 	_review_details.hide()
+	_review_media.hide()  # show_file_review fills these in for file changes.
+	_details_toggle.hide()
+	_review_scroll.hide()
 	_review_pending = true
 	_send.disabled = true
 	_review_label.text = "Preview · " + summary
@@ -745,29 +771,37 @@ func show_file_review(summary: String, text_diff: String, media: Array = []) -> 
 	_review_details.visible = not text_diff.is_empty()
 	for child: Node in _review_media.get_children():
 		child.queue_free()
+	for child: Node in _review_paths.get_children():
+		child.queue_free()
 	for item: Dictionary in media:
 		var caption := Label.new()
 		caption.text = str(item.get("path", ""))
 		caption.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-		_review_media.add_child(caption)
+		_review_paths.add_child(caption)
 		var row := HBoxContainer.new()
+		row.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		_review_media.add_child(row)
+		var both := item.has("before") and item.has("after")
 		for side: String in ["before", "after"]:
 			if not item.has(side):
 				continue
 			var column := VBoxContainer.new()
 			column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			column.size_flags_vertical = Control.SIZE_EXPAND_FILL
 			row.add_child(column)
-			var label := Label.new()
-			label.text = side.capitalize()
-			column.add_child(label)
+			if both:
+				var label := Label.new()
+				label.text = side.capitalize()
+				label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+				column.add_child(label)
 			var path := str(item[side])
 			if item.get("media") == "image":
 				var image := Image.load_from_file(path)
 				if image != null:
 					var view := TextureRect.new()
 					view.texture = ImageTexture.create_from_image(image)
-					view.custom_minimum_size = Vector2(100, get_theme_default_font_size() * 14)
+					view.custom_minimum_size = Vector2(100, get_theme_default_font_size() * 6)
+					view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 					view.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 					view.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 					column.add_child(view)
@@ -789,6 +823,9 @@ func show_file_review(summary: String, text_diff: String, media: Array = []) -> 
 							player.play()
 				)
 				column.add_child(play)
+	_review_media.visible = not media.is_empty()
+	_details_toggle.visible = not media.is_empty()
+	_set_details_open(_details_open or media.is_empty(), false)
 
 
 func hide_edit_review(message: String = "") -> void:
@@ -798,6 +835,8 @@ func hide_edit_review(message: String = "") -> void:
 	_send.disabled = false
 	_review.hide()
 	for child: Node in _review_media.get_children():
+		child.queue_free()
+	for child: Node in _review_paths.get_children():
 		child.queue_free()
 	_prompt.editable = true
 	_prompt.placeholder_text = ("Chat with " + _agent_name)

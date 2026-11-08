@@ -99,6 +99,36 @@ func _chat_layout(plugin: EditorPlugin) -> void:
 	await _capture("joinery-scroll-review.png")
 	dock.hide_edit_review()
 	await get_tree().process_frame
+	# A model preview fills the panel; file details stay folded until asked for.
+	var still := Image.create(320, 320, false, Image.FORMAT_RGBA8)
+	still.fill(Color(0.35, 0.37, 0.4))
+	var still_path := OS.get_cache_dir().path_join("joinery-review-still.png")
+	still.save_png(still_path)
+	(
+		dock
+		. show_file_review(
+			"Create a low-poly hammer",
+			"+ art/sources/hammer.blend\n+ recipes/hammer.toml",
+			[{"path": "art/models/hammer.glb", "media": "image", "after": still_path}],
+		)
+	)
+	for index: int in 6:
+		await get_tree().process_frame
+	_check(dock._review_media.visible, "Model preview is shown")
+	_check(not dock._review_scroll.visible, "File details start folded")
+	var choices_after: Control = dock._review.get_child(dock._review.get_child_count() - 1)
+	_check(
+		dock._review_media.get_global_rect().end.y <= choices_after.get_global_rect().position.y,
+		"Preview fits above Accept and Reject without scrolling"
+	)
+	_check(dock._review_media.size.y > dock._review.size.y * 0.4, "Preview gets most of the panel")
+	await _capture("joinery-model-review.png")
+	dock._details_toggle.button_pressed = true
+	await get_tree().process_frame
+	_check(dock._review_scroll.visible, "Details open on request")
+	dock.hide_edit_review()
+	dock._set_details_open(false)
+	await get_tree().process_frame
 
 
 func _accepted_model_preview(plugin: EditorPlugin) -> void:
