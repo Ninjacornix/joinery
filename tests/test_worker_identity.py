@@ -106,3 +106,30 @@ def test_linux_root_does_not_make_model_workers_root() -> None:
         pytest.raises(ValueError, match="non-root"),
     ):
         docker_owner_args()
+
+
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
+def test_supercollider_worker_can_boot_and_answer_cleanly(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, platform: str
+) -> None:
+    (tmp_path / "source/dist").mkdir(parents=True)
+    (tmp_path / "source/dist/index.js").write_text("")
+    monkeypatch.setattr("joinery.workers.installation", lambda _tool: tmp_path)
+    with (
+        patch("joinery.worker_identity.sys.platform", platform),
+        patch("joinery.worker_identity.os.getuid", return_value=1001, create=True),
+        patch("joinery.worker_identity.os.getgid", return_value=1002, create=True),
+    ):
+        args = supercollider_worker(tmp_path).args
+    # A mount into the image home leaves root-owned folders there, and sclang
+    # then never finishes starting.
+    assert not any("/home/joiner" in argument for argument in args)
+    # JACK needs more shared memory than Docker's 64 MB default.
+    assert args[args.index("--shm-size") + 1] == "512m"
+    assert "SCLANG_PATH=/tmp/joinery-sclang" in args
+    start = args[-1]
+    # Readline echo is off (IDE mode) and each line is run (newline -> form feed).
+    assert "sclang -i joinery -l /tmp/sclang_conf.yaml" in start
+    assert 'tr "\\n" "\\f"' in start
+    assert "jackd --no-realtime -d dummy" in start
+    assert start.endswith("exec node /opt/collider/dist/index.js")

@@ -96,6 +96,28 @@ def blender_worker(project: Path) -> ServerSpec:
     )
 
 
+# Shell run inside the SuperCollider worker before the MCP server starts.
+# - The extension loads through a library config (-l), not a mount into the
+#   home: Docker would create those parent folders as root, and sclang then
+#   cannot create its synthdefs folder and never starts.
+# - Linux sclang echoes input through readline, which the MCP's parser reads as
+#   the reply. Naming an IDE (-i) turns readline off; sclang then runs code on a
+#   form feed, so the wrapper turns each newline into one. exec keeps the
+#   wrapper's process ID, so stopping it stops sclang.
+# - scsynth needs a running JACK server and the container has no sound card,
+#   so JACK runs its dummy driver. Audio is captured as recordings, never played.
+_SUPERCOLLIDER_START = (
+    "printf 'includePaths:\\n  - /opt/collider/ClaudeCollider\\n' "
+    "> /tmp/sclang_conf.yaml && "
+    "printf '%s\\n' '#!/bin/bash' "
+    '\'exec /usr/bin/sclang -i joinery -l /tmp/sclang_conf.yaml "$@" '
+    '< <(stdbuf -o0 tr "\\n" "\\f")\' > /tmp/joinery-sclang && '
+    "chmod +x /tmp/joinery-sclang && "
+    "{ jackd --no-realtime -d dummy -r 48000 -p 1024 >/tmp/jackd.log 2>&1 & } && "
+    "exec node /opt/collider/dist/index.js"
+)
+
+
 def supercollider_worker(project: Path) -> ServerSpec:
     source = installation("supercollider") / "source"
     if not (source / "dist/index.js").is_file():
@@ -124,23 +146,28 @@ def supercollider_worker(project: Path) -> ServerSpec:
             "512",
             "--memory",
             "4g",
+            # JACK keeps its audio buffers in shared memory; Docker's 64 MB
+            # default makes jackd die with a bus error.
+            "--shm-size",
+            "512m",
             "-v",
             f"{source}:/opt/collider:ro",
-            "-v",
-            f"{source}/ClaudeCollider:/home/joiner/.local/share/SuperCollider/Extensions/ClaudeCollider:ro",
             "-v",
             f"{project.resolve()}:/work",
             "-w",
             "/work",
             "-e",
-            "SCLANG_PATH=/usr/bin/sclang",
+            "SCLANG_PATH=/tmp/joinery-sclang",
+            "-e",
+            "SC_BOOT_TIMEOUT=30000",
             "-e",
             "CC_SAMPLES_PATH=/work/audio",
             "-e",
             "CC_RECORDINGS_PATH=/work/audio/recordings",
             WORKER_IMAGE,
-            "node",
-            "/opt/collider/dist/index.js",
+            "sh",
+            "-c",
+            _SUPERCOLLIDER_START,
         ],
     )
 
