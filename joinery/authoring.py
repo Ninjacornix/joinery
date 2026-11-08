@@ -190,6 +190,37 @@ def enabled(project: Path, tool: str) -> None:
         raise PermissionError(f"{tool} is not selected for this project.")
 
 
+def texture_dir(source: str) -> str:
+    """Where a Blender source's textures are written as separate image files."""
+    return f"art/textures/{Path(source).stem}"
+
+
+# Writes each image that has pixels as its own PNG. The .blend keeps its packed
+# copy, so a recipe still replays from the .blend alone.
+_EXPORT_TEXTURES = """
+def _joinery_export_textures(directory):
+    os.makedirs(directory, exist_ok=True)
+    used = set()
+    for image in sorted(bpy.data.images, key=lambda i: i.name):
+        if image.type != 'IMAGE' or image.size[0] == 0 or image.size[1] == 0:
+            continue
+        name = bpy.path.clean_name(image.name) or 'texture'
+        while name in used:
+            name += '_'
+        used.add(name)
+        width, height = image.size
+        pixels = [0.0] * (width * height * 4)
+        image.pixels.foreach_get(pixels)
+        copy = bpy.data.images.new('joinery_texture_export', width, height, alpha=True)
+        copy.colorspace_settings.name = image.colorspace_settings.name
+        copy.pixels.foreach_set(pixels)
+        copy.filepath_raw = os.path.join(directory, name + '.png')
+        copy.file_format = 'PNG'
+        copy.save()
+        bpy.data.images.remove(copy)
+"""
+
+
 def _script(tool: str, source: str, base: str, code: str, exports: list[str]) -> str:
     if tool == "blender":
         lines = [
@@ -211,6 +242,8 @@ def _script(tool: str, source: str, base: str, code: str, exports: list[str]) ->
             "assert all(all(math.isfinite(x) for row in o.matrix_world for x in row) for o in bpy.data.objects), 'Nonfinite object transform'",
             "bpy.ops.file.pack_all()",
             f"bpy.ops.wm.save_as_mainfile(filepath=os.path.abspath({source!r}))",
+            _EXPORT_TEXTURES,
+            f"_joinery_export_textures(os.path.abspath({texture_dir(source)!r}))",
         ]
         for export in exports:
             if Path(export).suffix != ".glb":
@@ -297,7 +330,15 @@ async def edit_document(
         confined(project, output)
         if Path(output).parts[0] not in {"art", "audio"}:
             raise ValueError("Exports belong under art/ or audio/.")
-    _replacements(project, (source, *exports))
+    textures: tuple[str, ...] = ()
+    if tool == "blender":
+        # Texture files are regenerated on every edit; clear the old set so an
+        # image removed from the model does not leave a stale file behind.
+        folder = confined(project, texture_dir(source))
+        textures = tuple(
+            p.relative_to(project).as_posix() for p in sorted(folder.glob("*.png"))
+        )
+    _replacements(project, (source, *exports, *textures))
     identifier = uuid.uuid4().hex
     recipe_dir = project / "recipes"
     recipe_dir.mkdir(exist_ok=True)
@@ -332,7 +373,15 @@ async def edit_document(
         sources=(base,) if base else (),
         note=note,
     )
+    for old in textures:
+        (project / old).unlink(missing_ok=True)
     result = await run_offline(_tool_argv(recipe), project)
+    if tool == "blender" and result.ok:
+        folder = confined(project, texture_dir(source))
+        written = tuple(
+            p.relative_to(project).as_posix() for p in sorted(folder.glob("*.png"))
+        )
+        recipe = recipe.model_copy(update={"outputs": (*recipe.outputs, *written)})
     if not result.ok:
         raise RuntimeError(
             f"{tool} did not complete the document operation: {result.output[-2000:]}"

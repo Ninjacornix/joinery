@@ -384,3 +384,38 @@ def test_no_material_export_is_an_error_not_a_staged_success(
             )
         )
     record.assert_not_awaited()
+
+
+def test_blender_textures_are_separate_recorded_outputs(
+    stage: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    textures = stage / "art/textures/hammer"
+    textures.mkdir(parents=True)
+    (textures / "Removed_Image.png").write_bytes(b"stale")
+
+    async def run(_argv: list[str], project: Path, *_args: object) -> Result:
+        # The worker writes the images the model still has.
+        (project / "art/textures/hammer/Head_BaseColor.png").write_bytes(b"png")
+        return Result(True, "saved", "", 0.01)
+
+    record = AsyncMock(return_value={"status": "staged", "requires_review": True})
+    monkeypatch.setattr(authoring, "run_offline", run)
+    monkeypatch.setattr(authoring, "_record", record)
+    asyncio.run(
+        authoring.edit_document(
+            stage,
+            "blender",
+            "art/sources/hammer.blend",
+            "pass",
+            ["art/models/hammer.glb"],
+        )
+    )
+    recipe: Recipe = record.await_args.args[1]
+    assert recipe.outputs == (
+        "art/sources/hammer.blend",
+        "art/models/hammer.glb",
+        "art/textures/hammer/Head_BaseColor.png",
+    )
+    assert not (textures / "Removed_Image.png").exists()
+    script = (stage / recipe.script).read_text()
+    assert "_joinery_export_textures" in script and "art/textures/hammer" in script
