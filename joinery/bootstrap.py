@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -19,7 +20,9 @@ from joinery.wiring import _args, _command_str, _opencode_plugin
 
 
 def _run(argv: list[str], timeout: int = 1800) -> None:
-    result = subprocess.run(bash_script_argv(argv), cwd=ROOT, check=False, timeout=timeout)
+    result = subprocess.run(
+        bash_script_argv(argv), cwd=ROOT, check=False, timeout=timeout
+    )
     if result.returncode:
         raise ValueError("Setup command failed: " + argv[0])
 
@@ -127,6 +130,7 @@ def update_addon(project: Path) -> dict[str, str]:
     )
     if target.is_dir() and addon_version(target) == version and uids_present:
         refresh_managed_gates(project)
+        enable_plugin(project)
         return {"version": version, "state": "current"}
     backups = project / ".joinery/addon-backups"
     backups.mkdir(parents=True, exist_ok=True)
@@ -160,10 +164,51 @@ def update_addon(project: Path) -> dict[str, str]:
             json.dumps({"version": version}) + "\n"
         )
         refresh_managed_gates(project)
+        enable_plugin(project)
     finally:
         if staging.exists():
             shutil.rmtree(staging)
     return {"version": version, "state": "updated", "backup": str(backup)}
+
+
+PLUGIN = "res://addons/joinery/plugin.cfg"
+_ENABLED = re.compile(r"^enabled\s*=\s*PackedStringArray\((.*?)\)\s*$", re.MULTILINE)
+
+
+def enable_plugin(project: Path) -> bool:
+    """Turn the Joinery addon on in project.godot, keeping other plugins.
+
+    The Project Manager does this when it creates a project; projects created
+    from the command line would otherwise open without the sidebar. Returns
+    True when the file changed.
+    """
+    path = project / "project.godot"
+    text = path.read_text()
+    start = text.find("[editor_plugins]")
+    if start == -1:
+        path.write_text(
+            text.rstrip("\n")
+            + f'\n\n[editor_plugins]\n\nenabled=PackedStringArray("{PLUGIN}")\n'
+        )
+        return True
+    end = text.find("\n[", start + 1)
+    end = len(text) if end == -1 else end
+    section = text[start:end]
+    match = _ENABLED.search(section)
+    if match is None:
+        section = section.rstrip("\n") + f'\nenabled=PackedStringArray("{PLUGIN}")\n'
+    else:
+        entries = [e.strip() for e in match.group(1).split(",") if e.strip()]
+        if f'"{PLUGIN}"' in entries:
+            return False
+        joined = ", ".join([*entries, f'"{PLUGIN}"'])
+        section = (
+            section[: match.start()]
+            + f"enabled=PackedStringArray({joined})"
+            + section[match.end() :]
+        )
+    path.write_text(text[:start] + section + text[end:])
+    return True
 
 
 def refresh_managed_gates(project: Path) -> None:
