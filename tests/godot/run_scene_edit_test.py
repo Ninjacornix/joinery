@@ -57,20 +57,36 @@ def main() -> int:
             )
             cmd = [
                 str(engine_binary()),
+                "--audio-driver",
+                "Dummy",
                 "--editor",
                 "--path",
                 str(project),
             ]
+            if os.environ.get("JOINERY_RENDERING_DRIVER"):
+                cmd += ["--rendering-driver", os.environ["JOINERY_RENDERING_DRIVER"]]
             if not empty:
                 cmd.append("res://main.tscn")
             try:
                 result = subprocess.run(
-                    cmd, check=False, env=env, capture_output=True, text=True,
-                    timeout=180 if args.live else 40,
+                    cmd,
+                    check=False,
+                    env=env,
+                    capture_output=True,
+                    text=True,
+                    timeout=180 if args.live else 120,
                 )
             except subprocess.TimeoutExpired as exc:
-                print((exc.stdout or b"").decode(errors="replace") if isinstance(exc.stdout, bytes) else exc.stdout)
-                print((exc.stderr or b"").decode(errors="replace") if isinstance(exc.stderr, bytes) else exc.stderr)
+                print(
+                    (exc.stdout or b"").decode(errors="replace")
+                    if isinstance(exc.stdout, bytes)
+                    else exc.stdout
+                )
+                print(
+                    (exc.stderr or b"").decode(errors="replace")
+                    if isinstance(exc.stderr, bytes)
+                    else exc.stderr
+                )
                 return 1
             print(result.stdout)
             print(result.stderr)

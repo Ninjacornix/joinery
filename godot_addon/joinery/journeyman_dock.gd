@@ -15,7 +15,7 @@ signal review_requested
 signal review_closed
 
 const COMMAND_SCRIPT := preload("res://addons/joinery/command_job.gd")
-const ACCENT := Color(0.85, 0.63, 0.26)
+const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
 const COMMANDS := {
 	"/agents": ["Supported agents", "cli"],
 	"/doctor": ["Check installed tools", "cli"],
@@ -42,6 +42,7 @@ var _busy := false
 var _command_job: RefCounted
 var _running_command := ""
 var _connection: Label
+var _connection_icon: TextureRect
 var _stop: Button
 var _reconnect: Button
 var _review: VBoxContainer
@@ -61,37 +62,54 @@ func _init() -> void:
 
 
 func _ready() -> void:
+	theme = UI_THEME.build(self)
+	var font_size := get_theme_default_font_size()
+	add_theme_constant_override("separation", maxi(8, int(font_size * 0.6)))
 	custom_minimum_size.x = get_theme_default_font_size() * 24
 	var heading := Label.new()
 	heading.text = "Journeyman"
-	heading.set_theme_type_variation("HeaderLarge")
+	heading.add_theme_font_size_override("font_size", int(font_size * 1.15))
 	add_child(heading)
 	var connection_row := HBoxContainer.new()
+	connection_row.add_theme_constant_override("separation", maxi(6, int(font_size * 0.45)))
 	add_child(connection_row)
+	_connection_icon = TextureRect.new()
+	_connection_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	_connection_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	_connection_icon.custom_minimum_size = Vector2(font_size, font_size)
+	_connection_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	connection_row.add_child(_connection_icon)
 	_connection = Label.new()
+	_connection.add_theme_color_override("font_color", get_theme_color("secondary", "Joinery"))
 	_connection.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_connection.text = "Connecting…"
 	_connection.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	connection_row.add_child(_connection)
 	_reconnect = Button.new()
 	_reconnect.text = "Reconnect"
+	_reconnect.accessibility_name = "Reconnect your coding agent"
 	_reconnect.hide()
 	_reconnect.pressed.connect(func() -> void: reconnect_requested.emit())
 	connection_row.add_child(_reconnect)
 	_transcript = RichTextLabel.new()
 	_transcript.scroll_following = true
 	_transcript.selection_enabled = true
+	_transcript.accessibility_name = "Conversation"
 	_transcript.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	add_child(_transcript)
 	_review = VBoxContainer.new()
+	_review.theme = theme
+	_review.add_theme_constant_override("separation", maxi(8, int(font_size * 0.6)))
 	_review.hide()
 	add_child(_review)
 	_review_label = Label.new()
 	_review_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_review_label.add_theme_font_size_override("font_size", int(font_size * 1.1))
 	_review.add_child(_review_label)
 	_review_scroll = ScrollContainer.new()
 	_review_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_review_scroll.follow_focus = true
+	_review_scroll.accessibility_name = "Proposed changes and previews"
 	_review_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_review_scroll.custom_minimum_size.y = get_theme_default_font_size() * 8
 	_review.add_child(_review_scroll)
@@ -102,20 +120,27 @@ func _ready() -> void:
 	_review_details.fit_content = true
 	_review_details.scroll_active = false
 	_review_details.selection_enabled = true
+	_review_details.accessibility_name = "File changes"
 	_review_details.hide()
 	review_body.add_child(_review_details)
 	_review_media = VBoxContainer.new()
 	review_body.add_child(_review_media)
 	review_body.move_child(_review_media, 0)
 	var choices := HBoxContainer.new()
+	choices.add_theme_constant_override("separation", maxi(8, int(font_size * 0.6)))
 	_review.add_child(choices)
 	var accept_button := Button.new()
-	accept_button.text = "Accept"
+	accept_button.text = "Accept changes"
+	accept_button.theme_type_variation = "JoineryPrimaryButton"
+	accept_button.accessibility_name = "Accept reviewed changes"
+	accept_button.tooltip_text = "Keep the changes shown in this review"
 	accept_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	accept_button.pressed.connect(func() -> void: accept_edit_requested.emit())
 	choices.add_child(accept_button)
 	var reject_button := Button.new()
-	reject_button.text = "Reject"
+	reject_button.text = "Reject changes"
+	reject_button.accessibility_name = "Reject reviewed changes"
+	reject_button.tooltip_text = "Discard this proposal and preserve the original"
 	reject_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	reject_button.pressed.connect(func() -> void: reject_edit_requested.emit())
 	choices.add_child(reject_button)
@@ -123,6 +148,9 @@ func _ready() -> void:
 	_chips.hide()
 	add_child(_chips)
 	_prompt = LineEdit.new()
+	_prompt.accessibility_name = "Message to your coding agent"
+	_prompt.tooltip_text = "Describe a change. Enter sends; type / for commands."
+	_prompt.custom_minimum_size.y = font_size * 2.5
 	_prompt.placeholder_text = "Say what to change, or / for commands"
 	_prompt.text_changed.connect(_update_commands)
 	_prompt.text_submitted.connect(_on_submit)
@@ -130,6 +158,7 @@ func _ready() -> void:
 	add_child(_prompt)
 	_stop = Button.new()
 	_stop.text = "Stop"
+	_stop.accessibility_name = "Stop the current agent response"
 	_stop.hide()
 	_stop.pressed.connect(func() -> void: cancel_requested.emit())
 	add_child(_stop)
@@ -137,17 +166,14 @@ func _ready() -> void:
 	_command_layer.layer = 100
 	add_child(_command_layer)
 	_command_popup = PanelContainer.new()
-	var panel := StyleBoxFlat.new()
-	panel.bg_color = (
-		get_theme_color("base_color", "Editor")
-		if has_theme_color("base_color", "Editor")
-		else Color(0.13, 0.13, 0.14)
+	_command_popup.theme = theme
+	var panel: StyleBoxFlat = UI_THEME.panel(
+		get_theme_color("raised", "Joinery"), get_theme_color("border", "Joinery"), 4, 8
 	)
-	panel.set_corner_radius_all(6)
-	panel.set_content_margin_all(4)
 	_command_popup.add_theme_stylebox_override("panel", panel)
 	_command_layer.add_child(_command_popup)
 	_command_list = ItemList.new()
+	_command_list.accessibility_name = "Available slash commands"
 	_command_list.item_clicked.connect(_on_command_clicked)
 	_command_popup.add_child(_command_list)
 	_command_popup.hide()
@@ -322,7 +348,7 @@ func _set_targets(targets: Array[Dictionary]) -> void:
 		var label := Label.new()
 		label.text = "Editing · " + str(target["label"])
 		label.add_theme_font_size_override("font_size", int(get_theme_default_font_size() * 0.85))
-		label.modulate = Color(0.75, 0.78, 0.82)
+		label.add_theme_color_override("font_color", get_theme_color("secondary", "Joinery"))
 		label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		label.custom_minimum_size.x = 60
 		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -331,6 +357,7 @@ func _set_targets(targets: Array[Dictionary]) -> void:
 		clear.text = "×"
 		clear.flat = true
 		clear.tooltip_text = "Clear selection for this message"
+		clear.accessibility_name = "Clear target " + str(target["label"])
 		clear.pressed.connect(_remove_target.bind(str(target["id"])))
 		context.add_child(clear)
 	_chips.visible = not _target_context.is_empty()
@@ -369,6 +396,10 @@ func set_chat_state(state: String, detail: String) -> void:
 	_connection.text = detail
 	_connection.tooltip_text = detail
 	_reconnect.visible = state == "error"
+	var icon := {"connected": "StatusSuccess", "error": "StatusError"}.get(state, "Progress1")
+	_connection_icon.visible = has_theme_icon(icon, "EditorIcons")
+	if _connection_icon.visible:
+		_connection_icon.texture = get_theme_icon(icon, "EditorIcons")
 
 
 func set_chat_busy(busy: bool) -> void:
@@ -471,7 +502,7 @@ func append_agent_text(text: String, new_message: bool) -> void:
 	if new_message or not _assistant_open:
 		if _assistant_open:
 			_transcript.add_text("\n\n")
-		_transcript.push_color(ACCENT)
+		_transcript.push_color(get_theme_color("accent", "Joinery"))
 		_transcript.add_text(_agent_name + "  ")
 		_transcript.pop()
 		_assistant_open = true
@@ -613,7 +644,13 @@ func _engine_dir() -> String:
 
 
 func _say(who: String, what: String) -> void:
-	_transcript.push_color(ACCENT if who == "Journeyman" else Color(0.75, 0.82, 0.90))
+	_transcript.push_color(
+		(
+			get_theme_color("accent", "Joinery")
+			if who in ["Journeyman", _agent_name]
+			else get_theme_color("secondary", "Joinery")
+		)
+	)
 	_transcript.add_text(who + "  ")
 	_transcript.pop()
 	_transcript.add_text(what + "\n\n")

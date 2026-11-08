@@ -57,7 +57,7 @@ func _chat_layout(plugin: EditorPlugin) -> void:
 	_check(dock._command_popup.visible, "Slash command completion is visible")
 	_check(popup.end.y < prompt.position.y, "Entire command popup sits above the input")
 	_check(popup.size.y > dock.get_theme_default_font_size() * 1.5, "A command row is not clipped")
-	await _capture("/tmp/joinery-command-popup.png")
+	await _capture("joinery-command-popup.png")
 	dock._prompt.text = "/help"
 	dock._update_commands("/help")
 	var enter := InputEventKey.new()
@@ -88,7 +88,7 @@ func _chat_layout(plugin: EditorPlugin) -> void:
 		dock._prompt.get_global_rect().end.y <= dock.get_viewport_rect().end.y,
 		"Input remains on screen during review"
 	)
-	await _capture("/tmp/joinery-scroll-review.png")
+	await _capture("joinery-scroll-review.png")
 	dock.hide_edit_review()
 	await get_tree().process_frame
 
@@ -146,7 +146,7 @@ func _accepted_model_preview(plugin: EditorPlugin) -> void:
 		),
 		"Accepted model has visible 3D geometry preview"
 	)
-	await _capture("/tmp/joinery-accepted-model.png")
+	await _capture("joinery-accepted-model.png")
 	EditorInterface.set_main_screen_editor("3D")
 
 
@@ -494,9 +494,21 @@ func _empty_scene(plugin: EditorPlugin, box: Dictionary) -> void:
 	await get_tree().process_frame
 
 
-func _capture(path: String = "/tmp/joinery-live-box-preview.png") -> void:
+func _capture(filename: String = "joinery-live-box-preview.png") -> void:
+	var directory := OS.get_environment("JOINERY_CAPTURE_DIR")
+	if directory.is_empty():
+		directory = OS.get_cache_dir().path_join("joinery-native-captures")
+	var error := DirAccess.make_dir_recursive_absolute(directory)
+	_check(error == OK, "Create screenshot directory: " + directory)
+	if error != OK:
+		return
 	RenderingServer.force_draw()
-	EditorInterface.get_base_control().get_viewport().get_texture().get_image().save_png(path)
+	var image := EditorInterface.get_base_control().get_viewport().get_texture().get_image()
+	_check(image != null and not image.is_empty(), "Capture a rendered editor framebuffer")
+	if image == null or image.is_empty():
+		return
+	var path := directory.path_join(filename)
+	_check(image.save_png(path) == OK, "Save native editor screenshot: " + path)
 
 
 func _history(plugin: EditorPlugin) -> UndoRedo:
