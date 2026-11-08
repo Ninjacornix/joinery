@@ -18,6 +18,7 @@ from mcp.types import CallToolResult, TextContent
 from joinery.art_approval import approved, review
 from joinery.art_approval import fingerprint as bible_fingerprint
 from joinery.authoring import run_offline
+from joinery.bible_rules import check_rules
 from joinery.catalog import load_catalog, load_project_tools
 from joinery.deps import check_deps
 from joinery.lockfile import asset_files, check_assets
@@ -475,6 +476,13 @@ class ProjectGateway:
             problems = check_assets(tx.stage, load_catalog())
             if problems:
                 raise ValueError("Asset validation failed: " + "; ".join(problems))
+            problems = await check_rules(
+                tx.stage,
+                [change["path"] for change in changes],
+                lambda argv, root: run_offline(argv, root, 180, readonly=True),
+            )
+            if problems:
+                raise ValueError("Art bible check failed: " + "; ".join(problems))
         problems = check_deps(tx.stage, load_denylist())
         if problems:
             raise ValueError("Dependency validation failed: " + "; ".join(problems))

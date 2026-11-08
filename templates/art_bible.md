@@ -53,6 +53,24 @@ What the game feels like, and what it must never feel like.
 - Music: tempo range … BPM, keys/modes …, instruments/patches …, loops (seamless, 60–120 s)
 - Loudness (checked): music −16 LUFS, ambience −22 LUFS, SFX peaks ≤ −1 dBTP
 
+## Checked rules
+Measured on every changed asset before you review it. Change the numbers here;
+an empty or commented line means "not checked".
+
+```toml
+[audio]
+true_peak_max_dbtp = -1.0   # no audio file may peak above this
+lufs_tolerance = 1.0        # allowed distance from a folder's loudness target
+
+[audio.lufs]
+"audio/music" = -16.0
+"audio/ambience" = -22.0
+
+[models.max_triangles]
+# "art/characters" = 15000
+# "art/props" = 3000
+```
+
 ## 8. Never (hard bans)
 - e.g. lens flares, chromatic aberration, neon outside UI, stock "whoosh" transitions …
 
