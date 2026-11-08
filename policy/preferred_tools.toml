@@ -172,12 +172,11 @@ candidates = [
 id = "surge-xt"
 name = "Surge XT"
 domain = "audio"
-status = "first-party-planned"
+status = "available"
+builtin_server = "joinery-sound"
 candidates = ["redsquidleader/surge-xt-mcp: 1 star"]
-# Not packaged for Debian, and upstream ships only nightly Linux builds under a
-# moving tag, so there is no stable artifact for the sandbox to pin. Until that
-# changes the sandbox synthesises with SuperCollider and renders MIDI through
-# FluidSynth. See docs/adr/0008-sandbox-image.md.
+# Joinery's sound server renders Surge XT 1.3.4 (pinned stable release) offline
+# through its real VST3 in the creative worker. See docs/adr/0021-surge-xt.md.
 
 [[tool]]
 id = "material-maker"

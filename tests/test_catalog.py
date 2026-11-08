@@ -84,9 +84,13 @@ def test_available_tool_needs_an_mcp() -> None:
         Catalog.model_validate(raw)
 
 
-def test_custom_tool_cannot_collide_with_normalized_builtin_namespace(tmp_path: Path) -> None:
+def test_custom_tool_cannot_collide_with_normalized_builtin_namespace(
+    tmp_path: Path,
+) -> None:
     config = tmp_path / "joinery.toml"
-    config.write_text('[tools]\nenabled=[]\n[[tools.custom]]\nid="x"\nname="X"\ndomain="2d"\nserver="joinery_registry"\ncommand="x"\n')
+    config.write_text(
+        '[tools]\nenabled=[]\n[[tools.custom]]\nid="x"\nname="X"\ndomain="2d"\nserver="joinery_registry"\ncommand="x"\n'
+    )
     with pytest.raises(ValueError, match="clashes"):
         enabled_tools(load_catalog(), config)
 
@@ -103,9 +107,18 @@ def test_required_tools_always_enabled_and_allowed(tmp_path: Path) -> None:
 
 def test_enabling_unavailable_tool_fails(tmp_path: Path) -> None:
     config = tmp_path / "joinery.toml"
-    config.write_text('[tools]\nenabled = ["surge-xt"]\n')
-    with pytest.raises(ValueError, match="surge-xt"):
-        enabled_tools(load_catalog(), config)
+    config.write_text('[tools]\nenabled = ["future-synth"]\n')
+    raw = raw_catalog()
+    raw["tool"].append(
+        {
+            "id": "future-synth",
+            "name": "Future Synth",
+            "domain": "audio",
+            "status": "first-party-planned",
+        }
+    )
+    with pytest.raises(ValueError, match="future-synth"):
+        enabled_tools(Catalog.model_validate(raw), config)
 
 
 CUSTOM = (

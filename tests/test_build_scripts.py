@@ -42,7 +42,14 @@ def test_checksum_fetch_keeps_every_downloaded_hash_and_existing_entry(
     rows = (sandbox / "checksums.txt").read_text().splitlines()
     entries = dict(line.split() for line in rows if line and not line.startswith("#"))
     expected = hashlib.sha256(b"real fixture bytes").hexdigest()
-    assert set(entries) == {"godot", "blender", "mpfb2", "materialmaker", "retained"}
+    assert set(entries) == {
+            "godot",
+            "blender",
+            "mpfb2",
+            "materialmaker",
+            "surge",
+            "retained",
+        }
     assert all(
         entries[name] == expected
         for name in ("godot", "blender", "mpfb2", "materialmaker")

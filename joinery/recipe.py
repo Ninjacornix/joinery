@@ -261,6 +261,8 @@ def _tool_argv(recipe: Recipe) -> list[str]:
         ]
     if recipe.tool == "supercollider":
         return ["sclang", recipe.script]
+    if recipe.tool == "surge-xt":
+        return ["joinery-surge", recipe.script]
     if recipe.tool == "godot":
         return ["godot", "--headless", "--script", recipe.script]
     if recipe.tool == "krita":

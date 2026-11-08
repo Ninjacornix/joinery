@@ -81,9 +81,8 @@ PROGRAMS = {
         "MuseScore with pinned WebSocket plugin",
     ),
     "surge-xt": Program(
-        (),
-        ("unsupported capability reporting",),
-        "No stable pinned native runtime or MCP integration",
+        ("joinery-sound",),
+        ("named parameters", "notes", "exact WAV replay", "review/revert"),
     ),
 }
 

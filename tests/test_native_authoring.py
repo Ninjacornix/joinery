@@ -39,6 +39,12 @@ DOCUMENTS = [
         "audio/sfx/impact.wav",
         id="supercollider-sfx",
     ),
+    pytest.param(
+        "surge-xt",
+        "audio/sources/creak.json",
+        "audio/sfx/creak.wav",
+        id="surge-sfx",
+    ),
 ]
 
 
@@ -48,7 +54,7 @@ def stage(tmp_path: Path) -> Path:
     project.mkdir(parents=True)
     (project.parent / "journal.json").write_text(json.dumps({"state": "staging"}))
     (project / "joinery.toml").write_text(
-        '[tools]\nenabled=["blender","krita","aseprite","supercollider","material-maker","inkscape"]\n'
+        '[tools]\nenabled=["blender","krita","aseprite","supercollider","material-maker","inkscape","surge-xt"]\n'
     )
     return project
 
@@ -70,9 +76,7 @@ def test_unselected_owner_cannot_author(stage: Path, tool: str) -> None:
         authoring.enabled(stage, tool)
 
 
-@pytest.mark.parametrize(
-    "tool", ["gimp", "audacity", "reaper", "musescore", "surge-xt"]
-)
+@pytest.mark.parametrize("tool", ["gimp", "audacity", "reaper", "musescore"])
 def test_desktop_only_or_planned_tools_do_not_claim_native_authoring(
     stage: Path, tool: str
 ) -> None:
@@ -116,7 +120,8 @@ def test_document_edit_retains_preimage_and_records_every_export(
         assert len(recipe.sources) == 1
         assert (stage / recipe.sources[0]).read_bytes() == original
         assert (stage / recipe.sources[0]).parent.joinpath(".gdignore").is_file()
-        if tool != "supercollider":
+        # Text sources (SuperCollider, Surge) are written as the edit itself.
+        if tool not in {"supercollider", "surge-xt"}:
             assert native.read_bytes() == original  # the fake app never saves
     else:
         assert recipe.sources == ()

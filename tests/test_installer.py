@@ -4,7 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from joinery.catalog import CustomTool, ProjectTools, load_catalog, load_project_tools
+from joinery.catalog import (
+    Catalog,
+    CustomTool,
+    ProjectTools,
+    load_catalog,
+    load_project_tools,
+)
 from joinery.cli import check_mcp_config, main
 from joinery.installer import (
     Selection,
@@ -22,18 +28,35 @@ SDXL = CustomTool(
 )
 
 
-def number(tool_id: str) -> str:
-    ids = [t.id for t in menu_tools(load_catalog())]
+def number(tool_id: str, catalog: Catalog | None = None) -> str:
+    ids = [t.id for t in menu_tools(catalog or load_catalog())]
     return str(ids.index(tool_id) + 1)
 
 
-def drive(answers: list[str], current: list[str]) -> tuple[Selection, list[str]]:
+def drive(
+    answers: list[str], current: list[str], catalog: Catalog | None = None
+) -> tuple[Selection, list[str]]:
     shown: list[str] = []
     pending = iter(answers)
     result = run_menu(
-        load_catalog(), current, (), lambda _: next(pending), shown.append
+        catalog or load_catalog(), current, (), lambda _: next(pending), shown.append
     )
     return result, shown
+
+
+def with_planned_tool() -> Catalog:
+    """The shipped catalog plus a tool whose own MCP is still being built."""
+    raw = load_catalog().model_dump(mode="python")
+    raw["tool"] = [
+        *raw["tool"],
+        {
+            "id": "future-synth",
+            "name": "Future Synth",
+            "domain": "audio",
+            "status": "first-party-planned",
+        },
+    ]
+    return Catalog.model_validate(raw)
 
 
 def test_toggles_tools() -> None:
@@ -48,7 +71,8 @@ def test_required_tool_cannot_be_removed() -> None:
 
 
 def test_preferred_tool_without_mcp_cannot_be_selected() -> None:
-    result, shown = drive([number("surge-xt"), ""], [])
+    catalog = with_planned_tool()
+    result, shown = drive([number("future-synth", catalog), ""], [], catalog)
     assert result.tools == ["godot"]
     assert any("own MCP in progress" in line for line in shown)
 
@@ -74,8 +98,8 @@ def test_bad_input_is_ignored() -> None:
 
 
 def test_noninteractive_rejects_unavailable_tool() -> None:
-    with pytest.raises(ValueError, match="surge-xt"):
-        validate_choice(load_catalog(), ["surge-xt"])
+    with pytest.raises(ValueError, match="future-synth"):
+        validate_choice(with_planned_tool(), ["future-synth"])
 
 
 def test_write_selection_keeps_other_settings(tmp_path: Path) -> None:

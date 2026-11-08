@@ -131,11 +131,11 @@ def make_server(project: Path, family: str) -> MCPServer[Any]:
         async def operate_document(
             tool: str, source: str, code: str, exports: list[str], note: str = ""
         ) -> dict[str, Any]:
-            """Operate a native document in its actual offline app. Blender code uses bpy; Krita code receives app/document; Aseprite Lua receives sprite; SuperCollider code is a complete NRT patch with output paths and exit. Save/export and replay recording are automatic except the SuperCollider render. Use art/sources/ for .blend and art/models/ for GLB exports. Read document/source context first; retain existing named parts. Requires approved art direction and user review."""
+            """Operate a native document in its actual offline app. Blender code uses bpy; Krita code receives app/document; Aseprite Lua receives sprite; SuperCollider code is a complete NRT patch with output paths and exit. Surge XT code is the JSON source: {"synth": "surge-xt", "seconds", "sample_rate", "parameters": {name: value in Surge's display units}, "notes": [{"pitch", "start", "duration", "velocity"}]} with WAV exports; inspect a Surge source to list every parameter with its default. Save/export and replay recording are automatic except the SuperCollider render. Use art/sources/ for .blend and art/models/ for GLB exports. Read document/source context first; retain existing named parts. Requires approved art direction and user review."""
             allowed = {
                 "joinery-blender-ops": {"blender"},
                 "joinery-paint": {"krita", "aseprite"},
-                "joinery-sound": {"supercollider"},
+                "joinery-sound": {"supercollider", "surge-xt"},
             }[family]
             if tool not in allowed:
                 raise ValueError("Use this application's owning server.")

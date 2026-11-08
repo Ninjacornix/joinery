@@ -53,7 +53,7 @@ PROBES: dict[str, Probe] = {
         "surge-xt-cli",
         version_flag="",
         byo=True,
-        note="not packaged for Debian; the sandbox synthesises with SuperCollider",
+        note="rendered in the sandbox worker; a desktop install is only for opening sources by hand",
     ),
     "material-maker": Probe("material-maker", version_flag=""),
     "gimp": Probe("gimp", version_flag="--version"),

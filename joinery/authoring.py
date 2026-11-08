@@ -28,6 +28,7 @@ SUPPORTED = {
     "supercollider",
     "material-maker",
     "inkscape",
+    "surge-xt",
 }
 SUFFIXES = {
     "blender": ".blend",
@@ -36,6 +37,7 @@ SUFFIXES = {
     "supercollider": ".scd",
     "material-maker": ".ptex",
     "inkscape": ".svg",
+    "surge-xt": ".json",
 }
 
 
@@ -149,6 +151,18 @@ async def inspect_document(project: Path, tool: str, source: str) -> dict[str, A
                 if node.tag.split("}")[-1].lower() == "layer"
             ]
         }
+    if tool == "surge-xt" and path.suffix == ".json":
+        got = await run_offline(["joinery-surge", "--list"], project, readonly=True)
+        if not got.ok:
+            raise ValueError(
+                "Surge XT could not list its parameters: " + got.output[-800:]
+            )
+        return {
+            "source": source,
+            "content": path.read_text(),
+            # The plugin's defaults; this source's own values are in "content".
+            "parameter_defaults": json.loads(got.stdout),
+        }
     if path.suffix in {".scd", ".sc", ".ptex", ".svg", ".json"}:
         if path.stat().st_size > 2_000_000:
             raise ValueError(
@@ -257,6 +271,10 @@ def _script(tool: str, source: str, base: str, code: str, exports: list[str]) ->
             + json.dumps(code, ensure_ascii=False)
             + ".interpret;\n)\n"
         )
+    if tool == "surge-xt":
+        # Like SuperCollider, the log carries the whole patch, so a replay never
+        # depends on the source file that the same recipe writes.
+        return f"render({source!r}, {code!r}, {exports!r})\n"
     raise ValueError("Use the graph or vector document operation for this application.")
 
 
@@ -299,12 +317,13 @@ async def edit_document(
         "krita": ".py",
         "aseprite": ".lua",
         "supercollider": ".scd",
+        "surge-xt": ".py",
     }.get(tool)
     if extension is None:
         raise ValueError("Use edit_graph or edit_vector for this application.")
     script = recipe_dir / (identifier + extension)
     script.write_text(_script(tool, source, base, code, exports))
-    if tool == "supercollider":
+    if tool in {"supercollider", "surge-xt"}:
         target.write_text(code)
     recipe = Recipe(
         tool=tool,

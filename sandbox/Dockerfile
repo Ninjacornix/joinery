@@ -138,12 +138,8 @@ RUN set -euo pipefail; \
     if [ "${WITH_SUPERCOLLIDER}" != "1" ]; then echo "sc: not requested"; exit 0; fi; \
     apt-install supercollider supercollider-language supercollider-server
 
-# Surge XT is deliberately absent. Debian does not package it, and upstream
-# publishes only nightly Linux builds under a moving "Nightly" tag, so there is
-# no stable artifact to pin or hash. Synthesis goes through SuperCollider above,
-# and MIDI renders through FluidSynth with the GM SoundFont in the core layer.
-# If a packaged subtractive synth is ever wanted, Debian has zynaddsubfx,
-# amsynth and yoshimi; none is installed until something drives it.
+# Surge XT is installed in the creative worker layer (creative.Dockerfile),
+# from its pinned stable release in surge-synthesizer/releases-xt.
 
 # --- Material Maker ----------------------------------------------------------
 # Procedural PBR material graphs, with a CLI exporter.
