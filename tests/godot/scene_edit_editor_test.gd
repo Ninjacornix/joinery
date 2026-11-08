@@ -94,6 +94,12 @@ func _chat_layout(plugin: EditorPlugin) -> void:
 
 
 func _accepted_model_preview(plugin: EditorPlugin) -> void:
+	var filesystem := EditorInterface.get_resource_filesystem()
+	var imported_paths: Array[String] = []
+	var imported_listener := func(paths: PackedStringArray) -> void:
+		for path: String in paths:
+			imported_paths.append(path)
+	filesystem.resources_reimported.connect(imported_listener)
 	var model := Node3D.new()
 	var mesh := MeshInstance3D.new()
 	mesh.mesh = BoxMesh.new()
@@ -119,7 +125,8 @@ func _accepted_model_preview(plugin: EditorPlugin) -> void:
 	var deadline := Time.get_ticks_msec() + 10000
 	while (
 		(
-			plugin._workspace._current.get("path") != "art/models/accepted.glb"
+			not imported_paths.has("res://art/models/accepted.glb")
+			or plugin._workspace._current.get("path") != "art/models/accepted.glb"
 			or (
 				plugin
 				. _workspace
@@ -131,6 +138,10 @@ func _accepted_model_preview(plugin: EditorPlugin) -> void:
 		and Time.get_ticks_msec() < deadline
 	):
 		await get_tree().process_frame
+	_check(
+		imported_paths.has("res://art/models/accepted.glb"),
+		"Observe native model import completion before using its preview"
+	)
 	_check(plugin._workspace.visible, "Accepted model opens the main asset viewer")
 	_check(
 		(
@@ -159,13 +170,13 @@ func _accepted_model_preview(plugin: EditorPlugin) -> void:
 	)
 	# Finish any queued import/index invalidation before testing an unchanged
 	# stamped refresh. Initial import completion may legitimately rebuild a view.
-	var filesystem := EditorInterface.get_resource_filesystem()
 	deadline = Time.get_ticks_msec() + 10000
 	while (
 		(
 			plugin._workspace._command_job != null
 			or plugin._workspace._invalidated
 			or plugin._workspace._stamp.is_empty()
+			or plugin._workspace._preview_import_changed
 			or filesystem.is_scanning()
 			or filesystem.is_importing()
 		)
@@ -174,6 +185,7 @@ func _accepted_model_preview(plugin: EditorPlugin) -> void:
 		await get_tree().process_frame
 	for index: int in 2:
 		await get_tree().process_frame
+	filesystem.resources_reimported.disconnect(imported_listener)
 	var viewers: Array[Node] = plugin._workspace._preview.find_children(
 		"*", "SubViewportContainer", true, false
 	)
@@ -184,21 +196,63 @@ func _accepted_model_preview(plugin: EditorPlugin) -> void:
 		camera.position.z *= 0.8
 		var camera_transform := camera.transform
 		_check(not plugin._workspace._stamp.is_empty(), "Catalog returns a nonempty refresh stamp")
-		plugin._workspace.refresh()
-		deadline = Time.get_ticks_msec() + 10000
-		while plugin._workspace._command_job != null and Time.get_ticks_msec() < deadline:
-			await get_tree().process_frame
-		_check(plugin._workspace._command_job == null, "Stamped catalog refresh completes")
-		_check(
-			(
-				is_instance_valid(viewer)
-				and is_instance_valid(camera)
-				and camera.transform == camera_transform
-			),
-			"Unchanged stamped refresh preserves the imported model and camera"
-		)
+		for invalidated: bool in [true, false]:
+			var stamp: String = plugin._workspace._stamp
+			if invalidated:
+				plugin._workspace.invalidate()
+			_check(plugin._workspace._stamp == stamp, "Invalidation retains the confirmed revision")
+			plugin._workspace.refresh()
+			deadline = Time.get_ticks_msec() + 10000
+			while plugin._workspace._command_job != null and Time.get_ticks_msec() < deadline:
+				await get_tree().process_frame
+			_check(plugin._workspace._command_job == null, "Stamped catalog refresh completes")
+			_check(
+				(
+					is_instance_valid(viewer)
+					and is_instance_valid(camera)
+					and camera.transform == camera_transform
+				),
+				"Unchanged catalog refresh preserves the imported model and camera"
+			)
+		if is_instance_valid(viewer):
+			await _reimport_selected_model(plugin, viewer.get_instance_id())
 	await _capture("joinery-accepted-model.png")
 	EditorInterface.set_main_screen_editor("3D")
+
+
+func _reimport_selected_model(plugin: EditorPlugin, old_viewer_id: int) -> void:
+	# Import settings are deliberately absent from the workspace's asset stamp.
+	# This proves a genuine selected-resource reimport still reloads geometry
+	# when the raw file and the complete catalog payload remain unchanged.
+	var path := "res://art/models/accepted.glb"
+	var original := FileAccess.get_file_as_bytes(path)
+	var catalog: Dictionary = plugin._workspace._data.duplicate(true)
+	var settings := ConfigFile.new()
+	_check(settings.load(path + ".import") == OK, "Load real GLB import settings")
+	settings.set_value("params", "nodes/root_scale", 2.0)
+	_check(settings.save(path + ".import") == OK, "Change native model import scale")
+	EditorInterface.get_resource_filesystem().reimport_files(PackedStringArray([path]))
+	var deadline := Time.get_ticks_msec() + 10000
+	var updated := false
+	while not updated and Time.get_ticks_msec() < deadline:
+		var viewers: Array[Node] = plugin._workspace._preview.find_children(
+			"*", "SubViewportContainer", true, false
+		)
+		if not viewers.is_empty() and viewers[0].get_instance_id() != old_viewer_id:
+			for node: Node in viewers[0].find_children("*", "MeshInstance3D", true, false):
+				var mesh := node as MeshInstance3D
+				var bounds: AABB = mesh.global_transform * mesh.get_aabb()
+				if is_equal_approx(bounds.size.x, 2.0):
+					updated = true
+		if not updated:
+			await get_tree().process_frame
+	_check(updated, "Real selected-model reimport reloads changed geometry")
+	_check(FileAccess.get_file_as_bytes(path) == original, "Reimport leaves raw GLB unchanged")
+	_check(plugin._workspace._data == catalog, "Reimport works with an identical catalog payload")
+	_check(
+		plugin._workspace._selected_path == "art/models/accepted.glb",
+		"Reimport preserves the selected asset"
+	)
 
 
 func _existing_scene(plugin: EditorPlugin, box: Dictionary) -> void:

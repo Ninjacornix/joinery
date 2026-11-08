@@ -56,7 +56,7 @@ func _enter_tree() -> void:
 		_workspace.invalidate
 	)
 	get_editor_interface().get_resource_filesystem().resources_reimported.connect(
-		func(_paths: PackedStringArray) -> void: _workspace.invalidate()
+		_workspace.resources_reimported
 	)
 	_dock = DOCK_SCRIPT.new()
 	_dock.name = "Journeyman"

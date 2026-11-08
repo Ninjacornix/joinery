@@ -35,6 +35,7 @@ var _refresh_elapsed := 0.0
 var _invalidated := false
 var _queued_open := PackedStringArray()
 var _pending_scene_preview := ""
+var _preview_import_changed := false
 
 
 func _ready() -> void:
@@ -106,7 +107,8 @@ func _process(delta: float) -> void:
 	if not _pending_scene_preview.is_empty() and ResourceLoader.exists(_pending_scene_preview):
 		var path := _pending_scene_preview
 		_pending_scene_preview = ""
-		_show_preview(path)
+		_show_preview(path, _preview_import_changed)
+		_preview_import_changed = false
 	_refresh_elapsed += delta
 	if _command_job == null:
 		if not _queued_open.is_empty():
@@ -137,8 +139,12 @@ func _process(delta: float) -> void:
 	_status.hide()
 	if _job == "refresh":
 		_stamp = str(payload.get("stamp", ""))
-		if not bool(payload.get("unchanged", false)):
+		if (
+			not bool(payload.get("unchanged", false))
+			and (payload != _data or _preview_import_changed)
+		):
 			_apply_data(payload)
+			_preview_import_changed = false
 	else:
 		invalidate()
 
@@ -149,8 +155,17 @@ func _show_error(message: String) -> void:
 
 
 func invalidate() -> void:
-	_stamp = ""
+	# Keep the last confirmed revision while requesting fresh data. Filesystem
+	# notifications also cover editor/cache writes that do not change assets.
 	_invalidated = true
+
+
+func resources_reimported(paths: PackedStringArray) -> void:
+	# A real import can change a loaded scene even when its raw file and catalog
+	# metadata are unchanged (for example import settings or external textures).
+	if paths.has("res://" + _selected_path):
+		_preview_import_changed = true
+	invalidate()
 
 
 func _start_job(job: String, arguments: PackedStringArray) -> void:
@@ -311,7 +326,19 @@ func _filter() -> void:
 
 
 func select_resource(path: String) -> void:
-	_selected_path = path.trim_prefix("res://").split("::")[0]
+	var selected := path.trim_prefix("res://").split("::")[0]
+	# The native filesystem dock can repeat its selection while rescanning. An
+	# already-rendered model keeps its camera; pending imports still retry below.
+	if (
+		selected == _selected_path
+		and _current.get("path") == selected
+		and _preview.get_child_count() > 0
+		and _preview.get_child(0) is SubViewportContainer
+	):
+		return
+	if selected != _selected_path:
+		_preview_import_changed = false
+	_selected_path = selected
 	if _data.is_empty():
 		return
 	_tools.select(0)
@@ -333,6 +360,8 @@ func select_tool(tool: String) -> void:
 
 
 func _select(index: int, notify: bool = true) -> void:
+	if str(_rows[index]["path"]) != _selected_path:
+		_preview_import_changed = false
 	_current = _rows[index]
 	_selected_path = str(_current["path"])
 	_title.text = _display_name(_selected_path)
@@ -348,7 +377,8 @@ func _select(index: int, notify: bool = true) -> void:
 		var hint := str(option["reason"]) if not option["available"] else str(option["path"])
 		_open_with.set_item_tooltip(item, hint)
 	_update_open(_open_with.selected)
-	_show_preview("res://" + _selected_path)
+	_show_preview("res://" + _selected_path, _preview_import_changed)
+	_preview_import_changed = false
 	if notify:
 		asset_selected.emit(_current.duplicate(true))
 
@@ -396,8 +426,11 @@ func _clear_preview() -> void:
 		child.queue_free()
 
 
-func _show_preview(path: String) -> void:
+func _show_preview(path: String, reimported: bool = false) -> void:
 	_clear_preview()
+	var cache_mode := (
+		ResourceLoader.CACHE_MODE_REPLACE if reimported else ResourceLoader.CACHE_MODE_REUSE
+	)
 	if not FileAccess.file_exists(path):
 		var missing := Label.new()
 		missing.text = "This file is missing."
@@ -420,7 +453,7 @@ func _show_preview(path: String) -> void:
 				_show_image(image)
 				return
 	if extension in ["wav", "ogg", "mp3"] and ResourceLoader.exists(path):
-		_audio.stream = load(path) as AudioStream
+		_audio.stream = ResourceLoader.load(path, "", cache_mode) as AudioStream
 		if _audio.stream != null:
 			_audio.stream = _audio.stream.duplicate() as AudioStream
 			if _audio.stream is AudioStreamWAV:
@@ -430,7 +463,7 @@ func _show_preview(path: String) -> void:
 			_show_audio()
 			return
 	if extension in ["blend", "glb", "gltf", "tscn"] and ResourceLoader.exists(path):
-		var scene := load(path) as PackedScene
+		var scene := ResourceLoader.load(path, "", cache_mode) as PackedScene
 		if scene != null:
 			_show_scene(scene)
 			return
