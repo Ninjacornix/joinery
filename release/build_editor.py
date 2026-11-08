@@ -80,7 +80,9 @@ def main() -> None:
             ROOT / "out/windows-build-deps",
             Path.home() / ".cache/joinery/windows-build-deps",
         )
+    print("Building the pinned native editor.", flush=True)
     command(argv, source)
+    print("Native compilation finished; checking the executable version.", flush=True)
     suffix = ".exe" if system == "windows" else ""
     binary = source / "bin" / f"godot.{system}.editor.{arch}{suffix}"
     if not binary.is_file():
@@ -97,8 +99,12 @@ def main() -> None:
             raise ValueError("The Windows D3D12 build did not produce its required runtime DLLs.")
         install_runtime_notices(binary.parent, ROOT / "out/windows-build-deps")
     version = subprocess.run(
-        [str(binary), "--version"], check=True, capture_output=True, text=True
+        [str(binary), "--version"], check=True, capture_output=True, text=True,
+        timeout=30,
     ).stdout.strip()
+    if not version:
+        raise ValueError("The native editor returned no version.")
+    print("Native editor version: " + version, flush=True)
     metadata = {
         "path": str(binary),
         "target": binary_target(binary),
