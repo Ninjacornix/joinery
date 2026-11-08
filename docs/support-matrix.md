@@ -1,22 +1,24 @@
 # 0.1 alpha support matrix
 
 This matrix distinguishes measured local/hosted behavior from intended release targets.
-Native CI entries remain pending until actual target-host jobs complete.
+The latest native validation is recorded below; final release gates remain pending.
 
 ## Platforms and distribution
 
 | Target | Editor/package evidence | Game export evidence | Status |
 | --- | --- | --- | --- |
-| macOS ARM64 | Native local editor and source/desktop archives exercised; unsigned app | Desktop export produced and native macOS game smoke exercised | Locally verified alpha target |
-| Linux x86_64 | Packaging/build path implemented; native editor and clean-install release CI **pending** | Linux AMD64 export executed in offline Docker: `JOINERY_EXPORT_OK geometry=1`; native desktop CI **pending** | Pending native editor release validation |
-| Windows x86_64 | Packaging/build path, private IPC/ACL and process adapters implemented; native editor and clean-install release CI **pending** | Windows executable produced; native target-host release CI **pending** | Pending native release validation |
+| macOS ARM64 | Patched editor builds; native widget/startup tests pass locally and on macOS 15; latest preview refresh regression pending | Desktop export produced and local native macOS game smoke exercised | Final graphical/bundle gate pending |
+| Linux x86_64 | Ubuntu 24.04 patched editor, widgets, startup, graphical review/undo, MCP and fresh bundle checks pass | Linux AMD64 export executed in offline Docker: `JOINERY_EXPORT_OK geometry=1`; final native runtime job pending | Native editor/bundle verified; final runtime gate pending |
+| Windows x86_64 | Native MSVC build, private IPC/ACL/process tests, real Codex startup, widgets and isolated project creation pass; latest preview refresh regression pending | Windows executable produced; final native runtime job pending | Final graphical/bundle/runtime gate pending |
 
 Hosted Ubuntu 24.04 offline worker builds, measured asset checks, all six clean
 testbed recipe rebuilds and all four native creative-tool update/review lifecycles
 **passed** in [run 42488962130](https://github.com/Ninjacornix/joinery/actions/runs/42488962130/job/128756906863)
 for candidate `37e2679` on 2026-11-08. Existing recipe fingerprints remained
-unchanged. This verifies the Linux worker/asset path; native graphical editor,
-desktop bundle and target-host release checks remain separate pending gates.
+unchanged. The latest [run 42503383271](https://github.com/Ninjacornix/joinery/actions/runs/42503383271)
+also passes the Linux graphical editor and fresh bundle gates. macOS and Windows
+are held by the same catalog refresh/camera regression; see the
+[desktop verification report](../evals/results/desktop-release.md).
 
 `release/build_editor.py` sets the macOS deployment target to 13.0 for new native
 CI builds. This is a build setting, not evidence that every existing local binary
@@ -44,8 +46,9 @@ Claude, Gemini and opencode sessions are explicitly refused on Windows: their
 read-only host project boundary is not implemented. This also applies to API
 profiles using the opencode backend. On macOS those providers require
 `sandbox-exec`; Linux requires bubblewrap (`bwrap`). Missing isolation is a startup
-error. Codex's Windows implementation still awaits the native release CI checks;
-the real signed-in end-to-end model audit ran on macOS.
+error. Codex's native startup/EOF/cancellation and Windows process/ACL checks
+pass without authentication or inference; the real signed-in end-to-end model
+audit ran on macOS.
 
 ## Creative applications
 

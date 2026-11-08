@@ -1,40 +1,73 @@
 # Desktop alpha verification
 
-Release target: `v0.1.0-alpha.1`. Publication remains gated on actual native
-Windows, Linux and macOS jobs; this report is not a claim that pending jobs pass.
+Release target: `v0.1.0-alpha.1`. Publication requires native editor, bundle and
+exported-game checks on macOS ARM64, Linux x86_64 and Windows x86_64. Pending
+checks below are not reported as successes.
 
-## Local evidence
+## Latest hosted evidence
 
-- Updated Python suite: 384 passed, 3 native-Windows tests skipped on macOS.
-- Ruff and strict mypy pass for 72 production/release source files, including
-  strict checking against native Windows platform stubs.
-- Native macOS existing-scene and empty-scene review/undo suites pass, retaining
-  checked command-menu, scrollable-review and accepted-model PNG captures.
-- A fresh macOS desktop extraction passes measured manifest, version, CLI,
-  addon-delivery and launcher checks in a path containing spaces.
-- All three official-runtime game exports were produced. The macOS export runs
-  natively; the Linux export runs in an offline Linux AMD64 container. Both prove
-  the technical GLB geometry loads. Windows native execution remains pending.
-- Actual tool and real model workflow evidence is in [alpha-tools.md](alpha-tools.md).
+Candidate `d3a1850`, [run 42503383271](https://github.com/Ninjacornix/joinery/actions/runs/42503383271),
+2026-11-08:
 
-## Hosted failures found and corrected
+- All three operating systems pass Ruff, strict mypy (75 source files), Python
+  tests and policy checks: macOS/Windows **408 passed, 4 platform skips**;
+  Linux **407 passed, 5 platform skips**.
+- Pinned real Codex CLI **0.167.0** passes initialization, normal pipe EOF and
+  cancellation without authentication or inference on all three hosts.
+- All three patched native editors build and pass the five native widget/pipe
+  cases, including buffered Unicode output, cancellation and audio transport.
+- All three pass isolated provider/API connection and project creation with five
+  retained screenshots: provider gating, API submenu, horizontal renderers,
+  stable wizard geometry and custom tool configuration.
+- Linux passes its full graphical scene/review/undo, Godot MCP installation and
+  probe, measured desktop packaging and fresh extraction/launcher checks.
+- macOS and Windows fail the same two preview refresh assertions: retaining a
+  confirmed catalog stamp and preserving the model camera after an unchanged
+  refresh. These failures block their later package/export steps and the three
+  exported-runtime jobs. A correction is being verified.
+- Hosted Ubuntu passes all **six unchanged testbed recipe fingerprints** and all
+  **four native creative-tool create/edit/replay/reject/accept/revert lifecycles**.
 
-Initial candidate: `002390b`, [run 42487334081](https://github.com/Ninjacornix/joinery/actions/runs/42487334081).
+The successful Linux accepted-model framebuffer shows the imported technical
+GLB, selected resource context, wider sidebar and separate Review workspace.
+CI fixtures use isolated settings and accounts; they never sign in to a real
+provider or change the user's open project.
+
+## Real native failures corrected during validation
 
 | Gate | Observed failure | Correction and verification |
 | --- | --- | --- |
-| Windows provider cleanup | The Node wrapper exited before its native Codex descendant released the temporary home | Snapshot owned descendants and wait on stable native handles after cancellation; require pipe EOF and immediate child exit. The real Windows Codex startup/EOF/cancellation check passes in the next validation run. |
-| Windows editor build | Missing upstream AccessKit and D3D12 build dependencies | Download exact SDK archives, verify measured/published hashes, extract verified bytes, retain accessibility and D3D12 support. Package only matching original runtime DLLs and their upstream notices. Actual native build is pending. |
-| Linux recipe replay | All ten outputs were absent: image UID 1000 could not write host UID 1001 files, although Blender returned zero | Run Linux workers under the invoking non-root UID:GID with a private disposable home. All six original recipes pass unchanged fingerprints, all four creative lifecycles pass, and all four MCP workers connect on Linux-owned storage; saved Godot output belongs to UID 1001. Hosted retry passed all six recipes in 43 seconds and all four rich lifecycles in 91 seconds. |
-| macOS graphical editor | Compilation succeeded; native OpenGL was explicitly rejected in the hosted virtual Mac | Enable the upstream-supported ANGLE backend with verified static dependencies. Native VM retry is pending. |
+| Windows provider lifecycle | Node wrapper exited before its native Codex descendant released the temporary home | Wait on stable handles for owned descendants and require pipe EOF and immediate child exit. Actual Windows Codex startup/cancellation and descendant cleanup pass. Temporary fixture cleanup retries only Windows sharing violation after completed process/pipe waits, with a hard deadline and lock-owner diagnostics. |
+| Windows private files/hooks | POSIX assumptions in locks, paths, permissions and shell wrappers | Native byte locks, user+SYSTEM ACLs before secret writes, literal PowerShell argument/stdin forwarding and trusted wrapper resolution. Native ACL, hostile/Unicode path, lease contention and recovery tests pass. |
+| Windows editor build | Missing AccessKit, NIR and D3D12 build dependencies | Verify exact upstream archives before extracting; preserve accessibility/D3D12 support and package original runtime redistributables with notices. Actual MSVC build passes. |
+| Windows graphical startup | GDI selected pixel formats before WGL initialization; a second SetPixelFormat failed | Native WGL probe isolated both causes. Patch 0010 initializes WGL first and removes duplicate pixel-format configuration. Actual Windows editor renders through private test-only Mesa. |
+| Windows process output | PeekNamedPipe reported ERROR_BROKEN_PIPE after a completed child | Patch 0011 treats that precise condition as EOF while retaining buffered bytes and other errors. Real buffered Unicode and empty-stderr EOF widget checks pass. |
+| Windows first catalog load | Passing an empty --since argument lost its value through native Windows argument quoting | Omit --since until a stamp exists. Actual Windows catalog loads and renders the accepted GLB. |
+| Linux native tool saves | Worker UID 1000 could not write host UID 1001 files although Blender returned zero | Map the regular invoking Linux UID:GID and use an ephemeral private home. All six recipes and four richer creative lifecycles pass on hosted Ubuntu; output ownership remains with the invoking user. |
+| macOS hosted display | Native OpenGL was rejected by the hosted virtual Mac | Build upstream ANGLE with verified dependencies and retain its license. Actual macOS graphical widget/startup tests pass. |
+| Linux hosted display | Missing/ambiguous software Vulkan presentation setup | Select the installed native Lavapipe ICD and require a successful presentation preflight. Full Linux graphical/bundle gate passes. |
+| Audio fixture clock | A fixed UI-timer delay assumed the audio mixer had already finished | Wait for the actual finished signal with a finite deadline; verify seek, pause, speed and loop restart. Three intentional broken-player mutations fail, and real native fixtures pass on all three hosts. |
 
-The original macOS/Linux unit and real Codex startup checks passed. Native
-Windows typing also revealed POSIX-only stub assumptions; correction and the
-remaining Windows unit, ACL, hook and graphical gates are still pending.
+The two Windows engine exceptions are exact-file, documented ADR exceptions to
+the editor-only patch policy, not a directory-wide exemption. Original policy,
+provenance, replay and transaction gates remain enabled.
 
-Focused retry: `37e2679`, [run 42488962130](https://github.com/Ninjacornix/joinery/actions/runs/42488962130).
-It exercises the Windows editor and all three Python/creative checks without
-duplicating the original Linux/macOS compiler jobs. It cannot publish a release.
+## Other measured evidence and limits
 
-Final release validation, native screenshots, archive hashes and publication
-verification will be recorded here after those gates actually complete.
+The real signed-in three-turn Codex/Blender source/export/scene workflow passed
+with **23 RPC requests and zero failed calls or retries**. It verified native
+geometry, exact rejection restore, accepted incremental changes and clean replay.
+See [alpha-tools.md](alpha-tools.md) for commands, timings and supporting-tool
+boundaries. Hosted provider smoke uses no account credentials and does not imply
+all providers or endpoints have a verified live authoring workflow.
+
+All three official-runtime game exports were produced locally. macOS ran
+natively and Linux ran in an offline AMD64 container, both reporting
+`JOINERY_EXPORT_OK geometry=1`. Final native exported-runtime release validation
+remains pending. Editor packages use the patched engine; game export templates
+are stock upstream Godot 4.7.2.
+
+Final candidate, native archive hashes and publication/download verification will
+be recorded here only after those gates complete. Builds are unsigned and not
+notarized. Windows alpha chat supports Codex; other provider sandbox adapters
+remain explicitly unsupported there.
