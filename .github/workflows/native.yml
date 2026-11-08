@@ -1,0 +1,155 @@
+name: Native desktop gates
+
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  editor:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: macos-arm64
+            archive: zip
+            jobs: 2
+          - os: ubuntu-24.04
+            target: linux-x86_64
+            archive: tar.gz
+            jobs: 4
+          - os: windows-2025
+            target: windows-x86_64
+            archive: zip
+            jobs: 4
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    env:
+      PYTHONUTF8: '1'
+      JOINERY_CAPTURE_DIR: ${{ github.workspace }}/out/native-evidence
+      JOINERY_SERVER_CACHE: ${{ github.workspace }}/out/ci-servers
+    steps:
+      - name: Enable real Windows checkout symlinks
+        if: runner.os == 'Windows'
+        run: git config --global core.symlinks true
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          lfs: true
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+      - name: Activate native MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13.0
+        with:
+          arch: x64
+      - run: uv sync --frozen --python 3.12
+      - name: Install Linux compiler and native display dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libx11-dev libxcursor-dev libxinerama-dev libgl1-mesa-dev libglu1-mesa-dev libasound2-dev libpulse-dev libudev-dev libxi-dev libxrandr-dev libwayland-dev xvfb xauth bubblewrap
+      - name: Restore native compiler cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cache/joinery/scons
+          key: scons-${{ matrix.target }}-${{ hashFiles('godot_patches/UPSTREAM', 'godot_patches/patches/*.patch', 'release/build_editor.py') }}
+          restore-keys: scons-${{ matrix.target }}-
+      - name: Build and measure the pinned patched native editor
+        run: uv run python release/build_editor.py --jobs ${{ matrix.jobs }} --github-env "$GITHUB_ENV"
+      - name: Provision private Windows software OpenGL
+        if: runner.os == 'Windows'
+        run: uv run python release/windows_graphics.py --engine "$JOINERY_RELEASE_ENGINE" --output out/windows-software-gl --cache "$RUNNER_TEMP/mesa" --github-env "$GITHUB_ENV"
+      - name: Lint native addon
+        run: uvx --from gdtoolkit==4.5.0 gdlint godot_addon/joinery/*.gd
+      - name: Exercise real graphical editor, review and undo
+        run: |
+          mkdir -p out/native-evidence
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a uv run python tests/godot/run_scene_edit_test.py | tee out/native-evidence/editor.log
+          else
+            uv run python tests/godot/run_scene_edit_test.py | tee out/native-evidence/editor.log
+          fi
+      - name: Require retained framebuffers and the Windows software renderer
+        run: |
+          uv run python - <<'PY'
+          import os
+          import struct
+          from pathlib import Path
+          evidence = Path(os.environ['JOINERY_CAPTURE_DIR'])
+          captures = list(evidence.glob('*.png'))
+          assert len(captures) >= 3, 'The native harness must retain at least three framebuffers'
+          for capture in captures:
+              data = capture.read_bytes()
+              assert data[:8] == b'\x89PNG\r\n\x1a\n', capture
+              assert min(struct.unpack('>II', data[16:24])) > 0, capture
+          if os.name == 'nt':
+              assert 'llvmpipe' in (evidence / 'editor.log').read_text(encoding='utf-8').lower(), 'Windows must exercise the private Mesa renderer'
+          PY
+      - name: Install and inspect the pinned Godot MCP on the native host
+        run: |
+          uv run joinery new out/mcp-check --name "Native MCP check" --tools godot
+          uv run joinery mcp install --project out/mcp-check --tool godot
+          uv run joinery mcp status --project out/mcp-check --probe | tee out/native-evidence/mcp.json
+      - name: Package the measured editor without CI graphics DLLs
+        run: |
+          uv run joinery package --desktop --binary "$JOINERY_RELEASE_ENGINE" --target "${{ matrix.target }}" --output "out/packages/Joinery-0.1.0-alpha.1-${{ matrix.target }}.${{ matrix.archive }}"
+          uv run python release/verify_bundle.py "out/packages/Joinery-0.1.0-alpha.1-${{ matrix.target }}.${{ matrix.archive }}" | tee out/native-evidence/bundle.json
+      - name: Export the portable fixture for all desktop runtimes once
+        if: runner.os == 'macOS'
+        run: uv run python release/export_smoke.py --output out/game-exports --cache "$RUNNER_TEMP/export-templates"
+      - name: Upload desktop release candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joinery-desktop-${{ matrix.target }}
+          path: out/packages/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - name: Upload portable game exports
+        if: runner.os == 'macOS'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joinery-game-exports
+          path: out/game-exports/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - name: Retain native logs and checked framebuffer captures
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joinery-native-evidence-${{ matrix.target }}
+          path: |
+            out/build-engine.json
+            out/native-evidence/
+            out/windows-software-gl/mesa-ci.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  runtime:
+    needs: editor
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, ubuntu-24.04, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
+      - run: uv sync --frozen --python 3.12
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: joinery-game-exports
+          path: out/game-exports
+      - name: Run the exported scene on its native operating system
+        run: uv run python release/export_smoke.py --output out/game-exports --smoke-only
