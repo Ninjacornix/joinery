@@ -4,14 +4,40 @@ import array
 import asyncio
 import json
 import math
+import os
 import subprocess
+import sys
 import time
+import traceback
 import wave
+from datetime import datetime
 from pathlib import Path
 
 configuration = Path.home() / ".audacity-data/audacity.cfg"
 configuration.parent.mkdir(parents=True, exist_ok=True)
-configuration.write_text("WantWelcomeScreen=0\n[Module]\nmod-script-pipe=1\n")
+# Without a [Version] matching the installed release, Audacity treats this as a
+# fresh install: it resets these settings and opens a modal "What's new" dialog
+# that blocks every script command. It also resets a module to "new" (never
+# loaded) unless its recorded path and file date match the module on disk.
+script_pipe = Path("/usr/lib/audacity/modules/mod-script-pipe.so")
+module_date = datetime.fromtimestamp(script_pipe.stat().st_mtime).strftime(
+    "%Y-%m-%dT%H:%M:%S"
+)
+version = subprocess.run(
+    ["dpkg-query", "-W", "-f=${Version}", "audacity"],
+    check=True,
+    capture_output=True,
+    text=True,
+).stdout
+major, minor, micro = version.split("+")[0].split("-")[0].split(".")[:3]
+configuration.write_text(
+    "PrefsVersion=1.1.1r1\n"
+    "[GUI]\nShowSplashScreen=0\n"
+    f"[Version]\nMajor={major}\nMinor={minor}\nMicro={micro}\n"
+    "[Module]\nmod-script-pipe=1\n"
+    f"[ModulePath]\nmod-script-pipe={script_pipe}\n"
+    f"[ModuleDateTime]\nmod-script-pipe={module_date}\n"
+)
 display_socket = Path("/tmp/.X11-unix/X99")
 display_deadline = time.monotonic() + 10
 while not display_socket.exists():
@@ -30,6 +56,22 @@ async def main(process):
             )
         await asyncio.sleep(0.1)
     import audacity_mcp.main as upstream
+
+    # The pipe opens long before Audacity can run commands: until its main
+    # window is up, a command gets only an empty line and the MCP times out.
+    # Retry one read-only call until it succeeds, then run the real checks.
+    started = time.monotonic()
+    while True:
+        try:
+            await upstream.mcp.call_tool("track_get_info", {})
+            break
+        except Exception as error:
+            if process.poll() is not None or time.monotonic() > started + 180:
+                raise RuntimeError(
+                    f"Audacity never accepted script commands: {error}\n"
+                    + Path("/work/audacity.log").read_text()[-3000:]
+                ) from error
+    ready_after = time.monotonic() - started
 
     calls = []
 
@@ -86,6 +128,7 @@ async def main(process):
         json.dumps(
             {
                 "native_calls": calls,
+                "seconds_to_ready": round(ready_after, 1),
                 "tracks": len(tracks),
                 "seconds": duration,
                 "rms": rms,
@@ -102,8 +145,12 @@ with Path("/work/audacity.log").open("w") as application_log:
         stdout=application_log,
         stderr=subprocess.STDOUT,
     )
+    status = 1
     try:
         asyncio.run(main(process))
+        status = 0
+    except BaseException:  # noqa: BLE001 - report any failure, then exit hard below.
+        traceback.print_exc()
     finally:
         process.terminate()
         try:
@@ -111,3 +158,8 @@ with Path("/work/audacity.log").open("w") as application_log:
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait()
+    # The MCP client reads in worker threads that can wait minutes for a reply
+    # Audacity will never send. Exit now rather than wait for them to unwind.
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(status)

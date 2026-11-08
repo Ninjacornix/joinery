@@ -75,6 +75,17 @@ jobs:
           sandbox/build.sh --with blender --with supercollider --with krita --with inkscape --with materialmaker --tag joinery-sandbox-runtime
           docker build --platform linux/amd64 -t joinery-mcp-worker -f sandbox/mcp.Dockerfile sandbox
           docker build --platform linux/amd64 -t joinery-creative-worker -f sandbox/creative.Dockerfile sandbox
+      - name: Probe native Audacity through its pinned MCP
+        run: |
+          uv run python - <<'PY'
+          from pathlib import Path
+          from joinery.catalog import load_catalog
+          from tests.upstream.sources import prepare
+          tool = load_catalog().get("audacity")
+          prepare(tool.mcp.repo, tool.mcp.ref, Path("out/native-mcp-source/audacity"))
+          PY
+          docker build --platform linux/amd64 -t joinery-mcp-conformance -f tests/upstream/Dockerfile tests/upstream
+          uv run python tests/integration/audacity_mcp.py --source out/native-mcp-source/audacity
       - name: Check measured testbed assets
         run: |
           uv run joinery lock --project testbed

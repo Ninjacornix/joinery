@@ -117,8 +117,10 @@ uv run python tests/integration/mcp_catalog.py --output out/mcp-catalog.json
 ```
 
 It reports a failure instead of treating discovery as proof of a working app.
-The measured run discovered all ten servers; nine probes passed and
-`claude-collider.cc_status` returned `SuperCollider boot timed out`. The separate
+An earlier run had `claude-collider.cc_status` return `SuperCollider boot timed
+out`. Three worker causes were fixed: the extension mount left root-owned folders in
+the home, JACK had no server and too little shared memory, and Linux `sclang` echoed
+input into replies. The separate
 first-party SuperCollider native NRT audio workflow passes. These are different
 interfaces and neither result cancels the other.
 
@@ -147,9 +149,10 @@ uv run python tests/integration/audacity_mcp.py --source out/native-mcp-source/a
 
 Use fresh source destinations when preparing again. Both native harnesses run
 offline in their own named containers and remove only those containers on exit.
-The Audacity native probe currently fails because its script pipe does not
-become ready in this environment. This remains a failure; its passing simulated
-interface suite does not establish native audio editing.
+The Audacity probe seeds Audacity's version and module settings, since a fresh
+install resets them and opens a blocking dialog, then waits until Audacity accepts
+commands. CI runs it on native x86 Linux. Under x86 emulation on Apple Silicon its
+first commands can still stall; that is not counted as a pass.
 
 Native Aseprite and REAPER checks require user-provided licensed executables;
 none were supplied. Native MuseScore is unavailable here. The five additional

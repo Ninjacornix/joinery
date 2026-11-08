@@ -51,19 +51,18 @@ scope and omissions; zero-pass and timeout results fail the runner.
 | Krita | `joinery-paint` | Capability call passes; actual layered KRA and exact PNG pixels, replay/review/revert pass |
 | Material Maker | `joinery-materialmaker` | Capability call passes; actual connected graph, texture pixels and roughness, replay/review/revert pass |
 | Inkscape | `inkscape`, `joinery-paint` | Discovery/diagnostics pass; native SVG identity, exact PNG pixels, replay/review/revert pass |
-| SuperCollider | `claude-collider`, `joinery-sound` | Both discover; first-party capability call and audible NRT 440/660 Hz replay/review/revert pass. **Upstream `cc_status` fails: boot timeout**, including a retry with dummy JACK audio |
+| SuperCollider | `claude-collider`, `joinery-sound` | Both discover; first-party capability call and audible NRT 440/660 Hz replay/review/revert pass. Upstream `cc_status` passes (3.6 s first boot, 2026-11-08, Apple Silicon under x86 emulation): results, runtime and syntax errors read back correctly, and a live 440 Hz recording measures RMS 0.141 |
 | Aseprite | `aseprite`, `joinery-paint` | Upstream contract tests pass; native checks unavailable without the licensed executable |
 | GIMP | `gimp` | Contracts pass. **9 native plugin-handler commands pass**, including XCF writes and exact red/blue PNG pixels; plugin socket startup and Joinery authoring integration are not proven |
-| Audacity | `audacity` | Contracts pass. **Native probe fails** before editing: mod-script-pipe readiness cannot be established in this environment |
+| Audacity | `audacity` | Contracts pass. Native probe: two harness causes fixed (module never loaded; fresh-install "What's new" dialog blocked commands). Under x86 emulation, first commands still stall during startup; the native x86 CI run is the deciding result |
 | REAPER | `reaper` | Contracts pass; native checks unavailable without the licensed executable |
 | MuseScore | `musescore` | Contracts and score-file edits pass; native GUI/plugin executable unavailable |
 | Surge XT | No MCP; planned entry | Unsupported capability behavior tested; no native integration claimed |
 
-All ten currently configured integrated servers expose schemas. Nine read-only
-probes pass; `claude-collider` fails. The probe command exits nonzero for that
+All ten currently configured integrated servers expose schemas. All ten read-only
+probes are expected to pass; `claude-collider` failed until its worker fix. The probe command exits nonzero for that
 failure. Application readiness failures are kept separate from passing contract
-tests; the test harness does not downgrade them to skips. The cause of either
-native failure has not been established.
+tests; the test harness does not downgrade them to skips.
 
 GIMP's handler check executes the pinned method bodies against real GIMP
 documents, with plugin registration bypassed to avoid nesting its event loop

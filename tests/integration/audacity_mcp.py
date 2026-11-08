@@ -55,7 +55,7 @@ def run(source: Path) -> dict[str, Any]:
                 ],
                 capture_output=True,
                 text=True,
-                timeout=90,
+                timeout=300,
                 check=False,
             )
             if got.returncode or "AUDACITY_NATIVE_MCP_OK" not in got.stdout:
