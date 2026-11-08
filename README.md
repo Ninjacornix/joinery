@@ -186,3 +186,10 @@ agreement does not claim that recipe replay has passed.
 
 CLI equivalents: `joinery workspace --project <path>` and
 `joinery open art/painting.kra --tool krita --project <path> --dry-run`.
+
+## Licence
+
+Joinery is released under the [MIT License](LICENSE). Godot and other bundled
+components keep their own licences; see [licenses/](licenses/). Creative tools
+used in the sandbox (Blender, Krita, Surge XT and others) are separate programs
+under their own licences and are not part of Joinery's code.

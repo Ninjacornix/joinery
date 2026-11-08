@@ -43,6 +43,6 @@ Joinery = Godot 4.7 + thin patch series + Joinery addon. The Journeyman sidebar 
 
 ## Workflow
 1. Before each stage: create a task list from its checkboxes in `.private/PLAN.md`.
-2. Small commits, one task per commit. Keep plan and phase terms out of commit messages, branches, file names and code; they are internal checklists.
+2. Small commits, one task per commit. No AI co-author or "generated with" lines in commits, PRs or docs. Keep plan and phase terms out of commit messages, branches, file names and code; they are internal checklists.
 3. After any `.gd`/`.tscn` edit: lint + affected tests (hook enforces this).
 4. At each gate: run evals, write `evals/results/<stage>.md` (numbers, failures, why), then stop.
