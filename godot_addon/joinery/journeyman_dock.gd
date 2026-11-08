@@ -74,7 +74,6 @@ var _route_label: Label
 var _composer: PanelContainer
 var _composer_style: StyleBoxFlat
 var _send: Button
-var _attach: Button
 var _selection_options: Dictionary = {"mode": "auto", "model": "", "effort": ""}
 
 
@@ -95,10 +94,6 @@ func _ready() -> void:
 	var font_size := get_theme_default_font_size()
 	_content.add_theme_constant_override("separation", maxi(8, int(font_size * 0.6)))
 	custom_minimum_size.x = get_theme_default_font_size() * 28
-	var heading := Label.new()
-	heading.text = "Chat"
-	heading.add_theme_font_size_override("font_size", int(font_size * 1.15))
-	_content.add_child(heading)
 	var connection_row := HBoxContainer.new()
 	connection_row.add_theme_constant_override("separation", maxi(6, int(font_size * 0.45)))
 	_content.add_child(connection_row)
@@ -112,6 +107,7 @@ func _ready() -> void:
 	_connection.add_theme_color_override("font_color", get_theme_color("secondary", "Joinery"))
 	_connection.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_connection.text = "Connecting…"
+	_connection.add_theme_font_size_override("font_size", int(font_size * 0.85))
 	_connection.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	connection_row.add_child(_connection)
 	_reconnect = Button.new()
@@ -140,8 +136,7 @@ func _ready() -> void:
 	_model.tooltip_text = (
 		"Models reported by your connected provider. " + "Automatic follows the chosen mode."
 	)
-	_model.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_model.fit_to_longest_item = false
+	_model.fit_to_longest_item = true
 	_model.clip_text = true
 	_model.add_item("Automatic model")
 	_model.set_item_metadata(0, "")
@@ -250,7 +245,7 @@ func _ready() -> void:
 	_prompt = INPUT_SCRIPT.new()
 	_prompt.accessibility_name = "Message to your coding agent"
 	_prompt.tooltip_text = "Describe a change. Enter sends; type / for commands."
-	_prompt.custom_minimum_size.y = font_size * 5
+	_prompt.custom_minimum_size.y = font_size * 3.5
 	_prompt.placeholder_text = ("Chat with " + _agent_name)
 	_prompt.text_changed.connect(func() -> void: _update_commands(_prompt.text))
 	_prompt.text_submitted.connect(_on_submit)
@@ -258,16 +253,6 @@ func _ready() -> void:
 	composer_body.add_child(_prompt)
 	_prompt.focus_entered.connect(_composer_focus.bind(true))
 	_prompt.focus_exited.connect(_composer_focus.bind(false))
-	_attach = Button.new()
-	_attach.text = "+"
-	_attach.flat = true
-	_attach.theme_type_variation = "JoineryIconButton"
-	_attach.accessibility_name = "Use selected scene objects"
-	_attach.tooltip_text = "Use selected scene objects as context"
-	_attach.custom_minimum_size = Vector2(font_size * 2.25, font_size * 2.25)
-	_attach.pressed.connect(on_selection_changed)
-	controls.add_child(_attach)
-	controls.move_child(_attach, 0)
 	_send = Button.new()
 	_send.text = "Send"
 	_send.accessibility_name = "Send message"
@@ -279,6 +264,9 @@ func _ready() -> void:
 		_send.icon = get_theme_icon("ArrowUp", "EditorIcons")
 		_send.text = ""
 	_send.pressed.connect(func() -> void: _on_submit(_prompt.text))
+	var push_right := Control.new()
+	push_right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	controls.add_child(push_right)
 	controls.add_child(_send)
 	composer_body.add_child(controls)
 	var progress_row := HBoxContainer.new()
@@ -608,7 +596,6 @@ func set_chat_busy(busy: bool) -> void:
 	_prompt.editable = not _review_pending
 	_stop.visible = busy
 	_send.visible = not busy
-	_attach.disabled = busy
 	_stop.disabled = false
 	_prompt.placeholder_text = (
 		"Review changes below the viewport"
@@ -843,7 +830,8 @@ func hide_edit_review(message: String = "") -> void:
 	if was_visible:
 		review_closed.emit()
 	if not message.is_empty():
-		show_agent_message(message)
+		finish_agent_response(false)
+		_transcript.add_notice(message)
 
 
 func append_agent_text(text: String, new_message: bool) -> void:

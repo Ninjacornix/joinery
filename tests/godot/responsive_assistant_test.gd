@@ -105,7 +105,10 @@ func _run() -> void:
 			var records: Array[Dictionary] = chat._transcript._messages
 			_check(records[0]["panel"] != null, "User messages have their own bubble")
 			_check(records[1]["panel"] == null, "Assistant replies use the plain chat surface")
-			_check(records[1]["copy"].visible, "Assistant replies have a copy action")
+			_check(not records[1].has("copy"), "Replies stay uncluttered: text is selectable")
+			chat.hide_edit_review("Accepted: fixture")
+			var last: Node = chat._transcript._body.get_child(-1)
+			_check(last is Label, "Decisions appear as quiet status lines, not chat messages")
 			_check(
 				chat._chips.get_child(0).size.y <= chat.get_theme_default_font_size() * 2.25,
 				"Selected resources must remain compact above the message"

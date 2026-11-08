@@ -113,15 +113,16 @@ static func _chat_controls(result: Theme, colors: Dictionary, unit: float) -> vo
 	for type_name: String in ["JoineryPicker", "JoineryIconButton", "JoinerySendButton"]:
 		var send := type_name == "JoinerySendButton"
 		for state: String in ["normal", "hover", "pressed", "disabled"]:
-			var fill: Color = colors["focus"] if send else colors["surface"]
+			# Pickers are quiet until pointed at; only Send carries colour.
+			var fill: Color = colors["focus"] if send else Color.TRANSPARENT
 			if state == "hover":
-				fill = fill.lerp(colors["text"], 0.1)
+				fill = fill.lerp(colors["text"], 0.1) if send else colors["raised"]
 			elif state == "pressed":
-				fill = fill.lerp(colors["inset"], 0.2)
+				fill = fill.lerp(colors["inset"], 0.2) if send else colors["raised"]
 			elif state == "disabled":
-				fill = colors["raised"]
-			var border: Color = fill if send else colors["border"].lerp(fill, 0.55)
-			var box := panel(fill, border, 6 * unit, 6 * unit)
+				fill = colors["raised"] if send else Color.TRANSPARENT
+			var border := Color.TRANSPARENT
+			var box := panel(fill, border, 6 * unit, (16 if send else 6) * unit)
 			box.content_margin_top = 4 * unit
 			box.content_margin_bottom = 4 * unit
 			if type_name == "JoineryIconButton":

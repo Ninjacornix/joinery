@@ -19,12 +19,14 @@ func _ready() -> void:
 	follow_focus = true
 	var margins := MarginContainer.new()
 	margins.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	for edge: String in ["left", "right", "top", "bottom"]:
-		margins.add_theme_constant_override("margin_" + edge, get_theme_default_font_size())
+	var gutter := int(get_theme_default_font_size() * 0.5)
+	for edge: String in ["left", "right", "bottom"]:
+		margins.add_theme_constant_override("margin_" + edge, gutter)
+	margins.add_theme_constant_override("margin_top", get_theme_default_font_size())
 	add_child(margins)
 	_body = VBoxContainer.new()
 	_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_body.add_theme_constant_override("separation", get_theme_default_font_size() * 2)
+	_body.add_theme_constant_override("separation", int(get_theme_default_font_size() * 0.9))
 	margins.add_child(_body)
 	_welcome = Label.new()
 	_welcome.text = "Select something in your scene, then describe what to change."
@@ -41,12 +43,17 @@ func _on_scroll(value: float) -> void:
 
 func add_message(who: String, text: String) -> void:
 	_welcome.hide()
+	var user := who == "You"
+	if user and not _messages.is_empty():
+		# A new turn starts with your message: give it room above.
+		var gap := Control.new()
+		gap.custom_minimum_size.y = get_theme_default_font_size() * 0.6
+		_body.add_child(gap)
 	var column := VBoxContainer.new()
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	column.add_theme_constant_override("separation", 6)
+	column.add_theme_constant_override("separation", 2)
 	_body.add_child(column)
 	var content_parent: Node = column
-	var user := who == "You"
 	var panel: PanelContainer
 	if user:
 		var row := HBoxContainer.new()
@@ -58,51 +65,39 @@ func add_message(who: String, text: String) -> void:
 		panel.size_flags_horizontal = Control.SIZE_SHRINK_END
 		panel.add_theme_stylebox_override(
 			"panel",
-			UI_THEME.panel(get_theme_color("raised", "Joinery"), Color.TRANSPARENT, 12, 10, 0)
+			UI_THEME.panel(get_theme_color("raised", "Joinery"), Color.TRANSPARENT, 12, 14, 0)
 		)
 		row.add_child(panel)
 		content_parent = panel
 	var summary := Button.new()
 	summary.flat = true
 	summary.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	summary.custom_minimum_size.y = get_theme_default_font_size() * 2
+	summary.custom_minimum_size.y = get_theme_default_font_size() * 1.4
+	summary.add_theme_font_size_override("font_size", int(get_theme_default_font_size() * 0.8))
 	for state: String in ["normal", "hover", "pressed"]:
 		summary.add_theme_stylebox_override(state, StyleBoxEmpty.new())
 	summary.add_theme_color_override("font_color", get_theme_color("secondary", "Joinery"))
 	summary.hide()
-	column.add_child(summary)
 	var details := RichTextLabel.new()
 	_configure_text(details)
 	details.hide()
-	column.add_child(details)
 	summary.pressed.connect(func() -> void: details.visible = not details.visible)
 	var label := RichTextLabel.new()
 	_configure_text(label)
 	label.accessibility_name = who + " message"
 	content_parent.add_child(label)
-	var copy := Button.new()
-	copy.text = "Copy"
-	copy.flat = true
-	copy.theme_type_variation = "JoineryIconButton"
-	copy.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	copy.accessibility_name = "Copy assistant reply"
-	copy.tooltip_text = "Copy this reply"
-	if has_theme_icon("ActionCopy", "EditorIcons"):
-		copy.icon = get_theme_icon("ActionCopy", "EditorIcons")
-		copy.text = ""
-	copy.visible = not user
-	column.add_child(copy)
+	# Timing reads after the reply it describes, small and quiet.
+	column.add_child(summary)
+	column.add_child(details)
 	var record := {
 		"who": who,
 		"text": text,
 		"label": label,
-		"copy": copy,
 		"panel": panel,
 		"summary": summary,
 		"details": details,
 		"dirty": true,
 	}
-	copy.pressed.connect(func() -> void: DisplayServer.clipboard_set(str(record["text"])))
 	_messages.append(record)
 	_follow = true if user else _follow
 	_dirty = true
@@ -123,13 +118,29 @@ func append_delta(who: String, text: String, new_message: bool) -> void:
 		add_message(who, "")
 	_messages[-1]["text"] += text
 	_messages[-1]["dirty"] = true
-	_messages[-1]["copy"].disabled = true
 	_dirty = true
 
 
 func finish_response() -> void:
-	if not _messages.is_empty():
-		_messages[-1]["copy"].disabled = false
+	pass
+
+
+## A status line from Joinery itself (accepted, rejected), not a chat message.
+func add_notice(text: String) -> void:
+	_welcome.hide()
+	var notice := Label.new()
+	notice.text = (
+		"✓  " + text
+		if text.begins_with("Accepted") or text.begins_with("Changes accepted")
+		else "·  " + text
+	)
+	notice.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	notice.add_theme_font_size_override("font_size", int(get_theme_default_font_size() * 0.8))
+	notice.add_theme_color_override("font_color", get_theme_color("secondary", "Joinery"))
+	notice.accessibility_name = "Status: " + text
+	_body.add_child(notice)
+	_follow = true
+	_dirty = true
 
 
 func show_timing(event: Dictionary) -> void:
@@ -209,7 +220,7 @@ func _process(_delta: float) -> void:
 				. x
 			)
 			label.custom_minimum_size.x = minf(
-				maxf(30, measured + 4), maxf(80, _body.size.x * 0.82 - 32)
+				maxf(30, measured + 4), maxf(80, _body.size.x * 0.85 - 28)
 			)
 		record["dirty"] = false
 	_layout_dirty = false
