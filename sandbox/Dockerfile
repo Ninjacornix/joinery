@@ -118,11 +118,18 @@ RUN set -euo pipefail; \
     mkdir -p /tmp/mpfb2; \
     tar -xzf /tmp/mpfb2.tar.gz -C /tmp/mpfb2 --strip-components=1; \
     test -d /tmp/mpfb2/src/mpfb || { echo "mpfb2: src/mpfb missing" >&2; exit 1; }; \
-    addons="/opt/blender/${BLENDER_SERIES}/scripts/addons"; \
-    mkdir -p "${addons}"; \
-    cp -r /tmp/mpfb2/src/mpfb "${addons}/mpfb"; \
+    mkdir -p /opt/blender-extensions/system; \
+    cp -r /tmp/mpfb2/src/mpfb /opt/blender-extensions/system/mpfb; \
     rm -rf /tmp/mpfb2.tar.gz /tmp/mpfb2; \
-    blender --version
+    blender --version; \
+    BLENDER_SYSTEM_EXTENSIONS=/opt/blender-extensions blender --background \
+      --factory-startup --python-exit-code 1 --python-expr \
+      "import addon_utils; assert addon_utils.enable('bl_ext.system.mpfb', default_set=True)"
+
+# MPFB2 2.x is a Blender extension: Blender 4.2+ ignores it under scripts/addons,
+# so it lives in the system extension repository and loads as bl_ext.system.mpfb,
+# also under --factory-startup (recipe replay).
+ENV BLENDER_SYSTEM_EXTENSIONS=/opt/blender-extensions
 
 # --- Krita -------------------------------------------------------------------
 # Layered painting. Debian packages it, so apt verifies it.
