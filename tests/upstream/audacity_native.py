@@ -46,6 +46,27 @@ while not display_socket.exists():
     time.sleep(0.1)
 
 
+def _cpu_ticks(pid: int) -> int:
+    fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
+    return int(fields[11]) + int(fields[12])  # utime + stime
+
+
+async def _settled(process, deadline: float) -> None:
+    """Wait until Audacity has used under 20% CPU for three seconds in a row."""
+    hertz = os.sysconf("SC_CLK_TCK")
+    quiet = 0
+    await asyncio.sleep(3)
+    while quiet < 3:
+        if process.poll() is not None:
+            raise RuntimeError("Audacity exited while starting")
+        if time.monotonic() > deadline:
+            raise RuntimeError("Audacity never finished starting")
+        before = _cpu_ticks(process.pid)
+        await asyncio.sleep(1)
+        busy = (_cpu_ticks(process.pid) - before) / hertz
+        quiet = quiet + 1 if busy < 0.2 else 0
+
+
 async def main(process):
     deadline = time.monotonic() + 30
     while not list(Path("/tmp").glob("audacity_script_pipe.to.*")):
@@ -55,25 +76,23 @@ async def main(process):
                 + Path("/work/audacity.log").read_text()[-3000:]
             )
         await asyncio.sleep(0.1)
+
+    # The pipe opens long before Audacity can run commands. A command sent too
+    # early gets an empty reply, and dropping that connection mid-reply crashes
+    # Audacity. So send nothing until it has finished starting: its CPU use
+    # settles once the main window is up.
+    started = time.monotonic()
+    await _settled(process, started + 180)
+    # Importing the MCP creates its client, which opens the pipe at once.
     import audacity_mcp.main as upstream
 
-    # The pipe opens long before Audacity can run commands: until its main
-    # window is up, a command gets only an empty line and the MCP times out.
-    # Retry one read-only call until it succeeds, then run the real checks.
-    started = time.monotonic()
-    while True:
-        try:
-            # One call can wait minutes for a reply; bound each attempt.
-            await asyncio.wait_for(
-                upstream.mcp.call_tool("track_get_info", {}), timeout=20
-            )
-            break
-        except Exception as error:
-            if process.poll() is not None or time.monotonic() > started + 120:
-                raise RuntimeError(
-                    f"Audacity never accepted script commands: {error}\n"
-                    + Path("/work/audacity.log").read_text()[-3000:]
-                ) from error
+    try:
+        await asyncio.wait_for(upstream.mcp.call_tool("track_get_info", {}), timeout=60)
+    except Exception as error:
+        raise RuntimeError(
+            f"Audacity did not answer its first command: {error}\n"
+            + Path("/work/audacity.log").read_text()[-3000:]
+        ) from error
     ready_after = time.monotonic() - started
 
     calls = []
