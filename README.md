@@ -97,7 +97,10 @@ Projects stay plain Godot projects, so they open in stock Godot too.
 
 ## Licence
 
-Joinery is released under the [MIT License](LICENSE). Godot and other bundled
-components keep their own licences; see [licenses/](licenses/). The creative tools
-(Blender, Krita, Surge XT and others) are separate programs under their own
-licences and are not part of Joinery's code.
+Joinery is released under the [GNU AGPL-3.0-or-later](LICENSE). The parts that
+are copied into your game (the editor add-on, blueprints, features and templates)
+and the Godot engine changes are MIT, so your games stay yours to sell or keep
+closed. See [LICENSING.md](LICENSING.md) for the full split. Godot and other
+bundled components keep their own licences; see [licenses/](licenses/). The
+creative tools (Blender, Krita, Surge XT and others) are separate programs under
+their own licences and are not part of Joinery's code.

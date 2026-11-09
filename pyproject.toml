@@ -2,6 +2,8 @@
 name = "joinery"
 version = "0.1.0a1"
 description = "Godot-based engine directed through real creative tools. Creation, not generation."
+license = "AGPL-3.0-or-later"
+license-files = ["LICENSE"]
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "jsonschema==4.26.0",
