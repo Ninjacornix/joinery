@@ -114,6 +114,54 @@ async def run_offline(
             await cleanup.wait()
 
 
+# Reports what an edit needs to target by name: objects with their parents,
+# modifiers, vertex groups and shape keys, armatures with their bones, and
+# actions. Large rigs (Rigify, MPFB2) list deform bones only, with a total.
+_INSPECT_BLEND = """
+import bpy, json
+MAX_BONES = 256
+def bones(armature):
+    every = list(armature.bones)
+    shown = every if len(every) <= MAX_BONES else [b for b in every if b.use_deform]
+    return {
+        'bone_count': len(every),
+        'deform_bone_count': sum(b.use_deform for b in every),
+        'bones': [
+            {'name': b.name, 'parent': b.parent.name if b.parent else None, 'deform': b.use_deform}
+            for b in shown
+        ],
+    }
+def describe(o):
+    row = {
+        'name': o.name,
+        'type': o.type,
+        'parent': o.parent.name if o.parent else None,
+        'position': list(o.location),
+        'scale': list(o.scale),
+        'rotation': list(o.rotation_euler),
+        'vertices': len(o.data.vertices) if o.type == 'MESH' else 0,
+        'modifiers': [{'name': m.name, 'type': m.type} for m in o.modifiers],
+    }
+    if o.type == 'MESH':
+        row['vertex_groups'] = len(o.vertex_groups)
+        keys = o.data.shape_keys
+        row['shape_keys'] = [k.name for k in keys.key_blocks] if keys else []
+    if o.type == 'ARMATURE':
+        row.update(bones(o.data))
+    if o.animation_data and o.animation_data.action:
+        row['action'] = o.animation_data.action.name
+    return row
+print('JOINERY_DOCUMENT:' + json.dumps({
+    'objects': [describe(o) for o in bpy.data.objects],
+    'materials': [m.name for m in bpy.data.materials],
+    'actions': [
+        {'name': a.name, 'frames': [a.frame_range[0], a.frame_range[1]]}
+        for a in bpy.data.actions
+    ],
+}))
+"""
+
+
 async def inspect_document(project: Path, tool: str, source: str) -> dict[str, Any]:
     if tool not in selection_ids(
         load_catalog(), load_project_tools(project / "joinery.toml")
@@ -123,9 +171,8 @@ async def inspect_document(project: Path, tool: str, source: str) -> dict[str, A
     if not path.is_file():
         raise ValueError("The source document is missing.")
     if path.suffix == ".blend":
-        code = "import bpy,json; print('JOINERY_DOCUMENT:' + json.dumps({'objects':[{'name':o.name,'type':o.type,'position':list(o.location),'scale':list(o.scale),'rotation':list(o.rotation_euler),'vertices':len(o.data.vertices) if o.type=='MESH' else 0} for o in bpy.data.objects], 'materials':[m.name for m in bpy.data.materials]}))"
         got = await run_offline(
-            ["blender", "--background", source, "--python-expr", code],
+            ["blender", "--background", source, "--python-expr", _INSPECT_BLEND],
             project,
             readonly=True,
         )
