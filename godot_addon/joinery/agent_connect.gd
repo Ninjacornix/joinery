@@ -72,7 +72,7 @@ func _ready() -> void:
 	var actions := HBoxContainer.new()
 	_choices.add_child(actions)
 	_login = _button(actions, "Sign in", _start.bind("login"))
-	_api = _button(actions, "API / additional model…", _show_api)
+	_api = _button(actions, "Use an API key instead…", _show_api)
 	_install = _button(actions, "Install agent", _open_install)
 	_api_form = API_SCRIPT.new()
 	content.add_child(_api_form)
@@ -150,7 +150,7 @@ func _update() -> void:
 		)
 	)
 	if _selected.is_empty():
-		_detail.text = "Choose an agent to continue."
+		_detail.text = ""
 	elif data.get("requires_key_confirmation", false) and not _accepted_keys.has(_selected):
 		_detail.text = "An API key is available in API settings."
 	elif data.get("profile", false) and not ready:
@@ -158,6 +158,7 @@ func _update() -> void:
 	var supported := bool(data.get("supported", true))
 	if not supported:
 		_detail.text = str(data.get("reason", "This connection is unavailable on this platform."))
+	_detail.visible = not _detail.text.is_empty()
 	_login.visible = supported and installed and not ready and AGENT_NAMES.has(_selected)
 	_login.disabled = _job != null
 	_api.disabled = _job != null

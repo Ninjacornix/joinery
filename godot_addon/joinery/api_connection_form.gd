@@ -26,7 +26,7 @@ func _ready() -> void:
 	back.pressed.connect(func() -> void: back_requested.emit())
 	add_child(back)
 	var heading := Label.new()
-	heading.text = "API / additional model"
+	heading.text = "Connect with an API key"
 	heading.set_theme_type_variation("HeaderLarge")
 	add_child(heading)
 	_saved = OptionButton.new()
@@ -95,7 +95,8 @@ func configure(agents: Dictionary, selected: String) -> void:
 		_driver.set_item_disabled(index, not available)
 		_driver_hints[index] = (
 			str(data.get("reason", "This connection is unavailable on this platform."))
-			if not supported else "Install the selected agent to use this connection."
+			if not supported
+			else "Install the selected agent to use this connection."
 		)
 		_driver.set_item_tooltip(index, "" if available else str(_driver_hints[index]))
 		if available and not found_available:
@@ -121,7 +122,9 @@ func _choose_saved(index: int) -> void:
 	_endpoint.text = str(data.get("endpoint", ""))
 	_model.text = str(data.get("model", ""))
 	_key.clear()
-	_key.placeholder_text = "Leave blank to keep the saved key" if not data.is_empty() else "API key"
+	_key.placeholder_text = (
+		"Leave blank to keep the saved key" if not data.is_empty() else "API key"
+	)
 	if data.has("driver"):
 		_driver.select(0 if data["driver"] == "codex" else 1)
 	_update_hint()
@@ -132,20 +135,34 @@ func _update_hint() -> void:
 		return
 	_save.disabled = _driver.is_item_disabled(_driver.selected)
 	_hint.text = (
-		str(_driver_hints.get(_driver.selected, "Install the selected agent to use this connection."))
-		if _save.disabled else
-		"Use a Responses-compatible endpoint. The key is saved privately on this computer."
-		if _driver.selected == 0 else
-		"Use an OpenAI-compatible endpoint. The key is saved privately on this computer."
+		str(
+			_driver_hints.get(
+				_driver.selected, "Install the selected agent to use this connection."
+			)
+		)
+		if _save.disabled
+		else (
+			"Use a Responses-compatible endpoint. The key is saved privately on this computer."
+			if _driver.selected == 0
+			else "Use an OpenAI-compatible endpoint. The key is saved privately on this computer."
+		)
 	)
 
 
 func _submit() -> void:
 	if not _save.disabled:
-		save_requested.emit({
-			"id": _profile_id, "driver": _driver.get_item_metadata(_driver.selected),
-			"endpoint": _endpoint.text, "model": _model.text, "key": _key.text,
-		})
+		(
+			save_requested
+			. emit(
+				{
+					"id": _profile_id,
+					"driver": _driver.get_item_metadata(_driver.selected),
+					"endpoint": _endpoint.text,
+					"model": _model.text,
+					"key": _key.text,
+				}
+			)
+		)
 
 
 func clear_key() -> void:

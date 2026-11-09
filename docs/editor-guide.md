@@ -98,7 +98,7 @@ Provider marks are imported from locally installed apps/extensions.
 After connection, create or open a project; Change agent returns to connection.
 The selected agent sidebar connects after the editor opens.
 
-The **API / additional model** submenu accepts a base endpoint, model ID and
+The **Use an API key instead** page accepts a base endpoint, model ID and
 masked API key. It can also activate an environment key. Custom profiles use
 Codex (Responses API) or opencode (OpenAI-compatible API) and are saved outside
 projects in a private local file. Keys never enter subprocess arguments or logs.

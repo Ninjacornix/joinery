@@ -23,19 +23,23 @@ const INPUT_SCRIPT := preload("res://addons/joinery/message_input.gd")
 const HISTORY_SCRIPT := preload("res://addons/joinery/chat_history.gd")
 const SETTINGS_SCRIPT := preload("res://addons/joinery/journeyman_settings.gd")
 const CHIP_SCRIPT := preload("res://addons/joinery/target_chip.gd")
+# Everyday commands first; the rest are for when something does not work.
 const COMMANDS := {
-	"/agents": ["Supported agents", "cli"],
-	"/doctor": ["Check installed tools", "cli"],
-	"/tools": ["Check connected project tools", "cli"],
-	"/check": ["Check project assets", "cli"],
-	"/rebuild": ["Verify asset recipes", "cli"],
-	"/setup": ["Project setup", "ui"],
+	"/art": ["Review and approve the art bible", "ui"],
+	"/setup": ["Change project tools and settings", "ui"],
 	"/focus": ["Focus mode", "ui"],
-	"/toolbar": ["Viewport controls", "ui"],
+	"/toolbar": ["Show or hide viewport controls", "ui"],
 	"/help": ["All commands", "ui"],
-	"/art": ["Review and approve project art direction", "ui"],
-	"/models": ["Refresh available models", "ui"],
+	"/tools": ["Check that project tools are connected", "cli"],
+	"/doctor": ["Check which tools are installed", "cli"],
+	"/check": ["Check assets against the project rules", "cli"],
+	"/rebuild": ["Check that assets rebuild from their recipes", "cli"],
+	"/agents": ["List supported agents", "cli"],
+	"/models": ["Refresh the model list", "ui"],
 }
+const TROUBLESHOOTING: Array[String] = [
+	"/tools", "/doctor", "/check", "/rebuild", "/agents", "/models"
+]
 
 var _content: VBoxContainer
 var _transcript: HISTORY_SCRIPT
@@ -144,17 +148,18 @@ func _ready() -> void:
 	_model.fit_to_longest_item = false
 	_model.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_model.clip_text = true
-	_model.add_item("Automatic model")
+	_model.add_item("Auto model")
 	_model.set_item_metadata(0, "")
 	_model.item_selected.connect(_model_changed)
+	_model.hide()  # Shown once the provider reports models to choose from.
 	controls.add_child(_model)
 	_effort = OptionButton.new()
 	_effort.clip_text = true
 	_effort.fit_to_longest_item = false
-	_effort.custom_minimum_size.x = font_size * 5.5
+	_effort.custom_minimum_size.x = font_size * 7.5
 	_effort.accessibility_name = "Reasoning effort"
 	_effort.tooltip_text = "Supported reasoning levels for the selected model"
-	_effort.add_item("Auto")
+	_effort.add_item("Auto effort")
 	_effort.set_item_metadata(0, "")
 	_effort.hide()
 	_effort.item_selected.connect(_options_changed)
@@ -568,7 +573,7 @@ func _request_cancel() -> void:
 func set_model_options(models: Array) -> void:
 	_model_choices = models.duplicate(true)
 	_model.clear()
-	_model.add_item("Automatic model")
+	_model.add_item("Auto model")
 	_model.set_item_metadata(0, "")
 	for item: Dictionary in models:
 		if str(item.get("id", "")).is_empty():
@@ -584,6 +589,8 @@ func set_model_options(models: Array) -> void:
 		_model.set_item_metadata(_model.item_count - 1, saved)
 		_model.set_item_disabled(_model.item_count - 1, true)
 	restore_selection_options(_selection_options)
+	# A provider that exposes no model list leaves nothing to choose.
+	_model.visible = _model.item_count > 1
 	_model.tooltip_text = (
 		"Uses your provider's configured model; no model list is exposed."
 		if _model.item_count == 1
@@ -610,7 +617,7 @@ func _model_changed(_index: int) -> void:
 
 func _update_efforts() -> void:
 	_effort.clear()
-	_effort.add_item("Auto")
+	_effort.add_item("Auto effort")
 	_effort.set_item_metadata(0, "")
 	var model_id := str(_model.get_item_metadata(_model.selected))
 	var found := false
@@ -618,7 +625,7 @@ func _update_efforts() -> void:
 		if str(item.get("id", "")) != model_id:
 			continue
 		for value: String in item.get("efforts", []):
-			_effort.add_item(value.capitalize())
+			_effort.add_item(value.capitalize() + " effort")
 			_effort.set_item_metadata(_effort.item_count - 1, value)
 			if value == _selection_options.get("effort", ""):
 				_effort.select(_effort.item_count - 1)
@@ -818,10 +825,20 @@ func _run_slash(entry: String) -> void:
 		return
 	match command:
 		"/help":
-			var lines := PackedStringArray()
+			var everyday := PackedStringArray()
+			var fixes := PackedStringArray()
 			for candidate: String in COMMANDS:
-				lines.append("%s — %s" % [candidate, COMMANDS[candidate][0]])
-			_say("Journeyman", "Available commands:\n" + "\n".join(lines))
+				var line := "%s — %s" % [candidate, COMMANDS[candidate][0]]
+				(fixes if TROUBLESHOOTING.has(candidate) else everyday).append(line)
+			_say(
+				"Journeyman",
+				(
+					"Available commands:\n"
+					+ "\n".join(everyday)
+					+ "\n\nIf something is not working:\n"
+					+ "\n".join(fixes)
+				)
+			)
 		"/setup":
 			setup_requested.emit()
 		"/art":
