@@ -292,13 +292,20 @@ def _script(tool: str, source: str, base: str, code: str, exports: list[str]) ->
             _EXPORT_TEXTURES,
             f"_joinery_export_textures(os.path.abspath({texture_dir(source)!r}))",
         ]
+        if exports:
+            # A generated Rigify rig carries hundreds of control and mechanism
+            # bones; the game needs only its deform bones. Hand-made rigs keep
+            # every bone, since non-deform bones there are often sockets.
+            lines.append(
+                "_joinery_deform_only = any('rig_id' in a for a in bpy.data.armatures)"
+            )
         for export in exports:
             if Path(export).suffix != ".glb":
                 raise ValueError(
                     "The automatic Blender export uses GLB. Render images explicitly in the operation script."
                 )
             lines.append(
-                f"bpy.ops.export_scene.gltf(filepath=os.path.abspath({export!r}), export_format='GLB', export_yup=True)"
+                f"bpy.ops.export_scene.gltf(filepath=os.path.abspath({export!r}), export_format='GLB', export_yup=True, export_def_bones=_joinery_deform_only)"
             )
         return "\n".join(lines) + "\n"
     if tool == "krita":
