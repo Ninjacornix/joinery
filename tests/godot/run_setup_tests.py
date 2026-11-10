@@ -88,8 +88,14 @@ def _count(state: Path, name: str) -> int:
 
 def fake_cli(state: Path, argv: list[str]) -> int:
     """Answer one CLI call like the real `joinery`, logging it first."""
-    with (state / "calls.jsonl").open("a") as log:
-        log.write(json.dumps(argv) + "\n")
+    # One file per call, renamed into place whole: several fake CLIs run at once and the
+    # dialog test reads while they write, which mangled a shared log on Windows.
+    calls = state / "calls"
+    calls.mkdir(exist_ok=True)
+    name = f"{time.time_ns():020d}-{os.getpid()}"
+    partial = calls / (name + ".part")
+    partial.write_text(json.dumps(argv), encoding="utf-8")
+    os.replace(partial, calls / (name + ".json"))
     command = argv[0] if argv else ""
     if command == "status":
         report = _report(state)

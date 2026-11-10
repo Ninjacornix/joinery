@@ -454,7 +454,7 @@ func _wizard(create: Button) -> void:
 
 func _run_dialog() -> void:
 	var state := OS.get_environment("JOINERY_SETUP_STATE")
-	_calls_path = state.path_join("calls.jsonl")
+	_calls_path = state.path_join("calls")
 	Engine.set_meta("joinery_ui_config", state.path_join("journeyman.cfg"))
 	Engine.remove_meta("joinery_ui_prefs")
 	var theme_script: GDScript = load(ADDON + "ui_theme.gd")
@@ -494,8 +494,15 @@ func _until(ready: Callable, seconds := 20.0) -> bool:
 ## Every CLI call the fixture saw, as argument arrays.
 func _calls() -> Array:
 	var calls: Array = []
-	for line: String in FileAccess.get_file_as_string(_calls_path).split("\n", false):
-		calls.append(JSON.parse_string(line))
+	var names := Array(DirAccess.get_files_at(_calls_path))
+	names.sort()
+	for file_name: String in names:
+		if file_name.ends_with(".json"):
+			var call: Variant = JSON.parse_string(
+				FileAccess.get_file_as_string(_calls_path.path_join(file_name))
+			)
+			if call is Array:
+				calls.append(call)
 	return calls
 
 
