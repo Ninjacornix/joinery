@@ -1306,7 +1306,12 @@ def _write(path: Path, data: bytes) -> None:
 
 
 def _write_text(path: Path, text: str) -> None:
-    _write(path, text.encode("utf-8"))
+    """Write a project text file, keeping the line endings it already has (a
+    Windows checkout may hold CRLF), so a round trip leaves it byte for byte."""
+    data = text.encode("utf-8")
+    if path.is_file() and b"\r\n" in path.read_bytes():
+        data = data.replace(b"\r\n", b"\n").replace(b"\n", b"\r\n")
+    _write(path, data)
 
 
 def _prune(target: Path, rel: str) -> None:

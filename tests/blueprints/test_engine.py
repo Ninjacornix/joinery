@@ -241,6 +241,22 @@ def test_remove_restores_project_files_byte_for_byte(
     assert _snapshot(project) == before
 
 
+def test_crlf_project_files_keep_their_line_endings(
+    fixture_catalogue: FixtureCatalogue, tmp_path: Path
+) -> None:
+    # A Windows checkout with autocrlf holds the project files with CRLF.
+    project = _project(tmp_path, "alpha", ("controller",))
+    for name in ("project.godot", "joinery.toml"):
+        path = project / name
+        path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
+    before = _snapshot(project)
+    add_feature(project, "net")
+    assert b"\r\n" in (project / "project.godot").read_bytes()
+    assert b"\n" not in (project / "project.godot").read_bytes().replace(b"\r\n", b"")
+    remove_feature(project, "net")
+    assert _snapshot(project) == before
+
+
 def test_remove_renumbers_presets_and_drops_created_file(
     fixture_catalogue: FixtureCatalogue, tmp_path: Path
 ) -> None:
