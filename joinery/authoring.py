@@ -7,38 +7,29 @@ import contextlib
 import hashlib
 import json
 import os
-import re
 import shutil
 import uuid
 from pathlib import Path
 from typing import Any
 
+from joinery import tools
 from joinery.catalog import load_catalog, load_project_tools, selection_ids
 from joinery.locking import write_lock
 from joinery.mcp_runtime import validate_arguments
-from joinery.recipe import Recipe, _tool_argv, load_recipe, recipe_paths, record
+from joinery.recipe import Recipe, load_recipe, recipe_paths, record
 from joinery.runner import Result, SandboxRunner
+from joinery.tools import blender, inkscape, material_maker
 from joinery.worker_identity import docker_owner_args
 
 IMAGE = "joinery-creative-worker"
-SUPPORTED = {
-    "blender",
-    "krita",
-    "aseprite",
-    "supercollider",
-    "material-maker",
-    "inkscape",
-    "surge-xt",
-}
-SUFFIXES = {
-    "blender": ".blend",
-    "krita": ".kra",
-    "aseprite": ".aseprite",
-    "supercollider": ".scd",
-    "material-maker": ".ptex",
-    "inkscape": ".svg",
-    "surge-xt": ".json",
-}
+#: Tools whose native documents Joinery edits (script, graph or vector adapter).
+SUPPORTED = tools.authoring_ids()
+SUFFIXES = {tool: tools.get(tool).suffix for tool in SUPPORTED}
+#: Native formats inspect_document returns as text.
+TEXT_SUFFIXES = {".scd", ".sc", ".ptex", ".svg", ".json"}
+#: Kept for callers that still import these from here.
+texture_dir = blender.texture_dir
+material_export_driver = material_maker.export_driver
 
 
 def confined(project: Path, relative: str) -> Path:
@@ -114,54 +105,6 @@ async def run_offline(
             await cleanup.wait()
 
 
-# Reports what an edit needs to target by name: objects with their parents,
-# modifiers, vertex groups and shape keys, armatures with their bones, and
-# actions. Large rigs (Rigify, MPFB2) list deform bones only, with a total.
-_INSPECT_BLEND = """
-import bpy, json
-MAX_BONES = 256
-def bones(armature):
-    every = list(armature.bones)
-    shown = every if len(every) <= MAX_BONES else [b for b in every if b.use_deform]
-    return {
-        'bone_count': len(every),
-        'deform_bone_count': sum(b.use_deform for b in every),
-        'bones': [
-            {'name': b.name, 'parent': b.parent.name if b.parent else None, 'deform': b.use_deform}
-            for b in shown
-        ],
-    }
-def describe(o):
-    row = {
-        'name': o.name,
-        'type': o.type,
-        'parent': o.parent.name if o.parent else None,
-        'position': list(o.location),
-        'scale': list(o.scale),
-        'rotation': list(o.rotation_euler),
-        'vertices': len(o.data.vertices) if o.type == 'MESH' else 0,
-        'modifiers': [{'name': m.name, 'type': m.type} for m in o.modifiers],
-    }
-    if o.type == 'MESH':
-        row['vertex_groups'] = len(o.vertex_groups)
-        keys = o.data.shape_keys
-        row['shape_keys'] = [k.name for k in keys.key_blocks] if keys else []
-    if o.type == 'ARMATURE':
-        row.update(bones(o.data))
-    if o.animation_data and o.animation_data.action:
-        row['action'] = o.animation_data.action.name
-    return row
-print('JOINERY_DOCUMENT:' + json.dumps({
-    'objects': [describe(o) for o in bpy.data.objects],
-    'materials': [m.name for m in bpy.data.materials],
-    'actions': [
-        {'name': a.name, 'frames': [a.frame_range[0], a.frame_range[1]]}
-        for a in bpy.data.actions
-    ],
-}))
-"""
-
-
 async def inspect_document(project: Path, tool: str, source: str) -> dict[str, Any]:
     if tool not in selection_ids(
         load_catalog(), load_project_tools(project / "joinery.toml")
@@ -170,47 +113,12 @@ async def inspect_document(project: Path, tool: str, source: str) -> dict[str, A
     path = confined(project, source)
     if not path.is_file():
         raise ValueError("The source document is missing.")
-    if path.suffix == ".blend":
-        got = await run_offline(
-            ["blender", "--background", source, "--python-expr", _INSPECT_BLEND],
-            project,
-            readonly=True,
-        )
-        for line in got.output.splitlines():
-            if line.startswith("JOINERY_DOCUMENT:"):
-                data: dict[str, Any] = json.loads(
-                    line.removeprefix("JOINERY_DOCUMENT:")
-                )
-                return data
-        raise ValueError(
-            "Blender could not inspect this document: " + got.output[-800:]
-        )
-    if path.suffix == ".kra":
-        import zipfile
-        from xml.etree import ElementTree
-
-        with zipfile.ZipFile(path) as archive:
-            document = ElementTree.fromstring(archive.read("maindoc.xml"))
-        return {
-            "layers": [
-                dict(node.attrib)
-                for node in document.iter()
-                if node.tag.split("}")[-1].lower() == "layer"
-            ]
-        }
-    if tool == "surge-xt" and path.suffix == ".json":
-        got = await run_offline(["joinery-surge", "--list"], project, readonly=True)
-        if not got.ok:
-            raise ValueError(
-                "Surge XT could not list its parameters: " + got.output[-800:]
-            )
-        return {
-            "source": source,
-            "content": path.read_text(),
-            # The plugin's defaults; this source's own values are in "content".
-            "parameter_defaults": json.loads(got.stdout),
-        }
-    if path.suffix in {".scd", ".sc", ".ptex", ".svg", ".json"}:
+    module = tools.REGISTRY.get(tool)
+    if module is not None and module.suffix == path.suffix:
+        described = await module.inspect(project, path, source, run_offline)
+        if described is not None:
+            return described
+    if path.suffix in TEXT_SUFFIXES:
         if path.stat().st_size > 2_000_000:
             raise ValueError(
                 "Read specific graph sections; this document exceeds the inspection text limit."
@@ -237,149 +145,18 @@ def enabled(project: Path, tool: str) -> None:
         raise PermissionError(f"{tool} is not selected for this project.")
 
 
-def texture_dir(source: str) -> str:
-    """Where a Blender source's textures are written as separate image files."""
-    return f"art/textures/{Path(source).stem}"
-
-
-# Writes each image that has pixels as its own PNG. The .blend keeps its packed
-# copy, so a recipe still replays from the .blend alone.
-_EXPORT_TEXTURES = """
-def _joinery_export_textures(directory):
-    os.makedirs(directory, exist_ok=True)
-    used = set()
-    for image in sorted(bpy.data.images, key=lambda i: i.name):
-        if image.type != 'IMAGE' or image.size[0] == 0 or image.size[1] == 0:
-            continue
-        name = bpy.path.clean_name(image.name) or 'texture'
-        while name in used:
-            name += '_'
-        used.add(name)
-        width, height = image.size
-        pixels = [0.0] * (width * height * 4)
-        image.pixels.foreach_get(pixels)
-        copy = bpy.data.images.new('joinery_texture_export', width, height, alpha=True)
-        copy.colorspace_settings.name = image.colorspace_settings.name
-        copy.pixels.foreach_set(pixels)
-        copy.filepath_raw = os.path.join(directory, name + '.png')
-        copy.file_format = 'PNG'
-        copy.save()
-        bpy.data.images.remove(copy)
-"""
-
-
-def _script(tool: str, source: str, base: str, code: str, exports: list[str]) -> str:
-    if tool == "blender":
-        lines = [
-            "import bpy, os, math",
-            "os.chdir('/work')",
-            "bpy.ops.wm.read_factory_settings(use_empty=True)",
-            "bpy.context.preferences.filepaths.save_version = 0",
-        ]
-        if base:
-            lines.append(
-                f"bpy.ops.wm.open_mainfile(filepath=os.path.abspath({base!r}))"
-            )
-        lines += [
-            "bpy.context.scene.unit_settings.system = 'METRIC'",
-            "bpy.context.scene.unit_settings.scale_length = 1.0",
-            code,
-        ]
-        lines += [
-            "assert all(all(math.isfinite(x) for row in o.matrix_world for x in row) for o in bpy.data.objects), 'Nonfinite object transform'",
-            "bpy.ops.file.pack_all()",
-            f"bpy.ops.wm.save_as_mainfile(filepath=os.path.abspath({source!r}))",
-            _EXPORT_TEXTURES,
-            f"_joinery_export_textures(os.path.abspath({texture_dir(source)!r}))",
-        ]
-        if exports:
-            # A generated Rigify rig carries hundreds of control and mechanism
-            # bones; the game needs only its deform bones. Hand-made rigs keep
-            # every bone, since non-deform bones there are often sockets.
-            lines.append(
-                "_joinery_deform_only = any('rig_id' in a for a in bpy.data.armatures)"
-            )
-        for export in exports:
-            if Path(export).suffix != ".glb":
-                raise ValueError(
-                    "The automatic Blender export uses GLB. Render images explicitly in the operation script."
-                )
-            lines.append(
-                f"bpy.ops.export_scene.gltf(filepath=os.path.abspath({export!r}), export_format='GLB', export_yup=True, export_def_bones=_joinery_deform_only)"
-            )
-        return "\n".join(lines) + "\n"
-    if tool == "krita":
-        return "\n".join(
-            [
-                "from krita import Krita, InfoObject",
-                "import os",
-                "os.chdir('/work')",
-                "app = Krita.instance()",
-                f"document = app.openDocument(os.path.abspath({base!r}))"
-                if base
-                else "document = None",
-                code,
-                "assert document is not None, 'Create or open a native Krita document'",
-                "document.setBatchmode(True)",
-                "document.waitForDone()",
-                f"assert document.saveAs(os.path.abspath({source!r}))",
-                *[
-                    f"assert document.exportImage(os.path.abspath({path!r}), InfoObject())"
-                    for path in exports
-                ],
-                "document.setModified(False)",
-                "document.close()",
-                "",
-            ]
-        )
-    if tool == "aseprite":
-        return "\n".join(
-            [
-                f"local sprite = app.open({json.dumps(base)})"
-                if base
-                else "local sprite = nil",
-                code,
-                "assert(sprite ~= nil, 'Create or open a native sprite')",
-                f"sprite:saveAs({json.dumps(source)})",
-                *[f"sprite:saveCopyAs({json.dumps(path)})" for path in exports],
-                "",
-            ]
-        )
-    if tool == "supercollider":
-        # The log recreates the exact native patch before interpreting it, so a
-        # clean replay never depends on the previous source output remaining.
-        # Rendering is NRT with a completion action; no sound device is needed.
-        return (
-            "(\nFile.use("
-            + json.dumps(source, ensure_ascii=False)
-            + ', "w", { |file| file.write('
-            + json.dumps(code, ensure_ascii=False)
-            + "); });\n"
-            + json.dumps(code, ensure_ascii=False)
-            + ".interpret;\n)\n"
-        )
-    if tool == "surge-xt":
-        # Like SuperCollider, the log carries the whole patch, so a replay never
-        # depends on the source file that the same recipe writes.
-        return f"render({source!r}, {code!r}, {exports!r})\n"
-    raise ValueError("Use the graph or vector document operation for this application.")
-
-
 async def edit_document(
     project: Path, tool: str, source: str, code: str, exports: list[str], note: str = ""
 ) -> dict[str, Any]:
     enabled(project, tool)
+    module = tools.get(tool)
+    if not module.script_ext:
+        raise ValueError("Use edit_graph or edit_vector for this application.")
     validate_arguments({"code": code})
     target = confined(project, source)
-    if target.suffix != SUFFIXES[tool] or Path(source).parts[0] not in {"art", "audio"}:
+    if target.suffix != module.suffix or Path(source).parts[0] not in {"art", "audio"}:
         raise ValueError("Use the owning tool's native format under art/ or audio/.")
-    if tool == "blender" and (
-        not source.startswith("art/sources/")
-        or any(Path(path).is_relative_to(Path(source).parent) for path in exports)
-    ):
-        raise ValueError(
-            "Keep native Blender sources under art/sources/ and exports outside that source directory."
-        )
+    module.check_destinations(source, exports)
     for output in exports:
         confined(project, output)
         if Path(output).parts[0] not in {"art", "audio"}:
@@ -407,18 +184,9 @@ async def edit_document(
         base = input_path.relative_to(project).as_posix()
     for output in [source, *exports]:
         confined(project, output).parent.mkdir(parents=True, exist_ok=True)
-    extension = {
-        "blender": ".py",
-        "krita": ".py",
-        "aseprite": ".lua",
-        "supercollider": ".scd",
-        "surge-xt": ".py",
-    }.get(tool)
-    if extension is None:
-        raise ValueError("Use edit_graph or edit_vector for this application.")
-    script = recipe_dir / (identifier + extension)
-    script.write_text(_script(tool, source, base, code, exports))
-    if tool in {"supercollider", "surge-xt"}:
+    script = recipe_dir / (identifier + module.script_ext)
+    script.write_text(module.script(source, base, code, exports))
+    if module.text_source:
         target.write_text(code)
     recipe = Recipe(
         tool=tool,
@@ -429,7 +197,7 @@ async def edit_document(
     )
     for old in textures:
         (project / old).unlink(missing_ok=True)
-    result = await run_offline(_tool_argv(recipe), project)
+    result = await run_offline(module.replay_argv(recipe.script), project)
     if tool == "blender" and result.ok:
         folder = confined(project, texture_dir(source))
         written = tuple(
@@ -504,47 +272,15 @@ async def edit_graph(
         raise ValueError(
             "Material Maker uses a native .ptex under art/ and an art/ export directory."
         )
+    validate_arguments(graph)
+    stored, runtime, inputs = material_maker.image_inputs(
+        project, graph, source, output_directory
+    )
     target.parent.mkdir(parents=True, exist_ok=True)
     output.mkdir(parents=True, exist_ok=True)
-    code = (
-        "import json, pathlib, subprocess\n"
-        + f"pathlib.Path({source!r}).write_text({json.dumps(json.dumps(graph))})\n"
-        + f"driver = pathlib.Path({('recipes/' + hashlib.sha256(source.encode()).hexdigest()[:16] + '.export.gd')!r})\n"
-        + f"driver.write_text({material_export_driver(source, output_directory)!r})\n"
-        + "subprocess.run(['/opt/material-maker/joinery-godot', '--main-pack', '/opt/material-maker/material_maker.x86_64', '--rendering-method', 'mobile', '--script', str(driver)], check=True)\n"
-    )
+    code = material_maker.graph_code(source, stored, output_directory, runtime)
     return await _scripted_export(
-        project, "material-maker", source, code, output_directory
-    )
-
-
-def material_export_driver(source: str, directory: str) -> str:
-    return """extends SceneTree
-func _initialize() -> void:
-    run.call_deferred()
-func run() -> void:
-    await process_frame
-    var loader: Node = root.get_node("mm_loader")
-    var graph = await loader.load_gen(SOURCE)
-    if graph == null:
-        quit(1)
-        return
-    root.add_child(graph)
-    var count := 0
-    for node in graph.get_children():
-        if node.has_method("export_material"):
-            # Material Maker 1.8's command-line export otherwise skips existing
-            # files marked prompt_overwrite. This document is already isolated
-            # in transaction staging; refresh its declared native exports.
-            var profile: Dictionary = node.get_export("Godot/Godot 4 Standard")
-            for file: Dictionary in profile.get("files", []):
-                file["prompt_overwrite"] = false
-            await node.export_material(PREFIX, "Godot/Godot 4 Standard", 0, true)
-            count += 1
-    graph.free()
-    quit(0 if count > 0 else 1)
-""".replace("SOURCE", json.dumps("/work/" + source)).replace(
-        "PREFIX", json.dumps("/work/" + directory.rstrip("/") + "/" + Path(source).stem)
+        project, "material-maker", source, code, output_directory, sources=inputs
     )
 
 
@@ -559,19 +295,8 @@ async def edit_vector(
     if Path(source).suffix != ".svg" or Path(export).suffix != ".png":
         raise ValueError("Use native SVG and a PNG export.")
     validate_arguments(svg)
-    if re.search(
-        r"(?:file:|<!ENTITY|<script|(?:href|url)\s*[=(]\s*['\"]?https?:)",
-        svg,
-        re.IGNORECASE,
-    ):
-        raise ValueError(
-            "Vector documents must be self-contained; external assets and scripts are not accepted."
-        )
-    code = (
-        "import pathlib, subprocess\n"
-        + f"pathlib.Path({source!r}).write_text({svg!r})\n"
-        + f"subprocess.run(['inkscape', {source!r}, '--export-filename=' + {export!r}], check=True)\n"
-    )
+    inkscape.check_svg(svg)
+    code = inkscape.vector_code(source, svg, export)
     return await _scripted_export(
         project, "inkscape", source, code, str(Path(export).parent), [export]
     )
@@ -584,6 +309,7 @@ async def _scripted_export(
     code: str,
     directory: str,
     outputs: list[str] | None = None,
+    sources: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     before = _export_inventory(project, directory) if outputs is None else {}
     previous_outputs: set[str] = set()
@@ -615,6 +341,7 @@ async def _scripted_export(
         tool=tool,
         script=script.relative_to(project).as_posix(),
         outputs=(source, *outputs),
+        sources=sources,
     )
     return await _record(project, recipe, script.with_suffix(".toml"))
 

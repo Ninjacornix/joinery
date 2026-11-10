@@ -1,0 +1,167 @@
+"""Rigged and modified Blender models exported for Godot, in the real worker.
+
+Builds a human with MPFB2, adds MPFB2's Rigify meta-rig with its weights,
+generates the Rigify rig and exports a GLB. The game gets only the deform
+bones: the GLB skin must list exactly the rig's deform bones, every one a
+`DEF-` bone, and the mesh must be skinned to it. MPFB2's helper geometry
+(hidden by a Mask modifier) must not reach the GLB, while the human's shape
+keys do. A second recipe poses an FK control in an action; the exported
+animation must drive deform bones only. A hand-made crate with a Subdivision
+modifier and a shape key checks that the GLB shows what Blender shows. Every
+recipe replays (Blender recipes are compared as Blender writes them; see
+joinery.recipe.fingerprint).
+
+Technical fixtures in a temporary project; nothing here approves art direction
+or touches a user's game. Run: `uv run python tests/integration/blender_rig.py`.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import struct
+import sys
+import tempfile
+from pathlib import Path
+from typing import Any
+
+from joinery.authoring import IMAGE, edit_document, inspect_document
+from joinery.recipe import rebuild_one, recipe_paths
+from joinery.runner import SandboxRunner
+
+SOURCE, EXPORT = "art/sources/hero.blend", "art/models/hero.glb"
+
+# The code names MPFB2 and Rigify, so the recipe enables both first.
+BUILD = """
+from bl_ext.system.mpfb.services.humanservice import HumanService
+from bl_ext.system.mpfb.services.rigservice import RigService
+human = HumanService.create_human()
+human.name = 'Hero'
+meta = HumanService.add_builtin_rig(human, 'rigify.human_toes', import_weights=True)
+rig = RigService.generate_rigify_rig(meta, name='HeroRig', meta_rig_action='delete')
+assert rig is not None, 'Rigify rejected the MPFB2 meta-rig'
+rig.name = 'HeroRig'
+"""
+
+# Raise the left arm over 20 frames through its FK control (not a DEF bone).
+WAVE = """
+rig = bpy.data.objects['HeroRig']
+control = rig.pose.bones['upper_arm_fk.L']
+control.rotation_mode = 'XYZ'
+rig.animation_data_create()
+rig.animation_data.action = bpy.data.actions.new('Wave')
+for frame, angle in ((1, 0.0), (20, 1.2)):
+    control.rotation_euler = (0.0, 0.0, angle)
+    control.keyframe_insert('rotation_euler', frame=frame)
+bpy.context.scene.frame_start, bpy.context.scene.frame_end = 1, 20
+"""
+
+
+CRATE, CRATE_EXPORT = "art/sources/crate.blend", "art/models/crate.glb"
+CRATE_CODE = """
+bpy.ops.mesh.primitive_cube_add(size=1)
+crate = bpy.context.object
+crate.name = 'Crate'
+crate.modifiers.new('Smooth', 'SUBSURF').levels = 2
+crate.shape_key_add(name='Basis')
+dent = crate.shape_key_add(name='Dent')
+dent.data[0].co.z -= 0.2
+"""
+
+
+def glb_json(path: Path) -> dict[str, Any]:
+    data = path.read_bytes()
+    assert data[:4] == b"glTF", "not a GLB"
+    length, kind = struct.unpack("<I4s", data[12:20])
+    assert kind == b"JSON", kind
+    found: dict[str, Any] = json.loads(data[20 : 20 + length])
+    return found
+
+
+def rig_row(document: dict[str, Any]) -> dict[str, Any]:
+    rows: list[dict[str, Any]] = [
+        o for o in document["objects"] if o["type"] == "ARMATURE"
+    ]
+    assert len(rows) == 1, [row["name"] for row in rows]
+    return rows[0]
+
+
+async def main(stage: Path) -> dict[str, Any]:
+    (stage.parent / "journal.json").write_text(json.dumps({"state": "staging"}))
+    (stage / "joinery.toml").write_text('[tools]\nenabled=["blender"]\n')
+    (stage / "project.godot").write_text("config_version=5\n")
+    facts: dict[str, Any] = {}
+
+    await edit_document(stage, "blender", SOURCE, BUILD, [EXPORT], "rigged human")
+    document = await inspect_document(stage, "blender", SOURCE)
+    rig = rig_row(document)
+    assert rig["name"] == "HeroRig", rig
+    assert rig["bone_count"] > rig["deform_bone_count"] > 50, rig
+    hero = next(o for o in document["objects"] if o["name"] == "Hero")
+    assert hero["parent"] == "HeroRig" and hero["vertices"] > 10000, hero
+    assert any(m["type"] == "ARMATURE" for m in hero["modifiers"]), hero
+
+    gltf = glb_json(stage / EXPORT)
+    (skin,) = gltf["skins"]
+    joints = [gltf["nodes"][i]["name"] for i in skin["joints"]]
+    deform = {b["name"] for b in rig["bones"] if b["deform"]}
+    assert len(deform) == rig["deform_bone_count"]
+    assert sorted(set(joints) ^ deform) == [], sorted(set(joints) ^ deform)
+    assert len(joints) == len(set(joints)), "a joint is listed twice"
+    skinned = [n for n in gltf["nodes"] if "skin" in n and "mesh" in n]
+    assert skinned, "the human mesh is not skinned to the rig"
+    # MPFB2 hides its helper geometry with a Mask modifier. The game gets the
+    # body only (no helpers, so no unweighted vertices and no "neutral_bone")
+    # and keeps the human's shape keys as morph targets.
+    (primitive,) = gltf["meshes"][skinned[0]["mesh"]]["primitives"]
+    exported = gltf["accessors"][primitive["attributes"]["POSITION"]]["count"]
+    assert exported < hero["vertices"], (exported, hero["vertices"])
+    assert len(primitive.get("targets", [])) == len(hero["shape_keys"]) - 1, primitive
+    facts.update(
+        bones=rig["bone_count"],
+        deform_bones=len(joints),
+        source_vertices=hero["vertices"],
+        exported_vertices=exported,
+        morph_targets=len(primitive.get("targets", [])),
+    )
+
+    await edit_document(stage, "blender", SOURCE, WAVE, [EXPORT], "wave")
+    gltf = glb_json(stage / EXPORT)
+    (skin,) = gltf["skins"]
+    skinned_bones = {gltf["nodes"][i]["name"] for i in skin["joints"]}
+    (wave,) = [a for a in gltf.get("animations", []) if a["name"] == "Wave"]
+    targets = {gltf["nodes"][c["target"]["node"]]["name"] for c in wave["channels"]}
+    assert targets and targets <= skinned_bones, sorted(targets - skinned_bones)[:10]
+    assert "DEF-upper_arm.L" in targets, sorted(targets)[:20]
+    document = await inspect_document(stage, "blender", SOURCE)
+    assert rig_row(document).get("action") == "Wave", rig_row(document)
+    facts["animated_bones"] = len(targets)
+
+    # A hand-made model: what Godot shows is what Blender shows. The
+    # Subdivision modifier reaches the GLB, and so does the shape key.
+    await edit_document(stage, "blender", CRATE, CRATE_CODE, [CRATE_EXPORT], "crate")
+    gltf = glb_json(stage / CRATE_EXPORT)
+    (mesh,) = gltf["meshes"]
+    (primitive,) = mesh["primitives"]
+    count = gltf["accessors"][primitive["attributes"]["POSITION"]]["count"]
+    assert count > 24, f"the Subdivision modifier was not applied ({count} vertices)"
+    assert len(primitive.get("targets", [])) == 1, primitive
+    assert mesh.get("extras", {}).get("targetNames") == ["Dent"], mesh
+    facts["crate_vertices"] = count
+
+    replays = [
+        rebuild_one(path, stage, SandboxRunner(image=IMAGE))
+        for path in recipe_paths(stage)
+    ]
+    assert replays and all(replay.ok for replay in replays), replays
+    facts["replayed"] = len(replays)
+    return facts
+
+
+if __name__ == "__main__":
+    with tempfile.TemporaryDirectory(prefix="joinery-rig-") as directory:
+        stage = Path(directory) / "stage"
+        stage.mkdir()
+        print(json.dumps(asyncio.run(main(stage)), indent=1))
+        print("BLENDER_RIG_OK")
+        sys.exit(0)

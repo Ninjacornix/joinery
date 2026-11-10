@@ -28,12 +28,6 @@ DOCUMENTS = [
         "krita", "art/paint/icon.kra", "art/textures/icon.png", id="krita-texture"
     ),
     pytest.param(
-        "aseprite",
-        "art/sprites/walk.aseprite",
-        "art/textures/walk.png",
-        id="aseprite-sprite",
-    ),
-    pytest.param(
         "supercollider",
         "audio/sources/impact.scd",
         "audio/sfx/impact.wav",
@@ -54,7 +48,7 @@ def stage(tmp_path: Path) -> Path:
     project.mkdir(parents=True)
     (project.parent / "journal.json").write_text(json.dumps({"state": "staging"}))
     (project / "joinery.toml").write_text(
-        '[tools]\nenabled=["blender","krita","aseprite","supercollider","material-maker","inkscape","surge-xt"]\n'
+        '[tools]\nenabled=["blender","krita","supercollider","material-maker","inkscape","surge-xt"]\n'
     )
     return project
 
@@ -76,7 +70,9 @@ def test_unselected_owner_cannot_author(stage: Path, tool: str) -> None:
         authoring.enabled(stage, tool)
 
 
-@pytest.mark.parametrize("tool", ["gimp", "audacity", "reaper", "musescore"])
+# Removed from the catalog; they must never come back through an old project's
+# tool list.
+@pytest.mark.parametrize("tool", ["aseprite", "audacity", "reaper", "musescore"])
 def test_desktop_only_or_planned_tools_do_not_claim_native_authoring(
     stage: Path, tool: str
 ) -> None:

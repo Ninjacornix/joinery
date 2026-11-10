@@ -11,6 +11,9 @@ from joinery.mcp_runtime import ServerSpec
 from joinery.workspace import index, open_asset
 
 PROGRAMS = tuple(desktop.TOOLS)
+#: Desktop programs that are also catalog tools. The rest (Audacity) only open
+#: files by hand and are offered only when installed.
+CATALOG_PROGRAMS = tuple(t for t in PROGRAMS if t in {c.id for c in load_catalog().tool})
 UPSTREAM = ("godot", "blender", "supercollider", "inkscape")
 
 
@@ -24,6 +27,9 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(
         desktop.shutil, "which", lambda command: "/applications/" + command
     )
+    # As on a machine without a Joinery editor build: "Open in Godot" then falls
+    # back to a Godot on PATH (tests/test_godot_status.py covers this editor).
+    monkeypatch.setattr(desktop, "this_editor", lambda: None)
     return tmp_path
 
 
@@ -60,7 +66,7 @@ def test_open_native_document_in_each_program_without_executing_or_modifying_it(
     }
 
 
-@pytest.mark.parametrize("tool", PROGRAMS)
+@pytest.mark.parametrize("tool", CATALOG_PROGRAMS)
 def test_missing_desktop_app_explains_configuration_and_does_not_change_files(
     project: Path, monkeypatch: pytest.MonkeyPatch, tool: str
 ) -> None:
@@ -80,13 +86,9 @@ def test_missing_desktop_app_explains_configuration_and_does_not_change_files(
         ("blender", "art/sources/hammer.blend", "art/models/hammer.glb"),
         ("krita", "art/portrait.kra", "art/portrait.png"),
         ("gimp", "art/portrait.xcf", "art/portrait.png"),
-        ("aseprite", "art/walk.aseprite", "art/walk.png"),
         ("inkscape", "art/ui.svg", "art/ui.png"),
         ("material-maker", "art/stone.ptex", "art/stone.tres"),
         ("supercollider", "audio/sound.scd", "audio/sound.wav"),
-        ("audacity", "audio/dialogue.aup3", "audio/dialogue.wav"),
-        ("reaper", "audio/score.rpp", "audio/score.wav"),
-        ("musescore", "audio/theme.mscz", "audio/theme.mid"),
     ],
 )
 def test_edit_export_opens_its_original_native_source_not_an_unrelated_asset(
@@ -245,9 +247,10 @@ def test_pinned_install_identity_cannot_be_swapped(
     [
         ("blender", "joinery-blender-ops"),
         ("krita", "joinery-paint"),
-        ("aseprite", "joinery-paint"),
+        ("gimp", "joinery-paint"),
         ("inkscape", "joinery-paint"),
         ("supercollider", "joinery-sound"),
+        ("surge-xt", "joinery-sound"),
         ("material-maker", "joinery-materialmaker"),
     ],
 )
@@ -273,16 +276,14 @@ def test_project_setup_exposes_owning_first_party_mcp_only_when_selected(
     assert {spec.name for spec in unselected} == {"joinery-registry", "joinery-verify"}
 
 
-@pytest.mark.parametrize("tool", ["gimp", "audacity", "reaper", "musescore"])
-def test_unimplemented_app_mcp_is_truthfully_missing_not_silently_connected(
+@pytest.mark.parametrize("tool", ["aseprite", "audacity", "reaper", "musescore"])
+def test_removed_tool_in_an_old_project_starts_no_server_and_cannot_be_installed(
     project: Path, monkeypatch: pytest.MonkeyPatch, tool: str
 ) -> None:
     select(project, tool)
     monkeypatch.setenv("JOINERY_SERVER_CACHE", str(project / "empty server cache"))
     specs, missing = server_install.configured(project)
     assert {s.name for s in specs} == {"joinery-registry", "joinery-verify"}
-    readiness = {item.name: item for item in missing}
-    assert set(readiness) == {"godot", load_catalog().get(tool).mcp.server}
-    assert all(not item.connected and not item.installed for item in missing)
-    with pytest.raises(ValueError, match="not implemented yet"):
+    assert {item.name for item in missing} == {"godot"}
+    with pytest.raises(KeyError):
         server_install.install(tool)

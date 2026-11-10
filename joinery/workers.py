@@ -118,10 +118,30 @@ _SUPERCOLLIDER_START = (
 )
 
 
+#: Live recordings stay inside the container and vanish with it. Live audio is
+#: real time and cannot be replayed, so it is for auditioning only; final
+#: assets are rendered offline by joinery-sound (NRT) with a recipe.
+AUDITION_DIR = "/tmp/joinery-audition"
+#: Folders of the pinned claude-collider checkout hidden from the worker: drum
+#: samples and example songs of unknown provenance (Rule Zero).
+COLLIDER_HIDDEN = ("samples", "tapes", "user/samples")
+
+
 def supercollider_worker(project: Path) -> ServerSpec:
     source = installation("supercollider") / "source"
     if not (source / "dist/index.js").is_file():
         raise ValueError("Install the pinned SuperCollider MCP first.")
+    # An empty read-only tmpfs over each folder hides it. Docker can only mount
+    # over a folder that exists in the read-only source mount.
+    hidden = [
+        argument
+        for folder in COLLIDER_HIDDEN
+        if (source / folder).is_dir()
+        for argument in (
+            "--mount",
+            f"type=tmpfs,destination=/opt/collider/{folder},tmpfs-mode=0555",
+        )
+    ]
     name = "joinery-mcp-" + uuid.uuid4().hex
     return ServerSpec(
         name="claude-collider",
@@ -152,6 +172,7 @@ def supercollider_worker(project: Path) -> ServerSpec:
             "512m",
             "-v",
             f"{source}:/opt/collider:ro",
+            *hidden,
             "-v",
             f"{project.resolve()}:/work",
             "-w",
@@ -163,7 +184,7 @@ def supercollider_worker(project: Path) -> ServerSpec:
             "-e",
             "CC_SAMPLES_PATH=/work/audio",
             "-e",
-            "CC_RECORDINGS_PATH=/work/audio/recordings",
+            f"CC_RECORDINGS_PATH={AUDITION_DIR}",
             WORKER_IMAGE,
             "sh",
             "-c",

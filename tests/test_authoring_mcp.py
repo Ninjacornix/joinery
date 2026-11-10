@@ -28,7 +28,18 @@ FAMILIES = {
         "operate_document",
         "operate_vector",
     },
-    "joinery-sound": {"inspect_document", "document_capabilities", "operate_document"},
+    "joinery-sound": {
+        "inspect_document",
+        "document_capabilities",
+        "operate_document",
+        # Typed sound operations (servers/sound/ops.py).
+        "inspect_music",
+        "compose_music",
+        "edit_music",
+        "render_music",
+        "process_audio",
+        "set_surge_parameters",
+    },
     "joinery-materialmaker": {
         "inspect_document",
         "document_capabilities",
@@ -40,7 +51,7 @@ FAMILIES = {
 @pytest.fixture
 def project(tmp_path: Path) -> Path:
     (tmp_path / "joinery.toml").write_text(
-        '[tools]\nenabled=["blender","krita","aseprite","inkscape","supercollider","material-maker"]\n'
+        '[tools]\nenabled=["blender","krita","inkscape","supercollider","surge-xt","material-maker"]\n'
     )
     return tmp_path
 
@@ -61,9 +72,10 @@ def test_discovery_exposes_only_real_family_capabilities(
         async with Client(authoring.make_server(project, family)) as client:
             tools = {tool.name: tool for tool in (await client.list_tools()).tools}
             assert set(tools) == FAMILIES[family]
-            for name in ("inspect_document", "document_capabilities"):
+            readers = {"inspect_document", "document_capabilities", "inspect_music"}
+            for name in readers & set(tools):
                 assert tools[name].annotations.read_only_hint is True
-            for name in set(tools) - {"inspect_document", "document_capabilities"}:
+            for name in set(tools) - readers:
                 assert (
                     tools[name].annotations is None
                     or not tools[name].annotations.read_only_hint
@@ -79,7 +91,7 @@ def test_discovery_exposes_only_real_family_capabilities(
     [
         ("joinery-blender-ops", "blender", "art/sources/hammer.blend"),
         ("joinery-paint", "krita", "art/icon.kra"),
-        ("joinery-paint", "aseprite", "art/walk.aseprite"),
+        ("joinery-sound", "surge-xt", "audio/sources/creak.json"),
         ("joinery-sound", "supercollider", "audio/sources/impact.scd"),
     ],
 )
@@ -88,7 +100,7 @@ def test_user_native_operation_routes_exact_source_code_and_exports(
 ) -> None:
     operation = AsyncMock(return_value={"status": "staged", "requires_review": True})
     monkeypatch.setattr(authoring, "edit_document", operation)
-    exports = ["audio/impact.wav"] if tool == "supercollider" else ["art/export.png"]
+    exports = ["audio/impact.wav"] if family == "joinery-sound" else ["art/export.png"]
     result = request(
         project,
         family,
@@ -122,7 +134,8 @@ def test_user_native_operation_routes_exact_source_code_and_exports(
         ("joinery-blender-ops", "krita"),
         ("joinery-paint", "blender"),
         ("joinery-paint", "inkscape"),
-        ("joinery-sound", "aseprite"),
+        ("joinery-sound", "krita"),
+        ("joinery-paint", "aseprite"),
         ("joinery-sound", "gimp"),
     ],
 )
@@ -299,8 +312,8 @@ def test_invalid_named_transforms_are_rejected_before_record_or_worker(
     "family,selected",
     [
         ("joinery-blender-ops", ["blender"]),
-        ("joinery-paint", ["krita", "aseprite", "inkscape"]),
-        ("joinery-sound", ["supercollider"]),
+        ("joinery-paint", ["krita", "inkscape"]),
+        ("joinery-sound", ["supercollider", "surge-xt"]),
         ("joinery-materialmaker", ["material-maker"]),
     ],
 )
@@ -317,7 +330,7 @@ def test_capabilities_report_actual_runtime_and_do_not_equate_selection_with_ins
     execute = AsyncMock(
         return_value=Result(
             available,
-            json.dumps({tool: tool != "aseprite" for tool in selected}),
+            json.dumps({tool: tool != "inkscape" for tool in selected}),
             "",
             0.01,
         )
@@ -330,7 +343,7 @@ def test_capabilities_report_actual_runtime_and_do_not_equate_selection_with_ins
     assert data["review_required"] is True and data["network"] == "none"
     assert {t["id"] for t in data["tools"]} == set(selected)
     assert {t["id"] for t in data["tools"] if t["application_installed"]} == (
-        set(selected) - {"aseprite"} if available else set()
+        set(selected) - {"inkscape"} if available else set()
     )
     assert execute.await_args.kwargs == {"readonly": True}
 
