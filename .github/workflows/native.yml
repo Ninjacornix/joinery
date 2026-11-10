@@ -125,9 +125,17 @@ jobs:
           $dumps = Join-Path $env:GITHUB_WORKSPACE 'out\crash-dumps'
           New-Item -ItemType Directory -Force $dumps | Out-Null
           $wer = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting'
-          if (-not (Test-Path $wer)) { New-Item -Force $wer | Out-Null }
-          New-ItemProperty $wer -Name Disabled -Value 0 -PropertyType DWord -Force | Out-Null
-          New-ItemProperty $wer -Name DontShowUI -Value 1 -PropertyType DWord -Force | Out-Null
+          $policy = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Windows Error Reporting'
+          foreach ($path in $wer, $policy) {
+            if (-not (Test-Path $path)) { New-Item -Force $path | Out-Null }
+            New-ItemProperty $path -Name Disabled -Value 0 -PropertyType DWord -Force | Out-Null
+            New-ItemProperty $path -Name DontShowUI -Value 1 -PropertyType DWord -Force | Out-Null
+          }
+          # A crash reports through WER only while consent allows it and no queue holds it back.
+          New-ItemProperty $wer -Name DisableQueue -Value 1 -PropertyType DWord -Force | Out-Null
+          $consent = "$wer\Consent"
+          if (-not (Test-Path $consent)) { New-Item -Force $consent | Out-Null }
+          New-ItemProperty $consent -Name DefaultConsent -Value 1 -PropertyType DWord -Force | Out-Null
           $key = Join-Path "$wer\LocalDumps" (Split-Path $env:JOINERY_RELEASE_ENGINE -Leaf)
           New-Item -Force $key | Out-Null
           New-ItemProperty $key -Name DumpFolder -Value $dumps -PropertyType ExpandString -Force | Out-Null
@@ -136,6 +144,15 @@ jobs:
           Set-Service WerSvc -StartupType Manual -ErrorAction SilentlyContinue
           Start-Service WerSvc -ErrorAction SilentlyContinue
           Get-ItemProperty $key | Format-List DumpFolder, DumpType, DumpCount
+          Get-Service WerSvc | Format-List Name, Status, StartType
+          # Also a postmortem debugger, for crashes WER lets through without a dump.
+          try {
+            $procdump = Join-Path $env:RUNNER_TEMP 'procdump'
+            New-Item -ItemType Directory -Force (Join-Path $dumps 'postmortem') | Out-Null
+            Invoke-WebRequest https://download.sysinternals.com/files/Procdump.zip -OutFile "$procdump.zip"
+            Expand-Archive "$procdump.zip" $procdump -Force
+            & "$procdump\procdump64.exe" -accepteula -ma -i (Join-Path $dumps 'postmortem')
+          } catch { "procdump unavailable: $_" }
       - name: Lint native addon
         # The glob takes in every addon script, the part picker, parts panel
         # and sidebar pieces included; tests/godot holds their GDScript tests.
@@ -322,7 +339,13 @@ jobs:
         if: ${{ always() && runner.os == 'Windows' }}
         shell: pwsh
         run: |
-          $dumps = @(Get-ChildItem out\crash-dumps -Filter *.dmp -ErrorAction SilentlyContinue)
+          # The faulting module and offset of each crash, even when no dump was written.
+          Get-WinEvent -FilterHashtable @{ LogName = 'Application'; Id = 1000, 1001, 1005 } -MaxEvents 20 -ErrorAction SilentlyContinue |
+            Where-Object { $_.Message -match 'godot' } |
+            ForEach-Object { "---- $($_.TimeCreated) event $($_.Id)"; $_.Message } |
+            Tee-Object -FilePath out\crash-dumps\events.txt
+          $dumps = @(Get-ChildItem out\crash-dumps -Recurse -Filter *.dmp -ErrorAction SilentlyContinue)
+          if (-not $dumps) { Get-ChildItem C:\ProgramData\Microsoft\Windows\WER -Recurse -Filter *.dmp -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName } }
           if (-not $dumps) { 'No editor crash dumps.'; exit 0 }
           $cdb = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe' -ErrorAction SilentlyContinue
           if (-not $cdb) {
@@ -339,7 +362,7 @@ jobs:
             '::endgroup::'
           }
       - name: Retain Windows crash dumps and the editor's symbols
-        if: ${{ always() && runner.os == 'Windows' && hashFiles('out/crash-dumps/*.dmp') != '' }}
+        if: ${{ always() && runner.os == 'Windows' && hashFiles('out/crash-dumps/**/*.dmp') != '' }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: joinery-crash-dumps-${{ matrix.target }}
