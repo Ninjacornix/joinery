@@ -171,7 +171,7 @@ static func _text_types(t: Theme, c: Dictionary, m: Dictionary, context: Node) -
 	t.set_stylebox(
 		"panel",
 		"TooltipPanel",
-		_box(c["surface_raised"], c["border_subtle"], 1, _rad(m, "sm"), _sp(m, 2), _sp(m, 1))
+		_box(c["surface_raised"], c["border_subtle"], 1, 0, _sp(m, 2), _sp(m, 1))
 	)
 	for sep: String in ["HSeparator", "VSeparator"]:
 		var line := StyleBoxLine.new()
@@ -551,9 +551,9 @@ static func _panels(t: Theme, c: Dictionary, m: Dictionary) -> void:
 
 
 static func _lists(t: Theme, c: Dictionary, m: Dictionary) -> void:
-	var popup := _box(
-		c["surface_raised"], c["border_subtle"], 1, _rad(m, "lg"), _sp(m, 1), _sp(m, 1)
-	)
+	# Popup menus and tooltips are separate windows; their corners can't show what is behind
+	# them, so round corners left black wedges. They stay square.
+	var popup := _box(c["surface_raised"], c["border_subtle"], 1, 0, _sp(m, 1), _sp(m, 1))
 	t.set_stylebox("panel", "PopupMenu", popup)
 	t.set_stylebox(
 		"hover", "PopupMenu", _box(c["accent_tint"], Color.TRANSPARENT, 0, _rad(m, "md"), 0, 0)
