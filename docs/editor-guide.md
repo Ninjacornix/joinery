@@ -94,6 +94,16 @@ Use `/tools` for actual MCP connection/probe status; diagnostics stay in Output.
   and after approval the held request goes out again.
 - Changes are accepted or **Discarded** in the Review panel. **Compact** in
   history asks for confirmation inline before it frees space.
+- While Journeyman works or a change waits for review, Enter queues the
+  message instead of dropping it (the box says "Queue a message…"). Queued
+  messages wait under **Queued** at the end of the conversation, each with its
+  target chips, **Edit** (puts it back in the message box) and **×** (removes
+  it). They go out one at a time, oldest first, when the reply finishes and
+  nothing waits for review; a change under review is accepted or discarded
+  first. After a reply that failed or was stopped, the queue waits and offers
+  **Send queued message**. A lost connection keeps the queue. Up to five
+  messages can wait. Editor commands such as `/art` still run at once; others
+  such as `/feature` queue like messages.
 
 ### Picking a part of a model
 
