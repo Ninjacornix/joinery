@@ -16,6 +16,7 @@ from typing import Any, cast
 from mcp.types import CallToolResult, TextContent
 
 from joinery import parts as part_targets
+from joinery import references
 from joinery import tools as tool_modules
 from joinery.art_approval import approved, review
 from joinery.art_approval import fingerprint as bible_fingerprint
@@ -648,6 +649,18 @@ class ProjectGateway:
                 raise PermissionError(
                     "Model tools cannot change project policy or MCP configuration. Use project setup."
                 )
+        # A scene and the model or texture it loads are decided together: never
+        # stage a scene that points at a file nobody is adding.
+        gaps = references.missing(
+            tx.stage,
+            [c["path"] for c in changes if c["after"] not in {"", DIRECTORY}],
+        )
+        for scene, paths in references.users_of(
+            tx.stage, [c["path"] for c in changes if not c["after"]]
+        ).items():
+            gaps.setdefault(scene, []).extend(paths)
+        if gaps:
+            raise ValueError(references.refusal(gaps))
         asset_changes = [
             change["path"]
             for change in changes
@@ -757,10 +770,15 @@ class ProjectGateway:
         if tx is None or tx.id != identifier:
             raise ValueError("This transaction is not pending in the current session.")
         changes = tx.accept() if accept else []
+        notice = ""
         if accept:
             self._last_accepted = tx
         if not accept:
+            added = references.created(tx.changes)
             tx.reject()
+            notice = references.orphan_notice(
+                references.users_of(self.project, added), references.DISCARDED
+            )
         self.transaction = None
         self.runtime_owned = False
         for connection in self.staged.values():
@@ -772,6 +790,8 @@ class ProjectGateway:
             "accepted": accept,
             "changes": changes,
         }
+        if notice:
+            event["message"] = "Change discarded. " + notice
         if (
             accept
             and any(change["path"] == "art/bible.md" for change in changes)
@@ -798,12 +818,17 @@ class ProjectGateway:
             )
         tx.revert()
         self._last_accepted = None
+        notice = references.orphan_notice(
+            references.users_of(self.project, references.created(tx.changes)),
+            references.REVERTED,
+        )
         return {
             "kind": "file_decision",
             "transaction_id": identifier,
             "accepted": False,
             "changes": [],
-            "message": "The live preview changed before acceptance. File changes were restored; review the scene before retrying.",
+            "message": "The live preview changed before acceptance. File changes were restored; review the scene before retrying."
+            + (" " + notice if notice else ""),
         }
 
     async def cancel(self) -> None:

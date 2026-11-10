@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from joinery import readiness
+from joinery import readiness, references
 from joinery.catalog import ROOT, load_catalog, load_project_tools, selection_ids
 from joinery.platform_support import bash_script_argv, editor_running
 from joinery.server_install import install
@@ -318,12 +318,17 @@ def transactions(
     result: list[dict[str, Any]] = []
     for path in paths:
         tx = FileTransaction.load(project, path.parent.name)
+        warning = ""
         if action == "recover":
             tx.recover()
             if tx.state in {"staging", "review"}:
                 tx.reject()
         elif action == "revert":
             tx.revert()
+            warning = references.orphan_notice(
+                references.users_of(project, references.created(tx.changes)),
+                references.REVERTED,
+            )
         # A pruned change keeps its journal but can no longer be reverted.
         result.append(
             {
@@ -340,6 +345,7 @@ def transactions(
                     {"path": change["path"], "change": _change_kind(change)}
                     for change in tx.changes[:LISTED_FILES]
                 ],
+                **({"warning": warning} if warning else {}),
             }
         )
     return result

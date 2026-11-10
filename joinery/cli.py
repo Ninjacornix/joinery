@@ -21,6 +21,7 @@ from joinery import (
     game_setup,
     history,
     hook,
+    references,
 )
 from joinery.agents import all_agents
 from joinery.agents import get as get_agent
@@ -444,6 +445,7 @@ def _bible_upgrade(project: Path, yes: bool, as_json: bool) -> int:
 
 
 def _transaction_decision(project: Path, identifier: str, accept: bool) -> int:
+    warning = ""
     try:
         if not identifier:
             raise ValueError("Choose the change with --id.")
@@ -452,21 +454,24 @@ def _transaction_decision(project: Path, identifier: str, accept: bool) -> int:
             changes = tx.accept()
             steps = game_setup.after_accept(tx.project, game_setup.follow_up(tx))
         else:
+            added = references.created(tx.changes)
             tx.reject()
             changes, steps = [], []
+            warning = references.orphan_notice(
+                references.users_of(tx.project, added), references.DISCARDED
+            )
     except (OSError, ValueError, KeyError) as exc:
         print(json.dumps({"error": str(exc)}))
         return 1
-    print(
-        json.dumps(
-            {
-                "transaction_id": tx.id,
-                "state": tx.state,
-                "changes": changes,
-                "steps": steps,
-            }
-        )
-    )
+    outcome: dict[str, object] = {
+        "transaction_id": tx.id,
+        "state": tx.state,
+        "changes": changes,
+        "steps": steps,
+    }
+    if warning:
+        outcome["warning"] = warning
+    print(json.dumps(outcome))
     return 0
 
 

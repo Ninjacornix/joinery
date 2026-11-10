@@ -22,6 +22,9 @@ OBJECT_GUIDE = (
     "A scene in editor_context.unsaved_scenes is open with edits not saved yet: change it "
     "live with edit_scene, never with a staged file edit, which can't be accepted until "
     "those edits are saved. "
+    "Stage a model or texture and the scene that uses it in one change: a scene that "
+    "points at a file neither the project nor the same change has is refused, and a "
+    "scene accepted without its model opens with a missing file. "
 )
 
 #: The game: read the brief and setup with the art direction, extend the game
