@@ -1,7 +1,7 @@
 @tool
 extends EditorPlugin
-## Joinery's editor plugin: the Journeyman sidebar, the project questionnaire,
-## and Focus mode.
+## Joinery's editor plugin: the Journeyman sidebar, the Review panel, the app rail, the
+## project questionnaire and Focus mode.
 ##
 ## Plugin first, per CLAUDE.md: everything here uses stock Godot extension
 ## points, so the addon still loads on an unpatched editor. The parts that the
@@ -16,6 +16,8 @@ const SHELL_SCRIPT := preload("res://addons/joinery/editor_shell.gd")
 const RAIL_SCRIPT := preload("res://addons/joinery/tool_rail.gd")
 const EDITS_SCRIPT := preload("res://addons/joinery/scene_edits.gd")
 const CHAT_SCRIPT := preload("res://addons/joinery/chat_bridge.gd")
+const CONNECT_SCRIPT := preload("res://addons/joinery/agent_connect.gd")
+const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
 
 ## Focus mode is remembered, so a user who wants the stripped-back layout gets
 ## it on every launch instead of re-toggling it each session.
@@ -24,6 +26,15 @@ const FOCUS_SETTING := "joinery/focus_mode"
 ## Written by the Project Manager's Next button, in the fork. Tells the addon
 ## that this project was just created and still needs its questionnaire.
 const SETUP_PENDING := "joinery/setup_pending"
+
+## One wording per outcome, shared with the sidebar notices.
+const ACCEPTED := "Change accepted"
+const REJECTED := "Change rejected. Original restored."
+
+## Dialog sizes in multiples of the editor font size (em).
+const CONNECT_EM := Vector2(32, 36)
+const ART_EM := Vector2(48, 36)
+const ART_DIALOG := preload("res://addons/joinery/art_review_dialog.gd")
 
 var _dock: Control
 var _setup: AcceptDialog
@@ -39,8 +50,18 @@ var _scene_revision := 0
 var _adopting_preview := false
 var _file_review: Dictionary = {}
 var _file_accept_live_id := ""
+## Changed files of each change accepted this session, by transaction id, so a Revert
+## reloads exactly the scenes it restored.
+var _accepted_changes: Dictionary = {}
 var _review_panel: Control
 var _review_button: Button
+var _review_open := false
+## True while a file decision is on its way to the gateway; an error message arriving
+## meanwhile is the decision failing, and is shown in the Review panel.
+var _deciding := false
+## The 2D or 3D view the user had last, for the Godot rail button.
+var _last_view := "3D"
+var _connect_dialog: AcceptDialog
 
 
 func _enter_tree() -> void:
@@ -65,11 +86,16 @@ func _enter_tree() -> void:
 	# overflow arrows, which is no use for the surface you work from.
 	add_control_to_dock(DOCK_SLOT_RIGHT_BL, _dock)
 	_review_panel = _dock.take_review_panel()
+	_review_panel.name = "Review"
 	_review_button = add_control_to_bottom_panel(_review_panel, "Review")
-	_review_button.hide()
+	_set_review_tab(false)
 	_dock.review_requested.connect(_show_edit_review_panel)
 	_dock.review_closed.connect(_hide_edit_review_panel)
+	if _review_panel.has_signal("show_requested"):
+		_review_panel.connect("show_requested", _show_edit_review_panel)
 	_workspace.asset_selected.connect(_on_asset_selected)
+	if _workspace.has_signal("setup_requested"):
+		_workspace.connect("setup_requested", _on_project_setup)
 	_dock.target_opened.connect(_on_target_opened)
 	_raise_dock.call_deferred()
 
@@ -84,12 +110,16 @@ func _enter_tree() -> void:
 	# discoverability: a slash command you have not been told about is hidden.
 	add_tool_menu_item("Joinery: New project…", _on_new_project)
 	add_tool_menu_item("Joinery: Project setup…", _on_project_setup)
-	add_tool_menu_item("Joinery: Toggle Focus mode", _on_toggle_focus)
+	add_tool_menu_item("Joinery: Hide or show panels", _on_toggle_focus)
 	add_tool_menu_item("Joinery: Toggle viewport toolbar", _on_toggle_toolbar)
 
 	_dock.setup_requested.connect(_on_project_setup)
 	_dock.focus_toggle_requested.connect(_on_toggle_focus)
 	_dock.toolbar_toggle_requested.connect(_on_toggle_toolbar)
+	if _dock.has_signal("connect_requested"):
+		_dock.connect("connect_requested", _on_connect_requested)
+	if _dock.has_signal("change_reverted"):
+		_dock.connect("change_reverted", _on_change_reverted)
 
 	get_editor_interface().get_selection().selection_changed.connect(_dock.on_selection_changed)
 	_dock.on_selection_changed()
@@ -104,6 +134,9 @@ func _restore_focus() -> void:
 	var settings := get_editor_interface().get_editor_settings()
 	_connect_chat(settings)
 	_shell.apply(get_editor_interface().get_base_control(), settings)
+	_shell.watch_file_tree(get_editor_interface().get_file_system_dock())
+	# The saved layout has been applied by now; put the Review tab back in front.
+	_set_review_tab(_review_open)
 	var navigation := get_editor_interface().get_base_control().find_child(
 		"JoineryNavigation", true, false
 	)
@@ -115,14 +148,15 @@ func _restore_focus() -> void:
 		_workspace.creator_changed.connect(_on_creator_changed)
 		_rail.tool_selected.connect(_on_tool_selected)
 		_rail.toolbar_requested.connect(_on_toggle_toolbar)
-		main_screen_changed.connect(_on_main_screen_changed)
+		_rail.set_toolbar_shown(_shell.is_shown())
 		_workspace.refresh()
+	main_screen_changed.connect(_on_main_screen_changed)
 	if settings.has_setting(FOCUS_SETTING) and bool(settings.get_setting(FOCUS_SETTING)):
-		_focus.apply(get_editor_interface().get_base_control())
-		_dock.log_system("Focus mode restored from last session.")
+		if _focus.apply(get_editor_interface().get_base_control(), _review_panel):
+			_focus.show_review(_review_open)
 	_offer_setup_if_pending()
-	if not startup_prompt.is_empty():
-		_dock._on_submit.call_deferred(startup_prompt)
+	if not startup_prompt.is_empty() and _dock.has_method("_on_submit"):
+		_dock.call_deferred("_on_submit", startup_prompt)
 
 
 func _connect_chat(settings: EditorSettings) -> void:
@@ -139,19 +173,20 @@ func _connect_chat(settings: EditorSettings) -> void:
 	_chat.file_decision.connect(_on_file_decision)
 	_chat.art_review.connect(_on_art_review)
 	_dock.add_child(_chat)
-	_dock.set_chat_agent(agent)
-	_chat.status_changed.connect(_dock.set_chat_state)
-	_chat.busy_changed.connect(_dock.set_chat_busy)
-	_chat.message_delta.connect(_dock.append_agent_text)
-	_chat.message_received.connect(_dock.show_agent_message)
-	_chat.completed.connect(_dock.finish_agent_response)
-	_chat.models_received.connect(_dock.set_model_options)
-	_chat.execution_changed.connect(_dock.show_execution)
-	_chat.timing_received.connect(_dock.show_timing)
+	_call_dock("set_chat_agent", [agent])
+	_link(_chat.status_changed, "set_chat_state")
+	_chat.status_changed.connect(_on_chat_state)
+	_link(_chat.busy_changed, "set_chat_busy")
+	_link(_chat.message_delta, "append_agent_text")
+	_chat.message_received.connect(_on_chat_message)
+	_link(_chat.completed, "finish_agent_response")
+	_link(_chat.models_received, "set_model_options")
+	_link(_chat.execution_changed, "show_execution")
+	_link(_chat.timing_received, "show_timing")
 	var selection: Dictionary = settings.get_project_metadata(
 		"joinery", "assistant", {"mode": "auto", "model": "", "effort": ""}
 	)
-	_dock.restore_selection_options(selection)
+	_call_dock("restore_selection_options", [selection])
 	_chat.set_selection(selection)
 	_dock.selection_options_changed.connect(
 		func(options: Dictionary) -> void:
@@ -166,7 +201,41 @@ func _connect_chat(settings: EditorSettings) -> void:
 	_dock.reconnect_requested.connect(_chat.reconnect)
 	_dock.art_review_requested.connect(_chat.review_art)
 	_dock.models_refresh_requested.connect(_chat.refresh_models)
-	_chat.start(agent, profile, _dock._engine_dir(), ProjectSettings.globalize_path("res://"))
+	_chat.start(agent, profile, _engine_dir(), ProjectSettings.globalize_path("res://"))
+
+
+## Calls [param method] on the sidebar when this version of it has the method, passing only
+## as many arguments as it takes. The addon also runs beside older sidebars (degraded), so a
+## missing method is skipped. Returns false when it was skipped.
+func _call_dock(method: String, args: Array = []) -> bool:
+	if _dock == null or not _dock.has_method(method):
+		return false
+	_dock.callv(method, args.slice(0, _dock.get_method_argument_count(method)))
+	return true
+
+
+## Connect [param source] to the sidebar's [param method] when the sidebar has it.
+func _link(source: Signal, method: String) -> void:
+	if _dock.has_method(method):
+		source.connect(Callable(_dock, method))
+
+
+## A transient line in the sidebar footer (Focus mode, viewport tools).
+func _status(text: String) -> void:
+	_call_dock("show_status", [text])
+
+
+## A transient footer note with a link ("Panels hidden · Show panels"). A sidebar whose
+## show_status takes no action shows the text alone; _call_dock drops the extra arguments.
+func _status_action(text: String, action: String, callback: Callable) -> void:
+	_call_dock("show_status", [text, 4.0, action, callback])
+
+
+func _engine_dir() -> String:
+	var from_env := OS.get_environment("JOINERY_HOME")
+	if not from_env.is_empty():
+		return from_env
+	return ProjectSettings.globalize_path("res://").path_join("..").simplify_path()
 
 
 func _offer_setup_if_pending() -> void:
@@ -181,7 +250,6 @@ func _offer_setup_if_pending() -> void:
 		return
 	ProjectSettings.set_setting(SETUP_PENDING, null)
 	ProjectSettings.save()
-	_dock.log_system("New project: choosing the tools that will make it.")
 	_setup.open_for_new_project()
 
 
@@ -195,7 +263,7 @@ func _exit_tree() -> void:
 		_workspace.queue_free()
 	remove_tool_menu_item("Joinery: New project…")
 	remove_tool_menu_item("Joinery: Project setup…")
-	remove_tool_menu_item("Joinery: Toggle Focus mode")
+	remove_tool_menu_item("Joinery: Hide or show panels")
 	remove_tool_menu_item("Joinery: Toggle viewport toolbar")
 	if _shell != null:
 		_shell.restore()
@@ -205,6 +273,8 @@ func _exit_tree() -> void:
 		_focus.restore()
 	if is_instance_valid(_sidebar_tabs):
 		_sidebar_tabs.tabs_visible = _sidebar_tabs_were_visible
+	if is_instance_valid(_connect_dialog):
+		_connect_dialog.queue_free()
 	if _dock != null:
 		remove_control_from_docks(_dock)
 		_dock.queue_free()
@@ -212,14 +282,89 @@ func _exit_tree() -> void:
 		_setup.queue_free()
 
 
+# --- Review panel ----------------------------------------------------------------------------
+
+
+## The Review tab is the first bottom tab, and hidden while no review is pending. On editors
+## whose bottom panel is not a tab container, the legacy button opens and closes it instead.
+func _set_review_tab(shown: bool) -> void:
+	var dock := _review_panel.get_parent() as Control if _review_panel != null else null
+	var tabs := dock.get_parent() as TabContainer if dock != null else null
+	if tabs == null:
+		if _review_button != null:
+			_review_button.visible = shown
+		return
+	var index := tabs.get_tab_idx_from_control(dock)
+	if index < 0:
+		return
+	if shown and index != 0:
+		tabs.move_child(dock, 0)
+		index = tabs.get_tab_idx_from_control(dock)
+	if not shown and tabs.current_tab == index:
+		hide_bottom_panel()
+	tabs.set_tab_hidden(index, not shown)
+
+
+## Show the Review panel: reveal its tab, open the bottom panel on it, and in Focus mode bring
+## the bottom panel back with only this tab.
 func _show_edit_review_panel() -> void:
-	_review_button.show()
+	_review_open = true
+	_set_review_tab(true)
+	if _focus != null and _focus.is_active():
+		_focus.show_review(true)
+	var dock := _review_panel.get_parent() as Control
+	if dock != null and dock.get_parent() is Control:
+		(dock.get_parent() as Control).show()
 	make_bottom_panel_item_visible(_review_panel)
 
 
 func _hide_edit_review_panel() -> void:
-	_review_button.hide()
-	hide_bottom_panel()
+	if not _review_open:
+		return
+	_review_open = false
+	_set_review_tab(false)
+	if _focus != null and _focus.is_active():
+		_focus.show_review(false)
+
+
+func _open_review(summary: String) -> void:
+	_call_dock("show_edit_review", [summary, _edits.changes.size()])
+	_show_edit_review_panel()
+
+
+## Close the review with one notice in the transcript ([param kind]: success, rejected, info,
+## error).
+func _close_review(message: String, kind: String) -> void:
+	_deciding = false
+	_call_dock("hide_edit_review", [message, kind])
+	_hide_edit_review_panel()
+
+
+func _review_applying(on: bool) -> void:
+	_call_dock("set_review_applying", [on])
+
+
+## A decision could not be applied: re-enable the buttons and say why, in the Review panel.
+func _review_failed(message: String) -> void:
+	_deciding = false
+	_review_applying(false)
+	if not _call_dock("show_review_error", [message]):
+		_call_dock("show_agent_message", [message])
+
+
+func _on_chat_message(text: String) -> void:
+	if _deciding:
+		_review_failed(text)
+		return
+	_call_dock("show_agent_message", [text])
+
+
+func _on_chat_state(state: String, detail: String) -> void:
+	if _deciding and state == "error":
+		_review_failed(detail)
+
+
+# --- Main screen and selection ---------------------------------------------------------------
 
 
 func _has_main_screen() -> bool:
@@ -301,26 +446,32 @@ func _on_toggle_focus() -> void:
 	var editor := get_editor_interface()
 	if _focus.is_active():
 		_focus.restore()
-		_dock.log_system("Focus mode off: the full editor layout is back.")
+		# The panels coming back say it themselves. An empty note clears any earlier
+		# "Panels hidden" line, so the footer never claims panels are hidden once they are
+		# back, and a pending review gets its own line again.
+		_status("" if _review_open else "Panels shown")
+	elif _focus.apply(editor.get_base_control(), _review_panel):
+		_focus.show_review(_review_open)
+		# A pending review keeps its footer line: review status wins over this note.
+		if _review_open:
+			_status("")
+		else:
+			_status_action("Panels hidden", "Show panels", _on_toggle_focus)
 	else:
-		_focus.apply(editor.get_base_control())
-		_dock.log_system(
-			(
-				"Focus mode on: viewport and sidebar only. The rest is hidden, not "
-				+ "removed, so nothing about the project changed."
-			)
-		)
+		_status("This editor version can't hide the panels")
 	editor.get_editor_settings().set_setting(FOCUS_SETTING, _focus.is_active())
 
 
 func _on_toggle_toolbar() -> void:
 	var shown: bool = _shell.toggle(get_editor_interface().get_editor_settings())
-	_dock.log_system("Viewport toolbar %s." % ("shown" if shown else "hidden"))
+	if _rail != null:
+		_rail.set_toolbar_shown(shown)
+	_status("Viewport tools shown" if shown else "Viewport tools hidden")
 
 
 func _on_tool_selected(tool: String) -> void:
 	if tool == "godot":
-		get_editor_interface().set_main_screen_editor("3D")
+		get_editor_interface().set_main_screen_editor(_godot_view())
 		if _rail != null:
 			_rail.select_tool("godot")
 		return
@@ -328,7 +479,20 @@ func _on_tool_selected(tool: String) -> void:
 	_workspace.select_tool(tool)
 
 
+## The view the Godot rail button opens: 2D for a Node2D or Control scene, 3D for a Node3D
+## scene, otherwise the last of 2D and 3D the user had.
+func _godot_view() -> String:
+	var root := EditorInterface.get_edited_scene_root()
+	if root is Node3D:
+		return "3D"
+	if root is Node2D or root is Control:
+		return "2D"
+	return _last_view
+
+
 func _on_main_screen_changed(screen: String) -> void:
+	if screen in ["2D", "3D"]:
+		_last_view = screen
 	if _rail != null and screen != "Tools":
 		_rail.select_tool("godot")
 
@@ -372,6 +536,58 @@ func _unreachable_from_a_plugin() -> Array[String]:
 		),
 		"A 3D viewport right-click slot: 2D has one, 3D does not. Fork patch 1.",
 	]
+
+
+# --- Connecting an assistant -----------------------------------------------------------------
+
+
+## The sidebar's "Connect an assistant": the Project Manager's connection screen, in a dialog.
+func _on_connect_requested() -> void:
+	if is_instance_valid(_connect_dialog):
+		_connect_dialog.popup_centered(_em_size(CONNECT_EM))
+		return
+	var dialog := AcceptDialog.new()
+	dialog.title = "Connect an assistant"
+	dialog.ok_button_text = "Close"
+	dialog.theme = UI_THEME.build(_dock)
+	var view: Control = CONNECT_SCRIPT.new()
+	view.set("engine_home", _engine_dir())
+	view.set("initial_agent", str(_chat.get("_agent")) if _chat != null else "")
+	dialog.add_child(view)
+	view.connect("connected", _on_agent_connected.bind(view))
+	dialog.canceled.connect(dialog.queue_free)
+	dialog.confirmed.connect(dialog.queue_free)
+	_dock.add_child(dialog)
+	_connect_dialog = dialog
+	dialog.popup_centered(_em_size(CONNECT_EM))
+
+
+## Signed in: remember the agent, close the dialog and restart the chat with it. The
+## connection screen sends (agent, method) or (agent); both reach here.
+func _on_agent_connected(agent: String, method_or_view: Variant, view: Variant = null) -> void:
+	var screen: Variant = view if view is Object else method_or_view
+	var profile: Variant = screen.get("selected_profile") if screen is Object else null
+	var settings := get_editor_interface().get_editor_settings()
+	settings.set_setting("joinery/agent", agent)
+	settings.set_setting("joinery/connection", str(profile) if profile is String else "")
+	if is_instance_valid(_connect_dialog):
+		_connect_dialog.hide()
+		_connect_dialog.queue_free()
+	_call_dock("set_chat_agent", [agent])
+	_chat.start(
+		agent,
+		str(profile) if profile is String else "",
+		_engine_dir(),
+		ProjectSettings.globalize_path("res://")
+	)
+
+
+func _em_size(em: Vector2) -> Vector2i:
+	var font := float(_dock.get_theme_default_font_size())
+	return Vector2i(roundi(em.x * font), roundi(em.y * font))
+
+
+# --- Scene edits and file reviews ------------------------------------------------------------
 
 
 func _editor_context(targets: Array) -> Dictionary:
@@ -471,8 +687,6 @@ func _resource_context(resource: Resource, depth: int = 0) -> Dictionary:
 
 func _on_editor_action(event: Dictionary) -> void:
 	var result := _preview_scene_edit(event)
-	if result.get("success", false):
-		print("[Joinery] Scene preview ready: ", _edits.summary)
 	_chat.send_editor_result(str(event.get("request_id", "")), result)
 
 
@@ -517,7 +731,7 @@ func _preview_scene_edit(event: Dictionary) -> Dictionary:
 			scene.free()
 		return result
 	_edits.owns_preview_root = empty
-	_dock.show_edit_review(_edits.summary)
+	_open_review(_edits.summary)
 	EditorInterface.set_main_screen_editor("3D")
 	if not empty:
 		var selection := EditorInterface.get_selection()
@@ -529,28 +743,36 @@ func _preview_scene_edit(event: Dictionary) -> Dictionary:
 	return result
 
 
-func _accept_scene_edit() -> void:
+## Accept the pending review. The Review panel shows "Applying…" at once; a failure re-enables
+## it with the reason. [param quiet] commits a live scene edit as part of an accepted file
+## review, whose own decision already posts the one "Change accepted" notice.
+func _accept_scene_edit(quiet := false) -> void:
 	if not _file_review.is_empty():
+		_review_applying(true)
 		_file_accept_live_id = ""
 		if _edits.pending():
 			var ready: Dictionary = _edits.prepare_accept()
 			if not ready["success"]:
-				_dock.show_agent_message(str(ready["message"]))
+				_review_failed(str(ready["message"]))
 				return
 			_file_accept_live_id = _edits.transaction_id
 		for change: Dictionary in _file_review.get("changes", []):
 			if EditorInterface.get_unsaved_scenes().has("res://" + str(change["path"])):
-				_dock.show_agent_message(
-					"This scene has unsaved work. Use the live editor tool or save it first."
-				)
+				_review_failed("This scene has unsaved changes. Save it, then accept again.")
 				return
+		if not bool(_chat.get("_connected")):
+			_review_failed("The assistant is not connected. Reconnect, then accept again.")
+			return
+		_deciding = true
 		_chat.decide_files(str(_file_review["transaction_id"]), true)
 		return
 	if not _edits.pending():
 		return
+	if not quiet:
+		_review_applying(true)
 	var ready: Dictionary = _edits.prepare_accept()
 	if not ready["success"]:
-		_dock.show_agent_message(str(ready["message"]))
+		_review_failed(str(ready["message"]))
 		return
 	var edited_nodes: Array[Node] = []
 	for change: Dictionary in _edits.changes:
@@ -566,103 +788,109 @@ func _accept_scene_edit() -> void:
 		_adopting_preview = false
 		_edits.owns_preview_root = false
 	var result: Dictionary = _edits.accept(get_undo_redo())
-	if result["success"]:
-		_dock.hide_edit_review(str(result["message"]))
-		_chat.finish_live_review()
-		EditorInterface.mark_scene_as_unsaved()
-		var selection := EditorInterface.get_selection()
-		selection.clear()
-		for node: Node in edited_nodes:
-			if is_instance_valid(node) and node.is_inside_tree():
-				selection.add_node(node)
-		_dock.on_selection_changed()
-	else:
-		_dock.show_agent_message(str(result["message"]))
+	if not result["success"]:
+		_review_failed(str(result["message"]))
+		return
+	if not quiet:
+		_close_review(str(result["message"]), "success")
+	_chat.finish_live_review()
+	EditorInterface.mark_scene_as_unsaved()
+	var selection := EditorInterface.get_selection()
+	selection.clear()
+	for node: Node in edited_nodes:
+		if is_instance_valid(node) and node.is_inside_tree():
+			selection.add_node(node)
+	_dock.on_selection_changed()
 
 
-func _reject_scene_edit(message: String = "Preview rejected. Original scene restored.") -> void:
-	if not _file_review.is_empty():
-		_chat.decide_files(str(_file_review["transaction_id"]), false)
+## Reject the pending review. File changes are rejected through the gateway, whose decision
+## posts the notice; a live scene edit alone is restored here and posts [param message].
+func _reject_scene_edit(message: String = REJECTED, kind: String = "rejected") -> void:
+	var files := not _file_review.is_empty()
+	if files:
+		if bool(_chat.get("_connected")):
+			_review_applying(true)
+			_deciding = true
+			_chat.decide_files(str(_file_review["transaction_id"]), false)
+		else:
+			_review_failed("The assistant is not connected. Reconnect, then reject again.")
 	if _edits != null and _edits.pending():
 		_edits.reject()
 		_chat.finish_live_review()
-		_dock.hide_edit_review(message)
+		if not files:
+			_close_review(message, kind)
 		_dock.on_selection_changed()
 
 
 func _on_cancel_scene_edit() -> void:
 	_scene_revision += 1
-	_reject_scene_edit("Edit cancelled. Original scene restored.")
+	_reject_scene_edit("Edit cancelled. Original scene restored.", "info")
 
 
 func _on_edit_scene_changed(_scene: Node) -> void:
 	if _adopting_preview:
 		return
 	_scene_revision += 1
-	_reject_scene_edit("Preview discarded because the open scene changed.")
+	_reject_scene_edit("Preview discarded because the open scene changed.", "info")
 
 
 func _apply_changes() -> void:
 	if not _adopting_preview:
 		_reject_scene_edit(
-			"Preview discarded before saving or running. Accept it first to keep it."
+			"Preview discarded before saving or running. Accept it first to keep it.", "info"
 		)
 
 
 func _on_file_preview(event: Dictionary) -> void:
 	_file_review = event.duplicate(true)
-	_dock.show_file_review(
-		str(event.get("summary", "File changes")),
-		str(event.get("diff", "")),
-		event.get("media", [])
+	_call_dock(
+		"show_file_review",
+		[
+			str(event.get("summary", "File changes")),
+			str(event.get("diff", "")),
+			event.get("media", []),
+			event.get("changes", []),
+		]
 	)
+	_show_edit_review_panel()
 
 
 func _on_art_review(event: Dictionary) -> void:
-	var dialog := ConfirmationDialog.new()
-	dialog.title = "Project art direction"
-	dialog.ok_button_text = "Approve this version"
-	dialog.cancel_button_text = "Close"
-	var content := TextEdit.new()
-	content.text = str(event.get("text", ""))
-	content.editable = false
-	content.custom_minimum_size = Vector2(640, 480) * EditorInterface.get_editor_scale()
-	dialog.add_child(content)
-	_dock.add_child(dialog)
-	dialog.confirmed.connect(func() -> void: _chat.approve_art(str(event.get("sha256", ""))))
-	dialog.confirmed.connect(dialog.queue_free)
-	dialog.canceled.connect(dialog.queue_free)
-	dialog.popup_centered()
+	ART_DIALOG.open(
+		_dock,
+		str(event.get("text", "")),
+		_em_size(ART_EM),
+		func() -> void: _chat.approve_art(str(event.get("sha256", "")))
+	)
 
 
 func _on_file_decision(event: Dictionary) -> void:
 	if _file_review.get("transaction_id") != event.get("transaction_id"):
 		return
+	_deciding = false
 	var accepted := bool(event.get("accepted", false))
 	if accepted and not _file_accept_live_id.is_empty():
 		var valid: bool = _edits.pending() and _edits.transaction_id == _file_accept_live_id
 		if valid:
 			valid = bool(_edits.prepare_accept()["success"])
 		if not valid:
+			# The gateway restores the files and answers with a rejected decision.
 			_file_accept_live_id = ""
+			_review_failed("The preview changed before it was accepted. Restoring the files.")
 			_chat.rollback_files(str(event["transaction_id"]))
 			return
 	_file_review.clear()
 	_file_accept_live_id = ""
-	_dock.hide_edit_review(
-		str(
-			event.get(
-				"message",
-				"Changes accepted." if accepted else "Changes rejected. Original files preserved."
-			)
-		)
-	)
+	var message := str(event.get("message", ""))
 	if not accepted:
+		_close_review(REJECTED if message.is_empty() else message, "rejected")
 		if _edits.pending():
-			_dock.show_edit_review(_edits.summary)
+			_open_review(_edits.summary)
 		return
+	_accepted_changes[str(event.get("transaction_id", ""))] = event.get("changes", [])
 	if _edits.pending():
-		_accept_scene_edit()
+		_accept_scene_edit(true)
+	_close_review(ACCEPTED if message.is_empty() else message, "success")
 	var files := EditorInterface.get_resource_filesystem()
 	files.scan()
 	await get_tree().process_frame
@@ -676,14 +904,53 @@ func _on_file_decision(event: Dictionary) -> void:
 			EditorInterface.reload_scene_from_path(path)
 		elif EditorInterface.get_edited_scene_root() == null or change.get("change") == "created":
 			EditorInterface.open_scene_from_path(path)
-	# Exporting an asset alone does not change the scene. Show the actual imported
-	# model immediately instead of leaving the user looking at an empty viewport.
+	# Only a newly created model takes the user to the Tools view, where it is selected and
+	# flashed; an edit to an existing model stays in the view the user is working in.
 	for change: Dictionary in event.get("changes", []):
 		var path := "res://" + str(change["path"])
-		if path.get_extension() in ["glb", "gltf"] and FileAccess.file_exists(path):
+		if (
+			change.get("change") == "created"
+			and path.get_extension() in ["glb", "gltf"]
+			and FileAccess.file_exists(path)
+		):
 			EditorInterface.set_main_screen_editor("Tools")
 			_workspace.select_resource(path)
 			_workspace.invalidate()
 			_workspace.refresh()
 			_dock.set_resource_target(path, "PackedScene")
+			if _workspace.has_method("flash_selected"):
+				_workspace.call("flash_selected")
+			else:
+				UI_THEME.flash(_workspace)
 			break
+
+
+## A Revert restored files on disk: rescan them and reload the open scenes it rewrote, so the
+## editor shows the reverted state. A scene with unsaved edits is never reloaded (that would
+## throw the edits away); the footer says so instead.
+func _on_change_reverted(transaction_id: String) -> void:
+	# Restored files keep their earlier timestamps, so the accepted change's own file list says
+	# which scenes to reload. A change accepted in an earlier session: every open scene.
+	var known: bool = _accepted_changes.has(transaction_id)
+	var restored: Array[String] = []
+	for change: Dictionary in _accepted_changes.get(transaction_id, []):
+		restored.append("res://" + str(change.get("path", "")))
+	_accepted_changes.erase(transaction_id)
+	var files := EditorInterface.get_resource_filesystem()
+	files.scan()
+	await get_tree().process_frame
+	while files.is_scanning() or files.is_importing():
+		await get_tree().process_frame
+	var unsaved := EditorInterface.get_unsaved_scenes()
+	var kept: Array[String] = []
+	for path: String in EditorInterface.get_open_scenes():
+		if known and not restored.has(path) or not FileAccess.file_exists(path):
+			continue
+		if unsaved.has(path):
+			kept.append(path.get_file())
+		else:
+			EditorInterface.reload_scene_from_path(path)
+	if not kept.is_empty():
+		_status("Reverted. Not reloaded, it has unsaved edits: " + ", ".join(kept))
+	_workspace.invalidate()
+	_workspace.refresh()

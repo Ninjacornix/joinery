@@ -9,6 +9,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from run_startup_test import isolated_editor, isolated_environment
+
 from joinery.distribution import engine_binary
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -24,7 +26,9 @@ def main() -> int:
     args = parser.parse_args()
     for empty in (False, True):
         with tempfile.TemporaryDirectory(prefix="joinery-scene-edit-") as directory:
-            project = Path(directory)
+            temporary = Path(directory)
+            project = temporary / "scene-project"
+            project.mkdir()
             shutil.copytree(ROOT / "godot_addon/joinery", project / "addons/joinery")
             addon = project / "addons/edit_check"
             addon.mkdir()
@@ -44,7 +48,18 @@ def main() -> int:
             (project / "main.tscn").write_text(
                 '[gd_scene format=3]\n[node name="Scene" type="Node3D"]\n[node name="Existing" type="Node3D" parent="."]\nposition=Vector3(2,3,4)\n'
             )
-            env = os.environ.copy()
+            if args.live:
+                # One real inference needs the signed-in agent from the real profile.
+                env = os.environ.copy()
+                binary = engine_binary()
+            else:
+                # Otherwise a throwaway home and editor profile: settings such as Focus
+                # mode or the dock layout never carry over between runs.
+                capture = Path(
+                    os.environ.get("JOINERY_CAPTURE_DIR", temporary / "captures")
+                )
+                env = isolated_environment(temporary, ROOT, capture)
+                binary = isolated_editor(engine_binary(), temporary)
             env.update(
                 JOINERY_HOME=str(ROOT),
                 JOINERY_AGENT="codex",
@@ -56,7 +71,7 @@ def main() -> int:
                 else "",
             )
             cmd = [
-                str(engine_binary()),
+                str(binary),
                 "--audio-driver",
                 "Dummy",
                 "--editor",

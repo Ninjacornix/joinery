@@ -184,7 +184,8 @@ func accept(undo: EditorUndoRedoManager) -> Dictionary:
 			undo.add_do_property(node, "transform", change["after"])
 			undo.add_undo_property(node, "transform", change["before"])
 	undo.commit_action(false)
-	var result := {"success": true, "status": "accepted", "message": "Accepted: " + summary}
+	# One wording for an accepted change everywhere; the summary is already the review title.
+	var result := {"success": true, "status": "accepted", "message": "Change accepted"}
 	_clear()
 	return result
 

@@ -19,8 +19,8 @@
   },
   {
     "file": "opencode.svg",
-    "source": "~/.vscode/extensions/pkief.material-icon-theme-5.40.0/icons/opencode.svg",
-    "sha256": "1d357e98d0127aaa94642cb40d6a0dcb4483ffed041fc3484f9e95044e7ec792",
-    "origin": "user-requested local import"
+    "source": "drawn in-house for Joinery: an 'oc' monogram (two rectangles), no external artwork",
+    "sha256": "67936fab56d92755e3816145e19e260a22fa1a7a9b2d1d2a2204c3e405bb0600",
+    "origin": "in-house"
   }
 ]

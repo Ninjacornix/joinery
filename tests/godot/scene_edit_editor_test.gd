@@ -31,7 +31,7 @@ func _run() -> void:
 	if plugin == null:
 		get_tree().quit(1)
 		return
-	await _chat_layout(plugin)
+	await _review_layout(plugin)
 	await _accepted_model_preview(plugin)
 	var box := {
 		"summary": "Create a one metre box",
@@ -44,7 +44,7 @@ func _run() -> void:
 	# This fixture exits the SceneTree directly rather than using the editor's
 	# window-close flow. Drain owned preview viewports before renderer shutdown.
 	plugin._workspace._clear_preview()
-	plugin._dock.hide_edit_review()
+	plugin._close_review("", "info")
 	plugin._chat.close()
 	await get_tree().process_frame
 	await get_tree().process_frame
@@ -53,82 +53,82 @@ func _run() -> void:
 	get_tree().quit(1 if _failed else 0)
 
 
-func _chat_layout(plugin: EditorPlugin) -> void:
+## The Review panel lives in the bottom panel, first tab, and keeps Accept and Reject on
+## screen for a long diff and for a large media preview. Its inner layout (details, media
+## sizing) is covered by review_panel_test.gd.
+func _review_layout(plugin: EditorPlugin) -> void:
 	var dock: Control = plugin._dock
-	_check(not dock.is_ancestor_of(dock._review), "Review controls live outside the chat")
-	dock._prompt.text = "/art"
-	dock._update_commands("/art")
-	for index: int in 4:
-		await get_tree().process_frame
-	var popup: Rect2 = dock._command_popup.get_global_rect()
-	var prompt: Rect2 = dock._prompt.get_global_rect()
-	_check(dock._command_popup.visible, "Slash command completion is visible")
-	_check(popup.end.y < prompt.position.y, "Entire command popup sits above the input")
-	_check(popup.size.y > dock.get_theme_default_font_size() * 1.5, "A command row is not clipped")
-	await _capture("joinery-command-popup.png")
-	dock._prompt.text = "/help"
-	dock._update_commands("/help")
-	var enter := InputEventKey.new()
-	enter.keycode = KEY_ENTER
-	enter.pressed = true
-	dock._on_prompt_input(enter)
-	_check(
-		not dock._command_popup.visible and dock._prompt.text.is_empty(),
-		"Enter submits slash commands"
-	)
+	var review: Control = plugin._review_panel
+	_check(not dock.is_ancestor_of(review), "Review controls live outside the chat")
 	var lines := PackedStringArray()
 	for index: int in 250:
 		lines.append("+ Long reviewed scene change %d with properties and source context" % index)
-	dock.show_file_review("Large technical fixture import", "\n".join(lines))
-	for index: int in 6:
-		await get_tree().process_frame
-	var bar: VScrollBar = dock._review_scroll.get_v_scroll_bar()
-	_check(bar.max_value > bar.page, "Large import review has scrollable content")
-	dock._review_scroll.scroll_vertical = int(bar.max_value)
-	await get_tree().process_frame
-	_check(dock._review_scroll.scroll_vertical > 0, "Import review can scroll to its end")
-	var choices: Control = dock._review.get_child(dock._review.get_child_count() - 1)
-	_check(
-		choices.get_global_rect().end.y <= dock.get_viewport_rect().end.y,
-		"Accept and Reject remain on screen"
-	)
-	_check(
-		dock._prompt.get_global_rect().end.y <= dock.get_viewport_rect().end.y,
-		"Input remains on screen during review"
-	)
-	await _capture("joinery-scroll-review.png")
-	dock.hide_edit_review()
-	await get_tree().process_frame
-	# A model preview fills the panel; file details stay folded until asked for.
-	var still := Image.create(320, 320, false, Image.FORMAT_RGBA8)
-	still.fill(Color(0.35, 0.37, 0.4))
-	var still_path := OS.get_cache_dir().path_join("joinery-review-still.png")
-	still.save_png(still_path)
 	(
-		dock
-		. show_file_review(
-			"Create a low-poly hammer",
-			"+ art/sources/hammer.blend\n+ recipes/hammer.toml",
-			[{"path": "art/models/hammer.glb", "media": "image", "after": still_path}],
+		plugin
+		. _on_file_preview(
+			{
+				"transaction_id": "layout",
+				"summary": "Large technical fixture import",
+				"diff": "\n".join(lines),
+				"media": [],
+				"changes": [],
+			}
 		)
 	)
 	for index: int in 6:
 		await get_tree().process_frame
-	_check(dock._review_media.visible, "Model preview is shown")
-	_check(not dock._review_scroll.visible, "File details start folded")
-	var choices_after: Control = dock._review.get_child(dock._review.get_child_count() - 1)
-	_check(
-		dock._review_media.get_global_rect().end.y <= choices_after.get_global_rect().position.y,
-		"Preview fits above Accept and Reject without scrolling"
+	_check(plugin._review_open, "A file review opens the Review panel")
+	var tabs := review.get_parent().get_parent() as TabContainer
+	if tabs != null:
+		_check(tabs.get_tab_idx_from_control(review.get_parent()) == 0, "Review is the first tab")
+	_check_choices(plugin, "long diff")
+	await _capture("joinery-scroll-review.png")
+	# A model preview fills the panel; Accept and Reject stay below it.
+	var still := Image.create(320, 320, false, Image.FORMAT_RGBA8)
+	still.fill(Color(0.35, 0.37, 0.4))
+	# An isolated home has no cache folder until something makes it.
+	DirAccess.make_dir_recursive_absolute(OS.get_cache_dir())
+	var still_path := OS.get_cache_dir().path_join("joinery-review-still.png")
+	still.save_png(still_path)
+	(
+		plugin
+		. _on_file_preview(
+			{
+				"transaction_id": "layout",
+				"summary": "Create a low-poly hammer",
+				"diff": "+ art/sources/hammer.blend\n+ recipes/hammer.toml",
+				"media": [{"path": "art/models/hammer.glb", "media": "image", "after": still_path}],
+				"changes": [{"path": "art/models/hammer.glb", "change": "created"}],
+			}
+		)
 	)
-	_check(dock._review_media.size.y > dock._review.size.y * 0.4, "Preview gets most of the panel")
+	for index: int in 6:
+		await get_tree().process_frame
+	_check_choices(plugin, "model preview")
 	await _capture("joinery-model-review.png")
-	dock._details_toggle.button_pressed = true
+	plugin._file_review.clear()
+	plugin._close_review("", "info")
 	await get_tree().process_frame
-	_check(dock._review_scroll.visible, "Details open on request")
-	dock.hide_edit_review()
-	dock._set_details_open(false)
-	await get_tree().process_frame
+	_check(not plugin._review_open, "Closing the review hides the Review panel")
+
+
+func _check_choices(plugin: EditorPlugin, context: String) -> void:
+	var dock: Control = plugin._dock
+	var bottom := dock.get_viewport_rect().end.y
+	for prefix: String in ["Accept", "Reject"]:
+		var button := _button_starting(plugin._review_panel, prefix)
+		_check(button != null and button.is_visible_in_tree(), prefix + " is shown: " + context)
+		if button != null:
+			_check(
+				button.get_global_rect().end.y <= bottom, prefix + " stays on screen: " + context
+			)
+
+
+func _button_starting(root: Node, prefix: String) -> Button:
+	for node: Node in root.find_children("*", "Button", true, false):
+		if (node as Button).text.begins_with(prefix):
+			return node as Button
+	return null
 
 
 func _accepted_model_preview(plugin: EditorPlugin) -> void:
@@ -303,7 +303,7 @@ func _existing_scene(plugin: EditorPlugin, box: Dictionary) -> void:
 	_check(result["success"], "Create box in the live editor")
 	var node := scene.get_node_or_null("ReviewBox") as MeshInstance3D
 	_check(node != null and node.mesh.size == Vector3.ONE, "One metre native BoxMesh")
-	_check(plugin._dock._review.visible, "Show Accept/Reject with the live preview")
+	_check(plugin._review_open, "Show Accept/Reject with the live preview")
 	_check(
 		FileAccess.get_file_as_bytes(scene.scene_file_path) == bytes,
 		"A preview must not write the scene file"
@@ -480,7 +480,7 @@ func _combined_accept_conflict(
 	_check(plugin._edits.pending(), "Stale live preview cannot be accepted with file changes")
 	_check(not plugin._file_review.is_empty(), "File review waits for compensating restoration")
 	plugin._on_file_decision({"transaction_id": "fixture", "accepted": false})
-	_check(plugin._dock._review.visible, "User can still reject the stale live preview")
+	_check(plugin._review_open, "User can still reject the stale live preview")
 	plugin._reject_scene_edit()
 
 

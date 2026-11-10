@@ -3,9 +3,11 @@ extends EditorPlugin
 ## Install only in a temporary copy of testbed for full editor verification.
 
 var _failed := false
+var _screens: Array[String] = []
 
 
 func _enter_tree() -> void:
+	main_screen_changed.connect(func(screen: String) -> void: _screens.append(screen))
 	_run.call_deferred()
 
 
@@ -29,11 +31,15 @@ func _run() -> void:
 		get_tree().quit(1)
 		return
 	_check(plugin._dock.name == "Journeyman", "Restore the earlier sidebar layout")
-	_check(plugin._dock.size.x >= plugin._dock.get_theme_default_font_size() * 24,
-		"Saved narrow layouts must open with a readable chat width")
+	_check(
+		plugin._dock.size.x >= plugin._dock.get_theme_default_font_size() * 24,
+		"Saved narrow layouts must open with a readable chat width"
+	)
 	_check(plugin._chat != null, "Start the selected agent chat transport")
-	_check(plugin._dock.prompt_submitted.is_connected(plugin._chat.submit),
-		"Ordinary prompts must reach the chat transport")
+	_check(
+		plugin._dock.prompt_submitted.is_connected(plugin._chat.submit),
+		"Ordinary prompts must reach the chat transport"
+	)
 	if OS.get_environment("JOINERY_EXPECT_CODEX") == "1":
 		var connection_deadline := Time.get_ticks_msec() + 15000
 		while not plugin._chat._connected and Time.get_ticks_msec() < connection_deadline:
@@ -49,7 +55,13 @@ func _run() -> void:
 		if button is Button:
 			_check(button.text.is_empty(), "Native workspace selectors must be icon-only")
 	var dock_titles: Array[String] = [
-		"Scene", "FileSystem", "Import", "History", "Inspector", "Signals", "Groups",
+		"Scene",
+		"FileSystem",
+		"Import",
+		"History",
+		"Inspector",
+		"Signals",
+		"Groups",
 	]
 	for title: String in dock_titles:
 		var dock: Node
@@ -116,6 +128,8 @@ func _run() -> void:
 		await get_tree().process_frame
 	_check(plugin._rail._buttons.has("blender"), "Blender must be in the rail")
 	_check(plugin._rail._buttons.has("godot"), "Godot must be in the app rail")
+	_check(plugin._rail._buttons.has(""), "All assets must be in the app rail")
+	await _rail_states(plugin)
 	var toolbar_button: Button = plugin._rail.find_child("ViewportToolbarToggle", true, false)
 	for id: String in plugin._rail._buttons:
 		var app_button: Button = plugin._rail._buttons[id]
@@ -184,7 +198,10 @@ func _run() -> void:
 		await get_tree().process_frame
 		_check(plugin._dock._command_popup.visible, "Slash command menu must open")
 		_check(
-			plugin._dock._command_popup.get_global_rect().end.y <= plugin._dock._prompt.global_position.y,
+			(
+				plugin._dock._command_popup.get_global_rect().end.y
+				<= plugin._dock._prompt.global_position.y
+			),
 			"Slash command menu must open upward"
 		)
 		await _capture("/tmp/joinery-editor-chatup.png")
@@ -204,10 +221,114 @@ func _run() -> void:
 	if plugin._rail._buttons.has("supercollider"):
 		plugin._rail._buttons["supercollider"].pressed.emit()
 		await get_tree().process_frame
-		_check(plugin._workspace._audio.stream != null, "Audio app view must show playback controls")
+		_check(
+			plugin._workspace._audio.stream != null, "Audio app view must show playback controls"
+		)
 		await _capture("/tmp/joinery-editor-layout-audio.png")
+	await _review_in_focus(plugin)
+	await _single_accept_notice(plugin)
 	print("editor layout: ", "FAILED" if _failed else "ok")
 	get_tree().quit(1 if _failed else 0)
+
+
+func _rail_states(plugin: EditorPlugin) -> void:
+	var toggle: Button = plugin._rail.find_child("ViewportToolbarToggle", true, false)
+	_check(toggle.toggle_mode, "Viewport tools is a toggle")
+	_check(toggle.tooltip_text == "Viewport tools", "Viewport tools has a plain name")
+	_check(toggle.button_pressed == plugin._shell.is_shown(), "Toggle shows the saved preference")
+	plugin._on_toggle_toolbar()
+	_check(toggle.button_pressed == plugin._shell.is_shown(), "Toggle follows /toolbar")
+	plugin._on_toggle_toolbar()
+	# The scene is a Node3D, so the Godot item opens the 3D view.
+	EditorInterface.set_main_screen_editor("Script")
+	_screens.clear()
+	plugin._rail._buttons["godot"].pressed.emit()
+	await get_tree().process_frame
+	_check(_screens.has("3D"), "Godot opens 3D for a 3D scene")
+	_check(plugin._rail._buttons["godot"].button_pressed, "Godot is the selected rail item")
+	var deadline := Time.get_ticks_msec() + 30000
+	while plugin._rail._job != null and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	# Readiness is optional data: when the CLI reports it, the tooltip says it.
+	var readiness: Dictionary = plugin._rail._readiness
+	if readiness.has("blender") and plugin._rail._buttons.has("blender"):
+		var status := str(readiness["blender"]["status"])
+		var wording := str(plugin._rail.STATUS_TEXT.get(status, ""))
+		var tip: String = plugin._rail._buttons["blender"].tooltip_text
+		_check(wording.is_empty() or tip.contains(wording), "Blender's tooltip names its readiness")
+
+
+func _review_in_focus(plugin: EditorPlugin) -> void:
+	if plugin._focus.is_active():
+		plugin._on_toggle_focus()
+	plugin._on_toggle_focus()
+	_check(plugin._focus.is_active(), "Focus mode must find the editor docks")
+	plugin._open_review("Layout check")
+	await get_tree().create_timer(0.3).timeout
+	var review: Control = plugin._review_panel
+	var dock := review.get_parent() as Control
+	var tabs := dock.get_parent() as TabContainer
+	var index := tabs.get_tab_idx_from_control(dock)
+	_check(index == 0, "Review is the first bottom tab")
+	_check(not tabs.is_tab_hidden(index), "Review tab shows while a review is pending")
+	var accept := _button_starting(review, "Accept")
+	_check(accept != null and accept.is_visible_in_tree(), "Accept stays visible in Focus mode")
+	for other: int in tabs.get_tab_count():
+		if other != index:
+			_check(tabs.is_tab_hidden(other), "Focus mode shows only the Review tab")
+	await _capture("/tmp/joinery-editor-focus-review.png")
+	plugin._close_review("", "info")
+	await get_tree().process_frame
+	_check(tabs.is_tab_hidden(tabs.get_tab_idx_from_control(dock)), "Review tab hides when done")
+	plugin._on_toggle_focus()
+	_check(not plugin._focus.is_active(), "Focus mode turns off")
+	_check(tabs.is_visible_in_tree(), "Bottom panel returns after Focus mode")
+	var shown := 0
+	for other: int in tabs.get_tab_count():
+		shown += 0 if tabs.is_tab_hidden(other) else 1
+	_check(shown > 1, "Focus mode restores the other bottom tabs")
+
+
+## A file decision that also commits a live scene edit posts exactly one notice.
+func _single_accept_notice(plugin: EditorPlugin) -> void:
+	var scene := EditorInterface.get_edited_scene_root()
+	var edit := {
+		"summary": "Add a layout check box",
+		"operations": [{"operation": "create_box", "name": "LayoutBox", "size": [1, 1, 1]}]
+	}
+	var event := {"payload": edit, "context": plugin._editor_context([]), "targets": []}
+	_check(plugin._preview_scene_edit(event)["success"], "Live preview for the notice check")
+	var before := _transcript(plugin._dock).count("Change accepted")
+	plugin._file_review = {"transaction_id": "layout-notice", "changes": []}
+	plugin._file_accept_live_id = plugin._edits.transaction_id
+	await plugin._on_file_decision(
+		{"transaction_id": "layout-notice", "accepted": true, "changes": []}
+	)
+	await get_tree().process_frame
+	_check(not plugin._edits.pending(), "The live edit is committed with the files")
+	_check(scene.has_node("LayoutBox"), "The accepted box stays")
+	var after := _transcript(plugin._dock).count("Change accepted")
+	_check(after == before + 1, "One accepted notice, not two (%d)" % (after - before))
+	_check(not plugin._review_open, "The Review panel closes after the decision")
+	var manager := plugin.get_undo_redo()
+	manager.get_history_undo_redo(manager.get_object_history_id(scene)).undo()
+
+
+func _transcript(dock: Control) -> String:
+	var text := ""
+	for node: Node in dock.find_children("*", "", true, false):
+		if node is RichTextLabel:
+			text += (node as RichTextLabel).get_parsed_text() + "\n"
+		elif node is Label:
+			text += (node as Label).text + "\n"
+	return text
+
+
+func _button_starting(root: Node, prefix: String) -> Button:
+	for node: Node in root.find_children("*", "Button", true, false):
+		if (node as Button).text.begins_with(prefix):
+			return node as Button
+	return null
 
 
 func _capture(path: String) -> void:

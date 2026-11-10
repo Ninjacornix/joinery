@@ -1,6 +1,6 @@
 @tool
 extends RefCounted
-## Focus mode: viewport and sidebar only.
+## Focus mode: viewport, sidebar and the Review panel only.
 ##
 ## Most control goes through the sidebar, so the rest of Godot's layout is more
 ## than the user needs (ADR 0005). The proper version of this is a fork patch
@@ -12,24 +12,49 @@ extends RefCounted
 ## about the project changes, and `restore()` returns the editor exactly as it
 ## was. It is also the fragile part of the addon, since it depends on the
 ## editor's internal node shape; if a Godot release moves things, Focus mode
-## stops finding panels and does nothing rather than breaking the editor.
+## stops finding panels and [method apply] returns false rather than breaking
+## the editor.
+##
+## The Review panel is where every change is decided, so Focus mode never hides
+## it: the bottom panel that holds it stays, with every other tab hidden, and is
+## shown only while a review is pending ([method show_review]).
 
 ## Docks whose titles we keep, by substring. Everything else gets hidden.
-const KEEP := ["Journeyman", "Chatup", "JoineryNavigation"]
+const KEEP := ["Journeyman", "Chatup", "JoineryNavigation", "Review"]
 
 var _hidden: Array[Control] = []
 var _active := false
+## The tab container holding the Review panel, the tabs hidden in it, and whether it was
+## visible before Focus mode took it over.
+var _review_tabs: TabContainer
+var _review_tabs_visible := true
+var _hidden_tabs: Array[Control] = []
 
 
 func is_active() -> bool:
 	return _active
 
 
-func apply(base: Control) -> void:
+## Hide every dock column except the sidebar, the navigation rail and the Review panel's
+## container. [param review] is the Review panel; its container keeps only the Review tab.
+## Returns false, and changes nothing, when the editor layout has nothing to hide.
+func apply(base: Control, review: Control = null) -> bool:
 	if _active:
-		return
+		return true
 	_hidden.clear()
-	for container: Control in _find_dock_containers(base):
+	var containers := _find_dock_containers(base)
+	if review != null:
+		for container: Control in containers:
+			if container is TabContainer and container.is_ancestor_of(review):
+				_isolate_review(container as TabContainer, review)
+				break
+	for container: Control in containers:
+		# The Review panel's container (and anything inside it) is handled by its tabs.
+		if (
+			_review_tabs != null
+			and (container == _review_tabs or _review_tabs.is_ancestor_of(container))
+		):
+			continue
 		if _should_keep(container):
 			continue
 		if container.visible:
@@ -39,10 +64,14 @@ func apply(base: Control) -> void:
 	# navigation stays visible so Focus mode never strands the current view.
 	_active = not _hidden.is_empty()
 	if not _active:
-		push_warning(
-			"[Joinery] Focus mode found nothing to hide. The editor's layout is "
-			+ "not the shape this expects, so nothing was changed."
-		)
+		restore()
+	return _active
+
+
+## While Focus mode is on, show the Review panel's container only when a review is pending.
+func show_review(pending: bool) -> void:
+	if _active and is_instance_valid(_review_tabs):
+		_review_tabs.visible = pending
 
 
 func restore() -> void:
@@ -50,7 +79,29 @@ func restore() -> void:
 		if is_instance_valid(container):
 			container.visible = true
 	_hidden.clear()
+	if is_instance_valid(_review_tabs):
+		for control: Control in _hidden_tabs:
+			var index := (
+				_review_tabs.get_tab_idx_from_control(control) if is_instance_valid(control) else -1
+			)
+			if index >= 0:
+				_review_tabs.set_tab_hidden(index, false)
+		_review_tabs.visible = _review_tabs_visible
+	_hidden_tabs.clear()
+	_review_tabs = null
 	_active = false
+
+
+func _isolate_review(tabs: TabContainer, review: Control) -> void:
+	_review_tabs = tabs
+	_review_tabs_visible = tabs.visible
+	_hidden_tabs.clear()
+	for index: int in tabs.get_tab_count():
+		var control := tabs.get_tab_control(index)
+		if control == review or control.is_ancestor_of(review) or tabs.is_tab_hidden(index):
+			continue
+		tabs.set_tab_hidden(index, true)
+		_hidden_tabs.append(control)
 
 
 func _should_keep(container: Control) -> bool:
