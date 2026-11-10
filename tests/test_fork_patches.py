@@ -149,6 +149,9 @@ def test_patches_target_only_expected_areas() -> None:
                 "platform/windows/display_server_windows.cpp",
             )
         },
+        "0022-test-windows-trace-fail-fast-exits-in-test-editors.patch": {
+            "platform/windows/godot_windows.cpp": "docs/adr/0032-background-test-editors.md",
+        },
     }
     for patch in patches():
         for match in re.findall(r"^\+\+\+ b/(.+)$", patch.read_text(), re.MULTILINE):

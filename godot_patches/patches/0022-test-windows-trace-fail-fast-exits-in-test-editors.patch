@@ -1,0 +1,175 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Tue, 10 Nov 2026 21:03:54 +0100
+Subject: [PATCH] test(windows): trace fail-fast exits in test editors
+
+Joinery-only test support, not intended for upstream.
+
+JOINERY_CRASH_TRACE=1 makes abort, an invalid C runtime parameter,
+std::terminate and a pure virtual call print the failing thread's
+stack (resolved with the editor's .pdb) to stderr and exit with
+0xE04A0001-0xE04A0004. By default these end the process with
+0xC0000409 through __fastfail, which skips the crash handler and often
+Windows Error Reporting too. The handlers go into the editor's static
+runtime and into ucrtbase.dll, which the private Mesa DLLs share.
+JOINERY_CRASH_TRACE=selftest aborts through ucrtbase at startup to
+prove the trace. Without the variable nothing changes.
+---
+ platform/windows/godot_windows.cpp | 137 +++++++++++++++++++++++++++++
+ 1 file changed, 137 insertions(+)
+
+diff --git a/platform/windows/godot_windows.cpp b/platform/windows/godot_windows.cpp
+index 5c55a61..a4f82e3 100644
+--- a/platform/windows/godot_windows.cpp
++++ b/platform/windows/godot_windows.cpp
+@@ -57,6 +57,140 @@ static const char dummy[8] __attribute__((section("pck"), used)) = { 0 };
+ #endif
+ #endif
+ 
++#if defined(_MSC_VER)
++// Joinery: JOINERY_CRASH_TRACE=1 prints a stack for the C runtime's fail-fast
++// exits (abort, an invalid parameter, terminate, a pure call), which end the
++// process with 0xC0000409 and bypass the crash handler. Test support only.
++#include <csignal>
++#include <cstdarg>
++#include <cstdio>
++#include <cstdlib>
++#include <cstring>
++#include <cwchar>
++#include <exception>
++
++#pragma pack(push, before_dbghelp, 8)
++#include <dbghelp.h>
++#pragma pack(pop, before_dbghelp)
++#pragma comment(lib, "dbghelp.lib")
++
++static void joinery_trace_write(const char *p_format, ...) {
++	char text[2048];
++	va_list args;
++	va_start(args, p_format);
++	vsnprintf(text, sizeof(text), p_format, args);
++	va_end(args);
++	text[sizeof(text) - 1] = 0;
++	DWORD written = 0;
++	WriteFile(GetStdHandle(STD_ERROR_HANDLE), text, (DWORD)strlen(text), &written, nullptr);
++}
++
++// Prints the calling thread's stack with the editor's .pdb, then exits with
++// p_code (0xE04A000N), so a run's log names the failure and where it came from.
++static void joinery_trace_exit(const char *p_why, UINT p_code) {
++	static volatile LONG tracing = 0;
++	if (InterlockedExchange(&tracing, 1) != 0) {
++		Sleep(INFINITE); // Another thread is printing its trace.
++	}
++	joinery_trace_write("\nJOINERY CRASH TRACE: %s on thread %lu\n", p_why, GetCurrentThreadId());
++	HANDLE process = GetCurrentProcess();
++	wchar_t folder[MAX_PATH] = {};
++	GetModuleFileNameW(nullptr, folder, MAX_PATH);
++	if (wchar_t *slash = wcsrchr(folder, L'\\')) {
++		*slash = 0;
++	}
++	SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS | SYMOPT_FAIL_CRITICAL_ERRORS);
++	const bool symbols = SymInitializeW(process, folder, TRUE) != FALSE;
++	void *frames[128];
++	const USHORT count = CaptureStackBackTrace(1, 128, frames, nullptr);
++	for (USHORT i = 0; i < count; i++) {
++		const DWORD64 address = (DWORD64)frames[i];
++		HMODULE module = nullptr;
++		char path[MAX_PATH] = "?";
++		if (GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT, (LPCSTR)frames[i], &module)) {
++			GetModuleFileNameA(module, path, MAX_PATH);
++		}
++		const char *name = strrchr(path, '\\') ? strrchr(path, '\\') + 1 : path;
++		ULONG64 storage[(sizeof(SYMBOL_INFO) + 512 + sizeof(ULONG64) - 1) / sizeof(ULONG64)] = {};
++		SYMBOL_INFO *symbol = (SYMBOL_INFO *)storage;
++		symbol->SizeOfStruct = sizeof(SYMBOL_INFO);
++		symbol->MaxNameLen = 512;
++		DWORD64 displacement = 0;
++		const char *function = symbols && SymFromAddr(process, address, &displacement, symbol) ? symbol->Name : "???";
++		IMAGEHLP_LINE64 line = {};
++		line.SizeOfStruct = sizeof(line);
++		DWORD column = 0;
++		if (symbols && SymGetLineFromAddr64(process, address, &column, &line)) {
++			joinery_trace_write("[%u] %s+0x%llx %s (%s:%lu)\n", i, name, address - (DWORD64)module, function, line.FileName, line.LineNumber);
++		} else {
++			joinery_trace_write("[%u] %s+0x%llx %s+0x%llx\n", i, name, address - (DWORD64)module, function, displacement);
++		}
++	}
++	joinery_trace_write("-- END OF JOINERY CRASH TRACE --\n");
++	TerminateProcess(process, p_code);
++}
++
++static void __cdecl joinery_trace_abort(int) {
++	joinery_trace_exit("abort (SIGABRT)", 0xE04A0001);
++}
++
++static void __cdecl joinery_trace_invalid_parameter(const wchar_t *, const wchar_t *, const wchar_t *, unsigned int, uintptr_t) {
++	joinery_trace_exit("invalid parameter passed to the C runtime", 0xE04A0002);
++}
++
++static void __cdecl joinery_trace_terminate() {
++	joinery_trace_exit("std::terminate", 0xE04A0003);
++}
++
++static void __cdecl joinery_trace_purecall() {
++	joinery_trace_exit("pure virtual function call", 0xE04A0004);
++}
++
++// Arms the handlers in the editor's own (static) runtime and in ucrtbase.dll,
++// which the private Mesa DLLs share. JOINERY_CRASH_TRACE=selftest then aborts
++// through ucrtbase, to prove the trace in CI.
++static void joinery_crash_trace_install() {
++	const char *mode = getenv("JOINERY_CRASH_TRACE");
++	if (mode == nullptr || (strcmp(mode, "1") != 0 && strcmp(mode, "selftest") != 0)) {
++		return;
++	}
++	signal(SIGABRT, joinery_trace_abort);
++	_set_abort_behavior(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
++	_set_invalid_parameter_handler(joinery_trace_invalid_parameter);
++	_set_purecall_handler(joinery_trace_purecall);
++	std::set_terminate(joinery_trace_terminate);
++
++	typedef void(__cdecl * SignalHandler)(int);
++	typedef SignalHandler(__cdecl * SignalFunction)(int, SignalHandler);
++	typedef unsigned int(__cdecl * AbortBehaviorFunction)(unsigned int, unsigned int);
++	typedef _invalid_parameter_handler(__cdecl * InvalidParameterFunction)(_invalid_parameter_handler);
++	typedef _purecall_handler(__cdecl * PurecallFunction)(_purecall_handler);
++	typedef void(__cdecl * AbortFunction)();
++	HMODULE ucrt = LoadLibraryW(L"ucrtbase.dll");
++	if (ucrt == nullptr) {
++		return;
++	}
++	if (SignalFunction set_signal = (SignalFunction)(void *)GetProcAddress(ucrt, "signal")) {
++		set_signal(SIGABRT, joinery_trace_abort);
++	}
++	if (AbortBehaviorFunction set_abort = (AbortBehaviorFunction)(void *)GetProcAddress(ucrt, "_set_abort_behavior")) {
++		set_abort(0, _WRITE_ABORT_MSG | _CALL_REPORTFAULT);
++	}
++	if (InvalidParameterFunction set_invalid = (InvalidParameterFunction)(void *)GetProcAddress(ucrt, "_set_invalid_parameter_handler")) {
++		set_invalid(joinery_trace_invalid_parameter);
++	}
++	if (PurecallFunction set_purecall = (PurecallFunction)(void *)GetProcAddress(ucrt, "_set_purecall_handler")) {
++		set_purecall(joinery_trace_purecall);
++	}
++	if (strcmp(mode, "selftest") == 0) {
++		if (AbortFunction ucrt_abort = (AbortFunction)(void *)GetProcAddress(ucrt, "abort")) {
++			ucrt_abort();
++		}
++		abort();
++	}
++}
++#endif
++
+ char *wc_to_utf8(const wchar_t *wc) {
+ 	int ulen = WideCharToMultiByte(CP_UTF8, 0, wc, -1, nullptr, 0, nullptr, nullptr);
+ 	char *ubuf = new char[ulen + 1];
+@@ -141,6 +275,9 @@ int main(int argc, char **argv) {
+ 
+ 	// _argc and _argv are ignored
+ 	// we are going to use the WideChar version of them instead
++#if defined(_MSC_VER)
++	joinery_crash_trace_install();
++#endif
+ #if defined(CRASH_HANDLER_EXCEPTION) && defined(_MSC_VER)
+ 	__try {
+ 		return _main();

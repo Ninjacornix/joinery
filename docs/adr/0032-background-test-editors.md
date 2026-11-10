@@ -26,3 +26,17 @@ set, and without it the code paths are stock.
 
 This is test support, not intended for upstream. The fork-area guard permits
 only these exact files with this ADR.
+
+## Crash traces for fail-fast exits on Windows
+
+A second test-support patch, in `platform/windows/godot_windows.cpp` only,
+adds `JOINERY_CRASH_TRACE=1`. On Windows, `abort()`, an invalid C runtime
+parameter, `std::terminate` and a pure virtual call end the process with
+`0xC0000409` through `__fastfail`, which bypasses Godot's crash handler and
+often Windows Error Reporting, so such a crash left no stack. With the
+variable set, handlers in the editor's static runtime and in `ucrtbase.dll`
+(shared by the private Mesa DLLs) print the failing thread's stack, resolved
+with the editor's `.pdb`, to stderr and exit with `0xE04A0001`–`0xE04A0004`.
+`JOINERY_CRASH_TRACE=selftest` aborts at startup to prove the trace in CI.
+Only the Windows CI editor steps set it; `isolated_environment()` passes it
+through. Without it nothing changes.
