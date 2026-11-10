@@ -215,7 +215,10 @@ func _wizard(create: Button) -> void:
 	next.pressed.emit()
 	await _frames(2)
 	_check(_label_visible(dialog, "Copying the First-person 3D starting point"), "Name the start")
-	_check(_label_visible(dialog, "Downloading GodotSteam"), "Say GodotSteam downloads")
+	# The note shows while the step waits or runs. Without uv the step can
+	# already have failed (and hidden its note) by now, so check what the
+	# step list was told the step will do.
+	_check(_planned_note(dialog, "Downloading GodotSteam"), "Say GodotSteam downloads")
 	await _shot("setup-creating", dialog)
 	deadline = Time.get_ticks_msec() + 60000
 	while not (next.text == "Try again" and next.is_visible_in_tree()):
@@ -382,6 +385,13 @@ func _button_visible(parent: Node, text: String) -> Button:
 		if button.text == text and button.is_visible_in_tree():
 			return button
 	return null
+
+
+func _planned_note(parent: Node, text: String) -> bool:
+	for node: Node in parent.find_children("*", "Label", true, false):
+		if str(node.get_meta("planned", "")) == text:
+			return true
+	return false
 
 
 func _label_visible(parent: Node, text: String) -> bool:
