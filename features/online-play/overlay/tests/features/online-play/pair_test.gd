@@ -30,7 +30,7 @@ var check: PairCheck = null
 
 
 func _initialize() -> void:
-	Engine.max_fps = 120
+	PlayHarness.pace(self, 120)
 	_run.call_deferred()
 
 

@@ -22,6 +22,24 @@ var settings: Node
 var events: Node
 
 
+## Holds the process to at most `fps` frames a second. `Engine.max_fps` does
+## nothing under `--fixed-fps` (Godot skips its frame limiter then), so a
+## headless test otherwise runs thousands of frames a second and its game
+## clock races far ahead of real time: of real-time waits, and of a second
+## game process that is still starting up.
+static func pace(scene_tree: SceneTree, fps: int) -> void:
+	var frame_usec: int = 1000000 / maxi(fps, 1)
+	var due: Array[int] = [Time.get_ticks_usec()]
+	scene_tree.process_frame.connect(
+		func() -> void:
+			var now: int = Time.get_ticks_usec()
+			if now < due[0]:
+				OS.delay_usec(due[0] - now)
+				now = due[0]
+			due[0] = now + frame_usec
+	)
+
+
 func _init(scene_tree: SceneTree, test_name: String) -> void:
 	tree = scene_tree
 	name = test_name

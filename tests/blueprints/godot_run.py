@@ -228,4 +228,16 @@ def run_pair(
             host.communicate()
     host_result = Completed(host_cmd, host.returncode, host_out)
     client_result = Completed(client_cmd, client.returncode, client.stdout + client.stderr)
-    return _check(host_result, host_marker), _check(client_result, client_marker)
+    problems: list[str] = []
+    for side, result, marker in (
+        ("host", host_result, host_marker),
+        ("client", client_result, client_marker),
+    ):
+        try:
+            _check(result, marker)
+        except AssertionError as failure:
+            problems.append(f"[{side}] {failure}")
+    if problems:
+        # Both sides are shown: the one that fails first is often waiting on the other.
+        raise AssertionError("\n\n".join(problems))
+    return host_result, client_result
