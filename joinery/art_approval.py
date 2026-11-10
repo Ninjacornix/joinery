@@ -45,8 +45,14 @@ def review(project: Path) -> dict[str, str | bool]:
     }
 
 
-def approve(project: Path, approved_by: str, expected_sha256: str = "") -> None:
-    """Called only by an explicit user approval action, not a model tool."""
+def approve(
+    project: Path, approved_by: str, expected_sha256: str = "", *, allow_open: bool = False
+) -> None:
+    """Called only by an explicit user approval action, not a model tool.
+
+    ``allow_open`` lets a bible with sections still to fill be approved; only
+    project creation uses it, because the user chose to start with it as it is.
+    """
     if not approved_by.strip():
         raise ValueError("Identify the person approving the art direction.")
     content = (project / "art/bible.md").read_bytes()
@@ -56,7 +62,7 @@ def approve(project: Path, approved_by: str, expected_sha256: str = "") -> None:
             "The art bible changed while being reviewed. Open its current version before approving."
         )
     text = content.decode()
-    if "Not set yet" in text or "{{" in text:
+    if not allow_open and ("Not set yet" in text or "{{" in text):
         raise ValueError("Finish the art direction before approving it.")
     atomic_json(
         project / ".joinery/art-approval.json",
@@ -73,20 +79,21 @@ AT_CREATION = "user (at project creation)"
 #: What the user is told when that happens.
 APPROVED_AT_CREATION = (
     "Wrote the art bible from your answers. It counts as approved, so art and "
-    "audio work can start. If it changes later, approve it again in /art."
+    "audio work can start. Fill in any open sections in /art; if it changes later, "
+    "approve it again there."
 )
 
 
 def approve_at_creation(project: Path) -> bool:
-    """Approve a bible just drafted from the user's own answers at project creation.
+    """Approve the bible drafted when the project is made.
 
-    Called only by project setup right after it renders those answers, never
-    by a model tool. Records exactly what the Approve button records. A draft
-    with required sections still unset is left for the user to finish and
-    approve, as the button would refuse it too. Returns whether it is approved.
+    Called only by project setup right after it writes the bible, never by a
+    model tool. Records what the Approve button records. Sections the user
+    skipped stay open to fill in later; the bible counts as approved as drafted
+    (the user's decision, 2026-11-10). Returns whether it is approved.
     """
     try:
-        approve(project, AT_CREATION)
+        approve(project, AT_CREATION, allow_open=True)
     except (OSError, ValueError):
         return False
     return True

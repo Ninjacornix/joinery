@@ -246,8 +246,9 @@ def write_bible(
     written = bible.write_from_answers_file(project, preset)
     if written is None:
         bible.write_bible(project, {}, preset)
-    # Drafted from the user's own answers: approved at creation, if complete.
-    if written is not None and art_approval.approve_at_creation(project):
+    # Drafted at creation from the user's answers (or the starting point's preset when they
+    # skipped them all): approved as drafted; open sections can be filled in later.
+    if art_approval.approve_at_creation(project):
         return _step(report, "bible", "done", art_approval.APPROVED_AT_CREATION)
     return _step(
         report,

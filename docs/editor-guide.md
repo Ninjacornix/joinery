@@ -67,8 +67,9 @@ tools (ADR 0025); add any of them as a custom tool if you want it.
 Art creation requires approval of the project's completed `art/bible.md`.
 A bible drafted from your own answers when the project is made (the New project
 wizard, or `joinery bible` reading its answers file) counts as approved at
-creation, recorded as `user (at project creation)`; a draft with required
-sections left unset still needs finishing first. Changing its content
+creation, recorded as `user (at project creation)`, even with questions
+skipped: those sections stay open to fill in later in `/art`. So does a bible
+drafted from the starting point's preset alone. Changing its content
 invalidates approval; use `/art` to review and approve the current version
 again. An agent cannot approve its own direction or file changes (ADR 0033).
 Use `/tools` for actual MCP connection/probe status; diagnostics stay in Output.
@@ -136,9 +137,8 @@ Without `--features` the blueprint's suggested features are used;
 licence (the addon ships inside your game) and the plugin turned on. With a
 blueprint it also gets the game, `design/brief.md` with the controls the game
 really binds, and an `art/bible.md` draft whose technical sections come from the
-blueprint's preset, marked as suggestions. Finish and approve the bible before
-any asset work; a bible drafted from the wizard's answers with every required
-section answered is approved at creation. A bad feature mix is refused before any folder is made.
+blueprint's preset, marked as suggestions. That bible is approved at creation,
+with any skipped sections left open to fill in later. A bad feature mix is refused before any folder is made.
 
 With Steam on, Joinery writes `[game.steam]` (app ID and how players connect)
 and downloads the pinned GodotSteam extension into the project, checked against

@@ -105,19 +105,31 @@ def test_editing_the_bible_lapses_the_approval_until_the_user_approves(
     assert approved(project)
 
 
-def test_unfinished_answers_still_need_the_users_approval(tmp_path: Path) -> None:
+def test_skipped_answers_still_start_approved(tmp_path: Path) -> None:
+    """The user's decision: a bible with open sections counts as approved at creation."""
     project = new(tmp_path)
     step = apply(project, {"references": "Hob: chunky shapes"})
-    assert "Finish and approve it" in step["message"]
-    assert not approved(project)
-    assert not (project / ".joinery/art-approval.json").exists()
+    assert step["message"] == APPROVED_AT_CREATION
+    assert approved(project)
+    assert record(project)["approved_by"] == AT_CREATION
 
 
-def test_a_bible_drafted_without_answers_still_needs_approval(tmp_path: Path) -> None:
+def test_a_bible_drafted_without_answers_starts_approved(tmp_path: Path) -> None:
     project = new(tmp_path)
     step = apply(project, None)
-    assert "Finish and approve it" in step["message"]
-    assert not approved(project)
+    assert step["message"] == APPROVED_AT_CREATION
+    assert approved(project)
+
+
+def test_the_approve_button_still_needs_a_finished_bible(tmp_path: Path) -> None:
+    """Only creation accepts open sections; a later approval needs them filled."""
+    from joinery.art_approval import approve
+
+    project = new(tmp_path)
+    apply(project, None)
+    (project / ".joinery/art-approval.json").unlink()
+    with pytest.raises(ValueError, match="Finish the art direction"):
+        approve(project, "user")
 
 
 def test_a_project_without_a_bible_is_not_approved(tmp_path: Path) -> None:
@@ -140,6 +152,7 @@ def test_joinery_bible_from_answers_approves_at_creation(
 def test_no_model_tool_can_approve(tmp_path: Path) -> None:
     project = new(tmp_path)
     apply(project, {"references": "Hob: chunky shapes"})
+    (project / ".joinery/art-approval.json").unlink()
 
     async def tools() -> list[str]:
         async with Client(make_server(project)) as client:
