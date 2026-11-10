@@ -46,6 +46,10 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from joinery.runner import DEFAULT_TIMEOUT, Result, Runner
 
 RECIPE_DIR = "recipes"
+#: Immutable documents an incremental edit starts from, named by content hash.
+PREIMAGE_DIR = "recipes/inputs"
+#: Recipes replaced by a later edit of the same outputs. History only.
+HISTORY_DIR = "recipes/history"
 #: Formats whose bytes are stable enough to compare exactly.
 EXACT_SUFFIXES = frozenset(
     {".wav", ".ogg", ".mid", ".midi", ".scd", ".ptex", ".tres", ".json", ".txt"}
@@ -375,6 +379,29 @@ def _verify_rebuilt(
         elif wanted != measured[rel]:
             problems.append(f"{rel}: expected {wanted}, rebuilt {measured[rel]}")
     return Rebuilt(name, not problems, got.seconds, tuple(problems), measured)
+
+
+def store_preimage(project: Path, source: Path) -> str:
+    """Keep an immutable copy of a document an edit starts from.
+
+    Preimages are named by their content hash, so editing the same document
+    twice from the same state, or several recipes sharing one starting point,
+    stores it once. Returns the project-relative path a recipe lists in
+    ``sources``.
+    """
+    from joinery.transactions import copy_file
+
+    digest = hashlib.sha256()
+    with source.open("rb") as handle:
+        for block in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(block)
+    folder = project / PREIMAGE_DIR
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / ".gdignore").touch()
+    target = folder / (digest.hexdigest() + source.suffix)
+    if not target.is_file() or _exact(target) != "sha256:" + digest.hexdigest():
+        copy_file(source, target)
+    return target.relative_to(project).as_posix()
 
 
 def recipe_paths(project: Path) -> list[Path]:

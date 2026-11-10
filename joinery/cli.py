@@ -9,7 +9,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from joinery import __version__, connection, hook
+from joinery import __version__, connection, history, hook
 from joinery.agents import all_agents
 from joinery.agents import get as get_agent
 from joinery.api_profiles import configure as configure_api
@@ -367,7 +367,11 @@ def main() -> int:
     check = commands.add_parser("check", help="run policy checks")
     check.add_argument("target", choices=["all", "catalog", "deps", "mcp", "assets"])
     check.add_argument("--project", type=Path, default=ROOT / "testbed")
+    history.register(commands)
     args = parser.parse_args()
+
+    if args.command == "history":
+        return history.run(args)
 
     if args.command == "diagnostics":
         from joinery.diagnostics import report as diagnostic_report

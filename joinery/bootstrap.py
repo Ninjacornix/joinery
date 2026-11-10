@@ -252,13 +252,13 @@ def refresh_managed_gates(project: Path) -> None:
 
 def transactions(
     project: Path, action: str, identifier: str = ""
-) -> list[dict[str, str]]:
+) -> list[dict[str, str | bool]]:
     paths = (
         [project / ".joinery/transactions" / identifier / "journal.json"]
         if identifier
         else sorted((project / ".joinery/transactions").glob("*/journal.json"))
     )
-    result = []
+    result: list[dict[str, str | bool]] = []
     for path in paths:
         tx = FileTransaction.load(project, path.parent.name)
         if action == "recover":
@@ -267,5 +267,13 @@ def transactions(
                 tx.reject()
         elif action == "revert":
             tx.revert()
-        result.append({"id": tx.id, "state": tx.state, "summary": tx.summary})
+        # A pruned change keeps its journal but can no longer be reverted.
+        result.append(
+            {
+                "id": tx.id,
+                "state": tx.state,
+                "summary": tx.summary,
+                "revertible": tx.revertible,
+            }
+        )
     return result
