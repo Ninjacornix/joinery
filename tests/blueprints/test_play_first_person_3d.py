@@ -39,7 +39,10 @@ def test_overlay_is_code_only_greybox() -> None:
     root = blueprints.BLUEPRINTS_DIR / BLUEPRINT
     banned = {".png", ".jpg", ".jpeg", ".webp", ".svg", ".glb", ".gltf", ".blend",
               ".wav", ".ogg", ".mp3", ".ttf", ".otf"}
-    found = [p for p in root.rglob("*") if p.suffix.lower() in banned]
+    found = [
+        p for p in root.rglob("*")
+        if p.suffix.lower() in banned and p.relative_to(root).as_posix() not in blueprints.CAPTURE_FILES
+    ]
     assert found == []
     for script in root.rglob("*.gd"):
         uid = script.with_name(script.name + ".uid")

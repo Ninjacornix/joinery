@@ -160,7 +160,7 @@ func _check_jump_heights() -> void:
 	h.expect(await _wait_until(player.is_on_floor, 120), "the player lands after a full jump")
 	await h.physics_frames(2)
 	h.expect(h.fire_count(record) == 2, "each jump press jumps once")
-	_unwatch(record)
+	h.unwatch(record)
 	var tap_height: float = ground - tap_peak
 	var hold_height: float = ground - hold_peak
 	h.expect(tap_height > 4.0, "a tapped jump leaves the ground")
@@ -210,18 +210,8 @@ func _ledge_jump(ledge: Vector2i, frames_after: int) -> bool:
 	await h.physics_frames(12)
 	if not jumped:
 		h.expect(h.fire_count(record) == 0, "a late press in the air is not kept until landing")
-	_unwatch(record)
+	h.unwatch(record)
 	return jumped
-
-
-## Stops recording a signal started with `h.watch`.
-func _unwatch(record: Dictionary) -> void:
-	var signal_ref: Signal = record["signal"]
-	var catch: Variant = record.get("callable")
-	if catch is Callable and signal_ref.is_connected(catch):
-		signal_ref.disconnect(catch)
-	# The recorder holds the record, so drop it to break the cycle.
-	record.erase("callable")
 
 
 func _check_jump_buffer() -> void:
@@ -241,7 +231,7 @@ func _check_jump_buffer() -> void:
 	h.expect(h.fire_count(record) == 0, "there is no jump in mid-air")
 	await h.physics_frames(10)
 	h.expect(h.fire_count(record) == 1, "a jump pressed just before landing jumps on landing")
-	_unwatch(record)
+	h.unwatch(record)
 	await _wait_until(player.is_on_floor, 120)
 	await h.physics_frames(4)
 
@@ -255,7 +245,7 @@ func _check_jump_buffer() -> void:
 	await _wait_until(player.is_on_floor, 120)
 	await h.physics_frames(20)
 	h.expect(h.fire_count(early) == 0, "a jump pressed long before landing is not kept")
-	_unwatch(early)
+	h.unwatch(early)
 	h.expect(player.is_on_floor(), "the player stays on the floor")
 
 
@@ -332,7 +322,7 @@ func _check_checkpoint_and_spikes() -> void:
 	h.expect(back, "touching spikes sends the player back to the checkpoint")
 	# One respawn places the player above the spikes, the second sends it back.
 	h.expect(h.fire_count(record) == 2, "the spikes respawn the player once")
-	_unwatch(record)
+	h.unwatch(record)
 	h.expect(level.falls == falls + 1, "the spikes count one fall")
 	h.expect(level.hud.falls_label.text.contains(str(falls + 1)), "the HUD shows the falls")
 	await h.physics_frames(10)

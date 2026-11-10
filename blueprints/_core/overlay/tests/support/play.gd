@@ -5,7 +5,7 @@ extends RefCounted
 ## input through the real input map, waits for signals and collects failures.
 ##
 ## Run: godot --headless --fixed-fps 60 --script res://tests/game/play_test.gd
-##        -- --autostart --settings-path=user://test_settings.cfg
+##        -- --autostart --settings-path=/tmp/settings.cfg
 ##
 ## The `--script` file is compiled before the autoloads exist, so it cannot name
 ## `Game`, `Menus`, `Settings` or `GameEvents` directly. Use `play.game`,
@@ -138,16 +138,27 @@ func wait_watched(record: Dictionary, max_frames: int) -> Array:
 	while int(record["count"]) == 0 and frames < max_frames:
 		await tree.physics_frame
 		frames += 1
+	unwatch(record)
 	var signal_ref: Signal = record["signal"]
-	var catch: Callable = record["callable"]
-	if signal_ref.is_connected(catch):
-		signal_ref.disconnect(catch)
-	record.erase("callable")
 	expect(
 		int(record["count"]) > 0,
 		"signal %s fired within %d frames" % [signal_ref.get_name(), max_frames]
 	)
 	return record["args"]
+
+
+## Stops recording a watched signal. A record read only with `fired` or
+## `fire_count` must be passed here when the test is done with it: the
+## recorder and the record point at each other, and Godot reports the pair as
+## leaked at exit.
+func unwatch(record: Dictionary) -> void:
+	if not record.has("callable"):
+		return
+	var signal_ref: Signal = record["signal"]
+	var catch: Callable = record["callable"]
+	if is_instance_valid(signal_ref.get_object()) and signal_ref.is_connected(catch):
+		signal_ref.disconnect(catch)
+	record.erase("callable")
 
 
 func fire_count(record: Dictionary) -> int:

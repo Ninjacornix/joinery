@@ -40,7 +40,7 @@ FEATURE_DIR = blueprints.FEATURES_DIR / FEATURE
 ROOTS = ("features/online-play/", "tests/features/online-play/")
 PAIR = "res://tests/features/online-play/pair_test.gd"
 LOBBY = "res://tests/features/online-play/lobby_test.gd"
-SETTINGS = "--settings-path=user://test_settings.cfg"
+SETTINGS = "--settings-path={settings}"
 CHECKS_PASSED = "online: starting-point checks passed"
 PRESET = "Linux Dedicated Server"
 OTHER_FEATURES = ("controller", "save-load", "steam", "translations")

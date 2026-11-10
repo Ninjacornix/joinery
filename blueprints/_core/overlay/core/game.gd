@@ -25,6 +25,7 @@ var _level: Node = null
 var _level_time: float = 0.0
 var _play_time: float = 0.0
 var _actor: int = 1
+var _routing_restart: bool = false
 
 
 func _ready() -> void:
@@ -50,7 +51,17 @@ func start_game(start_options: Dictionary = {}) -> void:
 	get_tree().change_scene_to_file(level_path)
 
 
+## Restarts the current level. A session that has its own `restart_level`
+## (online play) is asked first, so a restart reaches every player; it
+## returns true when it took care of it.
 func restart_level() -> void:
+	if not _routing_restart and _session.has_method(&"restart_level"):
+		# The session may call back here to do the actual reload.
+		_routing_restart = true
+		var handled: bool = bool(_session.call(&"restart_level"))
+		_routing_restart = false
+		if handled:
+			return
 	Menus.close_all()
 	get_tree().paused = false
 	if is_instance_valid(_level):

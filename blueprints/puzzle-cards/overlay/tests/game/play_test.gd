@@ -2,7 +2,7 @@ extends SceneTree
 ## Play test for memory cards, driven by injected input.
 ##
 ## Run: godot --headless --fixed-fps 60 --script res://tests/game/play_test.gd
-##        -- --autostart --settings-path=user://test_settings.cfg
+##        -- --autostart --settings-path=<file>
 ##
 ## Cards are flipped with focus navigation (`ui_*`), with mouse clicks at
 ## their position, or (for the turn checks) as a given peer through

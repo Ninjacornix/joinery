@@ -2,7 +2,7 @@ extends SceneTree
 ## Plays the blank starting point with injected input only: menu to level,
 ## pause and resume, a settings change that persists, back to the menu.
 ## Run: godot --headless --fixed-fps 60 --script res://tests/game/play_test.gd
-##        -- --settings-path=user://test_settings.cfg
+##        -- --settings-path=<file>
 
 
 func _initialize() -> void:

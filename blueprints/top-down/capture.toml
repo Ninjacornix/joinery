@@ -1,0 +1,18 @@
+# How capture.png was made: Godot ran this blueprint and wrote its
+# frames (--write-movie); the last frame was shrunk with Image.resize.
+# Made by release/capture_blueprints.py. Nothing else touched it.
+origin = "tool-created"
+tool = "godot"
+engine_version = "4.7.2.stable.custom_build.d12dfc279"
+blueprint = "top-down"
+blueprint_version = 1
+features = ["controller", "save-load"]
+command = "godot_patches/godot-src/bin/godot.macos.editor.arm64 --path <tmp>/game --resolution 1280x720 --write-movie <tmp>/movie/frame.png --fixed-fps 30 --quit-after 150 res://core/main.tscn -- --autostart --settings-path=<tmp>/settings.cfg"
+frame = 149
+frames = 150
+fixed_fps = 30
+source_size = [1280, 720]
+resize = "Image.resize(960, 540, INTERPOLATE_LANCZOS)"
+resize_command = "godot_patches/godot-src/bin/godot.macos.editor.arm64 --headless --path <tmp>/resizer --script res://resize.gd -- <tmp>/movie/frame00000149.png <tmp>/capture.png 960 540"
+size = [960, 540]
+sha256 = "41b134c90bac285709a18f818d4868a48eca5545250d8755fcef87c4999e9b4e"

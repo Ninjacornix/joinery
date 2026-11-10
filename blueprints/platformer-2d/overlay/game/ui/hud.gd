@@ -18,6 +18,12 @@ var win_falls_label: Label
 var again_button: Button
 var menu_button: Button
 
+## What the labels show, kept so a language change can draw them again.
+var _coins: Vector2i = Vector2i.ZERO
+var _seconds: float = 0.0
+var _falls: int = 0
+var _win_result: Dictionary = {}
+
 
 func _ready() -> void:
 	root = Control.new()
@@ -52,15 +58,27 @@ func _ready() -> void:
 	Settings.changed.connect(_on_setting_changed)
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_TRANSLATION_CHANGED and coins_label != null:
+		set_coins(_coins.x, _coins.y)
+		set_time(_seconds)
+		set_falls(_falls)
+		if win_panel.visible:
+			_render_win()
+
+
 func set_coins(count: int, total: int) -> void:
+	_coins = Vector2i(count, total)
 	coins_label.text = tr("Coins: %d / %d") % [count, total]
 
 
 func set_time(seconds: float) -> void:
+	_seconds = seconds
 	time_label.text = tr("Time: %s") % format_time(seconds)
 
 
 func set_falls(count: int) -> void:
+	_falls = count
 	falls_label.text = tr("Falls: %d") % count
 
 
@@ -69,13 +87,19 @@ func set_timer_visible(on: bool) -> void:
 
 
 func show_win(result: Dictionary) -> void:
+	_win_result = result
+	_render_win()
+	win_panel.visible = true
+	again_button.grab_focus.call_deferred()
+
+
+func _render_win() -> void:
+	var result: Dictionary = _win_result
 	win_coins_label.text = tr("Coins: %d / %d") % [
 		int(result.get("coins", 0)), int(result.get("total", 0))
 	]
 	win_time_label.text = tr("Time: %s") % format_time(float(result.get("time", 0.0)))
 	win_falls_label.text = tr("Falls: %d") % int(result.get("falls", 0))
-	win_panel.visible = true
-	again_button.grab_focus.call_deferred()
 
 
 func hide_win() -> void:

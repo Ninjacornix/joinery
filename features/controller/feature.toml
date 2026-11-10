@@ -4,7 +4,7 @@
 # to rebind keys and buttons. Text prompts only; no glyph images.
 id = "controller"
 name = "Controller support"
-summary = "Play with a gamepad: pad bindings for every action, button prompts, menu navigation, rumble and a Controls page to rebind keys and buttons."
+summary = "Play with a gamepad: button prompts, rumble and a Controls page to rebind keys and buttons."
 version = 1
 requires = []
 conflicts = []

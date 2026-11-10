@@ -312,7 +312,7 @@ def test_describe_and_catalogue_json(fixture_catalogue: FixtureCatalogue) -> Non
     assert described["input"]["move_left"] == {
         "keys": ["A", "Left"],
         "mouse": [],
-        "pad": ["D-pad left", "Left stick left"],
+        "pad": ["Left stick left", "D-pad left"],
     }
     assert described["input"]["pause"]["pad"] == ["Start"]
     assert described["features_supported"] == ["controller", "lobby", "net", "solo", "words"]

@@ -17,6 +17,10 @@ var win_switches_label: Label
 var again_button: Button
 var menu_button: Button
 var _bars: Array[ColorRect] = []
+## What the labels show, kept so a language or device change can draw them again.
+var _target: Node = null
+var _score: int = 0
+var _win_result: Dictionary = {}
 
 
 ## "m:ss.cc" for a time in seconds.
@@ -63,20 +67,37 @@ func _ready() -> void:
 		player.connect(&"target_changed", _on_target_changed)
 	GameEvents.score_changed.connect(_on_score_changed)
 	GameEvents.level_completed.connect(show_win)
+	var controller: Node = get_node_or_null(^"/root/Controller")
+	if controller != null and controller.has_signal(&"device_changed"):
+		controller.connect(&"device_changed", _on_device_changed)
 	_on_target_changed(null)
 	_on_score_changed(0)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_TRANSLATION_CHANGED and counter != null:
+		_on_target_changed(_target)
+		_on_score_changed(_score)
+		if win_panel.visible:
+			_render_win()
 
 
 ## Shows the win screen for a `level_completed` result and focuses Play again.
 func show_win(result: Dictionary) -> void:
 	hint.visible = false
 	crosshair.visible = false
+	_win_result = result
+	_render_win()
+	win_panel.visible = true
+	again_button.grab_focus.call_deferred()
+
+
+func _render_win() -> void:
+	var result: Dictionary = _win_result
 	win_time_label.text = tr("Time: %s") % format_time(float(result.get("time", 0.0)))
 	win_switches_label.text = tr("Switches on: %d of %d") % [
 		int(result.get("switches", 0)), int(result.get("total", result.get("switches", 0)))
 	]
-	win_panel.visible = true
-	again_button.grab_focus.call_deferred()
 
 
 func hide_win() -> void:
@@ -137,7 +158,13 @@ func _text_size() -> int:
 	return UiStyle.px(UiStyle.TEXT_BODY)
 
 
+func _on_device_changed(_using_pad: bool) -> void:
+	_on_target_changed(_target)
+
+
 func _on_target_changed(target: Node) -> void:
+	_target = target if is_instance_valid(target) else null
+	target = _target
 	for bar: ColorRect in _bars:
 		bar.color = IDLE_COLOUR if target == null else ACTIVE_COLOUR
 	if target == null or (win_panel != null and win_panel.visible):
@@ -167,6 +194,7 @@ func _interact_key() -> String:
 
 
 func _on_score_changed(value: int) -> void:
+	_score = value
 	var level: Node = Game.current_level()
 	var total: int = 0
 	if level != null and level.has_method(&"switch_total"):

@@ -21,7 +21,7 @@ features/<id>/
 ```toml
 id = "online-play"
 name = "Online play"
-summary = "Host or join over LAN or the internet with Godot's high-level multiplayer."
+summary = "Host or join a game over LAN or the internet."
 version = 1
 requires = []          # added automatically and reported
 conflicts = []         # refused, in either direction
@@ -56,6 +56,8 @@ pad_buttons = [0]
   same setting to different values, or add the same autoload or export preset
   name; `validate_catalogue()` checks every blueprint with every feature
   subset.
+- A base `[append]` and an adapter's `[adapters.<id>.append]` may add to the
+  same key; the manifest keeps the union, so removal takes back both.
 - Removal must leave the project as it was: keep everything a feature changes
   declared in `feature.toml` or shipped in its overlay, so the manifest can
   undo it.

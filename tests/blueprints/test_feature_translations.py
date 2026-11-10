@@ -494,6 +494,93 @@ def test_every_blueprint_plays_in_another_language(tmp_path: Path, blueprint: st
     boot(project, frames=120, user_args=(*TEST_ARGS, "--pseudo-locale"))
 
 
+HUD_CHECK = """extends SceneTree
+## Turns the pseudo-locale on mid-game: every HUD text drawn with tr() is drawn
+## again in the new language at once, and never translated twice.
+
+const Harness := preload("res://tests/support/play.gd")
+
+var h: Harness
+
+
+func _initialize() -> void:
+	_run.call_deferred()
+
+
+func _run() -> void:
+	h = Harness.new(self, "hud_language")
+	await h.boot()
+	await h.physics_frames(30)
+	var labels: Array[Label] = _hud_labels(root)
+	var before: PackedStringArray = PackedStringArray()
+	for label: Label in labels:
+		before.append(label.text)
+	h.expect(not labels.is_empty(), "the HUD shows text")
+	var language: Node = root.get_node(^"Language")
+	language.call(&"set_pseudo", true)
+	await h.process_frames(2)
+	for i: int in labels.size():
+		var label: Label = labels[i]
+		if not is_instance_valid(label) or not label.is_visible_in_tree():
+			continue
+		var text: String = label.text
+		h.expect(text != before[i], "%s is drawn again (%s)" % [label.name, text])
+		h.expect(
+			text.begins_with("[") and not text.begins_with("[["),
+			"%s is translated once (%s)" % [label.name, text]
+		)
+	language.call(&"set_pseudo", false)
+	await h.process_frames(2)
+	for i: int in labels.size():
+		var label: Label = labels[i]
+		if is_instance_valid(label) and label.is_visible_in_tree():
+			h.expect(not label.text.begins_with("["), "%s is back in English" % label.name)
+	h.finish()
+
+
+func _hud_labels(node: Node) -> Array[Label]:
+	var found: Array[Label] = []
+	if node is CanvasItem and not (node as CanvasItem).is_visible_in_tree():
+		return found
+	var label: Label = node as Label
+	if (
+		label != null
+		and label.auto_translate_mode == Node.AUTO_TRANSLATE_MODE_DISABLED
+		and not label.text.is_empty()
+		and _in_hud(label)
+	):
+		found.append(label)
+	for child: Node in node.get_children():
+		found.append_array(_hud_labels(child))
+	return found
+
+
+func _in_hud(node: Node) -> bool:
+	var at: Node = node
+	while at != null:
+		var script: Script = at.get_script() as Script
+		if script != null and script.resource_path.ends_with("/ui/hud.gd"):
+			return true
+		at = at.get_parent()
+	return false
+"""
+
+
+@needs_godot
+@pytest.mark.parametrize(
+    "blueprint", [b for b in _blueprint_ids() if (blueprints.BLUEPRINTS_DIR / b / "overlay/game/ui/hud.gd").is_file()]
+)
+def test_hud_follows_a_language_switch(tmp_path: Path, blueprint: str) -> None:
+    """HUD numbers are drawn with tr() % n: a live language switch redraws
+    them, and the label never translates the result a second time."""
+    project = make_project(tmp_path, blueprint, [FEATURE])
+    (project / "hud_language_check.gd").write_text(HUD_CHECK, encoding="utf-8")
+    run_godot(
+        project, "res://hud_language_check.gd", ("--autostart", _settings(tmp_path)),
+        timeout=180, marker="hud_language",
+    )
+
+
 @needs_godot
 def test_translations_with_every_feature(tmp_path: Path) -> None:
     """Puzzle cards ships with translations by default; add everything else."""

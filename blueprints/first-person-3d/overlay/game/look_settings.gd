@@ -129,6 +129,8 @@ func _build_page() -> Control:
 		sensitivity(), SENSITIVITY_MIN, SENSITIVITY_MAX, 0.1))
 	column.add_child(_slider_row("Field of view", SECTION_LOOK, KEY_FOV,
 		fov(), FOV_MIN, FOV_MAX, 1.0))
+	if _controls_page_has_invert():
+		return column
 	var invert: CheckButton = UiStyle.toggle(invert_y())
 	invert.name = "%s_%s" % [SECTION_INPUT, KEY_INVERT_Y]
 	invert.toggled.connect(
@@ -138,6 +140,12 @@ func _build_page() -> Control:
 	line.name = "%s_row" % invert.name
 	column.add_child(line)
 	return column
+
+
+## True when the controller feature's Controls page already offers the same
+## invert toggle (same setting), so this page leaves it out.
+func _controls_page_has_invert() -> bool:
+	return get_node_or_null(^"/root/Controller") != null and InputMap.has_action(&"look_up")
 
 
 func _slider_row(

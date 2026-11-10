@@ -12,7 +12,15 @@ blueprints/
   <id>/
     blueprint.toml
     overlay/        -> project root: game/, tests/game/
+    capture.png     the new-project card's screenshot (never copied into a game)
+    capture.toml    how Godot made it: command, engine version, frame, sha256
 ```
+
+`capture.png` is the one picture a blueprint folder may hold, and only because
+Godot made it by running the blueprint: `uv run python
+release/capture_blueprints.py` makes every capture again (or `--blueprint <id>`
+for one). Re-run it after a blueprint's look changes; `validate_catalogue()`
+refuses a capture whose sha256 does not match its note.
 
 ## Rules
 
@@ -35,6 +43,9 @@ blueprints/
   Keyboard bindings are the blueprint's; pad bindings belong to the controller
   feature. Never declare `ui_*` actions: that would replace Godot's own.
 - Every user-visible string goes through `tr()` or a Control's auto-translate.
+  A Label filled from `tr("…") % n` turns auto-translate off (it would
+  translate the result a second time) and is drawn again on
+  `NOTIFICATION_TRANSLATION_CHANGED`, so a language switch updates it live.
 
 ## blueprint.toml
 

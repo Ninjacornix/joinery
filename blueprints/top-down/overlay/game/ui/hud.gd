@@ -24,6 +24,11 @@ var again_button: Button
 var menu_button: Button
 
 var _banner_left: float = 0.0
+## What the labels show, kept so a language change can draw them again.
+var _health: Vector2i = Vector2i.ZERO
+var _score: int = 0
+var _wave: Vector2i = Vector2i.ZERO
+var _end: Dictionary = {}
 
 
 func _ready() -> void:
@@ -43,6 +48,15 @@ func _ready() -> void:
 	set_dash(1.0)
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_TRANSLATION_CHANGED and score_label != null:
+		set_health(_health.x, _health.y)
+		set_score(_score)
+		set_wave(_wave.x, _wave.y)
+		if end_panel.visible:
+			_render_end()
+
+
 func _process(delta: float) -> void:
 	if _banner_left > 0.0:
 		_banner_left -= delta
@@ -51,16 +65,19 @@ func _process(delta: float) -> void:
 
 
 func set_health(health: int, max_health: int) -> void:
+	_health = Vector2i(health, max_health)
 	health_bar.max_value = maxf(float(max_health), 1.0)
 	health_bar.value = float(health)
 	health_label.text = tr("%d / %d") % [health, max_health]
 
 
 func set_score(value: int) -> void:
+	_score = value
 	score_label.text = tr("Score: %d") % value
 
 
 func set_wave(wave: int, total: int) -> void:
+	_wave = Vector2i(wave, total)
 	if wave <= 0:
 		wave_label.text = tr("Get ready")
 	else:
@@ -81,13 +98,20 @@ func show_banner(text: String, seconds: float = 1.6) -> void:
 
 func show_end(won: bool, result: Dictionary) -> void:
 	banner.visible = false
+	_end = {"won": won, "result": result}
+	_render_end()
+	end_panel.visible = true
+	again_button.grab_focus.call_deferred()
+
+
+func _render_end() -> void:
+	var won: bool = bool(_end.get("won", false))
+	var result: Dictionary = _end.get("result", {})
 	end_title.text = tr("Arena cleared!") if won else tr("You were overwhelmed")
 	end_title.add_theme_color_override(&"font_color", UiStyle.ACCENT if won else HEALTH_COLOUR)
 	end_score_label.text = tr("Score: %d") % int(result.get("score", 0))
 	end_time_label.text = tr("Time: %s") % format_time(float(result.get("time", 0.0)))
 	again_button.text = tr("Play again") if won else tr("Try again")
-	end_panel.visible = true
-	again_button.grab_focus.call_deferred()
 
 
 func hide_end() -> void:
@@ -170,6 +194,9 @@ func _build_end_panel() -> void:
 	menu_button.name = "MainMenu"
 	again_button.pressed.connect(retry_requested.emit)
 	menu_button.pressed.connect(main_menu_requested.emit)
+	# Title and retry text are set with tr() when the panel opens.
+	end_title.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
+	again_button.auto_translate_mode = Node.AUTO_TRANSLATE_MODE_DISABLED
 	for node: Control in [end_title, end_score_label, end_time_label, again_button, menu_button]:
 		column.add_child(node)
 	end_panel.add_child(column)

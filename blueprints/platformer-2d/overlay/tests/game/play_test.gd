@@ -3,7 +3,7 @@ extends SceneTree
 ## and checks what the player would see happen.
 ##
 ## Run: godot --headless --fixed-fps 60 --script res://tests/game/play_test.gd
-##      -- --autostart --settings-path=user://test_settings.cfg
+##      -- --autostart --settings-path=<file>
 ##
 ## This file is compiled before the autoloads exist, so it names no game
 ## script. The checks live in play_checks.gd, loaded once the game runs.

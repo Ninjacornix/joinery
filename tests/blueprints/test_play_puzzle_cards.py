@@ -95,7 +95,10 @@ def test_catalogue_has_no_problems_of_its_own() -> None:
 
 def test_overlay_is_code_only_greybox() -> None:
     assert check_overlay(OVERLAY, blueprints.BLUEPRINT_ROOTS) == []
-    found = [p for p in ROOT.rglob("*") if p.suffix.lower() in blueprints.BANNED_SUFFIXES]
+    found = [
+        p for p in ROOT.rglob("*")
+        if p.suffix.lower() in blueprints.BANNED_SUFFIXES and p.relative_to(ROOT).as_posix() not in blueprints.CAPTURE_FILES
+    ]
     assert found == []
     level = (OVERLAY / "game/level.tscn").read_text()
     assert '[node name="Players"' in level

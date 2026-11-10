@@ -98,17 +98,6 @@ func _wait_until(condition: Callable, max_frames: int) -> bool:
 	return bool(condition.call())
 
 
-## Stops a `h.watch` record that is read with `fire_count` instead of waited
-## on, so its callback does not outlive the test.
-func _unwatch(record: Dictionary) -> void:
-	var signal_ref: Signal = record["signal"]
-	if record.has("callable"):
-		var catch: Callable = record["callable"]
-		if is_instance_valid(signal_ref.get_object()) and signal_ref.is_connected(catch):
-			signal_ref.disconnect(catch)
-		record.erase("callable")
-
-
 func _wait_vulnerable() -> void:
 	await _wait_until(func() -> bool: return not player.is_invulnerable(), 120)
 
@@ -173,7 +162,7 @@ func _check_dash() -> void:
 	h.expect(cooled, "the dash cools down")
 	await h.tap(&"dash")
 	h.expect(h.fire_count(dashes) == 2, "dash works again after the cooldown")
-	_unwatch(dashes)
+	h.unwatch(dashes)
 	await h.physics_frames(30)
 
 
@@ -192,7 +181,7 @@ func _check_attack() -> void:
 	h.expect(player.health == player.max_health, "enemies fading in do not hurt")
 	await h.tap(&"attack")
 	h.expect(h.fire_count(swings) == 1, "attack waits for its cooldown")
-	_unwatch(swings)
+	h.unwatch(swings)
 
 	await h.physics_frames(20)
 	front.global_position = CLEAR + Vector2(50.0, 0.0)
@@ -200,7 +189,7 @@ func _check_attack() -> void:
 	var gone: Dictionary = h.watch(front.defeated)
 	await h.tap(&"attack")
 	h.expect(h.fire_count(gone) == 1, "a second hit defeats a chaser")
-	_unwatch(gone)
+	h.unwatch(gone)
 	await h.physics_frames(1)
 	h.expect(not is_instance_valid(front), "a defeated enemy is removed")
 	h.expect(level.score == score + 10, "a defeated chaser scores 10")

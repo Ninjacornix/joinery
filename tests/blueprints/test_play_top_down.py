@@ -59,7 +59,10 @@ def test_catalogue_has_no_problems_for_this_blueprint() -> None:
 def test_overlay_is_code_only_greybox() -> None:
     banned = {".png", ".jpg", ".jpeg", ".webp", ".svg", ".glb", ".gltf", ".blend",
               ".wav", ".ogg", ".mp3", ".ttf", ".otf"}
-    found = [p for p in ROOT.rglob("*") if p.suffix.lower() in banned]
+    found = [
+        p for p in ROOT.rglob("*")
+        if p.suffix.lower() in banned and p.relative_to(ROOT).as_posix() not in blueprints.CAPTURE_FILES
+    ]
     assert found == []
     for script in ROOT.rglob("*.gd"):
         uid = script.with_name(script.name + ".uid")

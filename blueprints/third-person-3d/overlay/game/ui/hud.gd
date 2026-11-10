@@ -15,6 +15,10 @@ var again_button: Button
 var menu_button: Button
 
 var _player: Node = null
+## What the labels show, kept so a language change can draw them again.
+var _coins: Vector2i = Vector2i.ZERO
+var _seconds: float = 0.0
+var _win_result: Dictionary = {}
 
 
 ## "m:ss.cc" for a time in seconds.
@@ -66,13 +70,23 @@ func _ready() -> void:
 	_build_win_panel(root)
 	set_coins(0, 0)
 	set_time(0.0)
+	var controller: Node = get_node_or_null(^"/root/Controller")
+	if controller != null and controller.has_signal(&"device_changed"):
+		controller.connect(&"device_changed", _on_device_changed)
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_TRANSLATION_CHANGED and coins_label != null:
+		_render()
 
 
 func set_coins(count: int, total: int) -> void:
+	_coins = Vector2i(count, total)
 	coins_label.text = tr("Coins: %d / %d") % [count, total]
 
 
 func set_time(seconds: float) -> void:
+	_seconds = seconds
 	time_label.text = tr("Time: %s") % format_time(seconds)
 
 
@@ -88,13 +102,19 @@ func bind_player(player: Node) -> void:
 
 func show_win(result: Dictionary) -> void:
 	prompt_label.visible = false
+	_win_result = result
+	_render_win()
+	win_panel.visible = true
+	again_button.grab_focus()
+
+
+func _render_win() -> void:
+	var result: Dictionary = _win_result
 	var seconds: float = float(result.get("time", 0.0))
 	win_time_label.text = tr("Time: %s") % format_time(seconds)
 	var score: int = int(result.get("score", 0))
 	var total: int = int(result.get("total", 0))
 	win_coins_label.text = tr("Coins: %d / %d") % [score, total]
-	win_panel.visible = true
-	again_button.grab_focus()
 
 
 func hide_win() -> void:
@@ -140,6 +160,19 @@ func _build_win_panel(root: Control) -> void:
 	win_panel.name = "WinScreen"
 	win_panel.visible = false
 	root.add_child(win_panel)
+
+
+## Draws every label again in the current language.
+func _render() -> void:
+	set_coins(_coins.x, _coins.y)
+	set_time(_seconds)
+	if win_panel.visible:
+		_render_win()
+	_refresh_prompt()
+
+
+func _on_device_changed(_using_pad: bool) -> void:
+	_refresh_prompt()
 
 
 func _on_target_changed(_target: Node) -> void:

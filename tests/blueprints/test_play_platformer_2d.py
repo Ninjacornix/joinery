@@ -66,7 +66,10 @@ def test_catalogue_has_no_problems_with_this_blueprint() -> None:
 
 
 def test_overlay_is_code_only_greybox() -> None:
-    found = [p for p in ROOT.rglob("*") if p.suffix.lower() in blueprints.BANNED_SUFFIXES]
+    found = [
+        p for p in ROOT.rglob("*")
+        if p.suffix.lower() in blueprints.BANNED_SUFFIXES and p.relative_to(ROOT).as_posix() not in blueprints.CAPTURE_FILES
+    ]
     assert found == []
     for script in ROOT.rglob("*.gd"):
         uid = script.with_name(script.name + ".uid")
@@ -106,7 +109,7 @@ def test_map_is_well_formed() -> None:
 @needs_godot
 def test_main_menu_and_autostart_boot_cleanly(tmp_path: Path) -> None:
     project = make_project(tmp_path, BLUEPRINT, [])
-    boot(project, frames=90, user_args=("--settings-path=user://test_settings.cfg",))
+    boot(project, frames=90, user_args=("--settings-path={settings}",))
     boot(project, frames=180)
 
 

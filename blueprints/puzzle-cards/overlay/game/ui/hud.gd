@@ -49,6 +49,11 @@ func _ready() -> void:
 	_row.add_child(stars)
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_TRANSLATION_CHANGED and moves_label != null:
+		refresh()
+
+
 ## Follows `board` (the level) from now on.
 func setup(board: Node) -> void:
 	_board = board

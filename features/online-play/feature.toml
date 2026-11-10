@@ -1,6 +1,6 @@
 id = "online-play"
 name = "Online play"
-summary = "Host or join over LAN or the internet with Godot's high-level multiplayer."
+summary = "Host or join a game over LAN or the internet."
 version = 1
 requires = []
 conflicts = []

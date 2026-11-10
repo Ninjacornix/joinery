@@ -1,6 +1,6 @@
 id = "save-load"
 name = "Save and load"
-summary = "Three save slots with an autosave at checkpoints: Continue and Load in the main menu, Save and Load in the pause menu."
+summary = "Three save slots and an autosave at checkpoints, with Continue, Save and Load in the menus."
 version = 1
 requires = []
 conflicts = []

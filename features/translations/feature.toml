@@ -17,7 +17,7 @@
 # not an asset.
 id = "translations"
 name = "Translations"
-summary = "Play in more than one language: a Language settings page, PO/CSV translation files in locale/, a pseudo-locale to check text length, and a tool that collects every text of the game."
+summary = "Play in more than one language: a Language page, translation files and a check for text that runs long."
 version = 1
 requires = []
 conflicts = []

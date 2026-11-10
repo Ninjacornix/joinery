@@ -12,6 +12,21 @@ func can_pause() -> bool:
 	return false
 """
 
+## Restarts through the session, as online play does: it either takes care
+## of the restart (calling back into Game) or leaves it to Game.
+const ROUTING_SESSION := """extends GameSession
+
+var asked: int = 0
+var handle: bool = true
+
+
+func restart_level() -> bool:
+	asked += 1
+	if handle:
+		Game.restart_level()
+	return handle
+"""
+
 var play: PlayHarness
 
 
@@ -28,6 +43,7 @@ func _run() -> void:
 	await _pause_and_sessions()
 	await _spawn_actions_and_state()
 	await _players_and_pending_state()
+	await _restart_through_session()
 	await _restart_and_leave()
 	play.finish()
 
@@ -269,6 +285,25 @@ func _players_and_pending_state() -> void:
 		play.expect(game.pending_state.is_empty(), "pending_state is used once")
 	ProjectSettings.set_setting("game/hooks/player_scene", previous)
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+
+
+func _restart_through_session() -> void:
+	var game: Node = play.game
+	var script: GDScript = GDScript.new()
+	script.source_code = ROUTING_SESSION
+	play.expect(script.reload() == OK, "a routing session compiles")
+	var session: GameSession = script.new() as GameSession
+	game.set_session(session)
+	var started: Dictionary = play.watch(play.events.level_started)
+	game.restart_level()
+	await play.wait_watched(started, 120)
+	play.expect(int(session.get(&"asked")) == 1, "restart asks the session once")
+	session.set(&"handle", false)
+	started = play.watch(play.events.level_started)
+	game.restart_level()
+	await play.wait_watched(started, 120)
+	play.expect(int(session.get(&"asked")) == 2, "a session that declines is asked")
+	game.set_session(null)
 
 
 func _restart_and_leave() -> void:

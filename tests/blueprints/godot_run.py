@@ -21,7 +21,10 @@ from joinery.installer import Selection
 from joinery.project import create_project
 
 STOCK_GODOT = ROOT / ".tools/Godot.app/Contents/MacOS/Godot"
-TEST_ARGS = ("--autostart", "--settings-path=user://test_settings.cfg")
+#: `{settings}` becomes a settings file of the project's own, outside it and
+#: outside `user://`, so no two tests ever share one.
+SETTINGS_ARG = "--settings-path={settings}"
+TEST_ARGS = ("--autostart", SETTINGS_ARG)
 _ERROR = re.compile(r"^(SCRIPT ERROR|ERROR:|USER SCRIPT ERROR|USER ERROR)", re.MULTILINE)
 _OK = re.compile(r"^\S.*: ok\s*$", re.MULTILINE)
 
@@ -91,6 +94,15 @@ def godot_env(project: Path) -> dict[str, str]:
     }
 
 
+def settings_file(project: Path) -> Path:
+    """The absolute settings file `{settings}` stands for in user args."""
+    return project.parent / f".settings-{project.name}.cfg"
+
+
+def _user_args(project: Path, user_args: Sequence[str]) -> list[str]:
+    return [arg.replace("{settings}", str(settings_file(project))) for arg in user_args]
+
+
 def _run(args: list[str], timeout: float, project: Path) -> Completed:
     env = godot_env(project)
     process = subprocess.run(
@@ -148,7 +160,7 @@ def run_godot(
     import_project(project)
     args = [
         str(_godot()), "--headless", "--path", str(project), "--fixed-fps", "60",
-        "--script", script, "--", *user_args,
+        "--script", script, "--", *_user_args(project, user_args),
     ]
     return _check(_run(args, timeout, project), marker)
 
@@ -165,7 +177,7 @@ def boot(
     import_project(project)
     args = [
         str(_godot()), "--headless", "--path", str(project), "--fixed-fps", "60",
-        "--quit-after", str(frames), "--", *user_args,
+        "--quit-after", str(frames), "--", *_user_args(project, user_args),
     ]
     return _check(_run(args, timeout, project), marker)
 
@@ -198,7 +210,7 @@ def run_pair(
         base += ["--script", script]
 
     def command(extra: Sequence[str]) -> list[str]:
-        return [*base, "--", *(arg.replace("{port}", port) for arg in extra)]
+        return [*base, "--", *(arg.replace("{port}", port) for arg in _user_args(project, extra))]
 
     env = godot_env(project)
     host_cmd, client_cmd = command(host_args), command(client_args)

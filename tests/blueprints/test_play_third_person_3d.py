@@ -21,7 +21,7 @@ BLUEPRINT = ROOT / "blueprints" / "third-person-3d"
 OVERLAY = BLUEPRINT / "overlay"
 BLUEPRINT_ID = "third-person-3d"
 PLAY_TEST = "res://tests/game/play_test.gd"
-USER_ARGS = ("--autostart", "--settings-path=user://test_settings.cfg")
+USER_ARGS = ("--autostart", "--settings-path={settings}")
 
 BANNED_SUFFIXES = {
     ".png", ".jpg", ".jpeg", ".webp", ".svg", ".glb", ".gltf", ".blend",

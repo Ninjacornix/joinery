@@ -2,7 +2,7 @@ extends SceneTree
 ## Play test for the first-person game, driven by injected input.
 ##
 ## Run: godot --headless --fixed-fps 60 --script res://tests/game/play_test.gd
-##        -- --autostart --settings-path=user://test_settings.cfg
+##        -- --autostart --settings-path=<file>
 ##
 ## Positions and view angles are set directly only to stage a check; every
 ## outcome comes from input going through the real input map.
