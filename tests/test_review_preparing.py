@@ -124,7 +124,7 @@ def staged(
 ) -> tuple[ProjectGateway, list[str]]:
     (tmp_path / "project.godot").write_text("config_version=5\n")
     monkeypatch.setattr("joinery.gateway.configured", lambda _: ([], []))
-    monkeypatch.setattr("joinery.gateway.evidence", AsyncMock(return_value=[]))
+    monkeypatch.setattr("joinery.gateway.render", AsyncMock())
     runs: list[str] = []
 
     async def offline(argv: list[str], _root: Path, *_a: Any, **_k: Any) -> Result:

@@ -46,7 +46,7 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (tmp_path / "joinery.toml").write_text('[tools]\nenabled=["godot"]\n')
     (tmp_path / "joinery.lock").write_text("version = 1\n")
     monkeypatch.setattr("joinery.gateway.configured", lambda _: ([], []))
-    monkeypatch.setattr("joinery.gateway.evidence", AsyncMock(return_value=[]))
+    monkeypatch.setattr("joinery.gateway.render", AsyncMock())
 
     async def offline(_argv: list[str], _root: Path, *_args: Any, **_kw: Any) -> Result:
         # Godot's import check and any worker run; the bible checks here are Python.

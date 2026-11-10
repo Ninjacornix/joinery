@@ -25,7 +25,7 @@ from joinery.lockfile import asset_files
 from joinery.locking import record_custom_outputs
 from joinery.mcp_runtime import MCPConnection, PolicyStop, validate_arguments
 from joinery.read_access import read_only
-from joinery.review import evidence
+from joinery.review import Render, plan, render
 from joinery.server_install import configured, installation
 from joinery.submission import is_reference
 from joinery.timing import TurnTiming
@@ -49,6 +49,10 @@ NATIVE_OPS = frozenset(
         "adjust_map",
         "bake_height_to_normal",
     }
+)
+#: Files whose line-by-line diff the review's Details show.
+TEXT_SUFFIXES = frozenset(
+    {".gd", ".tscn", ".tres", ".json", ".toml", ".gdshader", ".md"}
 )
 ART_GATE_MESSAGE = (
     "Before Journeyman makes anything, agree how your game should look. "
@@ -186,6 +190,9 @@ class ProjectGateway:
         self._discovery_lock = asyncio.Lock()
         #: (transaction id, stage inventory) right after a clean Godot import.
         self._imported: tuple[str, dict[str, str]] | None = None
+        #: (transaction id, review media, renders still to run) from open_review.
+        self._media_jobs: tuple[str, list[dict[str, Any]], list[Render]] = ("", [], [])
+        self._media_task: asyncio.Task[None] | None = None
 
     async def connection(self, server: str) -> MCPConnection:
         """Start just the requested server; unrelated creative apps stay idle."""
@@ -549,16 +556,8 @@ class ProjectGateway:
         tx = self.transaction
         if tx is None:
             return None
-        self.progress("Preparing your review…")
-        # No background app may continue writing after the reviewed snapshot.
-        for connection in self.staged.values():
-            await connection.close()
-        self.staged.clear()
-        self.runtime_owned = False
-        self._strip_runtime()
-        checked = await submission.validate(self, tx, set())
-        changes = checked.changes
-        if not changes:
+        checked = await self.submit_checks(set())
+        if not checked.changes:
             await self.cancel()
             return None
         if checked.gate is not None:
@@ -568,47 +567,70 @@ class ProjectGateway:
             return checked.gate
         if checked.problems:
             raise ValueError("; ".join(p.message for p in checked.problems))
-        text_diffs: list[str] = []
-        for change in changes:
-            if Path(change["path"]).suffix in {
-                ".gd",
-                ".tscn",
-                ".tres",
-                ".json",
-                ".toml",
-                ".gdshader",
-                ".md",
-            }:
-                old = tx.original / change["path"]
-                new = tx.stage / change["path"]
-                before = (
-                    old.read_text(errors="replace").splitlines()
-                    if old.is_file()
-                    else []
-                )
-                after = (
-                    new.read_text(errors="replace").splitlines()
-                    if new.is_file()
-                    else []
-                )
-                text_diffs.extend(
-                    difflib.unified_diff(
-                        before,
-                        after,
-                        fromfile=change["path"],
-                        tofile=change["path"],
-                        lineterm="",
-                    )
-                )
-        reviewed = tx.review()
-        if any(Path(change["path"]).suffix == ".blend" for change in changes):
-            self.progress("Rendering the before and after…")
+        preview = self.open_review(tx.summary)
+        _tx_id, _media, jobs = self._media_jobs
+        self._media_jobs = ("", [], [])
         with self.span("review_media"):
-            media = await evidence(
-                tx,
-                changes,
-                [dict(t) for t in self.target_context if t.get("part_kind")],
+            await render(jobs, strict=True)
+        preview.pop("media_pending", None)
+        return preview
+
+    async def submit_checks(self, live_scenes: set[str]) -> submission.Validation:
+        """Check the staged change as it stands now (``submission.validate``).
+
+        Staged apps are closed first, so no background app writes while the
+        change is checked; they start again if the agent keeps working.
+        """
+        tx = self.transaction
+        self.progress("Checking the change…")
+        for connection in self.staged.values():
+            await connection.close()
+        self.staged.clear()
+        self.runtime_owned = False
+        self._strip_runtime()
+        if tx is None or tx.state != "staging":
+            return submission.Validation()
+        with self.span("submit"):
+            return await submission.validate(self, tx, live_scenes)
+
+    def open_review(self, summary: str) -> dict[str, Any]:
+        """Put the checked stage in review and return its ``file_preview``.
+
+        ``summary`` is the agent's one line naming the change. The before/after
+        renders are planned here and run afterwards (:meth:`start_media`); the
+        preview already names the files they write, with ``media_pending``.
+        """
+        tx = self.transaction
+        if tx is None:
+            raise ValueError("Nothing is staged for review.")
+        if summary.strip():
+            tx.summary = summary.strip()[:160]
+        text_diffs: list[str] = []
+        for change in tx.diff():
+            if Path(change["path"]).suffix not in TEXT_SUFFIXES:
+                continue
+            old = tx.original / change["path"]
+            new = tx.stage / change["path"]
+            before = (
+                old.read_text(errors="replace").splitlines() if old.is_file() else []
             )
+            after = (
+                new.read_text(errors="replace").splitlines() if new.is_file() else []
+            )
+            text_diffs.extend(
+                difflib.unified_diff(
+                    before,
+                    after,
+                    fromfile=change["path"],
+                    tofile=change["path"],
+                    lineterm="",
+                )
+            )
+        reviewed = tx.review()
+        media, jobs = plan(
+            tx, reviewed, [dict(t) for t in self.target_context if t.get("part_kind")]
+        )
+        self._media_jobs = (tx.id, media, jobs)
         return {
             "kind": "file_preview",
             "diff": "\n".join(text_diffs[:400]),
@@ -616,7 +638,34 @@ class ProjectGateway:
             "summary": tx.summary,
             "changes": reviewed,
             "media": media,
+            "media_pending": bool(jobs),
         }
+
+    def start_media(self, emit: Callable[[dict[str, Any]], None]) -> None:
+        """Render the review's before and after in the background.
+
+        Emits ``review_media`` with the finished items; a failed render marks its
+        item with ``error`` instead of failing the review.
+        """
+        identifier, media, jobs = self._media_jobs
+        self._media_jobs = ("", [], [])
+        if not jobs:
+            return
+
+        async def rendered() -> None:
+            with self.span("review_media"):
+                await render(jobs)
+            emit({"kind": "review_media", "transaction_id": identifier, "media": media})
+
+        self._media_task = asyncio.create_task(rendered())
+
+    async def stop_media(self) -> None:
+        """Stop renders still running: Blender must never read a stage being moved."""
+        task, self._media_task = self._media_task, None
+        if task is not None and not task.done():
+            task.cancel()
+        if task is not None:
+            await asyncio.gather(task, return_exceptions=True)
 
     def span(self, phase: str) -> AbstractContextManager[None]:
         return self.timing.span(phase) if self.timing else nullcontext()
@@ -631,6 +680,7 @@ class ProjectGateway:
         tx = self.transaction
         if tx is None or tx.id != identifier:
             raise ValueError("This transaction is not pending in the current session.")
+        await self.stop_media()
         changes = tx.accept() if accept else []
         notice = ""
         if accept:
@@ -697,6 +747,7 @@ class ProjectGateway:
         }
 
     async def cancel(self) -> None:
+        await self.stop_media()
         self.runtime_owned = False
         self.runtime_config = None
         self.runtime_injected = None
@@ -711,6 +762,7 @@ class ProjectGateway:
         self.transaction = None
 
     async def close(self) -> None:
+        await self.stop_media()
         if self.transaction is not None and self.transaction.state in {
             "staging",
             "review",

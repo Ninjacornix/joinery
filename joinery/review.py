@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-from collections.abc import Coroutine
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -130,20 +130,36 @@ def part_thumbnail_script(part: dict[str, str]) -> str:
     )
 
 
-async def evidence(
+@dataclass
+class Render:
+    """One Blender render a review waits for: it writes ``output`` for ``item[side]``."""
+
+    item: dict[str, Any]
+    side: str
+    root: Path
+    relative: str
+    name: str
+    script: str
+
+    @property
+    def output(self) -> Path:
+        return self.root / ".joinery/previews" / self.name
+
+
+def plan(
     tx: FileTransaction,
     changes: list[dict[str, str]],
     parts: list[dict[str, str]] | None = None,
-) -> list[dict[str, Any]]:
-    """Before/after media for the changed art and audio.
+) -> tuple[list[dict[str, Any]], list[Render]]:
+    """Before/after media for the changed art and audio, and the renders they need.
 
-    ``parts`` are the prompt's part targets: a material or map target adds a
-    texture view of that part on its model before the full model. Every render
-    runs at once: each is its own offline Blender, and the review waits for all.
+    Every item already names the file each side shows: an image or audio file
+    as it is, or the render's output, which appears once :func:`render` has
+    run. ``parts`` are the prompt's part targets: a material or map target adds
+    a texture view of that part on its model before the full model.
     """
     media: list[dict[str, Any]] = []
-    #: (item, side, render) for every view that needs Blender.
-    renders: list[tuple[dict[str, Any], str, Coroutine[Any, Any, Path]]] = []
+    renders: list[Render] = []
     for change in sorted(changes, key=lambda c: _order(c["path"])):
         relative = change["path"]
         suffix = Path(relative).suffix.lower()
@@ -169,10 +185,15 @@ async def evidence(
                 key = hashlib.sha256(part.get("id", "").encode()).hexdigest()[:8]
                 for side, root in (("before", tx.original), ("after", tx.stage)):
                     if (root / relative).is_file():
-                        script = part_thumbnail_script(part)
-                        name = f"{digest}-{key}.png"
                         renders.append(
-                            (view, side, _render(root, relative, name, script))
+                            Render(
+                                view,
+                                side,
+                                root,
+                                relative,
+                                f"{digest}-{key}.png",
+                                part_thumbnail_script(part),
+                            )
                         )
                 media.append(view)
         for side, root in (("before", tx.original), ("after", tx.stage)):
@@ -181,22 +202,48 @@ async def evidence(
                 continue
             if suffix == ".blend":
                 renders.append(
-                    (
-                        item,
-                        side,
-                        _render(root, relative, digest + ".png", BLENDER_THUMBNAIL),
+                    Render(
+                        item, side, root, relative, digest + ".png", BLENDER_THUMBNAIL
                     )
                 )
             else:
                 item[side] = str(path)
         media.append(item)
+    for job in renders:
+        # A file left by an earlier review would show before this render is done.
+        job.output.unlink(missing_ok=True)
+        job.item[job.side] = str(job.output)
+    return media, renders
+
+
+async def render(renders: list[Render], *, strict: bool = False) -> None:
+    """Run every render at once, each in its own offline Blender.
+
+    A render that fails marks its item with ``error`` (the review still stands)
+    and drops that side; with ``strict`` the first failure is raised instead.
+    """
     done = await asyncio.gather(
-        *(render for _item, _side, render in renders), return_exceptions=True
+        *(_render(job.root, job.relative, job.name, job.script) for job in renders),
+        return_exceptions=True,
     )
-    for (target, side, _render_call), result in zip(renders, done, strict=True):
+    for job, result in zip(renders, done, strict=True):
         if isinstance(result, BaseException):
-            raise result
-        target[side] = str(result)
+            if strict or not isinstance(result, Exception):
+                raise result
+            job.item.pop(job.side, None)
+            job.item["error"] = str(result).split("\n", 1)[0]
+        else:
+            job.item[job.side] = str(result)
+
+
+async def evidence(
+    tx: FileTransaction,
+    changes: list[dict[str, str]],
+    parts: list[dict[str, str]] | None = None,
+) -> list[dict[str, Any]]:
+    """Before/after media with every render done; a failed render raises."""
+    media, renders = plan(tx, changes, parts)
+    await render(renders, strict=True)
     return media
 
 

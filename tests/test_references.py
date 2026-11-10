@@ -30,7 +30,7 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (tmp_path / "project.godot").write_text("config_version=5\n")
     (tmp_path / "joinery.toml").write_text('[tools]\nenabled=["godot"]\n')
     monkeypatch.setattr("joinery.gateway.configured", lambda _: ([], []))
-    monkeypatch.setattr("joinery.gateway.evidence", AsyncMock(return_value=[]))
+    monkeypatch.setattr("joinery.gateway.render", AsyncMock())
     monkeypatch.setattr("joinery.gateway.approved", lambda _project: True)
     monkeypatch.setattr("joinery.submission.approved_in", lambda *_: True)
     monkeypatch.setattr("joinery.submission.check_assets", lambda *_: [])
