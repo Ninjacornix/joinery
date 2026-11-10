@@ -387,3 +387,50 @@ def test_material_maker_image_inputs_are_not_folded_as_parts(project: Path) -> N
     assert owner["parts"] == ["art/materials/bark_albedo.png"]
     # The photo the graph reads is an input, not something the graph made.
     assert assets["art/photos/bark.png"]["part_of"] == ""
+
+
+def test_assets_waiting_for_review_are_listed_and_marked(project: Path) -> None:
+    from joinery.transactions import FileTransaction
+
+    (project / "project.godot").write_text("config_version=5\n")
+    tx = FileTransaction(project)
+    tx.begin("Model an ashtray")
+    tx.note_tool("blender")
+    stage = tx.stage
+    (stage / "art/sources").mkdir(parents=True)
+    (stage / "art/models").mkdir()
+    (stage / "art/sources/ashtray.blend").write_bytes(b"blend")
+    (stage / "art/models/ashtray.glb").write_bytes(b"glTF")
+    (stage / "art/models/ashtray.glb.import").write_text("[remap]\n")
+    (stage / "art/sources/.gdignore").write_text("")
+    (stage / "recipes/ashtray.toml").write_text(
+        'tool = "blender"\nscript = "recipes/ashtray.py"\n'
+        'outputs = ["art/sources/ashtray.blend", "art/models/ashtray.glb"]\n'
+    )
+    before = watch_stamp(project)
+    tx.review()
+    assert watch_stamp(project) != before, "Going to review refreshes the workspace"
+    assets = {a["path"]: a for a in index(project)["assets"]}
+    assert set(assets) == {"art/sources/ashtray.blend", "art/models/ashtray.glb"}
+    source = assets["art/sources/ashtray.blend"]
+    assert source["pending"] == tx.id and source["integrity"] == "pending"
+    assert source["tool"] == "blender" and source["kind"] == "model"
+    assert source["parts"] == ["art/models/ashtray.glb"], (
+        "Folded like an accepted model"
+    )
+    assert source["staged"].endswith(f"{tx.id}/stage/art/sources/ashtray.blend")
+    assert source["open_options"] == [], "Nothing to open before it is accepted"
+    tx.reject()
+    assert index(project)["assets"] == [], "A discarded change leaves the list"
+
+
+def test_models_scenes_use_outside_art_are_listed(project: Path) -> None:
+    (project / "props").mkdir()
+    (project / "props/crate.glb").write_bytes(b"glTF")
+    (project / "room.tscn").write_text(
+        '[gd_scene format=3]\n\n[ext_resource type="PackedScene" '
+        'path="res://props/crate.glb" id="1"]\n'
+    )
+    assets = {a["path"]: a for a in index(project)["assets"]}
+    assert assets["props/crate.glb"]["kind"] == "model"
+    assert assets["props/crate.glb"]["origin"] == "unrecorded"

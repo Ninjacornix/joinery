@@ -11,11 +11,18 @@ from typing import Any
 
 from pydantic import TypeAdapter
 
-from joinery import readiness
+from joinery import readiness, references
 from joinery.catalog import load_catalog, load_project_tools, selection_ids
 from joinery.desktop import TOOLS, launch, launcher, overrides, project_file
-from joinery.lockfile import AssetEntry, asset_files
+from joinery.lockfile import (
+    ASSET_DIRS,
+    NOT_ASSET_PATHS,
+    NOT_ASSETS,
+    AssetEntry,
+    asset_files,
+)
 from joinery.recipe import IMAGE_SUFFIXES, Recipe, load_recipe, recipe_paths
+from joinery.transactions import DIRECTORY, TRANSACTIONS, list_transactions
 
 #: What an asset is, for grouping in the workspace: by file type first.
 KIND_SUFFIXES: dict[str, frozenset[str]] = {
@@ -51,6 +58,12 @@ MAP_NAMES = frozenset(
 def watch_stamp(project: Path) -> str:
     """Cheap change detection for automatic refresh; never a provenance check."""
     paths = asset_files(project) | {"joinery.toml", "joinery.lock"}
+    # A change going to review, or decided, rewrites its journal.
+    paths.update(
+        p.relative_to(project).as_posix()
+        for p in (project / TRANSACTIONS).glob("*/journal.json")
+    )
+    paths.update(_scene_models(project))
     paths.update(
         p.relative_to(project).as_posix()
         for p in (project / "recipes").rglob("*")
@@ -99,6 +112,74 @@ class Asset:
     parts: list[str] = field(default_factory=list)
     #: For a part, the source asset it is folded under; empty for top-level assets.
     part_of: str = ""
+    #: The change waiting for review that adds or replaces this file; empty otherwise.
+    pending: str = ""
+    #: Where that change keeps the new file until it is accepted (project-relative).
+    staged: str = ""
+
+
+#: Model files a scene can load; ones outside art/ are still listed when a scene uses them.
+SCENE_MODELS = frozenset({".glb", ".gltf", ".fbx", ".obj", ".dae", ".blend"})
+
+
+def _scene_models(project: Path) -> set[str]:
+    """Model files the project's scenes load that live outside art/ and audio/."""
+    found: set[str] = set()
+    for scene in references.scenes(project):
+        try:
+            text = scene.read_text(errors="replace")
+        except OSError:
+            continue
+        for path, _uid in references.references(text):
+            if (
+                Path(path).suffix.lower() in SCENE_MODELS
+                and Path(path).parts[0] not in ASSET_DIRS
+                and (project / path).is_file()
+            ):
+                found.add(path)
+    return found
+
+
+def _is_asset(path: str) -> bool:
+    """The asset gate's own rule (lockfile.asset_files) for one project path."""
+    pure = Path(path)
+    return (
+        pure.parts[0] in ASSET_DIRS
+        and pure.suffix != ".import"
+        and pure.name not in NOT_ASSETS
+        and path not in NOT_ASSET_PATHS
+    )
+
+
+def _pending(project: Path) -> tuple[dict[str, tuple[str, str]], dict[str, Recipe]]:
+    """Assets that changes waiting for review add or replace, and those changes' recipes.
+
+    Returns ``{path: (transaction id, app)}`` and ``{recipe path: recipe}`` read from
+    each change's stage, so a new model folds its maps and exports like an accepted one.
+    """
+    found: dict[str, tuple[str, str]] = {}
+    recipes: dict[str, Recipe] = {}
+    for tx in list_transactions(project):
+        if tx.state != "review":
+            continue
+        tool = next((t for t in tx.tools if t not in {"godot", "joinery"}), "")
+        for change in tx.changes:
+            path = change["path"]
+            if change["after"] in {"", DIRECTORY}:
+                continue
+            if _is_asset(path):
+                found[path] = (tx.id, tool)
+            elif path.startswith("recipes/") and path.endswith(".toml"):
+                try:
+                    recipes[path] = load_recipe(tx.stage / path)
+                except (ValueError, OSError):
+                    continue
+    # The recipe names the app that made each file; the change only lists its apps.
+    for recipe in recipes.values():
+        for path in (*recipe.outputs, *recipe.sources):
+            if path in found:
+                found[path] = (found[path][0], recipe.tool)
+    return found, recipes
 
 
 def _suffix_kind(path: str) -> str:
@@ -132,7 +213,9 @@ def _fold(
         # A source that is not a native document (an image a Material Maker graph
         # reads) is an input, not something the recipe made: it stays its own asset.
         sources = [p for p in recipe.sources if Path(p).suffix.lower() in native]
-        members = [p for p in dict.fromkeys((*recipe.outputs, *sources)) if p in by_path]
+        members = [
+            p for p in dict.fromkeys((*recipe.outputs, *sources)) if p in by_path
+        ]
         owners = [p for p in members if Path(p).suffix.lower() in native]
         if not owners:
             continue
@@ -204,7 +287,14 @@ def index(project: Path) -> dict[str, Any]:
         issues.append("joinery.lock is missing; assets have no recorded provenance")
     locked = {entry.path: entry for entry in entries}
     claims = {out: rel for rel, recipe in recipes.items() for out in recipe.outputs}
-    paths = asset_files(project) | set(locked) | set(claims)
+    pending, pending_recipes = _pending(project)
+    paths = (
+        asset_files(project)
+        | set(locked)
+        | set(claims)
+        | set(pending)
+        | _scene_models(project)
+    )
     programs: dict[str, tuple[bool, str]] = {}
     for tool in names:
         try:
@@ -226,6 +316,16 @@ def index(project: Path) -> dict[str, Any]:
         asset = Asset(
             rel, tool, entry.origin if entry else "unrecorded", recipe=recipe_rel
         )
+        if rel in pending:
+            change, app = pending[rel]
+            asset.pending = change
+            asset.staged = f"{TRANSACTIONS}/{change}/stage/{rel}"
+            asset.tool = asset.tool or app
+        if not path.is_file() and asset.pending:
+            # New in a change waiting for review: nothing to open or check yet.
+            asset.integrity = "pending"
+            assets.append(asset)
+            continue
         if not path.is_file():
             asset.integrity = "missing"
         elif entry:
@@ -245,7 +345,9 @@ def index(project: Path) -> dict[str, Any]:
                 except ValueError as exc:
                     issues.append(str(exc))
             spec = TOOLS.get(tool)
-            candidates = [p for p in recipe.sources if not p.startswith("recipes/inputs/")]
+            candidates = [
+                p for p in recipe.sources if not p.startswith("recipes/inputs/")
+            ]
             if spec:
                 native_outputs = [
                     p for p in recipe.outputs if Path(p).suffix.lower() in spec.native
@@ -295,7 +397,7 @@ def index(project: Path) -> dict[str, Any]:
             )
         asset.open_options.sort(key=lambda option: (option.tool != tool, option.name))
         assets.append(asset)
-    _fold(assets, recipes, domains)
+    _fold(assets, {**pending_recipes, **recipes}, domains)
     # Readiness comes from the last report only: this index is rebuilt every few
     # seconds, and asking Docker each time would stall the workspace.
     known = readiness.cached_tools()
