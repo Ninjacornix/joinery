@@ -17,6 +17,10 @@ on:
         description: Blueprint and feature combinations to boot
         type: string
         default: default
+      classic_passes:
+        description: How many times to run the classic view check (to catch a rare failure)
+        type: string
+        default: '1'
   workflow_call:
     inputs:
       editors:
@@ -109,10 +113,29 @@ jobs:
           restore-keys: scons-${{ matrix.target }}-
       - name: Build and measure the pinned patched native editor
         id: native_build
-        run: uv run python release/build_editor.py --jobs ${{ matrix.jobs }} --github-env "$GITHUB_ENV"
+        # Windows also writes the editor's .pdb (never packaged) so crash dumps read as stacks.
+        run: uv run python release/build_editor.py --jobs ${{ matrix.jobs }} --github-env "$GITHUB_ENV" ${{ runner.os == 'Windows' && '--debug-symbols' || '' }}
       - name: Provision private Windows software OpenGL
         if: runner.os == 'Windows'
         run: uv run python release/windows_graphics.py --engine "$JOINERY_RELEASE_ENGINE" --output out/windows-software-gl --cache "$RUNNER_TEMP/mesa" --github-env "$GITHUB_ENV"
+      - name: Keep a full crash dump whenever the Windows editor crashes
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dumps = Join-Path $env:GITHUB_WORKSPACE 'out\crash-dumps'
+          New-Item -ItemType Directory -Force $dumps | Out-Null
+          $wer = 'HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting'
+          if (-not (Test-Path $wer)) { New-Item -Force $wer | Out-Null }
+          New-ItemProperty $wer -Name Disabled -Value 0 -PropertyType DWord -Force | Out-Null
+          New-ItemProperty $wer -Name DontShowUI -Value 1 -PropertyType DWord -Force | Out-Null
+          $key = Join-Path "$wer\LocalDumps" (Split-Path $env:JOINERY_RELEASE_ENGINE -Leaf)
+          New-Item -Force $key | Out-Null
+          New-ItemProperty $key -Name DumpFolder -Value $dumps -PropertyType ExpandString -Force | Out-Null
+          New-ItemProperty $key -Name DumpType -Value 2 -PropertyType DWord -Force | Out-Null
+          New-ItemProperty $key -Name DumpCount -Value 5 -PropertyType DWord -Force | Out-Null
+          Set-Service WerSvc -StartupType Manual -ErrorAction SilentlyContinue
+          Start-Service WerSvc -ErrorAction SilentlyContinue
+          Get-ItemProperty $key | Format-List DumpFolder, DumpType, DumpCount
       - name: Lint native addon
         # The glob takes in every addon script, the part picker, parts panel
         # and sidebar pieces included; tests/godot holds their GDScript tests.
@@ -167,12 +190,22 @@ jobs:
             uv run python tests/godot/run_scene_edit_test.py | tee out/native-evidence/editor.log
           fi
       - name: Switch between Joinery's layout and classic Godot
+        env:
+          # Repeat by hand to catch an intermittent failure; every pass must succeed.
+          CLASSIC_PASSES: ${{ inputs.classic_passes || '1' }}
         run: |
-          if [ "$RUNNER_OS" = Linux ]; then
-            xvfb-run -a uv run python tests/godot/run_classic_view_test.py --out out/classic-view
-          else
-            uv run python tests/godot/run_classic_view_test.py --out out/classic-view
-          fi
+          failed=0
+          for pass in $(seq 1 "$CLASSIC_PASSES"); do
+            out=out/classic-view
+            [ "$CLASSIC_PASSES" = 1 ] || out="out/classic-view/pass-$pass"
+            if [ "$RUNNER_OS" = Linux ]; then
+              xvfb-run -a uv run python tests/godot/run_classic_view_test.py --out "$out" || failed=$((failed + 1))
+            else
+              uv run python tests/godot/run_classic_view_test.py --out "$out" || failed=$((failed + 1))
+            fi
+          done
+          echo "Classic view: $failed of $CLASSIC_PASSES passes failed"
+          [ "$failed" = 0 ]
       - name: Capture responsive assistant controls in both themes
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
@@ -285,6 +318,35 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
+      - name: Print the stack of every Windows editor crash
+        if: ${{ always() && runner.os == 'Windows' }}
+        shell: pwsh
+        run: |
+          $dumps = @(Get-ChildItem out\crash-dumps -Filter *.dmp -ErrorAction SilentlyContinue)
+          if (-not $dumps) { 'No editor crash dumps.'; exit 0 }
+          $cdb = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Debuggers\x64\cdb.exe' -ErrorAction SilentlyContinue
+          if (-not $cdb) {
+            $cdb = Get-ChildItem 'C:\Program Files (x86)\Windows Kits', 'C:\Program Files\Windows Kits' -Recurse -Filter cdb.exe -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
+          }
+          if (-not $cdb) { 'cdb.exe is not installed; the dumps are uploaded unread.'; exit 0 }
+          $bin = Split-Path $env:JOINERY_RELEASE_ENGINE
+          $symbols = "$bin;srv*$env:RUNNER_TEMP\symbols*https://msdl.microsoft.com/download/symbols"
+          foreach ($dump in $dumps) {
+            "::group::$($dump.Name)"
+            & $cdb.FullName -z $dump.FullName -y $symbols -i $bin -lines -c '.symfix+; .reload; .ecxr; kn 80; !analyze -v; ~*kn 40; lmv m godot*; lm; q' 2>&1 |
+              Tee-Object -FilePath "out\crash-dumps\$($dump.BaseName).txt"
+            '::endgroup::'
+          }
+      - name: Retain Windows crash dumps and the editor's symbols
+        if: ${{ always() && runner.os == 'Windows' && hashFiles('out/crash-dumps/*.dmp') != '' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joinery-crash-dumps-${{ matrix.target }}
+          path: |
+            out/crash-dumps/
+            godot_patches/godot-src/bin/*.pdb
+          retention-days: 7
       - name: Retain native logs and checked framebuffer captures
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -295,6 +357,7 @@ jobs:
             out/widget-tests.log
             out/native-evidence/
             out/classic-view/
+            out/crash-dumps/*.txt
             out/windows-software-gl/mesa-ci.json
           if-no-files-found: warn
           retention-days: 14

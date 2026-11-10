@@ -24,6 +24,12 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--github-env", type=Path)
     parser.add_argument("--jobs", type=int, default=min(os.cpu_count() or 2, 4))
+    parser.add_argument(
+        "--debug-symbols",
+        action="store_true",
+        help="Also write the editor's symbols (a .pdb beside it on Windows), so a "
+        "crash dump from a test run can be read. The packaged files are unchanged.",
+    )
     args = parser.parse_args()
     source = ROOT / "godot_patches/godot-src"
     if not source.is_dir():
@@ -56,7 +62,7 @@ def main() -> None:
         "platform=" + system,
         "arch=" + arch,
         "dev_build=no",
-        "debug_symbols=no",
+        "debug_symbols=" + ("yes" if args.debug_symbols else "no"),
         "lto=none",
         "cache_path=" + str(cache),
         "cache_limit=3",
