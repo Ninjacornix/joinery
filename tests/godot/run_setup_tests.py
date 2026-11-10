@@ -20,7 +20,6 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -162,11 +161,11 @@ def main() -> int:
     if args.fake_cli is not None:
         return fake_cli(args.fake_cli, rest)
 
-    from run_startup_test import isolated_editor, isolated_environment
+    from run_startup_test import isolated_editor, isolated_environment, scratch_folder
 
     from joinery.distribution import engine_binary
 
-    with tempfile.TemporaryDirectory(prefix="joinery setup dialog ") as directory:
+    with scratch_folder("joinery setup dialog ") as directory:
         temporary = Path(directory)
         project = temporary / "project"
         project.mkdir()

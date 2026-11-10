@@ -17,11 +17,12 @@ import os
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
+
+from run_startup_test import scratch_folder
 
 from joinery import parts
 from joinery.locking import GLB_IMPORT, write_lock
@@ -106,7 +107,7 @@ def main() -> int:
         "--capture", type=Path, help="save dark and light screenshots here"
     )
     args = parser.parse_args()
-    with tempfile.TemporaryDirectory(prefix="joinery-parts-") as directory:
+    with scratch_folder("joinery-parts-") as directory:
         project = make_project(Path(directory))
         env = os.environ.copy()
         env["JOINERY_HOME"] = str(ROOT)

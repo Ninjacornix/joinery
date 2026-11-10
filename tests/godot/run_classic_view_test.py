@@ -25,10 +25,9 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
-from run_startup_test import isolated_editor, isolated_environment
+from run_startup_test import isolated_editor, isolated_environment, scratch_folder
 
 from joinery.distribution import engine_binary
 
@@ -124,7 +123,7 @@ def theme_pass(
     problems: list[str] = []
     log = (logs or out) / f"classic-view-{theme}.log"
     log.unlink(missing_ok=True)
-    with tempfile.TemporaryDirectory(prefix="joinery-classic-view-") as directory:
+    with scratch_folder("joinery-classic-view-") as directory:
         temporary = Path(directory)
         project = temporary / "project"
         project.mkdir()

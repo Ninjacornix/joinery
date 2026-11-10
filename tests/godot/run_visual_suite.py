@@ -21,7 +21,6 @@ import shutil
 import struct
 import subprocess
 import sys
-import tempfile
 import time
 from collections import Counter, defaultdict
 from collections.abc import Callable
@@ -30,7 +29,7 @@ from functools import partial
 from pathlib import Path
 
 from run_classic_view_test import capture_names, theme_pass
-from run_startup_test import isolated_editor, isolated_environment
+from run_startup_test import isolated_editor, isolated_environment, scratch_folder
 
 from joinery.distribution import engine_binary
 
@@ -246,7 +245,7 @@ def run_godot(
 def startup(theme: str, capture: Path, logs: Path) -> Harness:
     harness = Harness(f"project-manager-{theme}")
     harness.expected = [f"pm-{name}-{theme}.png" for name in STARTUP_SCREENS]
-    with tempfile.TemporaryDirectory(prefix="joinery-visual-pm-") as directory:
+    with scratch_folder("joinery-visual-pm-") as directory:
         temporary = Path(directory)
         env = isolated_environment(temporary, ROOT, capture)
         env["JOINERY_VISUAL_THEME"] = theme
@@ -290,7 +289,7 @@ def sidebar(capture: Path, logs: Path) -> Harness:
         for state in SIDEBAR_WIDE
         for theme in THEMES
     ]
-    with tempfile.TemporaryDirectory(prefix="joinery-visual-sidebar-") as directory:
+    with scratch_folder("joinery-visual-sidebar-") as directory:
         temporary = Path(directory)
         project = temporary / "project"
         project.mkdir()
@@ -319,7 +318,7 @@ def sidebar(capture: Path, logs: Path) -> Harness:
 def editor(theme: str, capture: Path, logs: Path) -> Harness:
     harness = Harness(f"editor-{theme}")
     harness.expected = [f"editor-{name}-{theme}.png" for name in EDITOR_SCREENS]
-    with tempfile.TemporaryDirectory(prefix="joinery-visual-editor-") as directory:
+    with scratch_folder("joinery-visual-editor-") as directory:
         temporary = Path(directory)
         project = temporary / "project"
         shutil.copytree(

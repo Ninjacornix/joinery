@@ -5,10 +5,9 @@ from __future__ import annotations
 import os
 import shutil
 import subprocess
-import tempfile
 from pathlib import Path
 
-from run_startup_test import isolated_editor, isolated_environment
+from run_startup_test import isolated_editor, isolated_environment, scratch_folder
 
 from joinery.catalog import ROOT
 from joinery.distribution import engine_binary
@@ -19,7 +18,7 @@ def main() -> int:
         os.environ.get("JOINERY_CAPTURE_DIR", ROOT / "out/assistant-captures")
     ).resolve()
     output.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="joinery-assistant-ui-") as directory:
+    with scratch_folder("joinery-assistant-ui-") as directory:
         temporary = Path(directory)
         project = temporary / "project"
         project.mkdir()

@@ -6,10 +6,9 @@ import argparse
 import os
 import shutil
 import subprocess
-import tempfile
 from pathlib import Path
 
-from run_startup_test import isolated_editor, isolated_environment
+from run_startup_test import isolated_editor, isolated_environment, scratch_folder
 
 from joinery.distribution import engine_binary
 
@@ -25,7 +24,7 @@ def main() -> int:
     )
     args = parser.parse_args()
     for empty in (False, True):
-        with tempfile.TemporaryDirectory(prefix="joinery-scene-edit-") as directory:
+        with scratch_folder("joinery-scene-edit-") as directory:
             temporary = Path(directory)
             project = temporary / "scene-project"
             project.mkdir()
