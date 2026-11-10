@@ -768,3 +768,15 @@ def test_mcp_probes_come_from_the_tool_modules() -> None:
     )
     assert readiness.judge_probe(krita, True, missing)[0] == "needs_image"
     assert readiness.judge_probe(krita, False, "boom")[0] == "broken"
+
+
+def test_alive_never_signals_on_windows(monkeypatch: pytest.MonkeyPatch) -> None:
+    # os.kill(pid, 0) on Windows is CTRL_C_EVENT: it would interrupt the console.
+    def no_kill(*_: object) -> None:
+        raise AssertionError("os.kill must not be used on Windows")
+
+    monkeypatch.setattr(readiness.os, "name", "nt")
+    monkeypatch.setattr(readiness.os, "kill", no_kill)
+    monkeypatch.setattr(readiness, "_alive_windows", lambda pid: pid == 42)
+    assert readiness._alive(42)
+    assert not readiness._alive(7)

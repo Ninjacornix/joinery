@@ -204,6 +204,10 @@ def _first_line(text: str) -> str:
 def _alive(pid: int) -> bool:
     if pid <= 0:
         return False
+    if os.name == "nt":
+        # os.kill(pid, 0) on Windows sends CTRL_C_EVENT (value 0) to the
+        # console instead of checking the process, so ask the kernel.
+        return _alive_windows(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -213,6 +217,33 @@ def _alive(pid: int) -> bool:
     except OSError:
         return False
     return True
+
+
+def _alive_windows(pid: int) -> bool:
+    import ctypes
+    from ctypes import wintypes
+
+    native: Any = ctypes  # WinDLL and get_last_error exist only on Windows
+    kernel = native.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+    kernel.OpenProcess.restype = wintypes.HANDLE
+    kernel.GetExitCodeProcess.argtypes = [
+        wintypes.HANDLE,
+        ctypes.POINTER(wintypes.DWORD),
+    ]
+    kernel.GetExitCodeProcess.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    handle = kernel.OpenProcess(0x1000, False, pid)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not handle:
+        # Access denied means the process exists but belongs to someone else.
+        return bool(native.get_last_error() == 5)
+    try:
+        code = wintypes.DWORD()
+        if not kernel.GetExitCodeProcess(handle, ctypes.byref(code)):
+            return False
+        return bool(code.value == 259)  # STILL_ACTIVE
+    finally:
+        kernel.CloseHandle(handle)
 
 
 def sandbox_revision(root: Path | None = None) -> str:
