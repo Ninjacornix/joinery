@@ -108,6 +108,33 @@ func _run() -> void:
 	_check(generic_box.mesh.size == Vector3.ONE, "Generic native resource construction")
 	edits.reject()
 	_check(not scene.has_node("GenericBox"), "Generic creation rejection restores original")
+	# Values Godot rounds or reports its own way must not read as a manual change.
+	var camera := {
+		"summary": "Create the doorway camera",
+		"operations":
+		[
+			{
+				"operation": "create_node",
+				"node_type": "Camera3D",
+				"name": "DoorCamera",
+				"properties":
+				{
+					"position": [0.3, 1.6, 4.1],
+					"rotation": [-0.2217, 0.5812, 0.0017],
+					"fov": 61.3
+				}
+			}
+		]
+	}
+	result = edits.preview(scene, camera, context, [])
+	_check(result["success"], "A camera previews")
+	_check(edits._generic.valid(edits._generic_plans), "A fresh camera preview is unchanged")
+	(scene.get_node("DoorCamera") as Camera3D).fov = 40.0
+	_check(
+		not edits._generic.valid(edits._generic_plans),
+		"An edit after the preview still counts as a change"
+	)
+	edits.reject()
 	var order: Array[String] = []
 	for name: String in ["A", "B", "C", "D"]:
 		var child := Node3D.new()

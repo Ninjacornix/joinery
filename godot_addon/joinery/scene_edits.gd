@@ -145,7 +145,9 @@ func prepare_accept() -> Dictionary:
 	if not pending() or not is_instance_valid(root):
 		return _error("This preview is no longer available.")
 	if not _generic.valid(_generic_plans):
-		return _error("The preview changed manually. Reject it and request a fresh edit.")
+		return _error(
+			"Part of this preview was changed in the editor after it was shown. Discard it and ask again."
+		)
 	for change: Dictionary in changes:
 		if change["kind"] == "generic":
 			continue
@@ -155,7 +157,9 @@ func prepare_accept() -> Dictionary:
 			or not node.is_inside_tree()
 			or node.transform != change["after"]
 		):
-			return _error("The preview was changed manually. Reject it and request a fresh edit.")
+			return _error(
+				"Part of this preview was changed in the editor after it was shown. Discard it and ask again."
+			)
 	var log_error := OK if _recorded else _write_record()
 	if log_error != OK:
 		return _error("Could not record this edit. The preview has not been accepted.")

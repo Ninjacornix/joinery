@@ -183,8 +183,15 @@ func apply_group(plans: Array[Dictionary]) -> void:
 					node.transform = entry["transform_after"]
 				elif node is Node3D or node is Node2D:
 					entry["transform_after"] = node.transform
+		var seen := {}
 		for key: String in entry["properties_after"]:
 			node.set(key, entry["properties_after"][key])
+		# What each property reads back once set: Godot rounds some values (a rotation
+		# goes through a Basis) and reports others differently in the editor (a camera's
+		# current), so the check before Accept compares against this, not the request.
+		for key: String in entry["properties_after"]:
+			seen[key] = node.get(key)
+		entry["properties_seen"] = seen
 
 
 func restore_group(plans: Array[Dictionary]) -> void:
@@ -254,8 +261,9 @@ func valid(plans: Array[Dictionary]) -> bool:
 			return false
 		if str(node.name) != str(entry.get("name_after", entry.get("name_before", node.name))):
 			return false
-		for key: String in entry["properties_after"]:
-			if node.get(key) != entry["properties_after"][key]:
+		var seen: Dictionary = entry.get("properties_seen", entry["properties_after"])
+		for key: String in seen:
+			if node.get(key) != seen[key]:
 				return false
 		if entry["action"] == "attach_script" and node.get_script() != entry["script_after"]:
 			return false
