@@ -2,7 +2,8 @@
 extends PanelContainer
 ## The composer: selected-target chips, the message field, the options picker, and Send. While
 ## Journeyman works, Stop takes Send's slot (an icon crossfade with a little blur); the
-## field stays editable but Enter waits. While a change waits for review the field is locked.
+## field stays editable and Enter still submits, so the dock can queue the message. While a
+## check runs the field is locked.
 ## Send is live only when it can act: connected, unlocked and with text in the field; otherwise
 ## it takes its muted disabled look (so the banner's button, when there is one, is the only
 ## accent action). The reply-mode picker rests with Send: it is live only while connected and
@@ -12,12 +13,15 @@ extends PanelContainer
 
 signal submitted(text: String)
 signal stop_pressed
+## A target chip was pressed: open [param path] where it is made.
+signal target_opened(path: String)
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const INPUT_SCRIPT := preload("message_input.gd")
 const OPTIONS_SCRIPT := preload("composer_options.gd")
+const CHIP_SCRIPT := preload("target_chip.gd")
 
 var chips: HFlowContainer
 var prompt: TextEdit
@@ -32,6 +36,10 @@ var _locked := false
 ## "connected", "connecting", "error" or "none", as the dock reports it.
 var _connection := "connected"
 var _restyling := false
+## What the next message is about, as the chips show it.
+var _targets: Array[Dictionary] = []
+## The dock's placeholder for the current state ("Queue a message…"), "" for the default.
+var _waiting := ""
 
 
 func _init() -> void:
@@ -103,28 +111,34 @@ func set_busy(busy: bool) -> void:
 		UI_MOTION.crossfade(send, stop, true)
 	else:
 		UI_MOTION.crossfade(stop, send, true)
-	set_placeholder()
+	_apply_placeholder()
 
 
-## Locked while a change waits for review or a check runs.
+## Locked while a check runs.
 func set_locked(locked: bool) -> void:
 	_locked = locked
 	prompt.editable = not locked
 	_sync_send()
-	set_placeholder()
+	_apply_placeholder()
 
 
 ## Follow Journeyman's connection: Send is live only while connected.
 func set_connection(state: String) -> void:
 	_connection = state
 	_sync_send()
-	set_placeholder()
+	_apply_placeholder()
 
 
-## Placeholder for the current state; [param waiting] overrides it (for example during a review).
+## Placeholder for the current state; [param waiting] overrides it until it is set again (for
+## example "Queue a message…" while Journeyman works).
 func set_placeholder(waiting := "") -> void:
-	if not waiting.is_empty():
-		prompt.placeholder_text = waiting
+	_waiting = waiting
+	_apply_placeholder()
+
+
+func _apply_placeholder() -> void:
+	if not _waiting.is_empty():
+		prompt.placeholder_text = _waiting
 	elif not _locked and _connection == "none":
 		prompt.placeholder_text = "Connect Journeyman to start"
 	elif not _locked:
@@ -137,7 +151,7 @@ func stopping() -> void:
 
 
 func _on_enter(text: String) -> void:
-	if _busy or _locked or _connection != "connected":
+	if _locked or _connection != "connected":
 		return
 	submitted.emit(text)
 
@@ -186,3 +200,69 @@ func _match_heights() -> void:
 	var square := send.get_combined_minimum_size()
 	options.custom_minimum_size.y = square.y
 	stop.custom_minimum_size = square
+
+
+## Put a queued message back: [param text] in the field and its [param targets] as chips. A
+## draft in the field stays, and the call returns false.
+func restore(text: String, targets: Array) -> bool:
+	if not prompt.text.strip_edges().is_empty():
+		return false
+	var typed: Array[Dictionary] = []
+	for target: Variant in targets:
+		if target is Dictionary:
+			typed.append(target)
+	set_targets(typed)
+	prompt.text = text
+	prompt.set_caret_column(text.length())
+	prompt.grab_focus()
+	return true
+
+
+# --- Targets -----------------------------------------------------------------------------------
+
+
+func target_snapshot() -> Array[Dictionary]:
+	return _targets.duplicate(true)
+
+
+func set_targets(targets: Array[Dictionary]) -> void:
+	_targets = targets.duplicate(true)
+	for child: Node in chips.get_children():
+		chips.remove_child(child)
+		child.queue_free()
+	# Many targets (a whole selection) show the first two and one "+N more" chip.
+	var shown := _targets if _targets.size() <= 3 else _targets.slice(0, 2)
+	for target: Dictionary in shown:
+		var id := str(target["id"])
+		var chip := CHIP_SCRIPT.build(self, target, target_opened.emit, _remove_target.bind(id))
+		chip.connect("removed", func() -> void: _sync_chips.call_deferred())
+		chips.add_child(chip)
+	if shown.size() < _targets.size():
+		var rest := _targets.slice(shown.size())
+		var names: Array[String] = []
+		for target: Dictionary in rest:
+			names.append(str(target.get("label", target["id"])))
+		var more := UI.chip("+%d more" % rest.size(), "", true)
+		more.tooltip_text = ", ".join(names)
+		more.remove.tooltip_text = "Remove these from this message"
+		more.remove.pressed.connect(
+			func() -> void:
+				for target: Dictionary in rest:
+					_remove_target(str(target["id"]))
+		)
+		more.connect("removed", func() -> void: _sync_chips.call_deferred())
+		chips.add_child(more)
+	_sync_chips()
+
+
+## Optimistic: the target leaves the request at once; the chip row hides after it animates out.
+func _remove_target(id: String) -> void:
+	var remaining: Array[Dictionary] = []
+	for target: Dictionary in _targets:
+		if str(target["id"]) != id:
+			remaining.append(target)
+	_targets = remaining
+
+
+func _sync_chips() -> void:
+	chips.visible = not _targets.is_empty()

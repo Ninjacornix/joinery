@@ -16,6 +16,9 @@ extends PanelContainer
 ## as a child is attached automatically ([method attach_bridge]) for send receipts, notices,
 ## transaction ids, the art gate, approvals and the game's suggestions.
 ##
+## While a request runs or a change waits for review, Send queues the message (sidebar_queue.gd);
+## queued messages go out one at a time once nothing is in the way ([method _drain]).
+##
 ## "/feature add|remove <id>" shows a plan card from `joinery feature … --plan`; the feature is
 ## applied only when the user presses Apply on it. "/brief" opens design/brief.md read-only.
 ## Suggestions from the game brief arrive one line at a time and are never acted on unasked.
@@ -43,7 +46,6 @@ signal change_reverted(transaction_id: String)
 signal files_changed(transaction_id: String, paths: PackedStringArray)
 
 const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
-const UI := preload("res://addons/joinery/ui_components.gd")
 const HISTORY_SCRIPT := preload("res://addons/joinery/chat_history.gd")
 const SETTINGS_SCRIPT := preload("res://addons/joinery/journeyman_settings.gd")
 const CHIP_SCRIPT := preload("res://addons/joinery/target_chip.gd")
@@ -54,12 +56,11 @@ const MENU_SCRIPT := preload("res://addons/joinery/command_menu.gd")
 const SLASH_SCRIPT := preload("res://addons/joinery/slash_commands.gd")
 const REVIEW_PATH := "res://addons/joinery/review_panel.gd"
 const ART_DIALOG := preload("res://addons/joinery/art_review_dialog.gd")
-const REVIEW_WAIT := "Accept or discard the change first"
+const REVIEW_WAIT := "Queue a message for after the review…"
+const QUEUE_WAIT := "Queue a message…"
 const PERSONA := "Journeyman"
 const DISCARDED := "Discarded. Your files were not touched."
 const BRIEF_PATH := "res://design/brief.md"
-## Document view size, in multiples of the font size.
-const DOCUMENT_EM := Vector2(46, 40)
 ## Minimum dock width in multiples of the font size.
 const MIN_EM := 24
 ## The same below the Inspector in Godot's classic layout, where the column is shared and a
@@ -95,7 +96,6 @@ var _slash: SLASH_SCRIPT
 var _review: Control
 var _review_pending := false
 var _details_open := false
-var _target_context: Array[Dictionary] = []
 var _busy := false
 var _agent_name := "Codex"
 var _assistant_open := false
@@ -141,12 +141,15 @@ func _ready() -> void:
 	_transcript.retry_requested.connect(_retry)
 	_transcript.revert_requested.connect(func(id: String) -> void: _slash.revert(id))
 	_content.add_child(_transcript)
+	_transcript.queue.edit_requested.connect(_edit_queued)
+	_transcript.queue.send_requested.connect(_drain)
 	_footer = FOOTER_SCRIPT.new()
 	_footer.review_requested.connect(func() -> void: review_requested.emit())
 	_content.add_child(_footer)
 	_composer = COMPOSER_SCRIPT.new()
 	_composer.submitted.connect(_on_submit)
 	_composer.stop_pressed.connect(_request_cancel)
+	_composer.target_opened.connect(func(path: String) -> void: target_opened.emit(path))
 	_content.add_child(_composer)
 	_prompt = _composer.prompt
 	_chips = _composer.chips
@@ -398,21 +401,70 @@ func _on_submit(text: String) -> void:
 	var entry := text.strip_edges()
 	if entry.is_empty():
 		return
-	if _busy or _review_pending:
-		if not (entry.begins_with("/") and SLASH_SCRIPT.is_local(entry)):
-			return
+	if _occupied() and _transcript.queue.waits(entry):
+		_enqueue(entry)
+		return
 	_command_popup.close()
 	_prompt.clear()
 	if entry.begins_with("/"):
 		run_command(entry)
 		return
+	_start_request(entry, target_snapshot())
+
+
+func _start_request(entry: String, targets: Array) -> void:
 	_assistant_open = false
-	var card := _transcript.add_request(entry, target_snapshot())
+	var card := _transcript.add_request(entry, targets)
 	card.connect("gate_review_requested", func() -> void: art_review_requested.emit())
 	card.connect(
 		"gate_describe_requested", func() -> void: fill_composer("Here's how my game should look: ")
 	)
 	_send_request(card)
+
+
+## A request runs, is on its way, or a change waits for review: new messages queue.
+func _occupied() -> bool:
+	var card := _card()
+	return _busy or _review_pending or (card != null and card.state == "sending")
+
+
+# --- Queue -------------------------------------------------------------------------------------
+
+
+func _enqueue(entry: String) -> void:
+	_command_popup.close()
+	if not _transcript.queue.push(entry, target_snapshot()):
+		show_status("The queue is full. Remove a message or wait for a reply.", 4.0)
+		return
+	_prompt.clear()
+
+
+## Edit: the message and its targets go back into the message box; a draft there stays.
+func _edit_queued(card: Control) -> void:
+	if _composer.restore(str(card.get("text")), card.get("targets")):
+		_transcript.queue.remove(card)
+	else:
+		show_status("Send or clear the message box first.")
+
+
+## Send the oldest queued message when nothing is in the way; commands run in order too.
+func _drain() -> void:
+	var card := _card()
+	var gated: bool = card != null and card.gated()
+	var queue := _transcript.queue
+	if queue.size_queued() == 0 or queue.paused or _occupied() or gated:
+		return
+	if connection_state != "connected" or not _slash.running().is_empty():
+		return
+	var next := queue.take()
+	var entry := str(next["text"])
+	if not entry.begins_with("/"):
+		_start_request(entry, next["targets"])
+		return
+	run_command(entry)
+	# A command that finished at once lets the next one go.
+	if _slash.running().is_empty():
+		_drain.call_deferred()
 
 
 ## Put [param text] in the message box, ready to edit and send (offers and "Ask Journeyman").
@@ -434,13 +486,14 @@ func _send_request(card: Control) -> void:
 
 
 func _retry(card: Control) -> void:
-	if not _busy and not _review_pending:
+	if not _occupied():
 		_send_request(card)
 
 
 ## A request that never reached the assistant. When the connection went with it, every
 ## indicator says so: the dot turns red and Send rests, while the card's Retry is the action.
 func _on_card_failed(reason: String) -> void:
+	_transcript.queue.pause()
 	_sync_send_slot()
 	if connection_state == "error" or reason.to_lower().contains("connection"):
 		connection_state = "error"
@@ -453,6 +506,7 @@ func _on_card_failed(reason: String) -> void:
 func _sync_send_slot() -> void:
 	var card := _card()
 	_composer.set_busy(_busy or (card != null and card.state == "sending"))
+	_composer.set_placeholder(_waiting_placeholder())
 
 
 ## Run a slash command ("/doctor", "/help", …) without posting it as a message. Unknown
@@ -489,6 +543,7 @@ func _on_slash_finished(_command: String, text: String, kind: String) -> void:
 	_sync()
 	if not text.is_empty():
 		_transcript.add_notice(text, kind)
+	_drain.call_deferred()
 
 
 func _on_reverted(transaction_id: String, ok: bool, message: String) -> void:
@@ -515,7 +570,9 @@ func _open_brief() -> void:
 		)
 		return
 	var text := FileAccess.get_file_as_string(BRIEF_PATH)
-	ART_DIALOG.open_document(self, "Game brief", text, _dialog_size(), "Change the game brief: ")
+	ART_DIALOG.open_document(
+		self, "Game brief", text, ART_DIALOG.document_size(self), "Change the game brief: "
+	)
 
 
 ## "Update to the new layout" in the art direction dialog.
@@ -587,15 +644,6 @@ func refresh_revertible() -> void:
 	_slash.check_revertible()
 
 
-func _dialog_size() -> Vector2i:
-	var em := float(get_theme_default_font_size())
-	var window := get_window().size if is_inside_tree() else Vector2i(1280, 800)
-	return Vector2i(
-		mini(roundi(DOCUMENT_EM.x * em), roundi(window.x * 0.9)),
-		mini(roundi(DOCUMENT_EM.y * em), roundi(window.y * 0.9))
-	)
-
-
 ## Footer and composer follow the state: a running check, a reply, a pending review, or idle.
 func _sync() -> void:
 	var command: String = _slash.running()
@@ -610,11 +658,19 @@ func _sync() -> void:
 		_footer.set_mode("review")
 	else:
 		_footer.set_mode("idle")
-	_composer.set_locked(_review_pending or not command.is_empty())
-	_composer.set_placeholder(REVIEW_WAIT if _review_pending else "")
+	_composer.set_locked(not command.is_empty())
+	_composer.set_placeholder(_waiting_placeholder())
+
+
+## While Send would queue, the message box says so.
+func _waiting_placeholder() -> String:
+	if _review_pending:
+		return REVIEW_WAIT
+	return QUEUE_WAIT if _occupied() and connection_state == "connected" else ""
 
 
 func _request_cancel() -> void:
+	_transcript.queue.pause()
 	var card := _card()
 	if not _busy and card != null and card.state == "sending":
 		# Stopped before Journeyman took it: the request stays here, ready to Retry.
@@ -680,50 +736,11 @@ func _drop_data(_at: Vector2, data: Variant) -> void:
 
 
 func target_snapshot() -> Array[Dictionary]:
-	return _target_context.duplicate(true)
+	return _composer.target_snapshot()
 
 
 func _set_targets(targets: Array[Dictionary]) -> void:
-	_target_context = targets.duplicate(true)
-	for child: Node in _chips.get_children():
-		_chips.remove_child(child)
-		child.queue_free()
-	# Many targets (a whole selection) show the first two and one "+N more" chip.
-	var shown := _target_context if _target_context.size() <= 3 else _target_context.slice(0, 2)
-	for target: Dictionary in shown:
-		var id := str(target["id"])
-		var chip := CHIP_SCRIPT.build(self, target, target_opened.emit, _remove_target.bind(id))
-		chip.connect("removed", func() -> void: _sync_chips.call_deferred())
-		_chips.add_child(chip)
-	if shown.size() < _target_context.size():
-		var rest := _target_context.slice(shown.size())
-		var names: Array[String] = []
-		for target: Dictionary in rest:
-			names.append(str(target.get("label", target["id"])))
-		var more := UI.chip("+%d more" % rest.size(), "", true)
-		more.tooltip_text = ", ".join(names)
-		more.remove.tooltip_text = "Remove these from this message"
-		more.remove.pressed.connect(
-			func() -> void:
-				for target: Dictionary in rest:
-					_remove_target(str(target["id"]))
-		)
-		more.connect("removed", func() -> void: _sync_chips.call_deferred())
-		_chips.add_child(more)
-	_sync_chips()
-
-
-## Optimistic: the target leaves the request at once; the chip row hides after it animates out.
-func _remove_target(id: String) -> void:
-	var remaining: Array[Dictionary] = []
-	for target: Dictionary in _target_context:
-		if str(target["id"]) != id:
-			remaining.append(target)
-	_target_context = remaining
-
-
-func _sync_chips() -> void:
-	_chips.visible = not _target_context.is_empty()
+	_composer.set_targets(targets)
 
 
 # --- Connection state --------------------------------------------------------------------------
@@ -733,7 +750,7 @@ func _sync_chips() -> void:
 func set_chat_agent(agent: String) -> void:
 	_agent_name = agent.capitalize()
 	if _composer != null:
-		_composer.set_placeholder(REVIEW_WAIT if _review_pending else "")
+		_composer.set_placeholder(_waiting_placeholder())
 		_header.show_state(connection_state, _agent_name)
 		_transcript.set_examples_enabled(connection_state == "connected")
 
@@ -755,8 +772,11 @@ func set_chat_state(state: String, detail: String) -> void:
 func _show_connection(detail := "") -> void:
 	_header.show_state(connection_state, _agent_name, detail)
 	_composer.set_connection(connection_state)
+	_composer.set_placeholder(_waiting_placeholder())
 	_transcript.set_examples_enabled(connection_state == "connected")
 	_transcript.set_retry_allowed(not connection_state in ["error", "none"])
+	if connection_state == "connected":
+		_drain.call_deferred()
 
 
 func set_chat_busy(busy: bool) -> void:
@@ -776,10 +796,13 @@ func set_chat_busy(busy: bool) -> void:
 				card.set_failed(_failure)
 			else:
 				card.finish(_outcome)
+		if was_busy and _outcome != "done":
+			_transcript.queue.pause()
 	_sync_send_slot()
 	_sync()
 	if not busy and was_busy:
 		_resume_held()
+		_drain()
 
 
 func set_model_options(models: Array) -> void:
@@ -896,6 +919,7 @@ func hide_edit_review(message: String = "", kind := "info") -> void:
 		finish_agent_response(false)
 		_transcript.add_decision(message, decided, _card() if was_pending else null)
 	_resume_held()
+	_drain()
 
 
 func set_review_applying(on: bool) -> void:
@@ -971,7 +995,3 @@ static func _decision_kind(message: String, kind: String) -> String:
 	if lower.contains("rejected") or lower.contains("discarded"):
 		return "rejected"
 	return "info"
-
-
-func _engine_dir() -> String:
-	return SLASH_SCRIPT.engine_dir()

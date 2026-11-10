@@ -187,6 +187,18 @@ func _states(light: bool, width: int) -> void:
 	_check(timer.visible and timer.text == "0:14", "A working card shows its timer")
 	await _shot("working", light, width, chat)
 
+	# Messages sent while Journeyman works wait at the end of the transcript.
+	chat.call("_on_submit", "Then add a brass handle on the left side.")
+	chat.call("_on_submit", "/feature add controller")
+	var queue: Node = transcript.get("queue")
+	_check(queue.call("texts").size() == 2, "Messages sent while working are queued")
+	await _shot("queued", light, width, chat)
+	# After a stopped turn the queue waits for the user.
+	queue.call("pause")
+	await _shot("queued-paused", light, width, chat)
+	for index: int in 2:
+		queue.call("remove", queue.call("first"))
+
 	chat.append_agent_text("I widened **Door** by 20% in Blender and darkened the wood.", true)
 	chat.finish_agent_response(true)
 	chat.set_chat_busy(false)

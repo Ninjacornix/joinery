@@ -18,6 +18,8 @@ extends ScrollContainer
 ## clear of it instead of hiding under it.
 ## Offers ([method add_offer]) are one quiet line with their actions; a feature plan
 ## ([method add_plan]) is a card that changes nothing until the user presses Apply.
+## Messages queued while Journeyman works wait in [member queue] (sidebar_queue.gd), after
+## the last turn, and stay at the end as the conversation grows.
 
 signal example_chosen(text: String)
 signal retry_requested(card: Control)
@@ -28,6 +30,7 @@ const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
 const CARD := preload("sidebar_change_card.gd")
+const QUEUE := preload("sidebar_queue.gd")
 const INDICATOR := preload("activity_indicator.gd")
 const EXAMPLES := [
 	"Make the selected model taller", "Add a footstep sound", "Repaint this texture warmer"
@@ -41,6 +44,8 @@ const NOTICE_ICONS := {
 	"error": ["error", "danger"],
 }
 
+## Queued messages, after every turn and before the caption's room.
+var queue: QUEUE
 var _body: VBoxContainer
 var _empty: Control
 var _examples: Array[Button] = []
@@ -76,6 +81,9 @@ func _ready() -> void:
 	_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	add_child(_body)
 	_build_empty()
+	queue = QUEUE.new()
+	queue.added.connect(_on_queue_added)
+	_body.add_child(queue)
 	get_v_scroll_bar().value_changed.connect(_on_scroll)
 	UI_MOTION.rubber_band(self)
 	STYLE.on_theme_overrides(self, _apply_fade)
@@ -228,7 +236,7 @@ func add_request(text: String, targets: Array = []) -> Control:
 	_hide_empty()
 	_turn = VBoxContainer.new()
 	_turn.theme_type_variation = "JoineryStack"
-	_body.add_child(_turn)
+	_add_turn(_turn)
 	var card := CARD.new(text, targets)
 	card.set_retry_allowed(_retry_allowed)
 	_turn.add_child(card)
@@ -444,8 +452,24 @@ func _current_turn() -> VBoxContainer:
 	if _turn == null:
 		_turn = VBoxContainer.new()
 		_turn.theme_type_variation = "JoineryStack"
-		_body.add_child(_turn)
+		_add_turn(_turn)
 	return _turn
+
+
+## Turns go before the queued messages and the caption's room.
+func _add_turn(turn: VBoxContainer) -> void:
+	_body.add_child(turn)
+	if queue != null:
+		_body.move_child(turn, queue.get_index())
+
+
+## A message was queued: its text follows the text size and the newest line stays in sight.
+func _on_queue_added(card: Control) -> void:
+	_hide_empty()
+	for pair: Array in card.scalables():
+		_scale(pair[0], pair[1])
+	_follow = true
+	_dirty = true
 
 
 ## Replies and notices sit on the shared SPACE.2 text inset; cards are boxes on the outer edge.
@@ -713,7 +737,7 @@ func add_plan(plan: Dictionary, title: String) -> FeaturePlan:
 	_hide_empty()
 	_turn = VBoxContainer.new()
 	_turn.theme_type_variation = "JoineryStack"
-	_body.add_child(_turn)
+	_add_turn(_turn)
 	var card := FeaturePlan.new()
 	card.build(plan, title)
 	_turn.add_child(card)

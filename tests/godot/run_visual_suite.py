@@ -52,6 +52,8 @@ SIDEBAR_STATES = (
     "commands",
     "sending",
     "working",
+    "queued",
+    "queued-paused",
     "review-waiting",
     "accepted",
     "conversation",

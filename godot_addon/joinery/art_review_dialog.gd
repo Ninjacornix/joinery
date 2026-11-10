@@ -128,6 +128,15 @@ static func _fill(
 		foot.add_child(ask)
 
 
+## A document view's size: 46 by 40 font sizes, at most 90% of [param parent]'s window.
+static func document_size(parent: Control) -> Vector2i:
+	var em := float(parent.get_theme_default_font_size())
+	var window := parent.get_window().size if parent.is_inside_tree() else Vector2i(1280, 800)
+	return Vector2i(
+		mini(roundi(46 * em), roundi(window.x * 0.9)), mini(roundi(40 * em), roundi(window.y * 0.9))
+	)
+
+
 ## A project document ([param text], Markdown) read-only under [param title], with Close and,
 ## when [param parent] has fill_composer(), "Ask Journeyman to change it", which starts a
 ## message with [param ask].

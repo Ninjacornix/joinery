@@ -239,9 +239,9 @@ func _run() -> void:
 		_check(change.state == "ready", "The card offers the review")
 		chat.set_chat_busy(false)
 		_check(chat._footer.text() == "Waiting for your review", "The footer waits for review")
-		_check(not chat._prompt.editable, "The composer waits for the decision")
+		_check(chat._prompt.editable, "The composer stays open to queue a message")
 		_check(
-			chat._prompt.placeholder_text == "Accept or discard the change first",
+			chat._prompt.placeholder_text == "Queue a message for after the review…",
 			"Say how to continue during review"
 		)
 		chat._on_accept()

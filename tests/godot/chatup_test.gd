@@ -260,6 +260,141 @@ func _run_revert_and_gate() -> void:
 	await process_frame
 
 
+## Messages sent while Journeyman works or a review waits are queued, then go out one at a
+## time; a failed or stopped turn pauses the queue until the user sends it on.
+func _run_queue() -> void:
+	var chat := load(DOCK_PATH).new() as Control
+	root.add_child(chat)
+	chat.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	await process_frame
+	chat.set_chat_agent("codex")
+	chat.set_chat_state("connected", "")
+	var sent: Array[String] = []
+	var sent_targets: Array = []
+	chat.prompt_submitted.connect(
+		func(text: String, targets: Array) -> void:
+			sent.append(text)
+			sent_targets.append(targets)
+	)
+	var queue: Control = chat._transcript.queue
+	chat._on_submit("Widen the door")
+	chat.set_chat_busy(true)
+	chat._on_sent()
+	_check(chat._prompt.placeholder_text == "Queue a message…", "While busy, Send queues")
+	chat.set_resource_target("res://audio/sfx/door_creak.wav", "AudioStreamWAV")
+	chat._prompt.text = "Darken the floor"
+	chat._composer._on_enter(chat._prompt.text)
+	_check(chat._prompt.text.is_empty(), "Queueing a message clears the message box")
+	_check(sent == ["Widen the door"], "A queued message waits for the turn")
+	_check(queue.texts() == PackedStringArray(["Darken the floor"]), "The message is queued")
+	var first: Control = queue.first()
+	_check(
+		first.is_visible_in_tree() and queue.heading.text == "Queued",
+		"A queued message shows as a Queued card in the transcript"
+	)
+	_check(
+		(
+			chat._transcript._body.get_child(-2) == queue
+			or chat._transcript._body.get_child(-1) == queue
+		),
+		"Queued messages sit after the conversation"
+	)
+	chat._on_submit("/feature add controller")
+	chat._on_submit("Add a creak")
+	_check(queue.texts().size() == 3, "/feature typed while busy is queued in order")
+	queue.card_at(1).remove.pressed.emit()
+	_check(
+		queue.texts() == PackedStringArray(["Darken the floor", "Add a creak"]),
+		"× removes a queued message"
+	)
+	# Edit puts the message and its targets back; a draft in the box stays.
+	var none: Array[Dictionary] = []
+	chat._set_targets(none)
+	chat._prompt.text = "A draft"
+	queue.card_at(1).edit.pressed.emit()
+	_check(
+		queue.texts().size() == 2 and chat._prompt.text == "A draft",
+		"Edit waits while the message box holds a draft"
+	)
+	chat._prompt.clear()
+	queue.card_at(1).edit.pressed.emit()
+	_check(chat._prompt.text == "Add a creak", "Edit puts the queued message in the message box")
+	_check(queue.texts() == PackedStringArray(["Darken the floor"]), "Edit takes it off the queue")
+	_check(
+		chat.target_snapshot().size() == 1 and chat.target_snapshot()[0]["kind"] == "Audio",
+		"Edit brings back the message's targets"
+	)
+	chat._on_submit(chat._prompt.text)
+	for index: int in 3:
+		chat._on_submit("Note %d" % index)
+	_check(queue.texts().size() == 5, "The queue holds five messages")
+	chat._prompt.text = "One too many"
+	chat._on_submit("One too many")
+	_check(
+		queue.texts().size() == 5 and chat._prompt.text == "One too many",
+		"A full queue keeps the message in the box"
+	)
+	_check(
+		chat._transcript.caption_text().begins_with("The queue is full"), "Say the queue is full"
+	)
+	chat._prompt.clear()
+	for index: int in 3:
+		queue.card_at(-1).remove.pressed.emit()
+	# The turn ends: the oldest queued message goes out, with its targets.
+	chat.set_chat_busy(false)
+	_check(
+		sent == ["Widen the door", "Darken the floor"], "The next message goes out after the turn"
+	)
+	_check(sent_targets[-1].size() == 1, "A queued message keeps its targets")
+	_check(chat._transcript.current_card().request == "Darken the floor", "It gets its own card")
+	_check(queue.texts() == PackedStringArray(["Add a creak"]), "One message goes at a time")
+	# A change waiting for review holds the queue until it is decided.
+	chat.set_chat_busy(true)
+	chat._on_sent()
+	chat.show_file_review("Darker floor", "", [], [], "tx-floor")
+	chat.set_chat_busy(false)
+	_check(sent.size() == 2, "The queue waits while a change waits for review")
+	_check(chat._prompt.editable, "The message box stays open during review")
+	_check(chat._prompt.placeholder_text == chat.REVIEW_WAIT, "During review, Send queues")
+	chat._on_submit("Polish the handle")
+	_check(queue.texts().size() == 2, "A message sent during review is queued")
+	chat._on_accept()
+	chat.hide_edit_review("Change accepted", "success")
+	_check(sent[-1] == "Add a creak", "After the decision the next message goes out")
+	# Stop: the queue stays but waits for the user.
+	chat.set_chat_busy(true)
+	chat._on_sent()
+	chat._request_cancel()
+	chat.set_chat_busy(false)
+	_check(sent.size() == 3, "No queued message goes out after Stop")
+	_check(queue.paused and queue.send.is_visible_in_tree(), "Offer Send queued message")
+	queue.send.pressed.emit()
+	_check(sent[-1] == "Polish the handle", "Send queued message sends it")
+	_check(not queue.paused and queue.texts().is_empty(), "The queue is empty and running again")
+	# A failed turn pauses the queue too.
+	chat.set_chat_busy(true)
+	chat._on_sent()
+	chat._on_submit("Try again later")
+	chat.show_timing({"outcome": "failed", "total_ms": 1000})
+	chat.set_chat_busy(false)
+	_check(sent.size() == 4 and queue.paused, "No queued message goes out after a failure")
+	queue.first().remove.pressed.emit()
+	_check(not queue.paused and not queue.visible, "Removing the last message clears the queue")
+	# Losing the connection keeps the queue; it goes out once connected again.
+	chat._on_submit("Start a turn")
+	chat.set_chat_busy(true)
+	chat._on_sent()
+	chat._on_submit("Keep me")
+	chat.set_chat_state("error", "Lost connection to Codex.")
+	chat.set_chat_busy(false)
+	_check(queue.texts() == PackedStringArray(["Keep me"]), "A lost connection keeps the queue")
+	chat.set_chat_state("connected", "")
+	await process_frame
+	_check(sent[-1] == "Keep me" and queue.texts().is_empty(), "Reconnected, the queue goes on")
+	chat.queue_free()
+	await process_frame
+
+
 func _run() -> void:
 	load(MOTION_PATH).set_enabled(false)
 	root.size = Vector2i(800, 800)
@@ -420,6 +555,7 @@ func _run() -> void:
 	chat.queue_free()
 	await process_frame
 	await _run_revert_and_gate()
+	await _run_queue()
 	await _run_with_motion()
 	print("sidebar chat: ", "FAILED" if _failed else "ok")
 	quit(1 if _failed else 0)
