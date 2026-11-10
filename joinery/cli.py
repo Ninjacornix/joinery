@@ -17,6 +17,7 @@ from joinery import (
     __version__,
     blueprints,
     brief,
+    chats,
     connection,
     game_setup,
     history,
@@ -960,6 +961,7 @@ def _parser() -> argparse.ArgumentParser:
     check.add_argument("--project", type=Path, default=ROOT / "testbed")
     history.register(commands)
     timeline.register(commands)
+    chats.register(commands)
     parts = _parts()
     if parts is not None:
         parts.register(commands)
@@ -974,6 +976,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "timeline":
         return timeline.run(args)
+
+    if args.command == "chats":
+        return chats.run(args)
 
     if args.command == "parts":
         parts = _parts()
