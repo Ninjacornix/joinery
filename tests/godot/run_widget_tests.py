@@ -9,10 +9,13 @@ import shutil
 import subprocess
 import sys
 import tempfile
-import time
 from pathlib import Path
 
-from run_startup_test import isolated_editor, isolated_environment
+from run_startup_test import (
+    isolated_editor,
+    isolated_environment,
+    remove_when_released,
+)
 
 from joinery.catalog import ROOT
 from joinery.distribution import engine_binary
@@ -59,33 +62,12 @@ def _game(path: Path, env: dict[str, str]) -> Path:
     return path
 
 
-def _remove_when_released(path: Path, seconds: float = 30.0) -> None:
-    """Delete the scratch folder once every process has let go of it.
-
-    Hosts the editor starts (chat, CLI jobs) shut down on their own when their
-    pipes close, a moment after the editor exits. Windows refuses to remove a
-    folder while such a process still runs in it, so wait for them to finish;
-    a host that never exits still fails the run after `seconds`.
-    """
-    deadline = time.monotonic() + seconds
-    while True:
-        try:
-            shutil.rmtree(path)
-            return
-        except FileNotFoundError:
-            return
-        except PermissionError:
-            if time.monotonic() > deadline:
-                raise
-            time.sleep(0.5)
-
-
 def main(selected: list[str]) -> int:
     temporary = Path(tempfile.mkdtemp(prefix="joinery native widgets "))
     try:
         return _run(selected, temporary)
     finally:
-        _remove_when_released(temporary)
+        remove_when_released(temporary)
 
 
 def _run(selected: list[str], temporary: Path) -> int:

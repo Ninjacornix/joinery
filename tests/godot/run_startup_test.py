@@ -10,6 +10,9 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -109,6 +112,37 @@ def isolated_environment(directory: Path, root: Path, capture: Path) -> dict[str
     return environment
 
 
+def remove_when_released(path: Path, seconds: float = 30.0) -> None:
+    """Delete a scratch folder once every process has let go of it.
+
+    Hosts the editor starts (chat, CLI jobs) shut down on their own when their
+    pipes close, a moment after the editor exits. Windows refuses to remove a
+    folder while such a process still runs in it, so wait for them to finish;
+    a host that never exits still fails the run after `seconds`.
+    """
+    deadline = time.monotonic() + seconds
+    while True:
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(0.5)
+
+
+@contextmanager
+def scratch_folder(prefix: str) -> Iterator[str]:
+    """Like tempfile.TemporaryDirectory, but waits for the editor's hosts."""
+    directory = tempfile.mkdtemp(prefix=prefix)
+    try:
+        yield directory
+    finally:
+        remove_when_released(Path(directory))
+
+
 def isolated_editor(source: Path, directory: Path) -> Path:
     target = directory / "editor" / source.name
     target.parent.mkdir()
@@ -165,7 +199,7 @@ def wizard_pass(root: Path, capture: Path, theme: str) -> list[str]:
     names = tuple(f"pm-{page}-{theme}.png" for page in WIZARD_PAGES)
     for name in names:
         (capture / name).unlink(missing_ok=True)
-    with tempfile.TemporaryDirectory(prefix="joinery-wizard-") as directory:
+    with scratch_folder("joinery-wizard-") as directory:
         temporary = Path(directory)
         env = isolated_environment(temporary, root, capture)
         env["JOINERY_VISUAL_THEME"] = theme
@@ -244,7 +278,7 @@ def setup_flow(root: Path, capture: Path) -> int:
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     try:
-        with tempfile.TemporaryDirectory(prefix="joinery-api-flow-") as directory:
+        with scratch_folder("joinery-api-flow-") as directory:
             temporary = Path(directory)
             env = isolated_environment(temporary, root, capture)
             env["JOINERY_TEST_MODEL_ENDPOINT"] = (
