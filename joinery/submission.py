@@ -88,6 +88,9 @@ ASSET_SUFFIXES = frozenset(
 )
 #: Files Godot parses on import: a change to one is import-checked.
 GODOT_SUFFIXES = frozenset({".gd", ".tscn", ".tres", ".gdshader", ".glb"})
+#: GUT's command-line runner; a project with it and a test folder runs its tests.
+GUT_RUNNER = "addons/gut/gut_cmdln.gd"
+TEST_DIRS = ("test", "tests")
 OFFLINE_SECONDS = 180
 
 
@@ -129,12 +132,21 @@ def _broken(output: str, ok: bool) -> bool:
     return not ok or "SCRIPT ERROR:" in output or "Parse Error:" in output
 
 
+def gut_dirs(stage: Path) -> list[str]:
+    """The project's GUT test folders, when it has GUT; otherwise none."""
+    if not (stage / GUT_RUNNER).is_file():
+        return []
+    return [name for name in TEST_DIRS if (stage / name).is_dir()]
+
+
 @dataclass
 class Validation:
     changes: list[dict[str, str]] = field(default_factory=list)
     problems: list[Problem] = field(default_factory=list)
     #: The art gate when asset work needs an approved art bible first.
     gate: dict[str, Any] | None = None
+    #: Checks that did not apply to this change ("tests" without GUT).
+    skipped: list[str] = field(default_factory=list)
 
 
 async def validate(
@@ -240,11 +252,15 @@ async def validate(
         or change["path"] == "project.godot"
         for change in changes
     )
+    tests = gut_dirs(tx.stage) if godot else []
+    if godot and not tests:
+        found.skipped.append("tests")
     found.problems += await checks(
         tx,
         changes,
         rules=rules,
         godot=godot and not gateway.import_current(tx),
+        tests=tests,
         span=gateway.span,
     )
     return found
@@ -256,12 +272,13 @@ async def checks(
     *,
     rules: bool,
     godot: bool,
+    tests: list[str] | None = None,
     span: Any = None,
 ) -> list[Problem]:
-    """The art bible's measured rules beside Godot's import check.
+    """The art bible's measured rules beside Godot's import check and the project's tests.
 
-    Each runs in the offline worker and takes seconds; neither writes what the
-    other reads (the rules mount the stage read-only).
+    Each runs in the offline worker and takes seconds. The rules mount the stage
+    read-only and run alongside; the tests need the import, so they follow it.
     """
 
     def timed(phase: str) -> AbstractContextManager[None]:
@@ -289,23 +306,26 @@ async def checks(
         ]
 
     async def godot_checks() -> list[Problem]:
-        if not godot:
-            return []
-        with timed("review_import"):
-            got = await run_offline(
-                ["godot", "--headless", "--path", "/work", "--editor", "--import"],
-                tx.stage,
-                OFFLINE_SECONDS,
-            )
-        if not _broken(got.output, got.ok):
-            return []
-        return [
-            Problem(
-                "godot_import",
-                "Godot import/script validation failed: "
-                + (got.output[-4000:] or "Godot exited with an error."),
-            )
-        ]
+        found: list[Problem] = []
+        if godot or tests:
+            with timed("review_import"):
+                got = await run_offline(
+                    ["godot", "--headless", "--path", "/work", "--editor", "--import"],
+                    tx.stage,
+                    OFFLINE_SECONDS,
+                )
+            if _broken(got.output, got.ok):
+                found.append(
+                    Problem(
+                        "godot_import",
+                        "Godot import/script validation failed: "
+                        + (got.output[-4000:] or "Godot exited with an error."),
+                    )
+                )
+                return found
+        if tests:
+            found += await run_tests(tx.stage, tests, timed)
+        return found
 
     outcomes = await asyncio.gather(measured(), godot_checks(), return_exceptions=True)
     problems: list[Problem] = []
@@ -314,3 +334,31 @@ async def checks(
             raise outcome
         problems += outcome
     return problems
+
+
+async def run_tests(
+    stage: Path, folders: list[str], timed: Any = None
+) -> list[Problem]:
+    """Run the project's GUT tests; a failure or a timeout is a problem to fix."""
+    argv = [
+        "godot",
+        "--headless",
+        "--path",
+        "/work",
+        "-s",
+        "res://" + GUT_RUNNER,
+        "-gdir=" + ",".join("res://" + name for name in folders),
+        "-ginclude_subdirs",
+        "-gexit",
+    ]
+    with timed("review_tests") if timed is not None else nullcontext():
+        got = await run_offline(argv, stage, OFFLINE_SECONDS)
+    if got.ok and "SCRIPT ERROR:" not in got.output:
+        return []
+    return [
+        Problem(
+            "tests",
+            "The project's tests failed: "
+            + (got.output[-4000:] or "GUT exited with an error."),
+        )
+    ]
