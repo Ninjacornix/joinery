@@ -180,7 +180,11 @@ def theme_pass(
             ]
             if "classic view: ok" not in output or failed:
                 problems.append(f"{theme} run {step} ({layout}) failed; see {log.name}")
-                if not any(line.startswith("CHECK ") for line in output.splitlines()):
+                if "EDITOR CRASH" in output:
+                    # All of it: a crash trace can run well past the last lines.
+                    print(f"  {theme} {step} {layout}: the editor crashed; its output:")
+                    print("\n".join("    " + line for line in output.splitlines()))
+                elif not any(line.startswith("CHECK ") for line in output.splitlines()):
                     # The editor never reached the checks: show how it ended.
                     tail = output.strip().splitlines()[-40:]
                     print(f"  {theme} {step} {layout}: no checks ran; last output:")

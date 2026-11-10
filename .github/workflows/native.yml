@@ -118,6 +118,25 @@ jobs:
       - name: Provision private Windows software OpenGL
         if: runner.os == 'Windows'
         run: uv run python release/windows_graphics.py --engine "$JOINERY_RELEASE_ENGINE" --output out/windows-software-gl --cache "$RUNNER_TEMP/mesa" --github-env "$GITHUB_ENV"
+      - name: Trace fail-fast exits in every later Windows editor
+        if: runner.os == 'Windows'
+        # abort() and friends end with 0xC0000409 and no report; the fork prints
+        # their stack instead (ADR 0032). Prove it once, then keep it on.
+        run: |
+          uv run python - <<'PY'
+          import os
+          import subprocess
+          result = subprocess.run(
+              [os.environ['JOINERY_GODOT_BIN'], '--version'],
+              env={**os.environ, 'JOINERY_CRASH_TRACE': 'selftest'},
+              capture_output=True, text=True, errors='replace', timeout=300, check=False,
+          )
+          print(result.stdout + result.stderr)
+          assert result.returncode == 0xE04A0001, f'exit 0x{result.returncode & 0xFFFFFFFF:08X}'
+          assert 'JOINERY CRASH TRACE: abort' in result.stderr
+          assert 'godot_windows.cpp' in result.stderr, 'the trace must resolve symbols'
+          PY
+          echo "JOINERY_CRASH_TRACE=1" >> "$GITHUB_ENV"
       - name: Keep a full crash dump whenever the Windows editor crashes
         if: runner.os == 'Windows'
         shell: pwsh

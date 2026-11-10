@@ -67,6 +67,8 @@ def isolated_environment(directory: Path, root: Path, capture: Path) -> dict[str
         "VK_DRIVER_FILES",
         "VK_ICD_FILENAMES",
         "JOINERY_RENDERING_DRIVER",
+        # Windows CI: print a stack for fail-fast exits (ADR 0032).
+        "JOINERY_CRASH_TRACE",
     }
     environment = {
         key: value for key, value in os.environ.items() if key.upper() in permitted
