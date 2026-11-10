@@ -58,6 +58,19 @@ class AgentAdapter(ABC):
         pass
 
     @property
+    def handle(self) -> str:
+        """The provider's id for this conversation, to resume it later ("" when none)."""
+        return ""
+
+    async def resume(self, handle: str) -> bool:
+        """Continue a saved conversation in the provider's own session; False when the
+        provider can't, and the chat goes on from a summary instead."""
+        return False
+
+    async def new_session(self) -> None:
+        """Start a fresh conversation in the connected provider."""
+
+    @property
     def agent(self) -> Agent:
         return get(self.agent_id)
 
@@ -102,6 +115,16 @@ class _SessionAdapter(AgentAdapter):
     async def close(self) -> None:
         await self.session.close()
 
+    @property
+    def handle(self) -> str:
+        return self.session.handle
+
+    async def resume(self, handle: str) -> bool:
+        return await self.session.resume(handle)
+
+    async def new_session(self) -> None:
+        await self.session.new_session()
+
 
 class ClaudeAdapter(_SessionAdapter):
     def __init__(self) -> None:
@@ -145,6 +168,16 @@ class CodexAdapter(AgentAdapter):
 
     async def close(self) -> None:
         await self.session.close()
+
+    @property
+    def handle(self) -> str:
+        return self.session.handle
+
+    async def resume(self, handle: str) -> bool:
+        return await self.session.resume(handle)
+
+    async def new_session(self) -> None:
+        await self.session.new_session()
 
 
 class GeminiAdapter(_SessionAdapter):

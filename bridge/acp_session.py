@@ -99,6 +99,7 @@ class ACPSession:
         #: The agent takes image content blocks (ACP promptCapabilities.image); without it
         #: attached images are listed by path in the prompt text.
         self.image_input = False
+        self.load_session = False
         self.usage = ACPUsage()
 
     async def connect(self, project: Path, profile_id: str = "") -> None:
@@ -162,29 +163,75 @@ class ACPSession:
             capabilities = initialized.get("agentCapabilities") or {}
             prompts = capabilities.get("promptCapabilities") or {}
             self.image_input = bool(prompts.get("image"))
-            config = proxy_config(self.gateway_socket)
-            config["name"] = "joinery-registry"
-            config["env"] = [
-                {"name": key, "value": value} for key, value in config["env"].items()
-            ]
-            session = await self.request(
-                "session/new", {"cwd": str(project), "mcpServers": [config]}
-            )
-            self.session_id = str(session["sessionId"])
-            models = session.get("models") or {}
-            self.current_model = str(models.get("currentModelId") or "")
-            self.model_choices = [
-                ModelChoice(
-                    id=str(m["modelId"]),
-                    name=str(m.get("name") or m["modelId"]),
-                    is_default=m["modelId"] == self.current_model,
-                )
-                for m in models.get("availableModels", [])
-            ]
-            self.load_config(session.get("configOptions", []))
+            # The agent can reopen a saved session (ACP session/load).
+            self.load_session = bool(capabilities.get("loadSession"))
+            await self.new_session()
         except BaseException:
             await self.close()
             raise
+
+    def _mcp_servers(self) -> list[dict[str, Any]]:
+        assert self.gateway_socket is not None
+        config = proxy_config(self.gateway_socket)
+        config["name"] = "joinery-registry"
+        config["env"] = [
+            {"name": key, "value": value} for key, value in config["env"].items()
+        ]
+        return [config]
+
+    def _adopt(self, session: dict[str, Any]) -> None:
+        """Take the models and options a new or loaded session reports."""
+        models = session.get("models") or {}
+        self.current_model = str(models.get("currentModelId") or "")
+        self.model_choices = [
+            ModelChoice(
+                id=str(m["modelId"]),
+                name=str(m.get("name") or m["modelId"]),
+                is_default=m["modelId"] == self.current_model,
+            )
+            for m in models.get("availableModels", [])
+        ]
+        self.load_config(session.get("configOptions", []))
+        self.usage = ACPUsage()
+
+    async def new_session(self) -> None:
+        """A fresh ACP session in the same agent process, for a new chat."""
+        session = await self.request(
+            "session/new",
+            {"cwd": str(self.project), "mcpServers": self._mcp_servers()},
+        )
+        self.session_id = str(session["sessionId"])
+        self._adopt(session)
+
+    @property
+    def handle(self) -> str:
+        """The ACP session id to load this conversation with."""
+        return self.session_id
+
+    async def resume(self, handle: str) -> bool:
+        """Reopen a saved session with session/load when the agent advertises
+        loadSession. The agent replays the history as updates first; those are already
+        on screen, so they are dropped. False when it can't."""
+        if not handle or not self.load_session or self.process is None:
+            return False
+        try:
+            session = await self.request(
+                "session/load",
+                {
+                    "sessionId": handle,
+                    "cwd": str(self.project),
+                    "mcpServers": self._mcp_servers(),
+                },
+                120,
+            )
+        except (RuntimeError, ConnectionError, TimeoutError, OSError):
+            return False
+        finally:
+            while not self.events.empty():
+                self.events.get_nowait()
+        self.session_id = handle
+        self._adopt(session if isinstance(session, dict) else {})
+        return True
 
     async def models(self) -> list[ModelChoice]:
         return self.model_choices

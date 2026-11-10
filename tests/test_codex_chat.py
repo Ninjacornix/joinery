@@ -62,6 +62,11 @@ for line in sys.stdin:
  elif method=='config/value/write':Path('hook_trusted').touch()
  elif method=='account/read':result={'account':None if Path('signed_out').exists() else {'type':'chatgpt'}}
  elif method=='thread/start':result={'thread':{'id':'thread1'}}
+ elif method=='thread/resume':
+  if Path('resume_fails').exists():
+   print(json.dumps({'id':r['id'],'error':{'message':'no rollout found for thread id'}}),flush=True)
+   continue
+  result={'thread':{'id':r['params']['threadId']}}
  elif method=='turn/start':
   turn+=1
   result={'turn':{'id':str(turn)}}
@@ -389,5 +394,42 @@ def test_attached_images_go_in_as_local_images(game: Path) -> None:
         assert turn["params"]["input"][1:] == [
             {"type": "localImage", "path": str(image)}
         ]
+
+    asyncio.run(run())
+
+
+def test_a_saved_thread_resumes_and_a_new_chat_starts_a_thread(game: Path) -> None:
+    async def run() -> None:
+        session = CodexSession()
+        try:
+            await session.connect(game)
+            assert session.handle == "thread1"
+            assert await session.resume("thread-saved")
+            assert session.handle == "thread-saved"
+            prompt = Prompt(text="hello", project_dir=str(game))
+            events = [e async for e in session.send(prompt)]
+            assert events[-1] == Done(ok=True)
+            (game / "resume_fails").touch()
+            assert not await session.resume("thread-gone")
+            assert session.handle == "thread-saved"
+            await session.new_session()
+            assert session.handle == "thread1"
+            requests = [
+                json.loads(line)
+                for line in (game / "requests.jsonl").read_text().splitlines()
+            ]
+            resumes = [r for r in requests if r.get("method") == "thread/resume"]
+            assert resumes[0]["params"]["threadId"] == "thread-saved"
+            # The resumed thread runs exactly like a new one: same folder, sandbox
+            # and instructions.
+            start = next(r for r in requests if r.get("method") == "thread/start")
+            for key in ("cwd", "sandbox", "approvalPolicy", "developerInstructions"):
+                assert resumes[0]["params"][key] == start["params"][key]
+            assert start["params"]["dynamicTools"][0]["name"] == "joinery_edit_scene"
+            turn = next(r for r in requests if r.get("method") == "turn/start")
+            assert turn["params"]["threadId"] == "thread-saved"
+            assert len([r for r in requests if r.get("method") == "thread/start"]) == 2
+        finally:
+            await session.close()
 
     asyncio.run(run())

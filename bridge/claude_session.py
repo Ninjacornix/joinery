@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -124,6 +125,18 @@ class ClaudeUsage:
         return None
 
 
+def claude_transcript_exists(project: Path, session_id: str) -> bool:
+    """Whether Claude Code keeps session [session_id] for [project]: its transcript is
+    <config>/projects/<project path, non-alphanumerics as "-">/<id>.jsonl. When the
+    config folder is not where Claude Code keeps it by default, trust the id."""
+    config = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+    projects = config / "projects"
+    if not projects.is_dir():
+        return True
+    folder = re.sub(r"[^A-Za-z0-9]", "-", str(project.resolve()))
+    return (projects / folder / f"{session_id}.jsonl").is_file()
+
+
 class ClaudeSession:
     def __init__(self) -> None:
         self.usage = ClaudeUsage()
@@ -155,6 +168,30 @@ class ClaudeSession:
             self.effort_supported = b"--effort" in output
         finally:
             await stop_process(probe)
+
+    @property
+    def handle(self) -> str:
+        """The session id to resume this conversation with, once a turn has run."""
+        return self.session_id if self.started else ""
+
+    async def resume(self, handle: str) -> bool:
+        """Continue a saved conversation: later turns pass `--resume <id>`, which works
+        across processes. Only when Claude Code still has that session for this project."""
+        try:
+            identifier = str(uuid.UUID(handle))
+        except ValueError:
+            return False
+        if not claude_transcript_exists(self.project, identifier):
+            return False
+        self.session_id = identifier
+        self.started = True
+        self.usage = ClaudeUsage()
+        return True
+
+    async def new_session(self) -> None:
+        self.session_id = str(uuid.uuid4())
+        self.started = False
+        self.usage = ClaudeUsage()
 
     async def models(self) -> list[ModelChoice]:
         # Print mode does not expose an account model inventory. Keep its

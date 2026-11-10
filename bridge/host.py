@@ -63,6 +63,18 @@ class Bridge:
     async def cancel(self) -> None:
         await self._adapter.cancel()
 
+    @property
+    def handle(self) -> str:
+        """The provider's resumable id for the current conversation ("" when none)."""
+        return self._adapter.handle
+
+    async def resume(self, handle: str) -> bool:
+        """Continue a saved conversation in the provider's own session, if it can."""
+        return await self._adapter.resume(handle)
+
+    async def new_session(self) -> None:
+        await self._adapter.new_session()
+
     async def send(self, message: SidebarMessage) -> AsyncIterator[AgentEvent]:
         """Forward one message and stream the agent's events back to the sidebar."""
         if not self._adapter.ready:
