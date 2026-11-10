@@ -3,6 +3,9 @@ From: ninjacornix <milanvrankic@gmail.com>
 Date: Tue, 10 Nov 2026 15:14:36 +0100
 Subject: [PATCH] fix(editor): pass the wizard's feature list as one argument
 
+Joinery-only, not meant for upstream: it fixes the Joinery wizard's call
+to the Joinery CLI.
+
 Windows drops an empty argument from a process command line, so an empty
 feature list left --features without a value and the CLI refused the call.
 ---
