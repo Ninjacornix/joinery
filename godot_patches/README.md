@@ -41,8 +41,10 @@ SCons cache elsewhere with `JOINERY_SCONS_CACHE`, size it with
 
 Intended series: 3D editor context-menu slot and viewport pick hook, meant for
 upstream, plus Joinery-only patches that restructure the editor (ADR 0005) and
-route project creation through Joinery's questionnaire (ADR 0004). Projects must
-stay openable in stock Godot; the addon degrades without these.
+route project creation through Joinery's questionnaire (ADR 0004): starting
+point, features and apps, brief and art direction, all read from the CLI
+([ADR 0029](../docs/adr/0029-new-project-wizard.md)). Projects must stay
+openable in stock Godot; the addon degrades without these.
 
 The Windows native OpenGL initialization fix is a separate upstream candidate
 with an exact-file scope exception ([ADR 0018](../docs/adr/0018-windows-software-opengl.md)).

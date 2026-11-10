@@ -22,6 +22,24 @@ CAPTURES = (
     "startup-setup-tools.png",
     "startup-setup-art.png",
 )
+#: The new-project wizard's pages, captured by visual_startup_test.gd in each
+#: theme: starting point cards, features with Steam and Online play on (the app
+#: ID field and the connect choice), the app ID error, brief and art direction
+#: with References, and the creating page.
+WIZARD_PAGES = (
+    "setup-1-details",
+    "setup-2-tools",
+    "setup-2-steam-error",
+    "setup-3-art",
+    "setup-creating",
+)
+THEMES = ("dark", "light")
+#: The fork's light preset, as the Appearance setting writes it.
+LIGHT_SETTINGS = (
+    '[gd_resource type="EditorSettings" format=3]\n\n'
+    "[resource]\n"
+    'interface/theme/color_preset = "Joinery Light"\n'
+)
 
 
 def isolated_environment(directory: Path, root: Path, capture: Path) -> dict[str, str]:
@@ -112,8 +130,8 @@ def isolated_editor(source: Path, directory: Path) -> Path:
     return target
 
 
-def checked_captures(directory: Path) -> None:
-    for name in CAPTURES:
+def checked_captures(directory: Path, names: tuple[str, ...] = CAPTURES) -> None:
+    for name in names:
         data = (directory / name).read_bytes()
         if data[:8] != b"\x89PNG\r\n\x1a\n" or data[12:16] != b"IHDR":
             raise ValueError("Startup capture is not a PNG: " + name)
@@ -141,6 +159,58 @@ class ModelList(BaseHTTPRequestHandler):
         pass
 
 
+def wizard_pass(root: Path, capture: Path, theme: str) -> list[str]:
+    """Walk the new-project wizard in one theme; return what went wrong."""
+    names = tuple(f"pm-{page}-{theme}.png" for page in WIZARD_PAGES)
+    for name in names:
+        (capture / name).unlink(missing_ok=True)
+    with tempfile.TemporaryDirectory(prefix="joinery-wizard-") as directory:
+        temporary = Path(directory)
+        env = isolated_environment(temporary, root, capture)
+        env["JOINERY_VISUAL_THEME"] = theme
+        binary = isolated_editor(engine_binary(), temporary)
+        if theme == "light":
+            data = binary.parent / "editor_data"
+            data.mkdir(exist_ok=True)
+            (data / "editor_settings-4.7.tres").write_text(LIGHT_SETTINGS)
+        command = [
+            str(binary),
+            "--audio-driver",
+            "Dummy",
+            "--project-manager",
+            "--script",
+            str(root / "tests/godot/visual_startup_test.gd"),
+        ]
+        if env.get("JOINERY_RENDERING_DRIVER"):
+            command += ["--rendering-driver", env["JOINERY_RENDERING_DRIVER"]]
+        try:
+            result = subprocess.run(
+                command,
+                cwd=temporary,
+                env=env,
+                timeout=300,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            output = result.stdout + result.stderr
+            code = result.returncode
+        except subprocess.TimeoutExpired:
+            output, code = "", -1
+    (capture / f"wizard-{theme}.log").write_text(output)
+    problems: list[str] = []
+    if code != 0 or "visual startup: ok" not in output:
+        problems.append(f"{theme}: the wizard walk failed (wizard-{theme}.log)")
+    # ui_checks reports clipped text, contrast, overflow and small targets; the
+    # walk adds "primary" when a page shows more than one accent fill.
+    problems += [line for line in output.splitlines() if line.startswith("UI-CHECK ")]
+    try:
+        checked_captures(capture, names)
+    except (OSError, ValueError) as exc:
+        problems.append(f"{theme}: {exc}")
+    return problems
+
+
 def main() -> int:
     root = Path(__file__).resolve().parents[2]
     if sys.prefix == sys.base_prefix:
@@ -153,6 +223,20 @@ def main() -> int:
         os.environ.get("JOINERY_CAPTURE_DIR", root / "out/startup-captures")
     ).resolve()
     capture.mkdir(parents=True, exist_ok=True)
+    # Both parts always run, so one failing never hides the other's result.
+    setup = setup_flow(root, capture)
+    problems = [p for theme in THEMES for p in wizard_pass(root, capture, theme)]
+    for problem in problems:
+        print(problem)
+    if not problems:
+        print(
+            f"New-project wizard: {len(WIZARD_PAGES)} pages in {len(THEMES)} themes: PASS"
+        )
+    return 1 if setup or problems else 0
+
+
+def setup_flow(root: Path, capture: Path) -> int:
+    """Agent connection, API form and project setup, from project_setup_flow_test."""
     for name in CAPTURES:
         (capture / name).unlink(missing_ok=True)
     server = ThreadingHTTPServer(("127.0.0.1", 0), ModelList)

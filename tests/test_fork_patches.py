@@ -14,7 +14,11 @@ meant to make, and anything else fails here rather than at runtime.
 
 from __future__ import annotations
 
+import os
 import re
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -86,6 +90,11 @@ DELETION_ALLOWANCE = {
     "0012": 130,
     "0013": 70,
     "0014": 30,
+    # The starting-point wizard replaces the 0008/0012 wizard's step 1 and 2
+    # pages, its three-step creating list and its art-only step 3. Checked
+    # against 4.7.2-stable: the one upstream line it changes is ok_pressed's
+    # `if (mode == MODE_NEW) {`, which gains a condition.
+    "0017": 175,
 }
 
 
@@ -120,12 +129,10 @@ def test_patches_target_only_expected_areas() -> None:
     allowed = ("editor/",)
     exceptions = {
         "0010-fix-windows-initialize-WGL-before-pixel-formats.patch": {
-            "platform/windows/gl_manager_windows_native.cpp":
-                "docs/adr/0018-windows-software-opengl.md",
+            "platform/windows/gl_manager_windows_native.cpp": "docs/adr/0018-windows-software-opengl.md",
         },
         "0011-fix-windows-treat-broken-output-pipes-as-EOF.patch": {
-            "drivers/windows/file_access_windows_pipe.cpp":
-                "docs/adr/0019-windows-process-pipe-eof.md",
+            "drivers/windows/file_access_windows_pipe.cpp": "docs/adr/0019-windows-process-pipe-eof.md",
         },
     }
     for patch in patches():
@@ -136,4 +143,68 @@ def test_patches_target_only_expected_areas() -> None:
             assert decision is not None and (ROOT / decision).is_file(), (
                 f"{patch.name} touches {match}, outside {allowed}. "
                 "An exact-file exception requires its own ADR."
+            )
+
+
+def test_the_new_project_wizard_patch_is_in_the_series() -> None:
+    """The starting-point wizard ships as one patch that reads the CLI's data."""
+    wizard = [p for p in patches() if "What are you making?" in p.read_text()]
+    assert len(wizard) == 1, "exactly one patch adds the starting-point wizard"
+    text = wizard[0].read_text()
+    # Its data comes from the Joinery CLI, never from tables restated in C++.
+    for command in (
+        '"blueprints", "--json"',
+        '"game", "apply"',
+        '"brief", "--project"',
+    ):
+        assert command in text, f"the wizard runs joinery {command}"
+    assert "not intended for upstream" in text
+
+
+def _upstream() -> dict[str, str]:
+    values: dict[str, str] = {}
+    for line in (ROOT / "godot_patches" / "UPSTREAM").read_text().splitlines():
+        if "=" in line and not line.startswith("#"):
+            key, value = line.split("=", 1)
+            values[key.strip()] = value.strip()
+    return values
+
+
+def test_series_applies_to_the_pinned_tag() -> None:
+    """Every patch applies, in order, to the pinned Godot tag.
+
+    Uses the local fork checkout's object store and a throwaway index, so no
+    files are checked out and nothing is fetched. Skips without a checkout.
+    """
+    source = ROOT / "godot_patches" / "godot-src"
+    git = shutil.which("git")
+    if git is None or not (source / ".git").exists():
+        pytest.skip("no godot_patches/godot-src checkout; run fork.sh sync")
+    commit = _upstream()["GODOT_COMMIT"]
+    probe = subprocess.run(
+        [git, "-C", str(source), "cat-file", "-e", commit + "^{commit}"],
+        capture_output=True,
+        check=False,
+    )
+    if probe.returncode != 0:
+        pytest.skip("the pinned tag is not in the local checkout")
+    with tempfile.TemporaryDirectory() as directory:
+        env = dict(os.environ, GIT_INDEX_FILE=str(Path(directory) / "index"))
+        subprocess.run(
+            [git, "-C", str(source), "read-tree", commit],
+            env=env,
+            check=True,
+            capture_output=True,
+        )
+        for patch in patches():
+            applied = subprocess.run(
+                [git, "-C", str(source), "apply", "--cached", str(patch)],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            assert applied.returncode == 0, (
+                f"{patch.name} does not apply after the patches before it: "
+                + applied.stderr.strip()
             )
