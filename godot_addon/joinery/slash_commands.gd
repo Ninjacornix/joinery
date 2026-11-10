@@ -46,6 +46,7 @@ const COMMANDS := {
 	"/agents": ["Accounts Journeyman can use", "cli"],
 	"/models": ["Refresh the model list", "ui"],
 }
+
 ## Shown only when typed, or under the Troubleshooting divider.
 const TROUBLESHOOTING: Array[String] = [
 	"/tools", "/doctor", "/check", "/rebuild", "/agents", "/models"
@@ -556,3 +557,10 @@ static func _first_error(output: String) -> String:
 		return str(data["error"])
 	var lines := output.strip_edges().split("\n", false)
 	return lines[0] if not lines.is_empty() else ""
+
+
+## True for commands that only open or change something in the editor ("ui"), which work
+## while Journeyman is busy with a request.
+static func is_local(command: String) -> bool:
+	var entry: Array = COMMANDS.get(command.split(" ")[0].to_lower(), [])
+	return entry.size() > 1 and entry[1] == "ui"

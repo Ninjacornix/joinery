@@ -30,7 +30,14 @@ func _run_with_motion() -> void:
 	chat.set_chat_state("connected", "")
 	chat.prompt_submitted.connect(func(_text: String, _targets: Array) -> void: pass)
 	chat._prompt.grab_focus()
-	chat._prompt.text = "/"
+	chat._prompt.insert_text_at_caret("/")
+	await process_frame
+	_check(chat._command_popup.visible, "Typing / opens the command menu")
+	chat._prompt.insert_text_at_caret("art")
+	await process_frame
+	_check(chat._command_popup.visible, "Typing /art keeps the command menu open")
+	chat._prompt.clear()
+	chat._prompt.insert_text_at_caret("/")
 	chat._update_commands("/")
 	await create_timer(0.3).timeout
 	var menu: Control = chat._command_popup
@@ -66,7 +73,23 @@ func _run_with_motion() -> void:
 	card.set_elapsed(5)
 	await create_timer(0.3).timeout
 	_check(chat._stop.visible and not chat._send.visible, "Stop settles in Send's slot")
-	_check(card._timer.text == "0:05", "The timer rolls to the elapsed time")
+	_check(card._timer.text == "0:05", "The timer shows the elapsed time")
+	_check(not card._timer.has_meta("_joinery_roll"), "The timer changes without a roll")
+	var arts: Array[String] = []
+	chat._slash.requested.connect(func(c: String) -> void: arts.append(c))
+	chat._prompt.insert_text_at_caret("/")
+	await process_frame
+	var menu_busy: Control = chat._command_popup
+	_check(menu_busy.visible, "Typing / while Journeyman works still opens the menu")
+	_check(
+		not menu_busy.matches.has("/feature") and menu_busy.matches.has("/art"),
+		"While Journeyman works the menu lists only editor commands"
+	)
+	chat._prompt.clear()
+	chat._on_submit("/art")
+	_check(arts == ["/art"], "/art runs while Journeyman works")
+	_check(chat._transcript.current_card() == card, "/art while working starts no request")
+	menu_busy.close()
 	_check(
 		(
 			card._timer.is_visible_in_tree()

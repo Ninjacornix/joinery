@@ -47,11 +47,13 @@ func _notification(what: int) -> void:
 ## Show the commands that match [param text] ("/" shows the everyday ones). With
 ## [param help], show every command with troubleshooting under its divider. Returns true
 ## when the menu is open.
-func open_for(text: String, help := false) -> bool:
+func open_for(text: String, help := false, local_only := false) -> bool:
 	var typed := text.to_lower()
 	var everyday: Array[String] = []
 	var fixes: Array[String] = []
 	for command: String in SLASH.COMMANDS:
+		if local_only and not SLASH.is_local(command):
+			continue
 		var fix := SLASH.TROUBLESHOOTING.has(command)
 		if help:
 			(fixes if fix else everyday).append(command)

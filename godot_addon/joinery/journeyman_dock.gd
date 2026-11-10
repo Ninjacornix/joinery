@@ -343,10 +343,11 @@ func _take_offer(command: String) -> void:
 
 
 func _update_commands(text: String) -> void:
-	if not text.begins_with("/") or text.contains(" ") or text.contains("\n") or _busy:
+	if not text.begins_with("/") or text.contains(" ") or text.contains("\n"):
 		_command_popup.close()
 		return
-	_command_popup.open_for(text)
+	# While a request runs, only the commands that open something in the editor apply.
+	_command_popup.open_for(text, false, _busy or _review_pending)
 
 
 func _on_prompt_input(event: InputEvent) -> void:
@@ -394,8 +395,11 @@ func _fill_prompt(text: String) -> void:
 
 func _on_submit(text: String) -> void:
 	var entry := text.strip_edges()
-	if entry.is_empty() or _busy or _review_pending:
+	if entry.is_empty():
 		return
+	if _busy or _review_pending:
+		if not (entry.begins_with("/") and SLASH_SCRIPT.is_local(entry)):
+			return
 	_command_popup.close()
 	_prompt.clear()
 	if entry.begins_with("/"):
