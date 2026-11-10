@@ -1,7 +1,10 @@
 """Surge XT through Joinery's sound adapter, in the real offline worker.
 
-Creates a source and WAV, edits it, inspects parameters, replays every recipe
-exactly, and checks that an unknown parameter is refused by name.
+Creates a source and WAV, edits it, inspects parameters, changes one parameter
+without resetting the others, replays every recipe exactly, and checks that an
+unknown parameter is refused by name. A project with only Surge XT selected
+starts the joinery-sound server, and its capabilities report Surge as
+installed in the worker.
 """
 
 from __future__ import annotations
@@ -14,9 +17,14 @@ import tempfile
 import wave
 from pathlib import Path
 
+from mcp import Client
+
 from joinery.authoring import IMAGE, edit_document, inspect_document
 from joinery.recipe import rebuild_one, recipe_paths
 from joinery.runner import SandboxRunner
+from joinery.server_install import configured
+from servers.authoring import make_server
+from servers.sound import ops
 
 PARAMETERS: dict[str, object] = {
     "a_filter_1_type": "LP 24 dB",
@@ -58,6 +66,27 @@ async def main(stage: Path) -> dict[str, object]:
     assert 0 < dark < bright, (bright, dark)
     info = await inspect_document(stage, "surge-xt", source)
     assert "a_filter_1_cutoff" in info["parameter_defaults"]
+    # A partial edit keeps every other parameter, the notes and the export.
+    await ops.set_surge_parameters(stage, source, {"a_osc_1_pitch": -7.0})
+    kept = json.loads((stage / source).read_text())
+    assert kept["parameters"] == {
+        **PARAMETERS,
+        "a_filter_1_cutoff": 300.0,
+        "a_osc_1_pitch": -7.0,
+    }, kept
+    assert kept["notes"] == PATCH["notes"]
+    # Surge XT alone starts the sound server, and the worker has the renderer.
+    servers = {spec.name for spec in configured(stage)[0]}
+    assert "joinery-sound" in servers, servers
+    async with Client(make_server(stage, "joinery-sound")) as client:
+        names = {tool.name for tool in (await client.list_tools()).tools}
+        assert {"set_surge_parameters", "compose_music", "process_audio"} <= names
+        got = await client.call_tool("document_capabilities", {})
+        capabilities = json.loads(got.content[0].text)
+    assert capabilities["runtime_available"] is True, capabilities
+    assert capabilities["tools"] == [
+        {"id": "surge-xt", "application_installed": True}
+    ], capabilities
     replays = [
         rebuild_one(path, stage, SandboxRunner(image=IMAGE))
         for path in recipe_paths(stage)

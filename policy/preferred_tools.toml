@@ -6,6 +6,8 @@
 # telemetry, generative services and outbound calls. Any new ref means re-vetting.
 
 vetted_on = 2026-11-07
+# Aseprite, REAPER, MuseScore and Audacity were removed (docs/adr/0025-tool-removals.md).
+# joinery/catalog.py REMOVED_TOOLS tells projects that still enable them.
 
 # Joinery's own servers, always allowed.
 builtin_servers = [
@@ -48,23 +50,19 @@ tier = "official"
 stars = 37
 last_push = 2026-09-29
 licence = "GPL-3.0-or-later"
-notes = "v1.0.3, needs Blender 5.1+. Runs LLM code unguarded, so use it only inside the sandbox. Materials via shader nodes and bake."
-
-[[tool]]
-id = "aseprite"
-name = "Aseprite"
-domain = "2d"
-paid = true
-status = "available"
-[tool.mcp]
-server = "aseprite"
-repo = "https://github.com/diivi/aseprite-mcp"
-ref = "4bcdb6f5932116bbdbd1b7d3fcc1e8f965f7657a"
-tier = "community"
-stars = 916
-last_push = 2026-11-03
-licence = "MIT"
-notes = "Needs your own Aseprite licence."
+# These read or drive Blender's window, which the offline worker never opens:
+# each returns "not available in background mode". Viewport and thumbnail
+# renders still work.
+blocked_tools = [
+  "get_screenshot_of_area_as_image",
+  "get_screenshot_of_window_as_image",
+  "get_screenshot_of_window_as_json",
+  "jump_to_tab_by_name",
+  "jump_to_tab_by_space_type",
+  "jump_to_view3d_object_by_name",
+  "jump_to_view3d_object_data_by_name",
+]
+notes = "v1.0.3, needs Blender 5.1+. Runs LLM code unguarded, so use it only inside the sandbox. Materials via shader nodes and bake. Window-only tools are blocked because the worker runs Blender in the background."
 
 [[tool]]
 id = "supercollider"
@@ -85,14 +83,10 @@ id = "gimp"
 name = "GIMP"
 domain = "2d"
 status = "available"
-[tool.mcp]
-server = "gimp"
-repo = "https://github.com/gimp-mcp/gimp-mcp"
-ref = "7325865385541a01aaf336ebc93b00332297f77f"
-tier = "community"
-stars = 289
-last_push = 2026-11-01
-licence = "GPL-3.0"
+builtin_server = "joinery-paint"
+# GIMP 3 runs headless in the creative worker. Joinery's own paint server edits
+# .xcf documents through its Python-Fu adapter (joinery/tools/gimp.py). The
+# community gimp-mcp needs a live desktop GIMP, so it is no longer pinned.
 
 [[tool]]
 id = "inkscape"
@@ -107,54 +101,11 @@ tier = "community"
 stars = 92
 last_push = 2026-11-02
 licence = "MIT"
+blocked_tools = ["inkscape_live"]
+blocked_operations = ["inkscape_extension:run_live"]
+notes = "For inspection, analysis and conversion. Persistent SVG edits go through joinery-paint operate_vector so they get a recipe. inkscape_live and extension run_live need the Inkscape desktop app over D-Bus, which the offline worker never has."
 
-[[tool]]
-id = "reaper"
-name = "REAPER"
-domain = "audio"
-paid = true
-status = "available"
-[tool.mcp]
-server = "reaper"
-repo = "https://github.com/bonfire-systems/reaper-mcp"
-ref = "e3dff9fd8e215d86462e6dd1599055a0dcd7921a"
-tier = "community"
-stars = 180
-last_push = 2026-10-25
-licence = "MIT"
-notes = "Needs your own REAPER licence."
-
-[[tool]]
-id = "musescore"
-name = "MuseScore"
-domain = "audio"
-status = "available"
-[tool.mcp]
-server = "musescore"
-repo = "https://github.com/ghchen99/mcp-musescore"
-ref = "80e2af772a51f152298a2186d1d18ba2b734c280"
-tier = "community"
-stars = 140
-last_push = 2026-11-02
-licence = "MIT"
-blocked_tools = ["show_score"]
-notes = "show_score loads its viewer from unpkg.com, so it stays blocked."
-
-[[tool]]
-id = "audacity"
-name = "Audacity"
-domain = "audio"
-status = "available"
-[tool.mcp]
-server = "audacity"
-repo = "https://github.com/xDarkzx/Audacity-MCP"
-ref = "2835f96c18934fe93b0b0673ba18fc88d884a12b"
-tier = "community"
-stars = 133
-last_push = 2026-10-31
-licence = "Apache-2.0"
-
-# Joinery is building its own MCPs for these. Listed in the menu, not selectable yet.
+# Joinery's own servers drive these programs in its offline workers.
 
 [[tool]]
 id = "krita"

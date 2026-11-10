@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import re
 import tomllib
+from collections.abc import Mapping
 from datetime import date
 from pathlib import Path
-from typing import Literal, Self
+from typing import Any, Literal, Self
 
 from pydantic import BaseModel, ConfigDict, model_validator
 
@@ -46,12 +47,20 @@ class McpSource(_Strict):
     last_push: date
     licence: str
     blocked_tools: tuple[str, ...] = ()
+    #: "tool:operation" pairs refused when a call's `operation` argument names
+    #: them, for multi-operation tools that are only partly usable offline.
+    blocked_operations: tuple[str, ...] = ()
     notes: str = ""
 
     @model_validator(mode="after")
     def _pinned(self) -> Self:
         if not re.fullmatch(r"[0-9a-f]{40}", self.ref):
             raise ValueError(f"{self.server}: ref must be a full commit SHA")
+        for entry in self.blocked_operations:
+            if not re.fullmatch(r"[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+", entry):
+                raise ValueError(
+                    f"{self.server}: blocked operation {entry!r} must be tool:operation"
+                )
         return self
 
 
@@ -194,15 +203,59 @@ def _check_custom(catalog: Catalog, custom: tuple[CustomTool, ...]) -> None:
         aliases.add(tool.server.replace("-", "_"))
 
 
+#: Tools Joinery used to offer and no longer does, with what to tell a project
+#: that still enables one. Such a project keeps working: the id is skipped, and
+#: the notice is shown wherever tool status is shown. Adding the program back
+#: as the user's own custom tool stays possible.
+REMOVED_TOOLS: dict[str, str] = {
+    "aseprite": (
+        "Aseprite was removed: it can't be packaged in Joinery's offline workers "
+        "(paid licence). Use Krita for pixel art, or add Aseprite yourself as a "
+        "custom tool."
+    ),
+    "reaper": (
+        "REAPER was removed: it can't be packaged in Joinery's offline workers "
+        "(paid licence) and needs a live desktop session. Use SuperCollider or "
+        "Surge XT, or add REAPER yourself as a custom tool."
+    ),
+    "musescore": (
+        "MuseScore was removed: it has no offline mode Joinery can drive. Music is "
+        "written as MIDI sources and rendered through FluidSynth and Surge XT; you "
+        "can still add MuseScore yourself as a custom tool."
+    ),
+    "audacity": (
+        "Audacity was removed as an editing tool: it can't run reliably in "
+        "Joinery's offline workers. Sound edits (trim, fade, normalise, loop "
+        "points, format) run in Joinery's sound tools; Open in Audacity still "
+        "works when it is installed."
+    ),
+}
+
+
+def removed_notices(tools: ProjectTools) -> list[str]:
+    """One notice per removed tool this project still enables."""
+    custom = {c.id for c in tools.custom}
+    return [
+        REMOVED_TOOLS[tool_id]
+        for tool_id in dict.fromkeys(tools.enabled)
+        if tool_id in REMOVED_TOOLS and tool_id not in custom
+    ]
+
+
 def selection_ids(catalog: Catalog, tools: ProjectTools) -> list[str]:
-    """Preferred ids in use. A required tool can be replaced by a custom one in its domain."""
+    """Preferred ids in use. A required tool can be replaced by a custom one in its domain.
+
+    Ids of removed tools are skipped rather than refused, so an older project
+    still opens; `removed_notices` says what happened to them.
+    """
     _check_custom(catalog, tools.custom)
-    for tool_id in tools.enabled:
+    enabled = {t for t in tools.enabled if t not in REMOVED_TOOLS}
+    for tool_id in enabled:
         if catalog.get(tool_id).status != "available":
             raise ValueError(f"{tool_id} has no vetted MCP yet")
     replaced = {c.domain for c in tools.custom}
     required = {t.id for t in catalog.tool if t.required and t.domain not in replaced}
-    return sorted(set(tools.enabled) | required)
+    return sorted(enabled | required)
 
 
 def enabled_tools(catalog: Catalog, config: Path = CONFIG_PATH) -> list[str]:
@@ -224,3 +277,20 @@ def blocked_tools(catalog: Catalog, server: str) -> tuple[str, ...]:
         if tool.mcp is not None and tool.mcp.server == server:
             return tool.mcp.blocked_tools
     return ()
+
+
+def blocked_operation(
+    catalog: Catalog, server: str, tool: str, arguments: Mapping[str, Any]
+) -> str:
+    """The blocked operation this call asks for, or ""."""
+    operation = arguments.get("operation")
+    if not isinstance(operation, str):
+        return ""
+    for entry in catalog.tool:
+        if (
+            entry.mcp is not None
+            and entry.mcp.server == server
+            and f"{tool}:{operation}" in entry.mcp.blocked_operations
+        ):
+            return operation
+    return ""

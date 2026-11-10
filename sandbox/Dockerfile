@@ -174,8 +174,8 @@ RUN set -euo pipefail; \
     if [ "${WITH_INKSCAPE}" != "1" ]; then echo "inkscape: not requested"; exit 0; fi; \
     apt-install inkscape
 
-# Aseprite is deliberately absent: it is paid and source-available, so the user
-# mounts their own licensed build. Krita covers the free pixel path.
+# Aseprite is deliberately absent: its licence forbids redistribution, so it is
+# not a catalog tool (docs/adr/0025-tool-removals.md). Krita covers pixel art.
 
 COPY entrypoint.sh /usr/local/bin/joinery-sandbox
 RUN chmod +x /usr/local/bin/joinery-sandbox

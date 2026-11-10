@@ -9,11 +9,14 @@ from pydantic import ValidationError
 
 from joinery.catalog import (
     CATALOG_PATH,
+    REMOVED_TOOLS,
     Catalog,
     allowed_servers,
     blocked_tools,
     enabled_tools,
     load_catalog,
+    load_project_tools,
+    removed_notices,
 )
 
 
@@ -102,7 +105,7 @@ def test_required_tools_always_enabled_and_allowed(tmp_path: Path) -> None:
     assert enabled_tools(catalog, config) == ["blender", "godot"]
     servers = allowed_servers(catalog, config)
     assert {"blender", "godot", "joinery-verify"} <= servers
-    assert "aseprite" not in servers
+    assert "inkscape" not in servers
 
 
 def test_enabling_unavailable_tool_fails(tmp_path: Path) -> None:
@@ -155,5 +158,27 @@ def test_preferred_godot_blocks_generic_network_tool() -> None:
     assert "game_http_request" in blocked_tools(load_catalog(), "godot")
 
 
-def test_preferred_musescore_blocks_remote_viewer() -> None:
-    assert "show_score" in blocked_tools(load_catalog(), "musescore")
+@pytest.mark.parametrize("removed", sorted(REMOVED_TOOLS))
+def test_removed_tool_in_an_old_project_is_skipped_with_a_notice(
+    tmp_path: Path, removed: str
+) -> None:
+    config = tmp_path / "joinery.toml"
+    config.write_text(f'[tools]\nenabled = ["{removed}", "krita"]\n')
+    catalog = load_catalog()
+    assert removed not in {t.id for t in catalog.tool}
+    # The project still opens: the removed id is skipped, not refused.
+    assert enabled_tools(catalog, config) == ["godot", "krita"]
+    notices = removed_notices(load_project_tools(config))
+    assert len(notices) == 1 and "removed" in notices[0]
+    assert "custom tool" in notices[0] or "Open in Audacity" in notices[0]
+
+
+def test_removed_tool_may_return_as_the_users_own_custom_tool(tmp_path: Path) -> None:
+    config = tmp_path / "joinery.toml"
+    config.write_text(
+        '[tools]\nenabled = ["aseprite"]\n[[tools.custom]]\nid = "aseprite"\n'
+        'name = "Aseprite"\ndomain = "2d"\nserver = "my-aseprite"\ncommand = "aseprite-mcp"\n'
+    )
+    tools = load_project_tools(config)
+    assert removed_notices(tools) == []
+    assert "my-aseprite" in allowed_servers(load_catalog(), config)

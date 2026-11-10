@@ -36,7 +36,7 @@ def test_every_preferred_and_first_party_mcp_is_accounted_for() -> None:
     }
     actual = {server for plan in PROGRAMS.values() for server in plan.servers}
     assert actual == expected
-    assert len(actual) == 15
+    assert len(actual) == 10
 
 
 @pytest.mark.parametrize("program", sorted(PROGRAMS))
@@ -199,9 +199,9 @@ def test_upstream_lane_cannot_report_empty_failed_or_timed_out_work_as_passed(
     monkeypatch.setenv("OPENAI_API_KEY", "test-secret-never-forwarded")
     monkeypatch.setattr(upstream_runner, "prepare", source)
     monkeypatch.setattr(upstream_runner.subprocess, "run", execute)
-    report = upstream_runner.run("gimp", tmp_path / "evidence")
+    report = upstream_runner.run("inkscape", tmp_path / "evidence")
     assert report["status"] == ("passed" if outcome == "passed" else "failed")
     assert json.loads(json.dumps(report)) == json.loads(
-        (tmp_path / "evidence/gimp.json").read_text()
+        (tmp_path / "evidence/inkscape.json").read_text()
     )
-    assert (tmp_path / "evidence/gimp.log").is_file()
+    assert (tmp_path / "evidence/inkscape.log").is_file()

@@ -45,40 +45,9 @@ PROGRAMS = {
             "review/replay",
         ),
     ),
-    "aseprite": Program(
-        ("aseprite", "joinery-paint"),
-        ("canvas/layers", "frames/tags", "drawing", "exports/errors"),
-        "User-provided licensed Aseprite executable",
-    ),
     "gimp": Program(
-        ("gimp",),
-        (
-            "canvas/layers",
-            "selected image editing",
-            "XCF/raster export",
-            "native plugin failures",
-        ),
-        "GIMP plus its pinned plugin",
-    ),
-    "audacity": Program(
-        ("audacity",),
-        ("tracks/selections", "cut/paste/trim", "labels/effects", "pipe errors"),
-        "Audacity with mod-script-pipe",
-    ),
-    "reaper": Program(
-        ("reaper",),
-        ("tracks/mixing", "MIDI/FX", "rendering", "project changes/errors"),
-        "User-provided licensed REAPER with reapy",
-    ),
-    "musescore": Program(
-        ("musescore",),
-        (
-            "notes/chords/rests",
-            "measures/parts",
-            "tempo/score metadata",
-            "score-file round trips",
-        ),
-        "MuseScore with pinned WebSocket plugin",
+        ("joinery-paint",),
+        ("worker presence", "python-fu batch", "XCF layers", "PNG export"),
     ),
     "surge-xt": Program(
         ("joinery-sound",),
@@ -86,13 +55,13 @@ PROGRAMS = {
     ),
 }
 
-PROFILES = {
-    "gimp": "sdk1",
-    "aseprite": "sdk1",
-    "audacity": "sdk1",
-    "reaper": "sdk2",
-    "musescore": "sdk2",
-}
+# Community MCPs whose pinned upstream tests run in an isolated SDK profile.
+# None today: Aseprite, REAPER, MuseScore and Audacity were removed from the
+# catalog, and GIMP is driven by Joinery's own paint server. A new community
+# MCP adds its id here with a profile under tests/upstream/.
+PROFILES: dict[str, str] = {}
+#: Profile used when a lane runs a tool not listed above.
+DEFAULT_PROFILE = "sdk1"
 
 # These are application interfaces, not authoring installers. The test runner
 # leaves the production server cache and provider environment alone.
