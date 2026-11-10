@@ -150,6 +150,13 @@ jobs:
           else
             uv run python tests/godot/run_scene_edit_test.py | tee out/native-evidence/editor.log
           fi
+      - name: Switch between Joinery's layout and classic Godot
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a uv run python tests/godot/run_classic_view_test.py --out out/classic-view
+          else
+            uv run python tests/godot/run_classic_view_test.py --out out/classic-view
+          fi
       - name: Capture responsive assistant controls in both themes
         run: |
           if [ "$RUNNER_OS" = Linux ]; then
@@ -178,10 +185,38 @@ jobs:
           uv run joinery new out/mcp-check --name "Native MCP check" --tools godot
           uv run joinery mcp install --project out/mcp-check --tool godot
           uv run joinery mcp status --project out/mcp-check --probe | tee out/native-evidence/mcp.json
-      - name: Package the measured editor without CI graphics DLLs
+      - name: Read the release version
+        id: release_version
+        # Same script as release.yml: maps the package version (0.2.0, 0.2.0a1)
+        # to its tag form (0.2.0, 0.2.0-alpha.1) and checks a pushed tag.
         run: |
-          uv run joinery package --desktop --binary "$JOINERY_RELEASE_ENGINE" --target "${{ matrix.target }}" --output "out/packages/Joinery-0.1.0-alpha.1-${{ matrix.target }}.${{ matrix.archive }}"
-          uv run python release/verify_bundle.py "out/packages/Joinery-0.1.0-alpha.1-${{ matrix.target }}.${{ matrix.archive }}" | tee out/native-evidence/bundle.json
+          uv run python - <<'PY'
+          import os
+          import re
+          import tomllib
+          from pathlib import Path
+
+          version = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version']
+          match = re.fullmatch(r'(\d+\.\d+\.\d+)(?:(a|b|rc)(\d+))?', version)
+          if match is None:
+              raise SystemExit(f'pyproject.toml version {version!r} is not a release version (X.Y.Z with an optional aN, bN or rcN)')
+          release, stage, number = match.groups()
+          stages = {'a': 'alpha', 'b': 'beta', 'rc': 'rc'}
+          tag_version = release if stage is None else f'{release}-{stages[stage]}.{number}'
+          if os.environ.get('GITHUB_REF_TYPE') == 'tag' and os.environ.get('GITHUB_REF_NAME') != f'v{tag_version}':
+              raise SystemExit(f"Tag {os.environ.get('GITHUB_REF_NAME')} does not match package version {version} (expected v{tag_version})")
+          lines = f'version={tag_version}\nprerelease={str(stage is not None).lower()}\n'
+          if 'GITHUB_OUTPUT' in os.environ:
+              with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as output:
+                  output.write(lines)
+          print(lines, end='')
+          PY
+      - name: Package the measured editor without CI graphics DLLs
+        env:
+          JOINERY_ARCHIVE: out/packages/Joinery-${{ steps.release_version.outputs.version }}-${{ matrix.target }}.${{ matrix.archive }}
+        run: |
+          uv run joinery package --desktop --binary "$JOINERY_RELEASE_ENGINE" --target "${{ matrix.target }}" --output "$JOINERY_ARCHIVE"
+          uv run python release/verify_bundle.py "$JOINERY_ARCHIVE" | tee out/native-evidence/bundle.json
       - name: Export the portable fixture for all desktop runtimes once
         if: runner.os == 'macOS'
         run: uv run python release/export_smoke.py --output out/game-exports --cache "$RUNNER_TEMP/export-templates"

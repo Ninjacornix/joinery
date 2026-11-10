@@ -1,0 +1,14 @@
+# Secret scanning for this repository: `gitleaks git .` and `gitleaks dir .`
+# pick this file up automatically, and the CI `secrets` job uses it on the
+# full history.
+title = "Joinery"
+
+[extend]
+useDefault = true
+
+# godot_patches/godot-src/ is a local, gitignored checkout of upstream Godot.
+# Its test keys and third-party sources (mbedtls, ICU, zstd, Vulkan) match
+# generic key patterns but are not ours. Nothing else is allowlisted.
+[[allowlists]]
+description = "Upstream Godot checkout used to build the fork"
+paths = ['''^godot_patches/godot-src/''']

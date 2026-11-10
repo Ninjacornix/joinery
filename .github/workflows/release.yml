@@ -1,28 +1,76 @@
-name: Desktop alpha release
+name: Desktop release
 
+# A release tag (v0.2.0, or v0.2.0-alpha.1 for a pre-release) must equal the
+# version in pyproject.toml. Pushing a release/ branch (other than the focused
+# *-validation ones) runs the same gates without publishing.
 on:
   push:
-    branches: [release/desktop-alpha]
-    tags: [v0.1.0-alpha.1]
+    branches: ['release/**', '!release/*-validation']
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+-*'
   workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
+  version:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      version: ${{ steps.release_version.outputs.version }}
+      prerelease: ${{ steps.release_version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Read the release version
+        id: release_version
+        # Same script as native.yml: maps the package version (0.2.0, 0.2.0a1)
+        # to its tag form (0.2.0, 0.2.0-alpha.1) and checks a pushed tag.
+        run: |
+          python3 - <<'PY'
+          import os
+          import re
+          import tomllib
+          from pathlib import Path
+
+          version = tomllib.loads(Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version']
+          match = re.fullmatch(r'(\d+\.\d+\.\d+)(?:(a|b|rc)(\d+))?', version)
+          if match is None:
+              raise SystemExit(f'pyproject.toml version {version!r} is not a release version (X.Y.Z with an optional aN, bN or rcN)')
+          release, stage, number = match.groups()
+          stages = {'a': 'alpha', 'b': 'beta', 'rc': 'rc'}
+          tag_version = release if stage is None else f'{release}-{stages[stage]}.{number}'
+          if os.environ.get('GITHUB_REF_TYPE') == 'tag' and os.environ.get('GITHUB_REF_NAME') != f'v{tag_version}':
+              raise SystemExit(f"Tag {os.environ.get('GITHUB_REF_NAME')} does not match package version {version} (expected v{tag_version})")
+          lines = f'version={tag_version}\nprerelease={str(stage is not None).lower()}\n'
+          if 'GITHUB_OUTPUT' in os.environ:
+              with Path(os.environ['GITHUB_OUTPUT']).open('a', encoding='utf-8') as output:
+                  output.write(lines)
+          print(lines, end='')
+          PY
+      - name: Require release notes for this version
+        env:
+          VERSION: ${{ steps.release_version.outputs.version }}
+        run: test -s "docs/releases/$VERSION.md"
   checks:
+    needs: version
     uses: ./.github/workflows/ci.yml
     with:
       native: false
   native:
+    needs: version
     uses: ./.github/workflows/native.yml
   publish:
-    needs: [checks, native]
-    if: github.event_name == 'push' && github.ref == 'refs/tags/v0.1.0-alpha.1'
+    needs: [version, checks, native]
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      PRERELEASE: ${{ needs.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -33,24 +81,23 @@ jobs:
       - name: Verify complete candidate set and archive digests
         working-directory: out/release
         run: |
-          test -f Joinery-0.1.0-alpha.1-macos-arm64.zip
-          test -f Joinery-0.1.0-alpha.1-linux-x86_64.tar.gz
-          test -f Joinery-0.1.0-alpha.1-windows-x86_64.zip
+          test -f "Joinery-$VERSION-macos-arm64.zip"
+          test -f "Joinery-$VERSION-linux-x86_64.tar.gz"
+          test -f "Joinery-$VERSION-windows-x86_64.zip"
           test "$(find . -maxdepth 1 -name '*.sha256' | wc -l)" -eq 3
+          test "$(find . -maxdepth 1 -type f | wc -l)" -eq 6
           sha256sum --check ./*.sha256
-      - name: Publish the gated prerelease
+      - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
-          cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
-          First desktop alpha: macOS ARM64, Linux x86_64, and Windows x86_64.
-
-          Download your platform archive and its SHA-256 checksum. Install uv and your supported agent CLI separately; connect your own subscription or API profile on first launch.
-
-          These are unsigned and not notarized alpha builds. macOS may require approval in Privacy & Security; Windows SmartScreen may flag an unknown publisher. Windows alpha chat supports Codex; other native provider sandboxes are not yet supported. Creative tool workers require Docker with Linux containers.
-
-          All desktop builds, isolated bundle checks, native editor review/undo tests, offline creative lifecycle checks, and exported runtime smoke tests passed in this workflow. Game exports are technical test artifacts rather than a bundled example game.
-          NOTES
+          cp "docs/releases/$VERSION.md" "$RUNNER_TEMP/release-notes.md"
           printf '\nBuild logs and native screenshots: %s/%s/actions/runs/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" >> "$RUNNER_TEMP/release-notes.md"
-          gh release create "$RELEASE_TAG" out/release/* --verify-tag --prerelease --title "Joinery 0.1.0 Alpha 1" --notes-file "$RUNNER_TEMP/release-notes.md"
+          flags=()
+          if [ "$PRERELEASE" = true ]; then
+            flags+=(--prerelease)
+          else
+            flags+=(--latest)
+          fi
+          gh release create "$RELEASE_TAG" out/release/* --verify-tag "${flags[@]}" --title "Joinery $VERSION" --notes-file "$RUNNER_TEMP/release-notes.md"
