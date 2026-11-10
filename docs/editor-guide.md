@@ -39,13 +39,14 @@ transactions, conflict checks and durable recovery journals.
 
 The shared MCP gateway installs the catalogued Godot, official Blender,
 SuperCollider and Inkscape servers at exact revisions. First-party servers operate
-Blender native documents/parts, Material Maker graphs, Krita layers, Aseprite Lua
-and SuperCollider NRT patches. Their offline workers save native sources and
+Blender native documents/parts, Material Maker graphs, Krita layers (pixel art
+too), Inkscape SVG and SuperCollider NRT patches. Their offline workers save native sources and
 exports, record replay/provenance, validate Godot import, and show before/after
 images or audio for review. Existing source edits preserve the owning document;
-replay preimages are kept separately from editable sources. Aseprite still needs
-a user-licensed executable in the worker image. Surge XT renders offline in
-the worker from named parameters and notes; SuperCollider remains available too.
+replay preimages are kept separately from editable sources. Surge XT renders
+offline in the worker from named parameters and notes; SuperCollider remains
+available too. Aseprite, REAPER, MuseScore and Audacity are no longer built-in
+tools (ADR 0025); add any of them as a custom tool if you want it.
 
 Art creation requires approval of the project's completed `art/bible.md`.
 Use `/art` to review and approve its current version. Changing its content
@@ -108,8 +109,8 @@ navigation. Preferred MCPs are selected by default; other candidates can be
 configured as project custom tools by supplying an executable and JSON arguments.
 
 The editor's **Tools** workspace previews project assets and opens their native
-sources in Blender, Krita, Audacity, GIMP, Inkscape, Aseprite, REAPER, MuseScore,
-SuperCollider, Material Maker, or a configured custom application. Choose a tool
+sources in Blender, Krita, GIMP, Inkscape, SuperCollider, Material Maker,
+Audacity (when installed), or a configured custom application. Choose a tool
 to filter its assets, select an asset, and use **Open in**. Changes saved in the
 desktop app are detected automatically. Provenance and recipe information stay
 available through the CLI.

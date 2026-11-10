@@ -59,23 +59,43 @@ audit ran on macOS.
 | Material Maker 1.8 | Native `.ptex` graph and Godot material/texture export | Connected shader exports real red/blue texture pixels; roughness changes, replay and transaction lifecycle verified; shutdown warnings remain |
 | Inkscape 1.4 | Editable SVG and PNG export | Stable element ID, actual exported pixels, replay and transaction lifecycle verified |
 | SuperCollider | Editable `.scd` patches and offline NRT audio export | Audible WAV, native UTF-8 source recreation, update/replay and transaction lifecycle verified; no live audio-device workflow claim |
-| Aseprite | Native Lua adapter exists; bring your own licensed executable | Not packaged or exercised with an actual licensed app in this audit |
-| GIMP 3.0.4 | Desktop open/view; app installed in the development worker | No evaluated first-party native authoring adapter or complete pinned MCP installer |
-| Audacity, REAPER, MuseScore | Optional desktop open/view when installed | Not installed or verified for automated authoring in this audit; REAPER requires your own licence |
+| GIMP 3.0.4 | Native `.xcf` create, inspect (layer tree, channels, paths) and edit through Joinery's Python-Fu adapter in `joinery-paint`, run headless in the offline creative worker; per-layer or composite PNG exports, byte-identical on replay; readiness checks `gimp-console --version`, a Python-Fu batch probe and `document_capabilities`; desktop open/view | `joinery rebuild` replays GIMP recipes once `joinery/recipe.py` dispatches through the tool modules; wrapping an existing PNG into an `.xcf` does not yet record that PNG as a recipe input; the community gimp-mcp pin was dropped because it needs a live desktop GIMP |
 | Surge XT | Supported through `joinery-sound` | Offline render of named parameters and notes to WAV, exact replay; no factory `.fxp` loading or random sources yet ([ADR 0021](adr/0021-surge-xt.md)) |
 | Custom tools | Explicit project MCP/desktop configuration | Readiness and provenance remain tool-specific; never inferred from a catalog entry |
+
+### Removed tools
+
+Aseprite, REAPER, MuseScore and Audacity are no longer catalog tools
+([ADR 0025](adr/0025-tool-removals.md)). A project that still lists one keeps
+opening; the id is skipped and a notice says what replaced it:
+
+- **Aseprite**: its licence forbids packaging it in an offline worker. Use Krita
+  for pixel art, or add Aseprite yourself as a custom tool.
+- **REAPER**: proprietary, needs a live desktop session. Use SuperCollider or
+  Surge XT, or add it yourself as a `[[tools.custom]]` tool with a
+  `[desktop.reaper]` command for "Open in".
+- **MuseScore**: no headless mode. Music is written as MIDI sources rendered
+  through FluidSynth and Surge XT.
+- **Audacity**: no reliable headless worker. Sound edits (trim, fade,
+  normalise, loop points, format) move to Joinery's sound server; "Open in
+  Audacity" still works when it is installed.
 
 Application versions here identify the evaluated worker, not guaranteed future
 apt package resolution. Direct-download versions/hashes are recorded; Debian's
 mutable base and unversioned apt dependencies are not a frozen OS snapshot.
-FluidSynth and FFmpeg support command-line media work; a full DAW/MIDI composition
-integration was not evaluated. No unlicensed applications, generative asset
+Music is written as MIDI sources and rendered offline through FluidSynth (the
+Debian FluidR3_GM SoundFont) and Surge XT patches by `joinery-sound`
+(`compose_music`, `edit_music`, `render_music`); FFmpeg runs its typed audio
+edits (`process_audio`). A full DAW integration was not evaluated. No
+unlicensed applications, generative asset
 services or downloaded art were used to inflate test coverage.
 
 Desktop **Open in**, native authoring, MCP connection and read-only probe success
 are separate capabilities. Run `joinery mcp status --project ... --probe` (or
-`/tools`) to inspect actual readiness. `joinery doctor` checks host executables;
-it does not certify the contents or connectivity of offline Docker workers.
+`/tools`) to inspect actual readiness. `joinery doctor` reports the shared
+readiness checks: Docker, each worker image, a version or feature command run
+inside the worker with no network, and the installed MCP pins. It does not run
+an authoring round trip.
 
 ## Providers and review
 

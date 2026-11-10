@@ -106,7 +106,9 @@ The final 65-test invocation is also recorded in the agent execution transcript.
   native authoring adapter in `joinery/authoring.py:23`, and its app-specific
   pinned server installer is absent (`joinery/server_install.py:58`). Do not
   present GIMP editing as an evaluated alpha capability.
-- Aseprite has a native adapter but its licensed binary is absent. REAPER,
+- (Later removed from the catalog with REAPER, MuseScore and Audacity; see
+  [ADR 0025](../../docs/adr/0025-tool-removals.md).)
+  Aseprite has a native adapter but its licensed binary is absent. REAPER,
   MuseScore, and Audacity are absent and their catalog entries do not imply
   complete installers or authoring integrations. Surge XT is planned. No
   unlicensed binary or unvetted server was installed to inflate coverage.

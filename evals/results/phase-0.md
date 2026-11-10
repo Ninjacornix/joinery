@@ -63,6 +63,12 @@ rather than a missing hour:
   in batch mode hangs, reporting it is "running as a background process" while
   the script-fu plug-in never returns. GIMP 3 changed the script-fu API from
   2.10 as well, so existing recipes do not port directly.
+  *Correction (2026-11-10):* the hang was a missing flag, not a GIMP defect.
+  Without `--batch-interpreter` and `--quit`, GIMP 3 prints "No batch
+  interpreter specified" and idles. With them it runs headless and fails fast
+  on errors. Joinery now edits GIMP `.xcf` documents through a Python-Fu
+  adapter (`tests/integration/gimp_native.py`); the 2.10 Script-Fu
+  `testbed/recipes/ui_panel.scm` was deleted.
 - **Inkscape** is in the image and is reliably headless, but it rasterises a
   document rather than authoring one, so it does not fit the current
   one-tool-one-script recipe shape without a change.

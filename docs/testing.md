@@ -45,6 +45,27 @@ they never approve art direction or create content in a user's game.
 | Material Maker | Preserve a connected native graph, verify actual red/blue texture pixels and changed material roughness, overwrite exports, replay and review/revert |
 | SuperCollider | Save the native patch, render audible WAV at 440/660 Hz, retain UTF-8 source, replay and review/revert |
 
+Blender's texture and extension handling has its own fixture:
+
+```sh
+# Painted and re-painted images survive the .blend save and export as PNGs.
+uv run python tests/integration/native_documents.py blender
+# Builds an MPFB2 human through a recipe. A creative worker built before the
+# MPFB2 extension fix stops with the rebuild hint instead.
+uv run python tests/integration/native_documents.py blender-mpfb
+# An MPFB2 human with a generated Rigify rig: the GLB skin holds exactly the
+# deform bones, MPFB2's helper geometry stays out, shape keys and an FK-driven
+# action reach the GLB; a Subdivision modifier and shape key on a crate too.
+uv run python tests/integration/blender_rig.py
+```
+
+ffmpeg audio edits through the `joinery-sound` MCP server (trim silence, fade,
+loudness, a looping stereo Ogg at another rate, and five refusals that change
+nothing) on a SuperCollider render: `uv run python tests/integration/audio_edits.py`.
+MIDI songs (FluidSynth and Surge XT) and audio edits on Surge renders are in
+`uv run python tests/integration/midi_render.py`. The latest measured run of
+every tool probe is in [tools-working](../evals/results/tools-working.md).
+
 Real upstream Godot MCP and cross-application checks are separate commands:
 
 ```sh
@@ -62,49 +83,112 @@ The native Godot GUI/undo/audio/startup harnesses under `tests/godot/` remain
 separate from Python input validation. Request-schema tests do not establish
 visual correctness or execute arbitrary live editor operations.
 
+## Editor harnesses
+
+Build the fork first (`godot_patches/fork.sh build`); every harness runs an
+isolated copy of that binary, with a throwaway home and no agent sign-in.
+
+```sh
+# Headless widgets: command jobs, chat transport, sidebar, audio, scene edits,
+# responsive sidebar, design tokens (ui_theme_test) and the Review panel.
+uv run python tests/godot/run_widget_tests.py
+# Project Manager: agent connect, API form, the three-step wizard, and creating a
+# fixture project through `joinery setup` with a custom connector.
+uv run --frozen python tests/godot/run_startup_test.py
+# The sidebar in a real editor window, and scene edits in the editor.
+uv run python tests/godot/run_assistant_ui_test.py
+uv run python tests/godot/run_scene_edit_test.py
+# Design tokens: no literal sizes or palette colours outside ui_theme.gd.
+uv run pytest -q tests/test_ui_tokens.py
+```
+
+Graphical harnesses turn Joinery's motion off (`ui_motion.set_enabled(false)`,
+or `Engine.set_meta("joinery_motion_enabled", false)` from the Project Manager)
+so every check and capture sees end states rather than a frame mid-animation.
+
+## Visual suite
+
+One command captures every Joinery screen in the patched editor, in the Joinery
+(dark) and Joinery Light editor presets, and checks each screen while it is shown:
+
+```sh
+uv run python tests/godot/run_visual_suite.py --report-only
+# Only some harnesses, e.g. the sidebar and the light editor, without the older ones:
+uv run python tests/godot/run_visual_suite.py --only sidebar --only editor-light --skip-legacy
+```
+
+Screens:
+
+- `pm-*`: agent connection, sign-in, API form, project list, the app-list failure
+  banner, each wizard step (Name your game, Choose your apps, Look and sound),
+  a failed creation step with Retry, and creation in progress.
+- `sidebar-*`, at 480 and 1000 px: connecting, no assistant, empty, chips,
+  command menu, a request sending, working (steps and timer), waiting for review
+  (thumbnail and footer), accepted (with Revert), conversation, not sent (Retry),
+  lost connection banner and settings. At 480 px also each Appearance accent
+  (Brass, Blue, Green, Violet) and settings with Reduce motion on.
+- `editor-*`: layout, disconnected/busy/commands/settings sidebar, the Review
+  panel with a model, its details, applying and a failed decision, Focus mode
+  with a review open, image and audio reviews on After and on Before, the Tools
+  workspace (all, Blender, SuperCollider), every tool readiness state on the rail,
+  the bottom panel, Focus mode, Project apps and the art direction dialog.
+
+The older startup, assistant and scene-edit harnesses run too and write into the
+same directory unless `--skip-legacy`.
+
+Every run uses an isolated, self-contained copy of the editor binary and a
+disposable project (the editor screens use a copy of `testbed/` with Blender
+import disabled). No agent signs in and no model is called. Each sidebar theme
+and width gets a fresh dock, and its request states start from a real submit.
+
+`tests/godot/ui_checks.gd` walks the visible controls of each screen and prints
+`UI-CHECK <screen> <kind> <node path> <detail>` for:
+
+| Kind | Rule |
+| --- | --- |
+| clipped | Label, Button, OptionButton or ItemList text wider than its room (cut, ellipsis or drawn outside), or wrapped text showing fewer lines than it has |
+| contrast | WCAG ratio under 4.5:1, or 3:1 for large text, between the font colour and the background read from the rendered frame (stylebox fallback) |
+| overflow | A control reaching outside its parent, or a visible part outside the window |
+| target | A button, field, slider, list or tab bar under 24×24 logical px (the editor scale is removed) |
+
+Disabled controls and content scrolled out of view are not judged. Two things
+are allowed on purpose: text trimmed with an ellipsis when the control or a near
+ancestor shows the full text as a tooltip (a long file name on a chip), and the
+`ALLOWED` list in `ui_checks.gd`, which names stock Godot controls Joinery does
+not restyle and why (the 3D viewport's "Perspective" menu, the Scene dock tree).
+`ui_checks_selftest.gd` proves every rule, and both allowances, first.
+
+Output goes to `out/visual/` (`--out` to change): the PNGs, `report.json` (all
+findings, per screen, and grouped per control), `report.md` (counts and the 30
+most widespread findings) and `logs/`. Any finding fails the run unless
+`--report-only`; a missing capture or a broken harness always fails it.
+
 ## Every catalogued program and MCP
 
-The [explicit test plan](../tests/upstream/plan.py) accounts for all **12 catalog
-programs and 15 MCP servers**, including Surge XT through `joinery-sound`. The default
-suite includes 26 additional completeness/source-integrity/runner cases: a new program
+The [explicit test plan](../tests/upstream/plan.py) accounts for all **8 catalog
+programs and 10 MCP servers**, including Surge XT through `joinery-sound`. The default
+suite includes completeness/source-integrity/runner cases: a new program
 or MCP cannot silently disappear from the plan, and empty, failed or timed-out
 suites cannot report success. This inventory is separate from
 the support matrix: a catalog entry does not mean Joinery has an installer or
 authoring adapter for it.
 
-Five upstream MCP suites run separately because their SDK dependencies differ.
-They execute actual upstream code at the catalog's exact Git revision; only the
-native application boundary is simulated. Aseprite and GIMP have new SDK/tool
-tests; Audacity, REAPER and MuseScore reuse their pinned upstream test suites.
-
-| Program | Application-specific checks | Portable result |
-| --- | --- | --- |
-| Aseprite | Canvas, layers, frames, tags, drawing, export checks, CLI failures, timeout configuration and MCP input schemas | 28 passed |
-| GIMP | Canvas and selected layers, resizing/cropping/filling/text, XCF and raster exports, undo/redo, plugin errors and MCP input schemas | 40 passed |
-| Audacity | Tracks and selections, editing, labels, effects, script-pipe framing, paths and errors | 153 passed, 1 skipped |
-| REAPER | Track/mixer changes, MIDI, FX, rendering, project operations and reapy failures | 364 passed; 13 live cases deselected |
-| MuseScore | Notes/chords/rests, tempo, metadata, repetition, rolls, score-file round trips and simulated WebSocket plugin requests | 85 passed, 3 skipped |
+Aseprite, REAPER, MuseScore and Audacity were removed from the catalog and
+GIMP's community MCP pin was dropped ([ADR 0025](adr/0025-tool-removals.md)),
+so no community MCP currently needs a separate upstream suite. The lane stays
+for the next one: list its id in `PROFILES` in `tests/upstream/plan.py`, then
 
 ```sh
-# Fetch software source at the exact pins, then run isolated locked profiles.
-uv run python -m tests.upstream.run --all
-uv run python -m tests.upstream.run --tool reaper
+# Fetch software source at the exact pin, then run an isolated locked profile.
+uv run python -m tests.upstream.run --tool <catalog id>
 ```
 
 The runner writes JSON, JUnit XML and logs to `out/upstream-mcp-tests/`. A failed,
-empty or timed-out suite fails the command. SDK 1.x and SDK 2.x/FastMCP profiles
-are locked separately under `tests/upstream/`; they use Python 3.13 without
-changing Joinery's Python 3.12 environment. No provider keys are passed to the
-test processes. The new CI job runs all five suites as separate matrix entries
-and retains their evidence. Hosted execution is pending a push.
-
-An existing local audit directory containing `<program>/.git/objects` can be
-used with `--local-audits PATH`. Tests still read committed blobs at the exact
-pin, never the editable checkout. Only this local mode can include the existing
-MuseScore example-score test fixtures: its measured result is 112 passed,
-6 skipped and 2 policy-excluded viewer cases. The portable path uses generated
-technical scores and does not download music or artwork. Optional Audacity
-speech-model tests are excluded; no model is installed or invoked.
+empty or timed-out suite fails the command. The SDK 1.x profile is locked under
+`tests/upstream/sdk1`; it uses Python 3.13 without changing Joinery's Python
+3.12 environment. No provider keys are passed to the test processes. Earlier
+measured results for the removed programs remain in
+`evals/results/all-mcp-programs.md` as history.
 
 ## Additional native probes
 
@@ -124,41 +208,37 @@ input into replies. The separate
 first-party SuperCollider native NRT audio workflow passes. These are different
 interfaces and neither result cancels the other.
 
-GIMP's pinned plugin handler bodies also run against actual native GIMP APIs:
-create/edit named layers, save XCF and verify exact red/blue exported PNG pixels.
-They pass in the offline creative image. This verifies native handlers, not the
-plugin's socket registration or a complete Joinery GIMP authoring adapter.
+GIMP 3 is checked in the offline worker by the shared readiness core
+(`gimp-console --version`, then a Python-Fu batch probe); see "Tool readiness"
+below. Its Python-Fu adapter runs natively in the creative worker:
+`uv run python tests/integration/gimp_native.py` creates an `.xcf` with named
+layers and a saved channel, edits one layer inside that channel, checks pixels
+per layer export, replays every recipe byte-identically and checks that a
+failing script and an unknown layer name are refused.
+Surge XT runs natively in the creative worker: `uv run python tests/integration/surge_native.py`.
+A failing SuperCollider offline render (parse error, runtime error or a patch
+that never exits) ends well inside a minute instead of hanging until the worker
+limit (`uv run python tests/integration/supercollider_native.py nrt`), and a recorded
+image feeds a Material Maker graph as a recipe input
+(`uv run python tests/integration/materialmaker_parts.py`).
 
-Prepare persistent disposable source directories for these optional probes:
+## Tool readiness
+
+Each catalog tool has one module under `joinery/tools/` that declares its
+readiness checks as data; `joinery/readiness.py` is the only code that runs
+them, so every front end and every agent sees the same state (`ready`,
+`downloading`, `needs_docker`, `needs_image`, `needs_licence` or `broken`),
+with per-feature states and a separate desktop "Open in" block.
+`tests/test_readiness.py` drives it with Docker replaced at its boundary;
+`tests/test_tool_modules.py` keeps the modules in step with the catalog. Against
+the real workers:
 
 ```sh
-uv run python - <<'PY'
-from pathlib import Path
-from joinery.catalog import load_catalog
-from tests.upstream.sources import prepare
-for name in ("gimp", "audacity"):
-    tool = load_catalog().get(name)
-    prepare(tool.mcp.repo, tool.mcp.ref, Path("out/native-mcp-source") / name)
-PY
-uv run python tests/integration/gimp_mcp.py --source out/native-mcp-source/gimp
-
-# Audacity is installed only in this test image, not in production workers.
-docker build --platform linux/amd64 -t joinery-mcp-conformance -f tests/upstream/Dockerfile tests/upstream
-uv run python tests/integration/audacity_mcp.py --source out/native-mcp-source/audacity
+# Tier 0 live, worker and MCP checks from the cache (missing ones show "checking").
+uv run python -m joinery.readiness --project testbed
+# Run every check now (worker commands run with --network none).
+uv run python -m joinery.readiness --project testbed --refresh
 ```
-
-Use fresh source destinations when preparing again. Both native harnesses run
-offline in their own named containers and remove only those containers on exit.
-The Audacity probe seeds Audacity's version and module settings, since a fresh
-install resets them and opens a blocking dialog, then waits until Audacity accepts
-commands. CI runs it on native x86 Linux. Under x86 emulation on Apple Silicon its
-first commands can still stall; that is not counted as a pass.
-
-Native Aseprite and REAPER checks require user-provided licensed executables;
-none were supplied. Native MuseScore is unavailable here. The five additional
-upstream suites do not install these MCPs into Joinery's production server cache
-or implement the missing application-specific authoring adapters/installers.
-Surge XT runs natively in the creative worker: `uv run python tests/integration/surge_native.py`.
 
 Tests cannot establish every operation exposed by a third-party application or
 MCP. These scenarios cover Joinery's implemented contracts and representative

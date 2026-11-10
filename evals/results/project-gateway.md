@@ -25,7 +25,7 @@ Run on the local Apple M2 development machine, 2026-11-08. Native editor build:
 | Permission/recovery fixtures | Model approval refusal, latched full-turn STOP, schema confinement, read-only provider boundary, exclusive project lease, post-review conflict, interrupted commit recovery, folder restoration and stale combined-preview compensation passed |
 | Claude live transport | Provider returned its account quota limit; no successful model/tool operation claimed |
 | Gemini/OpenCode | ACP stream/permission fixtures pass; real CLIs unavailable locally, so live authentication/model paths are unverified |
-| Aseprite | Adapter exists; licensed worker executable unavailable, so real execution is unverified |
+| Aseprite | Adapter exists; licensed worker executable unavailable, so real execution is unverified (Aseprite was later removed; see [ADR 0025](../../docs/adr/0025-tool-removals.md)) |
 | Source/engine bundle | Extracted file manifest verified; matching engine, CLI, fresh project creation and policy checks passed from a path containing spaces |
 | User project delivery | Copied addon updated with reversible backup; installed/source addon hashes and protocol 2 match |
 | Art direction approval flow | Accepting a draft now opens its explicit approval review; content/hash binding and stale-content refusal passed. Saving the draft alone never silently approves it. Existing sessions can use `/art`. |

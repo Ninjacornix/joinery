@@ -22,9 +22,12 @@ Bar for preferred MCPs, enforced in `joinery/catalog.py`:
 |---|---|---|
 | Godot | tugcantopaloglu/godot-mcp | community |
 | Blender, also materials | lab/blender_mcp (Blender Lab) | official |
-| Aseprite | diivi/aseprite-mcp | community |
 | SuperCollider | jeremyruppel/claude-collider | community |
-| GIMP, Inkscape, REAPER, MuseScore, Audacity | see list | community |
+| Inkscape | see list | community |
+
+Aseprite, REAPER, MuseScore and Audacity were later removed, and GIMP's
+community pin was dropped for Joinery's own server
+([ADR 0025](0025-tool-removals.md)).
 
 Godot's popular options failed the bar: hi-godot/godot-ai sends telemetry by default and
 routes vision requests to cloud models, tomyud1/godot-mcp has a `generate_2d_asset` tool,

@@ -54,7 +54,9 @@ before-state, followed by the delivery acceptance criteria.
 
 “Available” in the tool catalog currently means a preferred source was selected,
 not that an installed server has connected and completed a real operation.
-`joinery doctor` checks programs/versions, not MCP handshakes. The configuration
+`joinery doctor` renders the shared readiness core (`joinery/readiness.py`):
+worker images, versions inside the workers and, once cached, MCP probes; it does
+not run an authoring round trip. The configuration
 check even accepts an absent `.mcp.json`; that is not proof of tool readiness.
 
 ## Architecture to build
@@ -221,10 +223,11 @@ The hammer, crate and similar props use the same modelling integration.
 ### 7. Add materials, 2D and audio integrations
 
 Use the shared runtime, transactions, source registry and import handling for
-Material Maker, Krita/Aseprite and SuperCollider/audio tools. Each application
+Material Maker, Krita (pixel art included) and SuperCollider/Surge XT/MIDI audio tools. Each application
 still needs its own document, operation, preview/export and replay adapter.
 Material Maker/Krita/Surge currently have planned catalog entries; their
-first-party servers are not implemented. User-licensed apps stay optional.
+first-party servers are not implemented. Paid or desktop-only apps (Aseprite,
+REAPER, MuseScore, Audacity) were removed as built-in tools (ADR 0025).
 
 Acceptance examples: alter an existing material graph and reimport it; edit a
 sprite layer and refresh its Godot resource; change a synth patch and compare

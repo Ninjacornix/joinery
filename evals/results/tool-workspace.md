@@ -10,7 +10,8 @@
 - Joinery Godot 4.7.2 build: the same viewer integration test passes, and editor
   startup completes with the addon enabled.
 - Rendered viewer capture inspected with the testbed door selected.
-- Desktop launch tests cover Blender, Krita, SuperCollider IDE, Audacity and a
+- Desktop launch tests cover Blender, Krita, SuperCollider IDE, Audacity (kept as
+  "Open in" only after [ADR 0025](../../docs/adr/0025-tool-removals.md)) and a
   custom viewer, including unavailable apps, exact native-source selection and
   preserving provenance. Launches use mocked processes; every named desktop app
   has not been installed or opened during validation.

@@ -19,7 +19,7 @@ not run or claim to have verified.
 
 Desktop viewing is independent of MCP availability. A Krita document can open
 in Krita while its automation server is still planned. A WAV made by
-SuperCollider can open in Audacity or REAPER without changing its recorded
+SuperCollider can open in Audacity or another installed audio editor without changing its recorded
 owner or origin, or enabling another MCP. Only catalog tools and the project's
 explicit custom tools are offered.
 

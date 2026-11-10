@@ -44,8 +44,8 @@ part transform and the native-document operator save `.blend`, export GLB and
 record measured replay/provenance. Krita uses a disposable PyKrita main-thread
 worker; the supervisor stops it after a completed save/export acknowledgement.
 Material Maker is driven through its packaged native code and matching Godot
-runtime with software Vulkan. SuperCollider uses native NRT scores. Aseprite's
-Lua path needs a user-licensed executable and is reported missing otherwise.
+runtime with software Vulkan. SuperCollider uses native NRT scores. (The
+Aseprite Lua path was removed with Aseprite; see ADR 0025.)
 
 Incremental recipes preserve an immutable native preimage. Superseded recipes
 are archived; the source registry resolves current editable documents ahead of

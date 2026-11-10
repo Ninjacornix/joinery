@@ -81,7 +81,8 @@ themes, both widths and working/completed states. Logs:
 No game project, model subscription configuration or art approval was changed.
 The existing tool readiness failures recorded in [all-mcp-programs.md](all-mcp-programs.md)
 are separate: this work does not turn an upstream SuperCollider boot timeout or
-Audacity script-pipe failure into a passing native integration. Claude's print
+Audacity script-pipe failure into a passing native integration (Audacity was
+later removed as a catalog tool; see [ADR 0025](../../docs/adr/0025-tool-removals.md)). Claude's print
 transport still lacks a model catalog, and unsupported model/effort controls are
 not fabricated. See [assistant-performance.md](../../docs/assistant-performance.md)
 for behavior, boundaries and reproduction.

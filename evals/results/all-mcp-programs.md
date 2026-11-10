@@ -1,5 +1,7 @@
 # All catalogued programs and MCPs
 
+> Note (2026-11-09): Aseprite, REAPER, MuseScore and Audacity were later removed from the catalog and GIMP's community MCP pin was dropped ([ADR 0025](../../docs/adr/0025-tool-removals.md)). The results below are kept as history.
+
 Measured locally on 2026-11-08, macOS ARM64. Native worker checks use offline
 Linux AMD64 Docker containers under emulation. These changes have not been
 pushed or executed by hosted CI.

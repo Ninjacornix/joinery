@@ -38,14 +38,17 @@ loudness against targets.
 |---|---|
 | 3D models | Blender |
 | Materials | Material Maker, Blender shader nodes |
-| 2D and UI art | Krita, Inkscape, Aseprite (your own licence) |
-| Sound and music | Surge XT, SuperCollider |
+| 2D and UI art | Krita (pixel art too), GIMP, Inkscape |
+| Sound and music | Surge XT, SuperCollider; music as MIDI rendered through FluidSynth and Surge XT |
 | The game itself | Godot scenes, scripts and settings |
 
-GIMP, Audacity, REAPER and MuseScore can open your files and connect through
-community MCP servers, with lighter integration. You can also add your own
-programs. The [support matrix](docs/support-matrix.md) shows exactly what works
-for each tool.
+GIMP 3 edits native .xcf images (named layers, saved selection channels) in
+the offline worker through Joinery's own Python-Fu adapter and exports
+byte-identical PNGs. Audacity still opens sound files when it is installed.
+Aseprite, REAPER, MuseScore and Audacity are no longer built-in tools
+([ADR 0025](docs/adr/0025-tool-removals.md)); you can add them, or any other
+program, as your own custom tool. The [support matrix](docs/support-matrix.md)
+shows exactly what works for each tool.
 
 ## Bring your own AI
 

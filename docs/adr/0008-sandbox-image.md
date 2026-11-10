@@ -56,8 +56,9 @@ so a bad version cannot be baked in silently.
 
 **`joinery doctor`** reports which programs an enabled tool needs and whether
 they are present. It never installs anything; installing is the image's job,
-and doctor points at the image when something is missing. A user-licensed tool
-(Aseprite, REAPER) missing is reported but is not a failure.
+and doctor points at the image when something is missing. A desktop copy of a
+worker tool missing is reported but is not a failure. (User-licensed tools were
+removed from the catalog; see ADR 0025.)
 
 ## Measured
 Built and verified on 2026-11-07, amd64 emulated on an arm64 host:
@@ -82,8 +83,8 @@ The image is the unit of trust for asset work, so tool MCPs that run untrusted
 code (Blender Lab's included, per ADR 0003) are only safe inside it. The
 container runs as an unprivileged user, since tool scripts are untrusted.
 
-Aseprite is deliberately absent: it is paid and source-available, so the user
-mounts their own licensed build, with Krita as the free pixel path.
+Aseprite is deliberately absent: its licence forbids redistribution, so it
+was removed from the catalog (ADR 0025) and Krita is the pixel-art path.
 
 Building needs network and several gigabytes of disk; running does not need
 network and must not have it. `surgepy`, which PLAN names for rendering notes
