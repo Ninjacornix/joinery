@@ -43,6 +43,7 @@ signal change_reverted(transaction_id: String)
 signal files_changed(transaction_id: String, paths: PackedStringArray)
 
 const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
+const UI := preload("res://addons/joinery/ui_components.gd")
 const HISTORY_SCRIPT := preload("res://addons/joinery/chat_history.gd")
 const SETTINGS_SCRIPT := preload("res://addons/joinery/journeyman_settings.gd")
 const CHIP_SCRIPT := preload("res://addons/joinery/target_chip.gd")
@@ -687,11 +688,28 @@ func _set_targets(targets: Array[Dictionary]) -> void:
 	for child: Node in _chips.get_children():
 		_chips.remove_child(child)
 		child.queue_free()
-	for target: Dictionary in _target_context:
+	# Many targets (a whole selection) show the first two and one "+N more" chip.
+	var shown := _target_context if _target_context.size() <= 3 else _target_context.slice(0, 2)
+	for target: Dictionary in shown:
 		var id := str(target["id"])
 		var chip := CHIP_SCRIPT.build(self, target, target_opened.emit, _remove_target.bind(id))
 		chip.connect("removed", func() -> void: _sync_chips.call_deferred())
 		_chips.add_child(chip)
+	if shown.size() < _target_context.size():
+		var rest := _target_context.slice(shown.size())
+		var names: Array[String] = []
+		for target: Dictionary in rest:
+			names.append(str(target.get("label", target["id"])))
+		var more := UI.chip("+%d more" % rest.size(), "", true)
+		more.tooltip_text = ", ".join(names)
+		more.remove.tooltip_text = "Remove these from this message"
+		more.remove.pressed.connect(
+			func() -> void:
+				for target: Dictionary in rest:
+					_remove_target(str(target["id"]))
+		)
+		more.connect("removed", func() -> void: _sync_chips.call_deferred())
+		_chips.add_child(more)
 	_sync_chips()
 
 

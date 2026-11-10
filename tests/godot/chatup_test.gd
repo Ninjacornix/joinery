@@ -45,6 +45,32 @@ func _run_with_motion() -> void:
 	menu.close()
 	await create_timer(0.3).timeout
 	_check(not menu.visible, "The menu shrinks back into the composer")
+	var many: Array[Dictionary] = []
+	for index: int in 5:
+		(
+			many
+			. append(
+				{
+					"id": "room.tscn::Props/Item%d" % index,
+					"label": "Item%d" % index,
+					"kind": "Object",
+					"resource": "",
+					"source": "",
+					"crumbs": ["interrogation_room", "Props", "Item%d" % index],
+				}
+			)
+		)
+	chat._set_targets(many)
+	var chips: Array[Node] = chat._chips.get_children()
+	_check(chips.size() == 3, "Five targets show as two chips and one more")
+	_check(
+		str((chips[0] as Control).get("label").text) == "Item0",
+		"A scene node's chip leads with the node's name"
+	)
+	_check(str((chips[2] as Control).get("label").text) == "+3 more", "The rest fold into +3 more")
+	_check(chat.target_snapshot().size() == 5, "Every target still goes with the message")
+	var none: Array[Dictionary] = []
+	chat._set_targets(none)
 	chat.set_resource_target("res://audio/sfx/door_creak.wav", "AudioStreamWAV")
 	chat._chips.get_child(0).remove.pressed.emit()
 	_check(chat.target_snapshot().is_empty(), "A removed chip leaves the request at once")

@@ -57,7 +57,13 @@ static func build(
 	_host: Control, target: Dictionary, opened: Callable, removed: Callable
 ) -> PanelContainer:
 	var is_part := not str(target.get("part_kind", "")).is_empty()
-	var text := str(target.get("label", "")) if is_part else " › ".join(crumbs(target))
+	# A scene node leads with its own name: the scene's name first made every node of one
+	# scene read the same once trimmed. The whole path is in the tooltip.
+	var trail := crumbs(target)
+	var full := " › ".join(trail)
+	var text := str(target.get("label", "")) if is_part else full
+	if not is_part and trail.size() > 1:
+		text = trail[-1]
 	var chip := UI.chip(text, "", true)
 	chip.label.tooltip_text = ""
 	var resource := str(target.get("resource", "")).split("#")[0]
@@ -69,9 +75,11 @@ static func build(
 		else (
 			("Open in " + tool if not tool.is_empty() else "Open source file")
 			if not path.is_empty()
-			else text
+			else full
 		)
 	)
+	if not is_part and full != text and path.is_empty():
+		chip.tooltip_text = full
 	chip.accessibility_name = text
 	chip.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	chip.remove.tooltip_text = "Remove from this message"
