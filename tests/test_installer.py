@@ -26,6 +26,7 @@ from joinery.installer import (
     write_mcp_config,
     write_selection,
 )
+from joinery.transactions import HistoryPolicy, load_policy
 from tests.test_readiness import CREATIVE_WORKER, FakeHost
 
 SDXL = CustomTool(
@@ -438,3 +439,22 @@ def test_chosen_connector_has_no_summary(no_real_docker: FakeHost) -> None:
         for option in options:
             if option["state"] == "chosen":
                 assert option["summary"] == ""
+
+
+def test_setup_saves_the_history_choice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config = tmp_path / "joinery.toml"
+    base = ["setup", "--project", str(tmp_path), "--tools", "godot"]
+    assert _cli([*base, "--history", "keep-10"], monkeypatch) == 0
+    assert load_policy(tmp_path) == HistoryPolicy(keep=10, max_mb=1024)
+    assert "Keeping older versions: Last 10 changes, up to 1 GB." in capsys.readouterr().out
+    # Custom numbers start from the saved policy; the tools stay as chosen.
+    assert _cli([*base, "--history-keep", "25"], monkeypatch) == 0
+    assert load_policy(tmp_path) == HistoryPolicy(keep=25, max_mb=1024)
+    assert load_project_tools(config).enabled == ("godot",)
+    # Without a history choice, setup leaves [history] alone.
+    assert _cli(base, monkeypatch) == 0
+    assert load_policy(tmp_path).keep == 25
+    assert _cli([*base, "--history-keep", "0"], monkeypatch) == 1
+    assert load_policy(tmp_path).keep == 25

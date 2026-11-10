@@ -408,3 +408,38 @@ def test_a_project_joinery_made_is_not_refused(tmp_path: Path) -> None:
     project = new(tmp_path, blueprint="blank")
     assert blueprints.existing_game(project, "blank") is None
     assert "controller" in blueprints.add_feature(project, "controller").features
+
+
+def test_game_apply_saves_the_history_choice(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from joinery.cli import main
+    from joinery.transactions import HistoryPolicy, load_policy
+
+    project = new(tmp_path)
+    argv = ["game", "apply", "--project", str(project), "--blueprint", "blank"]
+    assert main([*argv, "--features=", "--history", "latest"]) == 0
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert lines[-2] == {
+        "step": "history",
+        "state": "done",
+        "message": "Keeping older versions: Only the newest.",
+    }
+    assert lines[-1]["step"] == "finished"
+    assert load_policy(project) == HistoryPolicy(keep=1, max_mb=1024)
+    # The rest of joinery.toml (the game the wizard chose) is still there.
+    assert '[game]' in (project / "joinery.toml").read_text()
+
+
+def test_game_apply_refuses_a_bad_history_choice_before_changing_anything(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from joinery.cli import main
+
+    project = new(tmp_path)
+    before = (project / "joinery.toml").read_text()
+    argv = ["game", "apply", "--project", str(project), "--blueprint", "blank"]
+    assert main([*argv, "--history", "keep-10", "--history-keep", "3"]) == 1
+    line = json.loads(capsys.readouterr().out.strip())
+    assert line["state"] == "failed" and "not both" in line["message"]
+    assert (project / "joinery.toml").read_text() == before

@@ -4,6 +4,11 @@ History is three things: restore data for accepted changes (so they can be
 reverted), the immutable documents incremental edits start from
 (``recipes/inputs``) and the recipes later edits replaced (``recipes/history``).
 
+The project's policy (``[history]`` in joinery.toml, ``policy``) bounds the
+first: older versions of models, textures and sounds a change replaced stay
+only for the last ``keep`` accepted changes, within ``max_mb``. The other two
+are what replay needs or old recipes, and only ``compact`` removes them.
+
 ``compact`` makes the current sources the new base. It drops every
 transaction's restore data (journals stay, marked not revertible), replaced
 recipes, and starting documents no current recipe needs. The documents the
@@ -25,6 +30,7 @@ import shutil
 import sys
 import tempfile
 import time
+import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -37,8 +43,11 @@ from joinery.recipe import (
 )
 from joinery.transactions import (
     PENDING,
+    POLICY_PRESETS,
     TRANSACTIONS,
     HistoryLock,
+    HistoryPolicy,
+    apply_retention,
     copy_file,
     list_transactions,
     load_policy,
@@ -186,7 +195,7 @@ def usage(project: Path) -> dict[str, Any]:
     unused = sum(_size(project / path) for path in recipes.unused)
     problems = list(recipes.problems)
     try:
-        policy = load_policy(project).model_dump()
+        policy = _policy_data(load_policy(project))
     except ValueError as exc:
         policy = {}
         problems.append(str(exc))
@@ -213,6 +222,155 @@ def usage(project: Path) -> dict[str, Any]:
         "policy": policy,
         "problems": problems,
     }
+
+
+# --- Policy -------------------------------------------------------------------------
+
+#: The ``[history]`` table, up to the next table header.
+_HISTORY_TABLE = re.compile(
+    r"^\[history\][ \t]*(?:#[^\n]*)?\n(?:(?!\[)[^\n]*(?:\n|$))*", re.MULTILINE
+)
+
+
+def _policy_data(policy: HistoryPolicy) -> dict[str, Any]:
+    return {**policy.model_dump(), "preset": policy.preset, "label": policy.label}
+
+
+def make_policy(
+    preset: str | None = None,
+    keep: int | None = None,
+    max_mb: int | None = None,
+    base: HistoryPolicy | None = None,
+) -> HistoryPolicy | None:
+    """A policy from a preset id or numbers (unset numbers come from ``base``).
+
+    None when nothing was chosen. Raises ValueError with a plain reason.
+    """
+    numbers = keep is not None or max_mb is not None
+    if preset is None and not numbers:
+        return None
+    if preset not in (None, "custom"):
+        if preset not in POLICY_PRESETS:
+            raise ValueError(
+                f"Unknown history choice: {preset}. Choose one of "
+                + ", ".join([*POLICY_PRESETS, "custom"])
+                + "."
+            )
+        if numbers:
+            raise ValueError("Choose a history preset or your own numbers, not both.")
+        return POLICY_PRESETS[preset]
+    if not numbers:
+        raise ValueError(
+            "A custom history needs how many changes to keep, the space, or both."
+        )
+    start = base or HistoryPolicy()
+    if keep is not None and keep < 1:
+        raise ValueError("Keep at least 1 change: the newest always stays revertible.")
+    if max_mb is not None and max_mb < 1:
+        raise ValueError("Allow at least 1 MB of history.")
+    return HistoryPolicy(
+        keep=start.keep if keep is None else keep,
+        max_mb=start.max_mb if max_mb is None else max_mb,
+    )
+
+
+def write_policy(project: Path, policy: HistoryPolicy) -> None:
+    """Save ``[history]`` in joinery.toml, keeping everything else as it was."""
+    path = project / "joinery.toml"
+    text = path.read_text() if path.is_file() else ""
+    block = (
+        "[history]\n"
+        "# Older versions kept so accepted changes can be reverted.\n"
+        f"keep = {policy.keep}\n"
+        f"max_mb = {policy.max_mb}\n"
+    )
+    match = _HISTORY_TABLE.search(text)
+    if match:
+        rest = text[match.end() :]
+        updated = text[: match.start()] + block + ("\n" + rest if rest else "")
+    else:
+        lead = text.rstrip("\n") + "\n\n" if text.strip() else ""
+        updated = lead + block
+    try:
+        saved = tomllib.loads(updated).get("history", {})
+    except tomllib.TOMLDecodeError as exc:
+        raise ValueError(f"joinery.toml can't be read: {exc}") from None
+    if HistoryPolicy.model_validate(saved) != policy:
+        raise ValueError("joinery.toml keeps [history] in a form Joinery can't edit.")
+    descriptor, temp = tempfile.mkstemp(prefix=".joinery-", dir=project)
+    try:
+        with os.fdopen(descriptor, "w") as handle:
+            handle.write(updated)
+        if path.is_file():
+            os.chmod(temp, path.stat().st_mode & 0o777)
+        os.replace(temp, path)
+    finally:
+        if os.path.exists(temp):
+            os.unlink(temp)
+
+
+def set_policy(
+    project: Path, policy: HistoryPolicy | None, dry_run: bool = False
+) -> dict[str, Any]:
+    """Read the policy, or save one and prune what it no longer keeps.
+
+    With ``dry_run`` nothing changes; the result says what saving would free.
+    """
+    project = project.resolve()
+    try:
+        previous: HistoryPolicy | None = load_policy(project)
+    except ValueError:
+        previous = None  # An unreadable [history] is replaced by the new one.
+    chosen = policy or previous or HistoryPolicy()
+    result: dict[str, Any] = {
+        "project": str(project),
+        "policy": _policy_data(chosen),
+        "previous": _policy_data(previous) if previous else None,
+        "changed": policy is not None and policy != previous,
+        "dry_run": dry_run,
+        "pruned": 0,
+        "freed_bytes": 0,
+    }
+    if policy is None:
+        return result
+    if not dry_run:
+        write_policy(project, policy)
+    outcome = apply_retention(project, policy, dry_run=dry_run)
+    result["pruned"] = outcome["pruned"]
+    result["freed_bytes"] = outcome["pruned_bytes"]
+    return result
+
+
+def describe_policy(data: dict[str, Any]) -> str:
+    """One sentence for people: what is kept and, after a change, what it freed."""
+    line = f"Keeping older versions: {data['policy']['label']}."
+    pruned = int(data["pruned"])
+    if pruned:
+        changes = f"{pruned} older change{'s' if pruned != 1 else ''}"
+        size = human_size(int(data["freed_bytes"]))
+        if data["dry_run"]:
+            line += f" This frees {size}; {changes} could no longer be reverted."
+        else:
+            line += f" Freed {size}; {changes} can no longer be reverted."
+    return line
+
+
+def add_policy_arguments(parser: argparse.ArgumentParser) -> None:
+    """``--history PRESET`` or ``--history-keep N`` / ``--history-max-mb M``."""
+    parser.add_argument(
+        "--history",
+        choices=[*POLICY_PRESETS, "custom"],
+        help="older versions to keep: keep-50 (default), keep-10, latest, or custom",
+    )
+    parser.add_argument("--history-keep", type=int, metavar="N")
+    parser.add_argument("--history-max-mb", type=int, metavar="M")
+
+
+def policy_from_args(
+    args: argparse.Namespace, base: HistoryPolicy | None = None
+) -> HistoryPolicy | None:
+    """The policy :func:`add_policy_arguments` asked for, or None."""
+    return make_policy(args.history, args.history_keep, args.history_max_mb, base)
 
 
 def _rewrite(path: Path, renames: dict[str, str]) -> bool:
@@ -348,26 +506,67 @@ def _describe(action: str, data: dict[str, Any]) -> str:
     return line
 
 
+def _policy(args: argparse.Namespace) -> dict[str, Any]:
+    project = _project(args.project)
+    try:
+        current = load_policy(project)
+    except ValueError:
+        current = None
+    chosen = make_policy(None, args.keep, args.max_mb, current)
+    return set_policy(project, chosen, dry_run=args.dry_run)
+
+
 def run(args: argparse.Namespace) -> int:
     """Run ``joinery history <action>``. Errors print as JSON and return 1."""
+    actions = {"usage": usage, "compact": compact}
     try:
-        data = (usage if args.action == "usage" else compact)(args.project)
+        if args.action == "policy":
+            data = _policy(args)
+        else:
+            if args.keep is not None or args.max_mb is not None or args.dry_run:
+                raise ValueError(
+                    "--keep, --max-mb and --dry-run go with: history policy"
+                )
+            data = actions[args.action](args.project)
     except (OSError, ValueError) as exc:
         print(json.dumps({"error": str(exc)}))
         print(str(exc), file=sys.stderr)
         return 1
-    print(json.dumps(data) if args.json else _describe(args.action, data))
+    if args.json:
+        print(json.dumps(data))
+    elif args.action == "policy":
+        print(describe_policy(data))
+    else:
+        print(_describe(args.action, data))
     return 1 if data.get("problems") and args.action == "compact" else 0
 
 
 def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    """Add ``history usage|compact --project P [--json]``; the handler is ``args.handler``."""
+    """Add ``history usage|compact|policy --project P [--json]``; the handler is ``args.handler``."""
     parser = subparsers.add_parser(
         "history",
-        help="show how much restore data and recipe history a project keeps, or compact it",
+        help="show how much restore data and recipe history a project keeps, "
+        "how much it keeps, or compact it",
     )
-    parser.add_argument("action", choices=["usage", "compact"])
+    parser.add_argument("action", choices=["usage", "compact", "policy"])
     parser.add_argument("--project", type=Path, required=True)
+    parser.add_argument(
+        "--keep",
+        type=int,
+        metavar="N",
+        help="policy: accepted changes that keep their older versions (at least 1)",
+    )
+    parser.add_argument(
+        "--max-mb",
+        type=int,
+        metavar="M",
+        help="policy: most space those older versions may use, in megabytes",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="policy: say what the new numbers would free, change nothing",
+    )
     parser.add_argument(
         "--json", action="store_true", help="machine-readable, for a UI front end"
     )

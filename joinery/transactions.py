@@ -779,6 +779,41 @@ class HistoryPolicy(BaseModel):
     def max_bytes(self) -> int:
         return self.max_mb * 1024 * 1024
 
+    @property
+    def preset(self) -> str:
+        """The preset id this policy matches, or ``custom``."""
+        if self.keep == 1:
+            return "latest"  # Its size cap never matters: the newest always stays.
+        for name, preset in POLICY_PRESETS.items():
+            if preset == self:
+                return name
+        return "custom"
+
+    @property
+    def label(self) -> str:
+        """The policy in the words the setup screens use."""
+        if self.preset in POLICY_LABELS:
+            return POLICY_LABELS[self.preset]
+        size = (
+            f"{self.max_mb / 1024:g} GB"
+            if self.max_mb >= 1024 and self.max_mb % 512 == 0
+            else f"{self.max_mb} MB"
+        )
+        return f"Last {self.keep} changes, up to {size}"
+
+
+#: The choices the setup screens offer; anything else is ``custom``.
+POLICY_PRESETS: dict[str, HistoryPolicy] = {
+    "keep-50": HistoryPolicy(keep=50, max_mb=2048),
+    "keep-10": HistoryPolicy(keep=10, max_mb=1024),
+    "latest": HistoryPolicy(keep=1, max_mb=1024),
+}
+POLICY_LABELS = {
+    "keep-50": "Last 50 changes, up to 2 GB",
+    "keep-10": "Last 10 changes, up to 1 GB",
+    "latest": "Only the newest",
+}
+
 
 def load_policy(project: Path) -> HistoryPolicy:
     path = project / "joinery.toml"
@@ -849,21 +884,23 @@ def _wait_for_history(project: Path, wait: float = 10.0) -> HistoryLock:
 
 
 def apply_retention(
-    project: Path, policy: HistoryPolicy | None = None
+    project: Path, policy: HistoryPolicy | None = None, dry_run: bool = False
 ) -> dict[str, int]:
     """Keep restore data for recent accepted transactions, prune the rest.
 
     The newest accepted transaction always stays revertible. Older ones keep
     their data while they are within both ``keep`` and ``max_mb``; everything
     beyond that window keeps its journal but is marked not revertible.
+    ``dry_run`` only counts what would go.
     """
     project = project.resolve()
     policy = policy or load_policy(project)
-    pruned = kept = kept_bytes = 0
+    pruned = pruned_bytes = kept = kept_bytes = 0
     with HistoryLock(project):
         found = list_transactions(project)
-        for tx in found:
-            tx.tidy()
+        if not dry_run:
+            for tx in found:
+                tx.tidy()
         accepted = [tx for tx in reversed(found) if tx.state == "accepted"]
         window = True
         for index, tx in enumerate(accepted):
@@ -877,7 +914,14 @@ def apply_retention(
             if window:
                 kept += 1
                 kept_bytes += size
-            else:
+                continue
+            pruned += 1
+            pruned_bytes += size
+            if not dry_run:
                 tx.drop_restore_data("retention")
-                pruned += 1
-    return {"kept": kept, "kept_bytes": kept_bytes, "pruned": pruned}
+    return {
+        "kept": kept,
+        "kept_bytes": kept_bytes,
+        "pruned": pruned,
+        "pruned_bytes": pruned_bytes,
+    }

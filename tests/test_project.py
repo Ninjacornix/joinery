@@ -221,3 +221,25 @@ def test_new_without_blueprint_stays_empty_but_has_the_addon(tmp_path: Path) -> 
     assert not (project / "game").exists()
     assert not (project / "design/brief.md").exists()
     assert "[game]" not in (project / "joinery.toml").read_text()
+
+
+def test_new_writes_the_history_choice(tmp_path: Path) -> None:
+    from joinery.transactions import HistoryPolicy, load_policy
+
+    code, project = _cli_new(tmp_path, "small", "--history", "keep-10")
+    assert code == 0
+    assert load_policy(project) == HistoryPolicy(keep=10, max_mb=1024)
+    code, project = _cli_new(
+        tmp_path, "own", "--history", "custom", "--history-keep", "3", "--history-max-mb", "300"
+    )
+    assert code == 0
+    assert load_policy(project) == HistoryPolicy(keep=3, max_mb=300)
+    # Without a choice the defaults apply, and joinery.toml doesn't restate them.
+    code, project = _cli_new(tmp_path, "plain")
+    assert code == 0
+    assert "[history]" not in (project / "joinery.toml").read_text()
+    assert load_policy(project).preset == "keep-50"
+    # A bad choice stops before anything is created.
+    code, project = _cli_new(tmp_path, "bad", "--history", "custom")
+    assert code == 1
+    assert not project.exists()

@@ -9,10 +9,15 @@ from pathlib import Path
 
 import pytest
 
-from joinery.history import compact, main, plan, usage
+from joinery.history import compact, main, make_policy, plan, usage, write_policy
 from joinery.recipe import load_recipe, rebuild_all, record, store_preimage
 from joinery.runner import Result
-from joinery.transactions import FileTransaction, list_transactions
+from joinery.transactions import (
+    FileTransaction,
+    HistoryPolicy,
+    list_transactions,
+    load_policy,
+)
 
 OLD = "0" * 32
 CURRENT = "1" * 32
@@ -172,7 +177,12 @@ def test_usage_counts_restore_data_and_preimages(tmp_path: Path) -> None:
     assert data["preimage_bytes"] == len(b"first state" * 1000) + len(b"second state")
     assert data["total_bytes"] >= data["restore_bytes"] + data["preimage_bytes"]
     assert data["transactions"] == {"total": 1, "revertible": 1, "pending": 0}
-    assert data["policy"] == {"keep": 50, "max_mb": 2048}
+    assert data["policy"] == {
+        "keep": 50,
+        "max_mb": 2048,
+        "preset": "keep-50",
+        "label": "Last 50 changes, up to 2 GB",
+    }
     assert len(list_transactions(project)) == 1
 
 
@@ -230,3 +240,98 @@ def test_joinery_cli_dispatches_history(
     assert len(lines) == 1 and json.loads(lines[0])["total_bytes"] > 0
     assert joinery(["history", "compact", "--project", str(project)]) == 0
     assert capsys.readouterr().out.startswith("Freed ")
+
+
+# --- Policy -------------------------------------------------------------------------
+
+
+def test_policy_reads_the_default_and_names_its_preset(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    project = fixture(tmp_path)
+    assert main(["history", "policy", "--project", str(project), "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["policy"]["preset"] == "keep-50"
+    assert data["changed"] is False and data["pruned"] == 0
+    assert not (project / "joinery.toml").exists(), "reading never writes"
+    assert main(["history", "policy", "--project", str(project)]) == 0
+    assert capsys.readouterr().out.strip() == (
+        "Keeping older versions: Last 50 changes, up to 2 GB."
+    )
+
+
+def test_policy_saves_history_and_keeps_the_rest_of_joinery_toml(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    project = fixture(tmp_path)
+    config = project / "joinery.toml"
+    config.write_text(
+        '# my notes\n[tools]\nenabled = ["godot"]\n\n'
+        "[history]\nkeep = 5\n\n"
+        '[game]\nblueprint = "blank"\n'
+    )
+    argv = ["history", "policy", "--project", str(project), "--max-mb", "512"]
+    assert main(argv) == 0
+    # Only the size changed; keep came from the saved policy.
+    assert load_policy(project) == HistoryPolicy(keep=5, max_mb=512)
+    text = config.read_text()
+    assert text.startswith('# my notes\n[tools]\nenabled = ["godot"]\n\n[history]')
+    assert text.endswith('\n\n[game]\nblueprint = "blank"\n')
+    assert text.count("[history]") == 1
+    assert "Last 5 changes, up to 512 MB" in capsys.readouterr().out
+    # A project without [history] gets it appended.
+    config.write_text('[tools]\nenabled = ["godot"]\n')
+    write_policy(project, HistoryPolicy(keep=10, max_mb=1024))
+    assert config.read_text().startswith('[tools]\nenabled = ["godot"]\n\n[history]\n')
+    assert load_policy(project).preset == "keep-10"
+
+
+def test_a_tighter_policy_prunes_and_says_what_it_freed(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    project = fixture(tmp_path)
+    for index in range(3):
+        (project / f"model{index}.blend").write_bytes(b"v1" * 1000)
+        accept_change(project, f"model{index}.blend", "v2")
+    assert usage(project)["transactions"]["revertible"] == 3
+    argv = ["history", "policy", "--project", str(project), "--keep", "1", "--json"]
+    assert main([*argv, "--dry-run"]) == 0
+    preview = json.loads(capsys.readouterr().out)
+    assert (preview["pruned"], preview["freed_bytes"]) == (2, 4000)
+    assert usage(project)["transactions"]["revertible"] == 3, (
+        "a dry run changes nothing"
+    )
+    assert not (project / "joinery.toml").exists()
+    assert main(argv) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["policy"]["preset"] == "latest"
+    assert (data["pruned"], data["freed_bytes"]) == (2, 4000)
+    assert usage(project)["transactions"]["revertible"] == 1
+    # The newest change still reverts; the older two keep their journals only.
+    newest = list_transactions(project)[-1]
+    assert newest.revertible and newest.summary == "Edit model2.blend"
+    assert main(["history", "policy", "--project", str(project), "--keep", "50"]) == 0
+    assert capsys.readouterr().out.strip() == (
+        "Keeping older versions: Last 50 changes, up to 2 GB."
+    )
+
+
+def test_policy_refuses_nonsense_and_changes_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    project = fixture(tmp_path)
+    for flag, value in (("--keep", "0"), ("--max-mb", "0")):
+        argv = ["history", "policy", "--project", str(project), flag, value]
+        assert main(argv) == 1
+        assert "error" in json.loads(capsys.readouterr().out.splitlines()[0])
+    assert main(["history", "usage", "--project", str(project), "--keep", "3"]) == 1
+    assert not (project / "joinery.toml").exists()
+    with pytest.raises(ValueError, match="not both"):
+        make_policy("keep-10", keep=3)
+    with pytest.raises(ValueError, match="custom history needs"):
+        make_policy("custom")
+    assert make_policy() is None
+    assert make_policy("custom", keep=20, max_mb=4096) == HistoryPolicy(
+        keep=20, max_mb=4096
+    )
+    assert HistoryPolicy(keep=20, max_mb=4096).label == "Last 20 changes, up to 4 GB"

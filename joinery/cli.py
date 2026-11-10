@@ -54,7 +54,12 @@ from joinery.policy import load_denylist, normalise
 from joinery.project import create_project
 from joinery.recipe import rebuild_all, recipe_paths, record
 from joinery.runner import pick
-from joinery.transactions import DIRECTORY, FileTransaction
+from joinery.transactions import (
+    DIRECTORY,
+    FileTransaction,
+    HistoryPolicy,
+    load_policy,
+)
 from joinery.vcs import ensure_lfs
 from joinery.wiring import unwireable, write_agent_wiring
 from joinery.workspace import index, open_asset, watch_stamp
@@ -118,10 +123,20 @@ def _choose(
     return run_menu(catalog, current.enabled if current else (), custom)
 
 
-def _setup(tools: str | None, project: Path, custom_mcps: str | None = None) -> int:
+def _setup(
+    tools: str | None,
+    project: Path,
+    custom_mcps: str | None = None,
+    policy_args: argparse.Namespace | None = None,
+) -> int:
     config = project / "joinery.toml"
     try:
         selection = _choose(tools, config, custom_mcps)
+        policy = (
+            history.policy_from_args(policy_args, _current_policy(project))
+            if policy_args is not None
+            else None
+        )
     except (TypeError, ValueError) as exc:
         print(f"setup: {exc}", file=sys.stderr)
         return 1
@@ -139,7 +154,21 @@ def _setup(tools: str | None, project: Path, custom_mcps: str | None = None) -> 
         print("Tracking native sources with Git LFS (.gitattributes)")
     print(f"Saved: {', '.join(selection.tools)}")
     print(f"Gate wired for: {', '.join(sorted({p.split('/')[0] for p in wired}))}")
+    if policy is not None:
+        try:
+            print(history.describe_policy(history.set_policy(project, policy)))
+        except (OSError, ValueError) as exc:
+            print(f"setup: {exc}", file=sys.stderr)
+            return 1
     return 0
+
+
+def _current_policy(project: Path) -> HistoryPolicy | None:
+    """The saved policy custom numbers start from; None when there is none to read."""
+    try:
+        return load_policy(project)
+    except ValueError:
+        return None
 
 
 def _feature_list(text: str | None) -> list[str] | None:
@@ -168,8 +197,10 @@ def _new(
     features: str | None = None,
     steam_app_id: str | None = None,
     connect: str | None = None,
+    policy_args: argparse.Namespace | None = None,
 ) -> int:
     try:
+        policy = history.policy_from_args(policy_args) if policy_args else None
         chosen = _feature_list(features)
         if blueprint is not None:
             chosen = _defaults(blueprint, chosen)
@@ -187,9 +218,13 @@ def _new(
             report=_print_step,
             wizard=True,
         )
-    except (TypeError, ValueError) as exc:
+        if policy is not None:
+            history.write_policy(path.resolve(), policy)
+    except (TypeError, ValueError, OSError) as exc:
         print(f"new: {exc}", file=sys.stderr)
         return 1
+    if policy is not None:
+        print(f"Keeping older versions: {policy.label}.")
     print(f"Created {path} with: {', '.join(selection.tools)}")
     print("Open it with: " + shlex.join(["joinery", "launch", "--project", str(path)]))
     return 0
@@ -202,6 +237,7 @@ def _game_apply(args: argparse.Namespace) -> int:
         print(json.dumps(step), flush=True)
 
     try:
+        policy = history.policy_from_args(args)
         chosen = _defaults(args.blueprint, _feature_list(args.features))
         game_setup.apply_choices(
             args.project.resolve(),
@@ -212,6 +248,15 @@ def _game_apply(args: argparse.Namespace) -> int:
             addon=not args.no_addon,
             report=emit,
         )
+        if policy is not None:
+            history.write_policy(args.project.resolve(), policy)
+            emit(
+                {
+                    "step": "history",
+                    "state": "done",
+                    "message": f"Keeping older versions: {policy.label}.",
+                }
+            )
     except (OSError, ValueError, RuntimeError) as exc:
         emit({"step": "error", "state": "failed", "message": str(exc)})
         return 1
@@ -683,6 +728,7 @@ def _parser() -> argparse.ArgumentParser:
         choices=list(game_setup.CONNECT_CHOICES),
         help="with Online play and Steam: connect players through Steam or direct IP",
     )
+    history.add_policy_arguments(new)
     game_cmd = commands.add_parser(
         "game", help="apply the new-project wizard's game choices to a project"
     )
@@ -695,6 +741,7 @@ def _parser() -> argparse.ArgumentParser:
     game_cmd.add_argument(
         "--no-addon", action="store_true", help="the addon is already in place"
     )
+    history.add_policy_arguments(game_cmd)
     blueprints_cmd = commands.add_parser(
         "blueprints", help="list the playable blueprints a project can start from"
     )
@@ -730,6 +777,7 @@ def _parser() -> argparse.ArgumentParser:
     custom_input.add_argument(
         "--custom-mcps-file", type=Path, help="JSON file of explicit custom MCP choices"
     )
+    history.add_policy_arguments(setup)
     tools = commands.add_parser("tools", help="list tools and their MCP status")
     tools.add_argument("--project", type=Path, default=ROOT)
     tools.add_argument(
@@ -1057,6 +1105,7 @@ def main(argv: list[str] | None = None) -> int:
             args.features,
             args.steam_app_id,
             args.connect,
+            args,
         )
     if args.command == "game":
         return _game_apply(args)
@@ -1078,7 +1127,7 @@ def main(argv: list[str] | None = None) -> int:
         except OSError as exc:
             print(f"setup: {exc}", file=sys.stderr)
             return 1
-        return _setup(args.tools, args.project, payload_text)
+        return _setup(args.tools, args.project, payload_text, args)
     if args.command == "agents":
         if args.json:
             print(
