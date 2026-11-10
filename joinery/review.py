@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
+from collections.abc import Coroutine
 from pathlib import Path
 from typing import Any
 
@@ -136,9 +138,12 @@ async def evidence(
     """Before/after media for the changed art and audio.
 
     ``parts`` are the prompt's part targets: a material or map target adds a
-    texture view of that part on its model before the full model.
+    texture view of that part on its model before the full model. Every render
+    runs at once: each is its own offline Blender, and the review waits for all.
     """
     media: list[dict[str, Any]] = []
+    #: (item, side, render) for every view that needs Blender.
+    renders: list[tuple[dict[str, Any], str, Coroutine[Any, Any, Path]]] = []
     for change in sorted(changes, key=lambda c: _order(c["path"])):
         relative = change["path"]
         suffix = Path(relative).suffix.lower()
@@ -164,13 +169,10 @@ async def evidence(
                 key = hashlib.sha256(part.get("id", "").encode()).hexdigest()[:8]
                 for side, root in (("before", tx.original), ("after", tx.stage)):
                     if (root / relative).is_file():
-                        view[side] = str(
-                            await _render(
-                                root,
-                                relative,
-                                f"{digest}-{key}.png",
-                                part_thumbnail_script(part),
-                            )
+                        script = part_thumbnail_script(part)
+                        name = f"{digest}-{key}.png"
+                        renders.append(
+                            (view, side, _render(root, relative, name, script))
                         )
                 media.append(view)
         for side, root in (("before", tx.original), ("after", tx.stage)):
@@ -178,9 +180,23 @@ async def evidence(
             if not path.is_file():
                 continue
             if suffix == ".blend":
-                path = await _render(root, relative, digest + ".png", BLENDER_THUMBNAIL)
-            item[side] = str(path)
+                renders.append(
+                    (
+                        item,
+                        side,
+                        _render(root, relative, digest + ".png", BLENDER_THUMBNAIL),
+                    )
+                )
+            else:
+                item[side] = str(path)
         media.append(item)
+    done = await asyncio.gather(
+        *(render for _item, _side, render in renders), return_exceptions=True
+    )
+    for (target, side, _render_call), result in zip(renders, done, strict=True):
+        if isinstance(result, BaseException):
+            raise result
+        target[side] = str(result)
     return media
 
 

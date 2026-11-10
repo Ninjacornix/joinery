@@ -47,6 +47,9 @@ GAME_GUIDE = (
 #: How the user decides, in the words the editor shows.
 REVIEW_GUIDE = (
     "The user accepts or discards every change in the Review panel. "
+    "Staged files are checked after your last message and only then open for review, "
+    "so say the change will open for review; never tell the user to accept something "
+    "that is not on screen yet. "
     "To approve art direction the user types /art and clicks Approve these rules; "
     "accepting a saved draft alone is not approval."
 )

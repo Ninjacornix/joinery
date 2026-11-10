@@ -328,6 +328,17 @@ async def serve(project: Path, agent_id: str, profile_id: str = "") -> int:
                     gateway.live_edit_pending = True
                 if isinstance(event, Done):
                     if event.ok:
+                        staged = gateway.transaction
+                        if staged is not None:
+                            # The agent's last words are on screen; the checks and
+                            # renders take a while, so the review shows it is coming.
+                            emit(
+                                {
+                                    "kind": "review_preparing",
+                                    "transaction_id": staged.id,
+                                    "summary": staged.summary,
+                                }
+                            )
                         with timing.span("review"):
                             preview = await gateway.finish()
                         if preview is not None:

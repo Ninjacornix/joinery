@@ -9,7 +9,7 @@ import ntpath
 import time
 import uuid
 from collections.abc import Awaitable, Callable
-from contextlib import nullcontext
+from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from typing import Any, cast
 
@@ -275,6 +275,8 @@ class ProjectGateway:
         self.timing: TurnTiming | None = None
         self._discovery_cache: tuple[float, dict[str, Any]] | None = None
         self._discovery_lock = asyncio.Lock()
+        #: (transaction id, stage inventory) right after a clean Godot import.
+        self._imported: tuple[str, dict[str, str]] | None = None
 
     async def connection(self, server: str) -> MCPConnection:
         """Start just the requested server; unrelated creative apps stay idle."""
@@ -521,6 +523,11 @@ class ProjectGateway:
                     "The native export could not be imported into Godot: "
                     + imported.output[-2000:]
                 )
+            # The review's own import check is skipped while nothing changed since.
+            self._imported = (
+                self.transaction.id,
+                inventory(self.transaction.stage, include_dirs=True),
+            )
         if custom is not None and self.transaction is not None and not result.is_error:
             root = self.transaction.stage
             after = inventory(root)
@@ -633,17 +640,17 @@ class ProjectGateway:
         tx = self.transaction
         if tx is None:
             return None
-        self.progress("Checking project changes…")
+        self.progress("Preparing your review…")
         # No background app may continue writing after the reviewed snapshot.
         for connection in self.staged.values():
             await connection.close()
         self.staged.clear()
         self.runtime_owned = False
         self._strip_runtime()
-        if not tx.diff():
+        changes = tx.diff()
+        if not changes:
             await self.cancel()
             return None
-        changes = tx.diff()
         for change in changes:
             if Path(change["path"]).parts[0] in PROTECTED:
                 raise PermissionError(
@@ -672,7 +679,7 @@ class ProjectGateway:
             and DIRECTORY not in {change["before"], change["after"]}
         ]
         bible_ok = _approved_in(self.project, tx.stage)
-        measure = lambda argv, root: run_offline(argv, root, 180, readonly=True)
+        rules = False
         if asset_changes:
             # Reference boards come before the bible; they still need a lock entry.
             if not bible_ok and not all(_is_reference(p) for p in asset_changes):
@@ -684,41 +691,20 @@ class ProjectGateway:
             problems = check_assets(tx.stage, load_catalog())
             if problems:
                 raise ValueError("Asset validation failed: " + "; ".join(problems))
-            if bible_ok:
-                problems = await check_rules(
-                    tx.stage, [change["path"] for change in changes], measure
-                )
-                if problems:
-                    raise ValueError("Art bible check failed: " + "; ".join(problems))
-        elif bible_ok and _ui_changes(tx.stage, changes):
+            rules = bible_ok
+        else:
             # UI themes and scenes are checked for text contrast and size.
-            problems = await check_rules(
-                tx.stage, [change["path"] for change in changes], measure
-            )
-            if problems:
-                raise ValueError("Art bible check failed: " + "; ".join(problems))
+            rules = bible_ok and _ui_changes(tx.stage, changes)
         problems = check_deps(tx.stage, load_denylist())
         if problems:
             raise ValueError("Dependency validation failed: " + "; ".join(problems))
-        if any(
+        godot = any(
             Path(change["path"]).suffix
             in {".gd", ".tscn", ".tres", ".gdshader", ".glb"}
             or change["path"] == "project.godot"
             for change in changes
-        ):
-            got = await run_offline(
-                ["godot", "--headless", "--path", "/work", "--editor", "--import"],
-                tx.stage,
-                180,
-            )
-            if (
-                not got.ok
-                or "SCRIPT ERROR:" in got.output
-                or "Parse Error:" in got.output
-            ):
-                raise ValueError(
-                    "Godot import/script validation failed: " + got.output[-4000:]
-                )
+        ) and not self._import_current(tx)
+        await self._checks(tx, changes, rules, godot)
         text_diffs: list[str] = []
         for change in changes:
             if Path(change["path"]).suffix in {
@@ -751,19 +737,82 @@ class ProjectGateway:
                         lineterm="",
                     )
                 )
-        self.progress("Preparing the visual review…")
+        reviewed = tx.review()
+        if any(Path(change["path"]).suffix == ".blend" for change in changes):
+            self.progress("Rendering the before and after…")
+        with self._span("review_media"):
+            media = await evidence(
+                tx,
+                changes,
+                [dict(t) for t in self.target_context if t.get("part_kind")],
+            )
         return {
             "kind": "file_preview",
             "diff": "\n".join(text_diffs[:400]),
             "transaction_id": tx.id,
             "summary": tx.summary,
-            "changes": tx.review(),
-            "media": await evidence(
-                tx,
-                changes,
-                [dict(t) for t in self.target_context if t.get("part_kind")],
-            ),
+            "changes": reviewed,
+            "media": media,
         }
+
+    def _span(self, phase: str) -> AbstractContextManager[None]:
+        return self.timing.span(phase) if self.timing else nullcontext()
+
+    def _import_current(self, tx: FileTransaction) -> bool:
+        """Godot already imported this exact stage cleanly (after a native export)."""
+        if self._imported is None or self._imported[0] != tx.id:
+            return False
+        return self._imported[1] == inventory(tx.stage, include_dirs=True)
+
+    async def _checks(
+        self,
+        tx: FileTransaction,
+        changes: list[dict[str, str]],
+        rules: bool,
+        godot: bool,
+    ) -> None:
+        """The art bible's measured rules and Godot's import check, side by side.
+
+        Each runs in the offline worker and takes seconds; neither writes what
+        the other reads (the rules mount the stage read-only).
+        """
+
+        async def measured() -> list[str]:
+            if not rules:
+                return []
+            with self._span("review_rules"):
+                return await check_rules(
+                    tx.stage,
+                    [change["path"] for change in changes],
+                    lambda argv, root: run_offline(argv, root, 180, readonly=True),
+                )
+
+        async def imported() -> str:
+            if not godot:
+                return ""
+            with self._span("review_import"):
+                got = await run_offline(
+                    ["godot", "--headless", "--path", "/work", "--editor", "--import"],
+                    tx.stage,
+                    180,
+                )
+            if (
+                not got.ok
+                or "SCRIPT ERROR:" in got.output
+                or "Parse Error:" in got.output
+            ):
+                return got.output[-4000:] or "Godot exited with an error."
+            return ""
+
+        found = await asyncio.gather(measured(), imported(), return_exceptions=True)
+        for outcome in found:
+            if isinstance(outcome, BaseException):
+                raise outcome
+        problems, failed = cast(tuple[list[str], str], tuple(found))
+        if problems:
+            raise ValueError("Art bible check failed: " + "; ".join(problems))
+        if failed:
+            raise ValueError("Godot import/script validation failed: " + failed)
 
     async def decide(self, identifier: str, accept: bool) -> dict[str, Any]:
         tx = self.transaction
