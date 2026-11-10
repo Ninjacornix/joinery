@@ -20,6 +20,8 @@ static func theme(context: Node, c: Dictionary) -> Theme:
 	t.set_font("font", "JoinerySectionButton", bold_font(context))
 	_pickers(t, c, m, context)
 	_switch(t, c, m)
+	_checks(t, c, m)
+	_scrollbars(t, c, m)
 	_panels(t, c, m)
 	_lists(t, c, m)
 	return t
@@ -630,6 +632,92 @@ static func switch_texture(
 			var over := Color(knob, knob.a * alpha * clampf(0.5 - knob_d, 0.0, 1.0))
 			image.set_pixel(px, py, under.blend(over))
 	return ImageTexture.create_from_image(image)
+
+
+## Check boxes and radio buttons drawn from the palette, so an unchecked box reads on every
+## surface: a border_strong outline (3:1) on the sunken fill; checked fills (box) or rings and
+## dots (radio) in accent. Disabled states are the same shapes at reduced opacity.
+static func _checks(t: Theme, c: Dictionary, m: Dictionary) -> void:
+	var side := roundi(float(m["icon"]))
+	var stroke := maxf(1.0, roundf(1.5 * float(m["u"])))
+	var icons := {
+		"unchecked": check_texture(side, false, false, c, stroke),
+		"checked": check_texture(side, false, true, c, stroke),
+		"radio_unchecked": check_texture(side, true, false, c, stroke),
+		"radio_checked": check_texture(side, true, true, c, stroke),
+	}
+	for name: String in icons.keys():
+		var radio := name.begins_with("radio")
+		var on := name.ends_with("_checked") or name == "checked"
+		icons[name + "_disabled"] = check_texture(side, radio, on, c, stroke, 0.45)
+	for name: String in icons:
+		t.set_icon(name, "CheckBox", icons[name])
+
+
+## One check box or radio icon, [param side] pixels square, anti-aliased.
+static func check_texture(
+	side: int, radio: bool, on: bool, c: Dictionary, stroke: float, alpha := 1.0
+) -> ImageTexture:
+	var image := Image.create(side, side, false, Image.FORMAT_RGBA8)
+	var half := side / 2.0
+	var center := Vector2(half, half)
+	var outline: Color = c["accent"] if on else c["border_strong"]
+	var fill: Color = c["accent"] if on and not radio else c["surface_sunken"]
+	var corner := maxf(2.0, roundf(side * 0.2))
+	# The check mark: two strokes through these points (fractions of the side).
+	var tick := [Vector2(0.27, 0.53), Vector2(0.43, 0.69), Vector2(0.74, 0.35)]
+	for py: int in side:
+		for px: int in side:
+			var point := Vector2(px + 0.5, py + 0.5)
+			var shape_d: float
+			if radio:
+				shape_d = point.distance_to(center) - (half - 0.5)
+			else:
+				var q := (point - center).abs() - Vector2(half - 0.5 - corner, half - 0.5 - corner)
+				shape_d = Vector2(maxf(q.x, 0.0), maxf(q.y, 0.0)).length() - corner
+			var inside := clampf(0.5 - shape_d, 0.0, 1.0)
+			var ring := clampf(0.5 - absf(shape_d + stroke / 2.0) + stroke / 2.0, 0.0, 1.0)
+			var colour := Color(fill, fill.a * inside).blend(Color(outline, outline.a * ring))
+			if on and radio:
+				var dot_d := point.distance_to(center) - side * 0.22
+				colour = colour.blend(Color(c["accent"], clampf(0.5 - dot_d, 0.0, 1.0)))
+			elif on:
+				var mark_d := minf(
+					_segment(point, tick[0] * side, tick[1] * side),
+					_segment(point, tick[1] * side, tick[2] * side)
+				)
+				var mark := clampf(0.5 - (mark_d - stroke * 0.6), 0.0, 1.0)
+				colour = colour.blend(Color(c["on_accent"], mark))
+			colour.a *= alpha
+			image.set_pixel(px, py, colour)
+	return ImageTexture.create_from_image(image)
+
+
+## Scroll bars: a thin border_strong thumb (3:1 on every surface) on a clear track, darker
+## while pointed at or dragged.
+static func _scrollbars(t: Theme, c: Dictionary, m: Dictionary) -> void:
+	# Half the bar's width: 6u in all.
+	var thickness := roundf(3 * float(m["u"]))
+	var states := {
+		"grabber": c["border_strong"],
+		"grabber_highlight": c["text_muted"],
+		"grabber_pressed": c["text"],
+	}
+	for type_name: String in ["VScrollBar", "HScrollBar"]:
+		var track := _empty(thickness, thickness)
+		t.set_stylebox("scroll", type_name, track)
+		t.set_stylebox("scroll_focus", type_name, track)
+		for state: String in states:
+			var thumb := _box(
+				states[state], Color.TRANSPARENT, 0, _rad(m, "full"), thickness, thickness
+			)
+			t.set_stylebox(state, type_name, thumb)
+
+
+## Distance from [param point] to the segment [param a]–[param b].
+static func _segment(point: Vector2, a: Vector2, b: Vector2) -> float:
+	var along := clampf((point - a).dot(b - a) / (b - a).length_squared(), 0.0, 1.0)
+	return point.distance_to(a + (b - a) * along)
 
 
 ## Signed distance from [param point] to a horizontal capsule.

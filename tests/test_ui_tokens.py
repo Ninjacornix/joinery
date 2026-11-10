@@ -12,6 +12,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 ADDON = Path(__file__).resolve().parents[1] / "godot_addon" / "joinery"
 # The token owners themselves.
 EXEMPT = {"ui_theme.gd", "ui_theme_build.gd"}
@@ -158,3 +160,131 @@ def test_the_named_size_guard_catches_copies() -> None:
     assert NAMED_PIXELS.search('var pad := roundf(32 * float(m["u"]))')
     assert NAMED_EM.search("const CONNECT_EM := Vector2(32, 36)")
     assert not NAMED_PIXELS.search("var gap := roundf(3.0 * UI_THEME.unit(self))")
+
+
+# --- Contrast ---------------------------------------------------------------------------------
+#: WCAG 2.2 AA: 4.5:1 for text (body and secondary), 3:1 for icons, borders that carry
+#: meaning and focus indicators.
+TEXT_AA = 4.5
+NON_TEXT_AA = 3.0
+#: Every role that is drawn as text, and the fills it is drawn on.
+TEXT_ROLES = ("text", "text_muted", "text_faint", "success", "danger", "accent", "accent_hover")
+TEXT_FILLS = ("surface", "surface_sunken", "surface_raised", "accent_tint", "danger_tint")
+#: Icons (text_muted glyphs), field and stop-button borders (border_strong) and the focus ring
+#: (accent), on every fill a control sits on.
+NON_TEXT_ROLES = ("text_muted", "border_strong", "accent")
+NON_TEXT_FILLS = ("surface", "surface_sunken", "surface_raised", "accent_tint")
+
+
+def _palette_tokens() -> tuple[dict[str, dict[str, str]], dict[str, tuple[str, str]]]:
+    theme = (ADDON / "ui_theme.gd").read_text(encoding="utf-8")
+    themes: dict[str, dict[str, str]] = {}
+    for name in ("DARK", "LIGHT"):
+        block = re.search(rf"^const {name} := \{{(.*?)^\}}", theme, re.MULTILINE | re.DOTALL)
+        assert block, name
+        themes[name.lower()] = dict(
+            re.findall(r'"(\w+)": Color\("([0-9a-f]{6})"\)', block.group(1))
+        )
+    block = re.search(r"^const ACCENTS := \{(.*?)^\}", theme, re.MULTILINE | re.DOTALL)
+    assert block
+    accents = {
+        name: (dark, light)
+        for name, dark, light in re.findall(
+            r'"(\w+)": \[Color\("([0-9a-f]{6})"\), Color\("([0-9a-f]{6})"\)\]', block.group(1)
+        )
+    }
+    return themes, accents
+
+
+RGB = tuple[float, float, float]
+
+
+def _rgb(hex_colour: str) -> RGB:
+    return (
+        int(hex_colour[0:2], 16) / 255,
+        int(hex_colour[2:4], 16) / 255,
+        int(hex_colour[4:6], 16) / 255,
+    )
+
+
+def _lerp(a: RGB, b: RGB, weight: float) -> RGB:
+    return (
+        a[0] + (b[0] - a[0]) * weight,
+        a[1] + (b[1] - a[1]) * weight,
+        a[2] + (b[2] - a[2]) * weight,
+    )
+
+
+def _palette(theme: str, accent_name: str) -> dict[str, RGB]:
+    """ui_theme.palette(): the base roles plus the derived accent and tint roles."""
+    themes, accents = _palette_tokens()
+    dark = theme == "dark"
+    colours = {role: _rgb(value) for role, value in themes[theme].items()}
+    accent = _rgb(accents[accent_name][0 if dark else 1])
+    white, black = (1.0, 1.0, 1.0), (0.0, 0.0, 0.0)
+    colours["accent"] = accent
+    # Color.lightened(a) moves toward white by a; Color.darkened(a) toward black.
+    colours["accent_hover"] = _lerp(accent, white, 0.08) if dark else _lerp(accent, black, 0.08)
+    colours["accent_pressed"] = _lerp(accent, black, 0.08 if dark else 0.16)
+    colours["on_accent"] = _rgb("1a1a1a") if dark else white
+    colours["accent_tint"] = _lerp(colours["surface_sunken"], accent, 0.14)
+    colours["danger_tint"] = _lerp(colours["surface"], colours["danger"], 0.12)
+    return colours
+
+
+def _luminance(colour: RGB) -> float:
+    channels = [c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4 for c in colour]
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2]
+
+
+def contrast(a: RGB, b: RGB) -> float:
+    high, low = sorted((_luminance(a), _luminance(b)), reverse=True)
+    return (high + 0.05) / (low + 0.05)
+
+
+def _pairs() -> list[tuple[str, str, str, str, float, float]]:
+    """(theme, accent, foreground, background, ratio, required) for every checked pair."""
+    _themes, accents = _palette_tokens()
+    pairs = []
+    for theme in ("dark", "light"):
+        for accent in accents:
+            p = _palette(theme, accent)
+            checks = [(fg, bg, TEXT_AA) for fg in TEXT_ROLES for bg in TEXT_FILLS]
+            checks += [(fg, bg, NON_TEXT_AA) for fg in NON_TEXT_ROLES for bg in NON_TEXT_FILLS]
+            checks += [
+                ("on_accent", bg, TEXT_AA) for bg in ("accent", "accent_hover", "accent_pressed")
+            ]
+            for fg, bg, required in checks:
+                pairs.append((theme, accent, fg, bg, contrast(p[fg], p[bg]), required))
+            # Secondary buttons: text on their hover and pressed fills.
+            raised, text = p["surface_raised"], p["text"]
+            for weight in (0.07, 0.12):
+                fill = _lerp(raised, text, weight)
+                pairs.append(
+                    (theme, accent, "text", f"button+{weight}", contrast(text, fill), TEXT_AA)
+                )
+    return pairs
+
+
+def test_every_role_meets_wcag_aa_on_every_surface_in_both_themes() -> None:
+    failures = [
+        f"{theme}/{accent}: {fg} on {bg} is {ratio:.2f}:1, needs {required}:1"
+        for theme, accent, fg, bg, ratio, required in _pairs()
+        if ratio < required
+    ]
+    assert not failures, "\n".join(failures)
+
+
+def test_the_contrast_check_covers_both_themes_and_every_accent() -> None:
+    pairs = _pairs()
+    assert {(theme, accent) for theme, accent, *_ in pairs} == {
+        (theme, accent)
+        for theme in ("dark", "light")
+        for accent in ("brass", "blue", "green", "violet")
+    }
+    assert contrast((0.0, 0.0, 0.0), (1.0, 1.0, 1.0)) == pytest.approx(21.0)
+    # Hairlines are not held to 3:1, but stay visible on every surface they divide.
+    for theme in ("dark", "light"):
+        p = _palette(theme, "brass")
+        for bg in ("surface", "surface_sunken"):
+            assert contrast(p["border_subtle"], p[bg]) >= 1.5, (theme, bg)

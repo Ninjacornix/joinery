@@ -257,6 +257,61 @@ func _check_icons() -> void:
 	_check(
 		tinted != null and tinted != UI_THEME.icon(_host, "chevron"), "Tinted icons are separate"
 	)
+	# Official app logos (icons/apps) render in their own colours; Blender has none (its terms
+	# need the word mark beside the logo), so the rail keeps its in-house glyph.
+	for app: String in [
+		"godot", "krita", "gimp", "inkscape", "material-maker", "surge-xt", "supercollider"
+	]:
+		var logo := UI_THEME.app_logo(_host, app)
+		_check(logo != null and logo.get_width() > 0, "The %s logo renders headless" % app)
+		if app not in ["inkscape", "supercollider"]:  # Black-and-white marks.
+			_check(_has_colour(logo), "The %s logo keeps its own colours" % app)
+	_check(not UI_THEME.has_app_logo("blender"), "No Blender logo is shipped")
+	_check(UI_THEME.app_logo(_host, "my-custom-tool") == null, "Custom tools have no logo")
+	for mode: String in ["dark", "light"]:
+		_check(UI_THEME.set_pref("theme", mode) == OK, "Save the theme preference")
+		# Inkscape's black mark has an official white variant for dark backgrounds.
+		var ink := UI_THEME.app_logo(_host, "inkscape").get_image()
+		var surface := UI_THEME.color(_host, "surface")
+		var ratio := _contrast(_mean_opaque(ink), surface)
+		_check(ratio >= 3.0, "Inkscape reads on the %s surface (%.2f:1)" % [mode, ratio])
+		# An unchecked radio and check box outline reads on every surface (3:1).
+		var built := UI_THEME.build(_host)
+		for icon: String in ["radio_unchecked", "unchecked"]:
+			var image := built.get_icon(icon, "CheckBox").get_image()
+			for fill: String in SURFACES:
+				var under := UI_THEME.color(_host, fill)
+				# The strongest pixel down the top edge: the outline stroke, not its soft rim.
+				ratio = 1.0
+				for y: int in image.get_height() / 4:
+					var drawn := under.blend(image.get_pixel(image.get_width() / 2, y))
+					ratio = maxf(ratio, _contrast(drawn, under))
+				_check(ratio >= 3.0, "%s %s on %s is %.2f:1" % [mode, icon, fill, ratio])
+	_check(UI_THEME.set_pref("theme", "match") == OK, "Restore the theme preference")
+
+
+## True when some opaque pixel of [param texture] is not grey.
+static func _has_colour(texture: Texture2D) -> bool:
+	var image := texture.get_image()
+	for y: int in image.get_height():
+		for x: int in image.get_width():
+			var pixel := image.get_pixel(x, y)
+			if pixel.a > 0.5 and pixel.s > 0.2:
+				return true
+	return false
+
+
+## The average colour of the opaque pixels of [param image].
+static func _mean_opaque(image: Image) -> Color:
+	var sum := Color(0, 0, 0, 0)
+	var count := 0
+	for y: int in image.get_height():
+		for x: int in image.get_width():
+			var pixel := image.get_pixel(x, y)
+			if pixel.a > 0.5:
+				sum += Color(pixel.r, pixel.g, pixel.b, 0)
+				count += 1
+	return Color(sum.r / count, sum.g / count, sum.b / count) if count else Color.BLACK
 
 
 func _check_watch(config: String) -> void:
