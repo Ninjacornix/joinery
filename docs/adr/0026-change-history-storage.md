@@ -46,3 +46,26 @@ by two project-sized copies per change.
 - After Compact, older changes can no longer be reverted; their cards say so.
 - Compact edits the working project directly, not as a reviewed transaction,
   because a transaction would itself keep copies of what it deletes.
+
+## Addendum, 2026-11-11: choosing the policy
+- **Where.** The new-project wizard (Features and apps: **Keep older versions**),
+  Project apps (`/setup`, **Older versions**, saved with Save) and Settings
+  (**Older versions** under History, next to Compact). Presets: last 50 changes up
+  to 2 GB (`keep-50`, the default), last 10 up to 1 GB (`keep-10`), only the newest
+  (`latest`, keep 1), or Custom numbers (Project apps and Settings).
+- **CLI.** `joinery history policy [--keep N] [--max-mb M] [--dry-run] [--json]`
+  reads or writes `[history]`, replacing only that table in `joinery.toml`, then
+  runs retention at once and reports `pruned` and `freed_bytes`; `--dry-run`
+  reports the same without changing anything. `joinery new`, `game apply` and
+  `setup` take `--history PRESET` or `--history-keep/--history-max-mb`. The
+  wizard passes its choice to `game apply`, or to `setup` without a starting point.
+- **Asking first.** Settings applies a choice that removes nothing at once; one that
+  removes restore data says how many changes and how much space, and applies only
+  on **Keep fewer**. Project apps says the same under the choice before Save.
+- **What it covers.** The policy bounds transaction restore data: the older
+  versions of models, textures and sounds that accepted changes replaced.
+  `recipes/inputs` documents that current recipes replay from cannot be dropped
+  without breaking `joinery rebuild`, and `recipes/history` holds replaced recipes
+  (small text); both stay until Compact, which removes replaced recipes and the
+  starting documents no current recipe needs. The newest accepted change always
+  stays revertible, whatever the policy.

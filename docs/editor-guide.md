@@ -118,6 +118,14 @@ the editor and whenever a change is staged or decided; it never polls.
   and after approval the held request goes out again.
 - Changes are accepted or **Discarded** in the Review panel. **Compact** in
   history asks for confirmation inline before it frees space.
+- **Older versions**, under History in Settings, sets how many accepted
+  changes keep the older versions of the files they replaced (models,
+  textures, sounds), so they can be reverted: **Last 50 changes** (up to 2 GB,
+  the default), **Last 10 changes** (up to 1 GB), **Only the newest**, or
+  **Custom…** (changes to keep and space in GB). A choice that would remove
+  restore data says so first ("3 older changes can no longer be reverted.
+  Frees 120 MB.") and applies only on **Keep fewer**. Project apps (`/setup`)
+  has the same choice under **Older versions** and saves it with **Save**.
 - While Journeyman works or a change waits for review, Enter queues the
   message instead of dropping it (the box says "Queue a message…"). Queued
   messages wait under **Queued** at the end of the conversation, each with its
@@ -334,8 +342,10 @@ folder and the game in one sentence (the renderer is under Advanced).
 inline (digits only, empty to add it later) and, with Online play on, how players
 connect (Steam or Direct IP). The apps sit behind one line with **Change…**;
 preferred MCPs are on by default, and other candidates can be set up as custom
-tools with a command and arguments. **Brief and art direction** asks the brief
-and art questions, pre-filled from the starting point.
+tools with a command and arguments. The step ends with **Keep older
+versions**: the last 50 changes up to 2 GB (the default), the last 10 up to
+1 GB, or only the newest. **Brief and art direction** asks the brief and art
+questions, pre-filled from the starting point.
 
 The editor's **Tools** workspace previews project assets and opens their native
 sources in Blender, Krita, GIMP, Inkscape, SuperCollider, Material Maker,
@@ -376,3 +386,12 @@ CLI equivalents: `joinery workspace --project <path>` and
 `joinery parts <model> --project <path>` lists the objects, materials and maps
 of a model (a GLB or its source document). `joinery history usage|compact
 --project <path>` shows or frees the space kept for undoing accepted changes.
+`joinery history policy --project <path> [--keep N] [--max-mb M] [--dry-run]`
+reads or sets `[history]` in `joinery.toml` and removes what a smaller choice
+no longer keeps, saying how much that frees; `joinery new`, `joinery game
+apply` and `joinery setup` take `--history keep-50|keep-10|latest|custom` (or
+`--history-keep N --history-max-mb M`). The choice bounds restore data for
+accepted changes, which is where older versions of models and textures live.
+Starting documents that current recipes replay from (`recipes/inputs`) and
+replaced recipes (`recipes/history`) are kept until **Compact**, which keeps
+only what replaying the current state needs.
