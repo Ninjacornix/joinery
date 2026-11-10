@@ -135,16 +135,24 @@ func _build() -> void:
 func _why_not(info: Dictionary, applied: Array) -> String:
 	for other: Variant in info.get("conflicts", []):
 		if other in applied:
-			return "Can't be used with %s." % title_of(str(other))
+			return "Can't be used with %s." % phrase_of(str(other))
 	for other: Variant in info.get("requires", []):
 		if not other in applied:
-			return "Needs %s first." % title_of(str(other))
+			return "Needs %s first." % phrase_of(str(other))
 	return "Not available for this game."
 
 
 ## A feature's name for people ("Online play"), from the catalogue when it is known.
 func title_of(id: String) -> String:
 	return str((_names.get(id, {}) as Dictionary).get("name", id.capitalize()))
+
+
+## The feature's name inside a sentence ("Needs online play first."); Steam keeps its capital.
+func phrase_of(id: String) -> String:
+	var name := title_of(id)
+	if id == "steam" or name.is_empty():
+		return name
+	return name.left(1).to_lower() + name.substr(1)
 
 
 ## A switch changed: show what it would change before anything happens.
@@ -179,7 +187,7 @@ func _plan_panel(id: String, adding: bool) -> Plan:
 	stack.theme_type_variation = "JoineryTight"
 	plan.add_child(stack)
 	var verb := "Adding" if adding else "Removing"
-	stack.add_child(UI_COMPONENTS.label("%s %s" % [verb, title_of(id)], "", true))
+	stack.add_child(UI_COMPONENTS.label("%s %s" % [verb, phrase_of(id)], "", true))
 	plan.working = HBoxContainer.new()
 	plan.working.theme_type_variation = "JoineryRow"
 	var spinner := INDICATOR.new()
@@ -277,7 +285,7 @@ func _apply_done(result: Dictionary) -> void:
 		_plan.problem.text = "Couldn't apply: " + (why if not why.is_empty() else "no reason given")
 		_plan.problem.show()
 		return
-	var message := "%s %s." % ["Added" if _plan.adding else "Removed", title_of(_plan.feature)]
+	var message := "%s %s." % ["Added" if _plan.adding else "Removed", phrase_of(_plan.feature)]
 	_close_plan(true)
 	applied.emit(message)
 	reload()

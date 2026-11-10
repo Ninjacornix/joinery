@@ -200,6 +200,23 @@ def test_user_edits_survive_reapply_and_removal(
     assert not (project / "tests/features/net").exists()
 
 
+def test_settings_godot_drops_as_defaults_are_not_user_edits(
+    fixture_catalogue: FixtureCatalogue, tmp_path: Path
+) -> None:
+    project = _project(tmp_path, "alpha", ("words",))
+    godot = project / "project.godot"
+    # The editor leaves out a setting that equals the engine default on save.
+    config = GodotConfig.parse(godot.read_text())
+    config.erase("internationalization", "locale/fallback")
+    godot.write_text(config.dump())
+    planned = plan(project, "alpha", ["words", "controller"])
+    assert planned.notes == []
+    assert not any(e.key == "locale/fallback" for e in planned.config_edits)
+    add_feature(project, "controller")
+    assert remove_feature(project, "words").notes == []
+    assert GodotConfig.parse(godot.read_text()).get("internationalization", "locale/fallback") is None
+
+
 def test_remove_restores_project_files_byte_for_byte(
     fixture_catalogue: FixtureCatalogue, tmp_path: Path
 ) -> None:

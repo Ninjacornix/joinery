@@ -944,6 +944,21 @@ class _Work:
     notes: list[str] = field(default_factory=list)
 
 
+# Godot leaves a setting out of project.godot when it equals the engine
+# default, so after the editor saves, these keys go missing without anyone
+# changing them. A missing key here still holds the default.
+_ENGINE_DEFAULTS = {
+    "audio/buses/default_bus_layout": to_variant("res://default_bus_layout.tres"),
+    "internationalization/locale/fallback": to_variant("en"),
+}
+
+
+def _effective_setting(config: GodotConfig, key: str) -> str | None:
+    section, name = _split_key(key)
+    current = config.get(section, name)
+    return _ENGINE_DEFAULTS.get(key) if current is None else current
+
+
 def _apply_setting(
     work: _Work, entry: dict[str, Any], old: dict[str, Any], key: str, raw: str
 ) -> None:
@@ -951,8 +966,9 @@ def _apply_setting(
     current = work.config.get(section, name)
     recorded = old.get("settings", {}).get(key)
     if recorded is not None:
-        if current == recorded["value"]:
-            if current != raw:
+        effective = _effective_setting(work.config, key)
+        if effective == recorded["value"]:
+            if effective != raw:
                 work.config.set(section, name, raw)
             entry["settings"][key] = {"value": raw, "previous": recorded["previous"]}
         else:
@@ -1458,7 +1474,7 @@ def remove_feature(project: Path, feature_id: str, *, root: Path | None = None) 
     had_entries = {s for s in config.sections() if config.keys(s)}
     for key, setting in entry.get("settings", {}).items():
         section, name = _split_key(key)
-        if config.get(section, name) == setting["value"]:
+        if _effective_setting(config, key) == setting["value"]:
             if setting["previous"] is None:
                 config.erase(section, name)
             else:

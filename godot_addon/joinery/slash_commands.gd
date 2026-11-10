@@ -101,6 +101,14 @@ static func feature_name(id: String) -> String:
 	return str(FEATURE_NAMES.get(id, id.replace("-", " ").capitalize()))
 
 
+## A feature's name inside a sentence ("Add online play"); Steam keeps its capital.
+static func feature_phrase(id: String) -> String:
+	var name := feature_name(id)
+	if id == "steam" or name.is_empty():
+		return name
+	return name.left(1).to_lower() + name.substr(1)
+
+
 ## Run [param entry]. Returns false when it is not a known command.
 func run(entry: String) -> bool:
 	var command := resolve(entry)

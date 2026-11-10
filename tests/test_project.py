@@ -171,7 +171,7 @@ def test_new_first_person_with_features(tmp_path: Path) -> None:
     assert "| Pause (`pause`) | Esc / P | Start | — |" in brief
     # The blueprint's bible preset filled the technical sections as suggestions.
     bible = (project / "art/bible.md").read_text()
-    assert "_Suggested by the Stylised PBR 3D starting point; change freely._" in bible
+    assert "_Suggested by the Stylised PBR 3D preset for this starting point; change freely._" in bible
     assert "{{" not in bible
     assert check_assets(project, load_catalog()) == []
 

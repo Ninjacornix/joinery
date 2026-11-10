@@ -61,6 +61,13 @@ const BRIEF_PATH := "res://design/brief.md"
 const DOCUMENT_EM := Vector2(46, 40)
 ## Minimum dock width in multiples of the font size.
 const MIN_EM := 24
+## The same below the Inspector in Godot's classic layout, where the column is shared and a
+## wider sidebar would push the editor past a laptop-sized window.
+const SHARED_MIN_EM := 19
+
+## Minimum width in multiples of the font size: [constant MIN_EM], or
+## [constant SHARED_MIN_EM] when the sidebar shares its column.
+var min_em := MIN_EM
 
 ## "connected", "connecting", "error" or "none" (no account connected yet).
 var connection_state := "connecting"
@@ -117,7 +124,7 @@ func _init() -> void:
 func _ready() -> void:
 	UI_THEME.watch(self)
 	theme_type_variation = "JoineryDock"
-	custom_minimum_size.x = get_theme_default_font_size() * MIN_EM
+	custom_minimum_size.x = get_theme_default_font_size() * min_em
 	_content = VBoxContainer.new()
 	_content.theme_type_variation = "JoineryRow"
 	add_child(_content)
@@ -191,7 +198,7 @@ func _notification(what: int) -> void:
 
 
 func _on_theme_rebuilt() -> void:
-	custom_minimum_size.x = get_theme_default_font_size() * MIN_EM
+	custom_minimum_size.x = get_theme_default_font_size() * min_em
 	if _command_popup != null:
 		_command_popup.theme = theme
 
@@ -528,7 +535,9 @@ func _on_feature_planned(plan: Dictionary) -> void:
 	var action := str(plan.get("action", "add"))
 	var id := str(plan.get("feature", ""))
 	var verb := "Add" if action == "add" else "Remove"
-	var card: Control = _transcript.add_plan(plan, "%s %s" % [verb, SLASH_SCRIPT.feature_name(id)])
+	var card: Control = _transcript.add_plan(
+		plan, "%s %s" % [verb, SLASH_SCRIPT.feature_phrase(id)]
+	)
 	_plan_card = card
 	_plan = {"action": action, "feature": id}
 	card.connect("apply_pressed", func() -> void: _slash.apply_feature(action, id))
@@ -541,7 +550,7 @@ func _on_feature_applied(ok: bool, message: String, transaction_id: String) -> v
 	if not ok:
 		_plan_card.set_failed(message)
 		return
-	var name := SLASH_SCRIPT.feature_name(str(_plan.get("feature", "")))
+	var name := SLASH_SCRIPT.feature_phrase(str(_plan.get("feature", "")))
 	var done := ("Added %s." if _plan.get("action") == "add" else "Removed %s.") % name
 	var paths := PackedStringArray()
 	for path: Variant in _plan_card.plan.get("changes", []):

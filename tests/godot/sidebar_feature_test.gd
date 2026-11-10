@@ -53,7 +53,7 @@ func _run() -> void:
 	)
 	var card: Control = chat._plan_card
 	var texts: PackedStringArray = card.texts()
-	_check(card.title_label.text == "Add Controller support", "The plan names the feature")
+	_check(card.title_label.text == "Add controller support", "The plan names the feature")
 	_check(texts.has("Nothing changes until you apply it."), "The plan says nothing changes yet")
 	_check(texts.has("features/controller/controller.gd"), "The plan lists the files it adds")
 	_check(not texts.has("features/controller/controller.gd.uid"), "Sidecar files stay out")
@@ -76,7 +76,7 @@ func _run() -> void:
 		not card.transaction_id.is_empty() and card._revert.visible, "The change can be reverted"
 	)
 	_check(
-		card._outcome_text.text.begins_with("Added Controller support."),
+		card._outcome_text.text.begins_with("Added controller support."),
 		"The outcome says what changed"
 	)
 
@@ -123,7 +123,7 @@ func _run() -> void:
 		"The offer plans the feature"
 	)
 	var online: Control = chat._plan_card
-	_check(online.title_label.text == "Add Online play", "The plan is for online play")
+	_check(online.title_label.text == "Add online play", "The plan is for online play")
 	await create_timer(0.5).timeout
 	_check(not DirAccess.dir_exists_absolute(ONLINE), "An offer never applies anything")
 	online._cancel.pressed.emit()
