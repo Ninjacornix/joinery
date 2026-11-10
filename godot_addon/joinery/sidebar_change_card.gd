@@ -3,7 +3,7 @@
 extends VBoxContainer
 ## One request in the transcript, kept as a change card so the session reads as a history you
 ## can trace and revert. The user's bubble holds only the request text. Under it, on the
-## transcript inset, Journeyman's side: the apps at work and a rolling timer, the live
+## transcript inset, Journeyman's side: the apps at work and a quiet timer, the live
 ## steps, a thumbnail when a change is ready, and inline errors. The decision line
 ## ("Change accepted", with "Revert" on accepted file changes) is placed by the transcript at
 ## the end of the turn, after the reply ([signal outcome_placing]). The decision itself is
@@ -385,18 +385,15 @@ func refresh_layout() -> void:
 	_sync_activity()
 
 
-## Seconds spent so far; the timer appears after three seconds and rolls like an odometer.
+## Seconds spent so far; the timer appears after three seconds. Each second only its text
+## changes: a ticking clock that moves every second pulls the eye from the work.
 func set_elapsed(seconds: int) -> void:
 	if seconds < 3 or state != "working":
 		return
+	_timer.text = UI_MOTION.format_clock(seconds)
 	if not _timer.visible:
-		# The first value is set, not rolled: there is nothing to roll from yet.
-		_timer.text = UI_MOTION.format_clock(seconds)
-		_timer.set_meta("_joinery_value", float(seconds))
 		UI_MOTION.fade_in(_timer)
 		_sync_activity()
-		return
-	UI_MOTION.roll_number(_timer, seconds, UI_MOTION.format_clock)
 
 
 ## The turn ended. [param outcome] is "done", "cancelled" or "failed". A request held by the
