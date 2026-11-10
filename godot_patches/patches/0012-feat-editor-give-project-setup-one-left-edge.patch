@@ -1126,7 +1126,7 @@ index 25b3fb5..49c7d23 100644
  	void _joinery_update_agent_chip();
  
 diff --git a/editor/themes/editor_theme_manager.cpp b/editor/themes/editor_theme_manager.cpp
-index 536ef7f..3cb81fa 100644
+index c291f8f..826a383 100644
 --- a/editor/themes/editor_theme_manager.cpp
 +++ b/editor/themes/editor_theme_manager.cpp
 @@ -361,9 +361,143 @@ static void _joinery_populate_styles(const Ref<EditorTheme> &p_theme, const Edit
@@ -1177,10 +1177,10 @@ index 536ef7f..3cb81fa 100644
 +
 +	// Colour roles shared with the sidebar (ui_theme.gd).
 +	const Color text = p_config.dark_theme ? Color::html("#eeede8") : Color::html("#25262a");
-+	const Color text_faint = p_config.dark_theme ? Color::html("#969690") : Color::html("#6a6c65");
-+	const Color raised = p_config.dark_theme ? Color::html("#2b2d30") : Color::html("#eeece6");
-+	const Color border_subtle = p_config.dark_theme ? Color::html("#3a3c40") : Color::html("#d9d7d0");
-+	const Color border_strong = p_config.dark_theme ? Color::html("#75787f") : Color::html("#7c7e76");
++	const Color text_faint = p_config.dark_theme ? Color::html("#9d9d97") : Color::html("#5f615a");
++	const Color raised = p_config.dark_theme ? Color::html("#2b2d30") : Color::html("#ebe9e2");
++	const Color border_subtle = p_config.dark_theme ? Color::html("#404247") : Color::html("#c9c6bd");
++	const Color border_strong = p_config.dark_theme ? Color::html("#7c7f86") : Color::html("#7c7e76");
 +	const int hairline = MAX(1, (int)Math::round(EDSCALE));
 +
 +	// The one secondary button: raised fill with a hairline edge, quieter

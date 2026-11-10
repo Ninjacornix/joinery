@@ -933,7 +933,7 @@ index 5f9592b..38720eb 100644
  	String noto_cjk_path;
  	String noto_cjk_bold_path;
 diff --git a/editor/themes/editor_theme_manager.cpp b/editor/themes/editor_theme_manager.cpp
-index 39f60bf..536ef7f 100644
+index 39f60bf..c291f8f 100644
 --- a/editor/themes/editor_theme_manager.cpp
 +++ b/editor/themes/editor_theme_manager.cpp
 @@ -166,6 +166,10 @@ Ref<StyleBoxLine> EditorThemeManager::make_line_stylebox(Color p_color, int p_th
@@ -964,10 +964,10 @@ index 39f60bf..536ef7f 100644
 +static Color _joinery_accent_color(bool p_light) {
 +	const String accent = EDITOR_GET("interface/theme/joinery_accent");
 +	if (accent == "Blue") {
-+		return p_light ? Color::html("#1f6aa5") : Color::html("#6aaee0");
++		return p_light ? Color::html("#1c64a0") : Color::html("#6aaee0");
 +	}
 +	if (accent == "Green") {
-+		return p_light ? Color::html("#2d7546") : Color::html("#79c48f");
++		return p_light ? Color::html("#2a7044") : Color::html("#79c48f");
 +	}
 +	if (accent == "Violet") {
 +		return p_light ? Color::html("#6a4bc4") : Color::html("#b59cf0");
@@ -986,7 +986,7 @@ index 39f60bf..536ef7f 100644
 +	const Color pressed = p_config.dark_theme ? accent.darkened(0.08) : accent.darkened(0.16);
 +	// Secondary text is a solid colour, never an alpha fade, so it keeps its
 +	// contrast on every surface.
-+	const Color text_muted = p_config.dark_theme ? Color::html("#b0b0aa") : Color::html("#5b5d55");
++	const Color text_muted = p_config.dark_theme ? Color::html("#b0b0aa") : Color::html("#53554e");
 +	const Color danger = p_config.dark_theme ? Color::html("#f08a7e") : Color::html("#b4372b");
 +	const int radius = 8 * EDSCALE;
 +

@@ -628,7 +628,7 @@ index 49c7d23..8362a4f 100644
  	// The wordmark on the page, flush with the line and the bar under it.
  	Button *joinery_wordmark = nullptr;
 diff --git a/editor/themes/editor_theme_manager.cpp b/editor/themes/editor_theme_manager.cpp
-index 3cb81fa..c5d3d6c 100644
+index 826a383..895328d 100644
 --- a/editor/themes/editor_theme_manager.cpp
 +++ b/editor/themes/editor_theme_manager.cpp
 @@ -299,8 +299,10 @@ static void _joinery_populate_styles(const Ref<EditorTheme> &p_theme, const Edit
@@ -660,8 +660,8 @@ index 3cb81fa..c5d3d6c 100644
  	// Colour roles shared with the sidebar (ui_theme.gd).
  	const Color text = p_config.dark_theme ? Color::html("#eeede8") : Color::html("#25262a");
 @@ -407,6 +417,9 @@ static void _joinery_populate_styles(const Ref<EditorTheme> &p_theme, const Edit
- 	const Color border_subtle = p_config.dark_theme ? Color::html("#3a3c40") : Color::html("#d9d7d0");
- 	const Color border_strong = p_config.dark_theme ? Color::html("#75787f") : Color::html("#7c7e76");
+ 	const Color border_subtle = p_config.dark_theme ? Color::html("#404247") : Color::html("#c9c6bd");
+ 	const Color border_strong = p_config.dark_theme ? Color::html("#7c7f86") : Color::html("#7c7e76");
  	const int hairline = MAX(1, (int)Math::round(EDSCALE));
 +	// Text on the faint accent of a disabled primary keeps 4.5:1 in plain text.
 +	p_theme->set_color("font_disabled_color", "JoineryPrimaryButton", text);

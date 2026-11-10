@@ -2422,7 +2422,7 @@ index aa29045..d310c41 100644
  	void _joinery_retry_create();
  	void _joinery_toggle_details(bool p_open);
 diff --git a/editor/themes/editor_theme_manager.cpp b/editor/themes/editor_theme_manager.cpp
-index c5d3d6c..aef801f 100644
+index 895328d..242be25 100644
 --- a/editor/themes/editor_theme_manager.cpp
 +++ b/editor/themes/editor_theme_manager.cpp
 @@ -44,6 +44,7 @@
