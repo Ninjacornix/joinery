@@ -1,7 +1,7 @@
 # Classic Godot view
 
 Joinery's editor layout (ADR 0005) moves Godot's docks to the bottom, puts a
-tool rail in the left column, trims the run bar and gives the Journeyman
+tool rail in the left column, restyles the run bar and gives the Journeyman
 sidebar the right column. People who already know Godot sometimes want
 Godot's own arrangement back, without leaving Joinery. The fork therefore has
 one switch between the two layouts (patch `0019`, Joinery-only, not meant for
@@ -18,8 +18,10 @@ layout change in the fork asks it. In Classic Godot:
   their stock slots, and the default layout is Godot's own.
 - The 2D, 3D, Script, Game, Asset Store and Tools buttons sit centred in the
   title bar with their names; there is no navigation column, so no tool rail.
-- The run bar shows all its buttons (run current and custom scene, Movie
-  Maker) in its stock place.
+- The run bar is Godot's own, in its stock place: Play is an icon button and
+  Pause and Stop always show. (Joinery's layout keeps run current scene, run
+  custom scene and Movie Maker too, but makes Play the one labelled primary
+  button and shows Pause and Stop only while the game runs.)
 - The bottom panel keeps its overflow arrows, dock menu and status strip, and
   its docks start open as in stock Godot.
 - The right column's docks have their usual docking menu.

@@ -15,9 +15,8 @@ Migrate existing utility docks to the bottom once, preserving unrelated docks, c
  editor/editor_main_screen.cpp   | 24 +++++++++++-----
  editor/editor_main_screen.h     |  6 ++--
  editor/editor_node.cpp          | 51 ++++++++++++++++++++++++++++++---
- editor/run/editor_run_bar.cpp   | 35 +++++++++++++++++++++-
- editor/run/editor_run_bar.h     |  3 ++
- 10 files changed, 114 insertions(+), 20 deletions(-)
+ editor/run/editor_run_bar.cpp   | 14 ++++++++-
+ 9 files changed, 90 insertions(+), 20 deletions(-)
 
 diff --git a/editor/docks/groups_dock.cpp b/editor/docks/groups_dock.cpp
 index de2534e..a43b6d6 100644
@@ -308,7 +307,7 @@ index c3b2686..420e89b 100644
  	int hsplits[] = { 0, dock_hsize, -dock_hsize, 0 };
  	for (int i = 0; i < (int)std_size(hsplits); i++) {
 diff --git a/editor/run/editor_run_bar.cpp b/editor/run/editor_run_bar.cpp
-index 1d61bad..190b3aa 100644
+index 1d61bad..2cc1c86 100644
 --- a/editor/run/editor_run_bar.cpp
 +++ b/editor/run/editor_run_bar.cpp
 @@ -125,6 +125,12 @@ void EditorRunBar::_reset_play_buttons() {
@@ -324,30 +323,17 @@ index 1d61bad..190b3aa 100644
  
  	play_scene_button->set_pressed(false);
  	play_scene_button->set_button_icon(get_editor_theme_icon(SNAME("PlayScene")));
-@@ -161,6 +167,22 @@ void EditorRunBar::_update_play_buttons() {
+@@ -161,6 +167,9 @@ void EditorRunBar::_update_play_buttons() {
  		active_button->set_pressed(true);
  		active_button->set_button_icon(get_editor_theme_icon(SNAME("Reload")));
  	}
 +	if (active_button == play_button) {
 +		play_button->set_text(TTRC("Restart"));
 +	}
-+}
-+
-+void EditorRunBar::shortcut_input(const Ref<InputEvent> &p_event) {
-+	if (Engine::get_singleton()->is_recovery_mode_hint() || p_event.is_null() || !p_event->is_pressed() || p_event->is_echo()) {
-+		return;
-+	}
-+	if (play_scene_button && !play_scene_button->is_visible() && ED_IS_SHORTCUT("editor/run_current_scene", p_event)) {
-+		_play_current_pressed(RunXRModeMenuItem::INVALID);
-+		accept_event();
-+	} else if (play_custom_scene_button && !play_custom_scene_button->is_visible() && ED_IS_SHORTCUT("editor/run_specific_scene", p_event)) {
-+		_play_custom_pressed(RunXRModeMenuItem::INVALID);
-+		accept_event();
-+	}
  }
  
  void EditorRunBar::_movie_maker_item_pressed(int p_id) {
-@@ -615,7 +637,10 @@ EditorRunBar::EditorRunBar() {
+@@ -615,7 +624,10 @@ EditorRunBar::EditorRunBar() {
  
  	play_button = memnew(Button);
  	main_hbox->add_child(play_button);
@@ -359,30 +345,3 @@ index 1d61bad..190b3aa 100644
  	play_button->set_toggle_mode(true);
  	play_button->set_focus_mode(Control::FOCUS_ACCESSIBILITY);
  	ED_SHORTCUT_AND_COMMAND("editor/run_project", TTRC("Run Project"), Key::F5);
-@@ -724,4 +749,12 @@ EditorRunBar::EditorRunBar() {
- 	write_movie_button->set_tooltip_text(TTRC("Enable Movie Maker mode.\nThe project will run at stable FPS and the visual and audio output will be recorded to a video file."));
- 	write_movie_button->set_accessibility_name(TTRC("Enable Movie Maker Mode"));
- 	write_movie_button->set_flat(false);
-+
-+	// Joinery: one way to run the game from the bar. Running the current or a
-+	// custom scene keeps its shortcut (see shortcut_input), and Movie Maker
-+	// stays in Project Settings > Editor > Movie Writer.
-+	play_scene_button->hide();
-+	play_custom_scene_button->hide();
-+	write_movie_panel->hide();
-+	set_process_shortcut_input(true);
- }
-diff --git a/editor/run/editor_run_bar.h b/editor/run/editor_run_bar.h
-index 98df6e1..873a208 100644
---- a/editor/run/editor_run_bar.h
-+++ b/editor/run/editor_run_bar.h
-@@ -113,6 +113,9 @@ private:
- protected:
- 	void _notification(int p_what);
- 	static void _bind_methods();
-+	// Joinery: the current-scene and custom-scene buttons are hidden, and
-+	// their shortcuts are handled here instead.
-+	virtual void shortcut_input(const Ref<InputEvent> &p_event) override;
- 
- public:
- 	static EditorRunBar *get_singleton() { return singleton; }

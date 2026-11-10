@@ -38,10 +38,10 @@ start"; the setting is marked restart-if-changed for Editor Settings.
  editor/editor_node.cpp              | 132 +++++++++++++++++++++++-----
  editor/editor_node.h                |   4 +
  editor/gui/editor_bottom_panel.cpp  |  20 +++--
- editor/run/editor_run_bar.cpp       |  31 ++++---
+ editor/run/editor_run_bar.cpp       |  21 +++--
  editor/settings/editor_settings.cpp |  16 ++++
  editor/settings/editor_settings.h   |   4 +
- 15 files changed, 224 insertions(+), 64 deletions(-)
+ 15 files changed, 218 insertions(+), 60 deletions(-)
 
 diff --git a/editor/docks/dock_tab_container.cpp b/editor/docks/dock_tab_container.cpp
 index 31dad08..47c5a1f 100644
@@ -596,7 +596,7 @@ index 3d3bea3..61be681 100644
  	callable_mp(this, &EditorBottomPanel::_repaint).call_deferred();
  }
 diff --git a/editor/run/editor_run_bar.cpp b/editor/run/editor_run_bar.cpp
-index 190b3aa..ccd6147 100644
+index 2cc1c86..b81ff1f 100644
 --- a/editor/run/editor_run_bar.cpp
 +++ b/editor/run/editor_run_bar.cpp
 @@ -125,12 +125,13 @@ void EditorRunBar::_reset_play_buttons() {
@@ -627,7 +627,7 @@ index 190b3aa..ccd6147 100644
  		play_button->set_text(TTRC("Restart"));
  	}
  }
-@@ -639,8 +640,12 @@ EditorRunBar::EditorRunBar() {
+@@ -626,8 +627,12 @@ EditorRunBar::EditorRunBar() {
  	main_hbox->add_child(play_button);
  	// Joinery: Play is the run bar's one primary action, "▶ Play" in the
  	// accent style shared with the Journeyman sidebar.
@@ -642,21 +642,6 @@ index 190b3aa..ccd6147 100644
  	play_button->set_toggle_mode(true);
  	play_button->set_focus_mode(Control::FOCUS_ACCESSIBILITY);
  	ED_SHORTCUT_AND_COMMAND("editor/run_project", TTRC("Run Project"), Key::F5);
-@@ -753,8 +758,10 @@ EditorRunBar::EditorRunBar() {
- 	// Joinery: one way to run the game from the bar. Running the current or a
- 	// custom scene keeps its shortcut (see shortcut_input), and Movie Maker
- 	// stays in Project Settings > Editor > Movie Writer.
--	play_scene_button->hide();
--	play_custom_scene_button->hide();
--	write_movie_panel->hide();
--	set_process_shortcut_input(true);
-+	if (EditorSettings::is_joinery_layout()) {
-+		play_scene_button->hide();
-+		play_custom_scene_button->hide();
-+		write_movie_panel->hide();
-+		set_process_shortcut_input(true);
-+	}
- }
 diff --git a/editor/settings/editor_settings.cpp b/editor/settings/editor_settings.cpp
 index 025969d..f1edeb2 100644
 --- a/editor/settings/editor_settings.cpp

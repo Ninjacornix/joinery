@@ -23,7 +23,7 @@ If you prefer Godot's own layout, switch to it from **Editor > Switch to
 classic Godot view**, from the command palette, or in Journeyman settings under
 **Appearance > Layout** (Joinery or Classic Godot). In Classic Godot the
 docks go back to their stock places, the 2D, 3D and Script buttons return to
-the title bar, the run bar shows every button and Journeyman is an ordinary
+the title bar, the run bar is Godot's own and Journeyman is an ordinary
 dock under the Inspector. **Switch to Joinery view** goes back. The switch
 applies after a restart; the dialog offers Restart or On next start. Each
 layout remembers its own docks, and the theme stays as you set it. The setting
