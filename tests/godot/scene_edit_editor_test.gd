@@ -2,9 +2,17 @@
 extends EditorPlugin
 
 var _failed := false
+## Set once the editor's first file scan has ended. The editor restores its dock layout in
+## that same step, pumping frames while it does, so a check that runs earlier sees the
+## bottom panel reordered under it.
+var _layout_ready := false
 
 
 func _enter_tree() -> void:
+	# Connected after the editor's own handler, so this runs once the layout is restored.
+	EditorInterface.get_resource_filesystem().sources_changed.connect(
+		func(_exist: bool) -> void: _layout_ready = true, CONNECT_ONE_SHOT
+	)
 	_run.call_deferred()
 
 
@@ -22,7 +30,11 @@ func _event(plugin: EditorPlugin, payload: Dictionary, targets: Array = []) -> D
 
 
 func _run() -> void:
-	await get_tree().create_timer(2.0).timeout
+	var deadline := Time.get_ticks_msec() + 180000
+	while not _layout_ready and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	_check(_layout_ready, "The editor finishes loading its layout")
+	await get_tree().create_timer(1.0).timeout
 	var plugin: EditorPlugin
 	for node: Node in get_tree().root.find_children("*", "EditorPlugin", true, false):
 		if node.get_script() == load("res://addons/joinery/plugin.gd"):
