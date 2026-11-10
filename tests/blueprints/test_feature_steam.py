@@ -1,22 +1,30 @@
 """The steam feature: a GodotSteam wrapper that is a quiet no-op without it.
 
-Joinery never downloads or installs GodotSteam, so these tests use stock
-Godot. `res://tests/features/steam/steam_test.gd` checks the Steam-absent path
-(every call false or "", nothing printed), then registers a fake `Steam`
-singleton and checks that calls are routed, lobby signals re-emitted, the app
-id gate and the achievement on level completion. The online-play bridge is
-checked against a stub `NetTransport` and, once online play is in the
-catalogue, against the real one.
+Most tests use stock Godot without the extension.
+`res://tests/features/steam/steam_test.gd` checks the Steam-absent path (every
+call false or "", nothing printed), then registers a fake `Steam` singleton
+and checks that calls are routed, lobby signals re-emitted, the app id gate,
+the connect setting and the achievement on level completion. The online-play
+bridge is checked against a stub `NetTransport` and, once online play is in
+the catalogue, against the real one.
+
+With the pinned GodotSteam release already in the per-user cache (it is never
+downloaded here) and a platform it has binaries for, one more test installs it
+into a project and boots headless to confirm every name the wrapper uses.
 """
 
 from __future__ import annotations
 
+import hashlib
+import platform
 import subprocess
+import sys
 from pathlib import Path
+from typing import IO
 
 import pytest
 
-from joinery import blueprints
+from joinery import blueprints, godotsteam
 from tests.blueprints.godot_run import (
     boot,
     free_port,
@@ -32,6 +40,7 @@ from tests.blueprints.test_core import check_overlay
 FEATURE = "steam"
 STEAM_TEST = "res://tests/features/steam/steam_test.gd"
 SERVICE = "res://features/steam/steam_service.gd"
+EXTENSION_CHECK = "res://tests/features/steam/extension_check.gd"
 ROOTS = ("features/steam/", "tests/features/steam/")
 # A stand-in for online play's transport base class, written only into test
 # projects that do not have the online-play feature.
@@ -86,11 +95,24 @@ def _quiet(output: str) -> None:
     assert noisy == [], "\n".join(noisy[:10])
 
 
+def _stock_project(tmp_path: Path, blueprint: str, features: list[str]) -> Path:
+    """A project as stock Godot sees it without GodotSteam.
+
+    Creating a Steam project installs the pinned extension when it can (from
+    the cache or the network); these tests are about the path without it, so
+    it is taken out again.
+    """
+    project = make_project(tmp_path, blueprint, features)
+    godotsteam.uninstall(project)
+    assert not (project / "addons/godotsteam").exists()
+    return project
+
+
 def _settings(tmp_path: Path) -> str:
     return f"--settings-path={tmp_path / 'settings.cfg'}"
 
 
-def test_steam_feature_declares_the_extension_without_installing_it() -> None:
+def test_steam_feature_declares_the_pinned_extension() -> None:
     feature = _feature()
     assert feature.name == "Steam"
     assert feature.blueprints == ["*"]
@@ -99,15 +121,17 @@ def test_steam_feature_declares_the_extension_without_installing_it() -> None:
     assert [e.model_dump() for e in feature.external] == [
         {
             "name": "GodotSteam GDExtension",
-            "source": "TBD, pending user approval",
-            "version": "TBD, pending user approval",
-            "install": "separate, user-approved step; not designed yet",
+            "source": "https://codeberg.org/godotsteam/godotsteam (release v4.23-gde, MIT)",
+            "version": "4.23",
+            "install": "downloaded by Joinery, pinned and hash-checked",
             "required": False,
+            "licence": "MIT",
         }
     ]
     assert feature.merge.autoload == {"SteamService": SERVICE}
     assert feature.merge.settings == {
         "steam/app_id": 0,
+        "steam/connect": "steam",
         "steam/achievement_on_complete": "",
         "steam/embed_callbacks": False,
     }
@@ -124,7 +148,8 @@ def test_steam_overlay_is_code_only() -> None:
     service = (feature_dir / "overlay/features/steam/steam_service.gd").read_text()
     # Held as a plain Object, so stock Godot parses the script.
     assert "Engine.has_singleton(SINGLETON)" in service
-    assert "Untested against the real extension" in service
+    assert "Untested against the real extension" not in service
+    assert "Checked against GodotSteam 4.23" in service
     assert "push_error" not in service and "push_warning" not in service
     transport = (feature_dir / "overlay/features/steam/steam_transport.gd").read_text()
     assert transport.startswith("extends NetTransport")
@@ -178,7 +203,7 @@ def test_apply_then_remove_leaves_the_project_as_it_was(tmp_path: Path) -> None:
 @needs_godot
 def test_steam_absent_and_fake_singleton(tmp_path: Path) -> None:
     """Stock Godot: no extension, quiet no-ops; then a fake singleton."""
-    project = make_project(tmp_path, "blank", [FEATURE])
+    project = _stock_project(tmp_path, "blank", [FEATURE])
     result = run_godot(
         project,
         STEAM_TEST,
@@ -192,7 +217,7 @@ def test_steam_absent_and_fake_singleton(tmp_path: Path) -> None:
 
 @needs_godot
 def test_steam_absent_boot_prints_at_most_one_verbose_line(tmp_path: Path) -> None:
-    project = make_project(tmp_path, "blank", [FEATURE])
+    project = _stock_project(tmp_path, "blank", [FEATURE])
     _quiet(boot(project, frames=90).output)
     binary = godot_binary()
     assert binary is not None
@@ -236,7 +261,7 @@ def test_steam_bridge_with_a_stub_transport(tmp_path: Path) -> None:
     The project has no online play, so the stub class and a stub `Net` stand
     in for it and the whole host and join flow runs.
     """
-    project = make_project(tmp_path, "blank", [FEATURE])
+    project = _stock_project(tmp_path, "blank", [FEATURE])
     stub = project / "tests/features/steam/stub/net_transport.gd"
     stub.parent.mkdir(parents=True)
     stub.write_text(STUB_NET_TRANSPORT)
@@ -262,7 +287,7 @@ def test_steam_with_online_play(tmp_path: Path) -> None:
     resolution = blueprints.resolve("blank", ["online-play", FEATURE])
     if resolution.problems:
         pytest.skip("features do not combine yet: " + "; ".join(resolution.problems))
-    project = make_project(tmp_path, "blank", ["online-play", FEATURE])
+    project = _stock_project(tmp_path, "blank", ["online-play", FEATURE])
     # Hosting starts online play's LAN beacon; keep it on this machine.
     lan = (f"--lan-port={free_port()}", "--lan-broadcast=127.0.0.1")
     result = run_godot(
@@ -291,3 +316,75 @@ def test_every_blueprint_boots_quietly_with_steam(
     output = boot(project, frames=90).output
     noisy = [line for line in output.splitlines() if "steam" in line.lower()]
     assert noisy == [], "\n".join(noisy[:10])
+
+
+def test_feature_names_the_release_in_the_policy() -> None:
+    release = godotsteam.load_release()
+    [external] = _feature().external
+    assert external.version == release.version
+    assert release.tag in external.source and release.licence in external.source
+    assert external.licence == release.licence
+    service = (
+        blueprints.FEATURES_DIR / FEATURE / "overlay/features/steam/steam_service.gd"
+    ).read_text()
+    assert f"GodotSteam {release.version}" in service
+
+
+def test_configured_steam_table_keeps_the_project_readable(tmp_path: Path) -> None:
+    """[game.steam] sits beside [game]; reading and rewriting [game] keeps it."""
+    project = make_project(tmp_path, "blank", [FEATURE])
+    godotsteam.configure(project, 480, "direct")
+    assert godotsteam.read_steam(project) == {"app_id": 480, "connect": "direct"}
+    assert 'connect="direct"' in (project / "project.godot").read_text()
+    record = blueprints.read_record(project)
+    assert record is not None and FEATURE in record.features
+    blueprints.remove_feature(project, FEATURE)
+    assert godotsteam.read_steam(project) == {"app_id": 480, "connect": "direct"}
+
+
+def _cached_release() -> Path | None:
+    """The pinned archive in the per-user cache, when it is there and intact."""
+    release = godotsteam.load_release()
+    archive = godotsteam.default_cache() / release.version / release.archive_name
+    if not archive.is_file():
+        return None
+    if hashlib.sha256(archive.read_bytes()).hexdigest() != release.sha256:
+        return None
+    return godotsteam.default_cache()
+
+
+def _release_has_binaries() -> bool:
+    machine = platform.machine().lower()
+    if sys.platform == "darwin":
+        return True  # universal dylib
+    if sys.platform.startswith("linux"):
+        return machine in {"x86_64", "amd64", "aarch64", "arm64"}
+    if sys.platform == "win32":
+        return machine in {"amd64", "x86_64"}
+    return False
+
+
+@needs_godot
+def test_real_extension_has_every_name_the_wrapper_uses(tmp_path: Path) -> None:
+    """Boots headless with the real GodotSteam: the init methods, the other
+    singleton methods, the lobby signals and their argument counts, and
+    SteamMultiplayerPeer.create_host/create_client all exist. Steam is never
+    started (the app id stays 0). Skipped unless the pinned release is in the
+    cache already; the test never downloads it.
+    """
+    cache = _cached_release()
+    if cache is None:
+        pytest.skip("the pinned GodotSteam release is not in the cache")
+    if not _release_has_binaries():
+        pytest.skip("GodotSteam has no binaries for this platform")
+    project = make_project(tmp_path, "blank", [FEATURE])
+    godotsteam.install(project, cache=cache, opener=_no_download)
+    result = run_godot(project, EXTENSION_CHECK, timeout=180, marker="steam extension")
+    assert "FAIL" not in result.output
+    # With the extension but no app id, the game boots quietly.
+    output = boot(project, frames=60).output
+    assert [line for line in output.splitlines() if line.startswith("Steam:")] == []
+
+
+def _no_download(url: str, timeout: float = 0) -> IO[bytes]:
+    raise AssertionError(f"tests never download ({url})")

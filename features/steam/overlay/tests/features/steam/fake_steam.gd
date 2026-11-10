@@ -30,8 +30,9 @@ var _pending: Array[Callable] = []
 
 
 # GodotSteam's method names are camelCase.
-func steamInitEx(retrieve_stats: bool, app_id: int, embed_callbacks: bool) -> Dictionary:
-	calls.append(["steamInitEx", retrieve_stats, app_id, embed_callbacks])
+## Same arguments as GodotSteam 4.23: (app_id, embed_callbacks).
+func steamInitEx(app_id: int, embed_callbacks: bool) -> Dictionary:
+	calls.append(["steamInitEx", app_id, embed_callbacks])
 	return {"status": init_status, "verbal": init_verbal}
 
 

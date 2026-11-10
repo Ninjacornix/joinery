@@ -1,0 +1,45 @@
+# The one GodotSteam release Joinery downloads, and only into projects that
+# have the steam feature (see docs/adr/0027-godotsteam.md). Change it only
+# through a reviewed change: pick a release at least two weeks old, download
+# the archive once, record its SHA-256 here and re-check the names in
+# features/steam against that release's source.
+#
+# GodotSteam is a code library (Steamworks bindings), not a generative tool.
+# Joinery never uploads or publishes anything to Steam.
+
+name = "GodotSteam GDExtension"
+version = "4.23"
+tag = "v4.23-gde"
+# Steamworks SDK the release is built against, and the oldest Godot it loads in.
+steamworks = "1.65"
+godot_min = "4.4"
+url = "https://codeberg.org/godotsteam/godotsteam/releases/download/v4.23-gde/godotsteam-4.23-gdextension-plugin-4.4.zip"
+sha256 = "c1728b4bf330da851a00eaf64dab2e99c506018b1d9f529511b25d7fe7649e97"
+size = 27592373
+# The source the release was built from; the names in features/steam were
+# checked against this commit's godotsteam.cpp and godotsteam_multiplayer_peer.cpp.
+source = "https://codeberg.org/godotsteam/godotsteam"
+commit = "532740f3f9c6a826c68914db81af9de1e32d5dc3"
+licence = "MIT"
+# Inside the archive; copied to <root>/LICENSE in the project.
+licence_file = "addons/godotsteam/license.md"
+
+[layout]
+# Archive entries are extracted only from under `root`, to the same path in
+# the project. SteamMultiplayerPeer ships inside this extension (no separate
+# download).
+root = "addons/godotsteam"
+# Left out, relative to `root`: the release's editor plugin, which checks the
+# Godot Asset Library for newer versions and can replace the extension with an
+# unpinned, unchecked download. The extension itself does not need it.
+exclude = [
+  "plugin.cfg",
+  "godotsteam_plugin.gd",
+  "godotsteam_plugin.gd.uid",
+  "editor/**",
+]
+# Files the extension cannot work without; a release missing one is refused.
+required = [
+  "godotsteam.gdextension",
+  "license.md",
+]

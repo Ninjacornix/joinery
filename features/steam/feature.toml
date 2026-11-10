@@ -1,6 +1,6 @@
 id = "steam"
 name = "Steam"
-summary = "Achievements, stats, rich presence and friend lobbies through the GodotSteam extension, once you install it. Without it every call does nothing."
+summary = "Achievements, stats and friend lobbies on Steam, through GodotSteam."
 version = 1
 requires = []
 conflicts = []
@@ -10,13 +10,15 @@ extra_roots = []
 
 [[external]]
 name = "GodotSteam GDExtension"
-source = "TBD, pending user approval"
-version = "TBD, pending user approval"
-install = "separate, user-approved step; not designed yet"
+source = "https://codeberg.org/godotsteam/godotsteam (release v4.23-gde, MIT)"
+version = "4.23"
+install = "downloaded by Joinery, pinned and hash-checked"
 required = false
+licence = "MIT"
 
 [project.settings]
 "steam/app_id" = 0
+"steam/connect" = "steam"
 "steam/achievement_on_complete" = ""
 "steam/embed_callbacks" = false
 

@@ -158,7 +158,7 @@ func _present() -> void:
 	fake.init_status = 0
 	play.expect(steam.initialize(), "initialize() starts Steam")
 	play.expect(steam.available and steam.status == "ready", "status is ready (%s)" % steam.status)
-	play.expect(fake.last("steamInitEx") == [true, 480, false], "init gets the app id")
+	play.expect(fake.last("steamInitEx") == [480, false], "init gets the app id")
 	play.expect(steam.initialize(), "initialize() again is fine")
 	play.expect(fake.count("steamInitEx") == 2, "a second initialize() does not start again")
 	var before: int = fake.callbacks_run
@@ -251,7 +251,7 @@ func _embedded() -> void:
 	ProjectSettings.set_setting("steam/embed_callbacks", true)
 	var fake: Object = _register()
 	play.expect(steam.initialize(), "a new singleton initialises")
-	play.expect(fake.last("steamInitEx") == [true, 480, true], "embedded callbacks are asked for")
+	play.expect(fake.last("steamInitEx") == [480, true], "embedded callbacks are asked for")
 	await play.process_frames(3)
 	play.expect(fake.callbacks_run == 0, "embedded callbacks are not run here")
 	_unregister()
@@ -331,6 +331,7 @@ func _bridge() -> void:
 	var ids: Array[String] = _lobby_ids()
 	play.expect(ids.has("steam_host") and ids.has("steam_join"), "Steam page entries %s" % [ids])
 	play.expect(_entry_ids(&"main").filter(_is_steam_entry).is_empty(), "not in the main menu")
+	await _direct(net, previous)
 	var bridged: Dictionary = play.watch(steam.bridged)
 	steam.host_on_steam()
 	var args: Array = await play.wait_watched(bridged, 30)
@@ -373,6 +374,26 @@ func _bridge() -> void:
 	play.expect(_lobby_ids().filter(_is_steam_entry).is_empty(), "Steam entries go with the bridge")
 	net.queue_free()
 	lobby.queue_free()
+
+
+## `steam/connect` = "direct": no Steam entries, and a Steam lobby leaves
+## online play on its own transport.
+func _direct(net: Node, transport: Object) -> void:
+	play.expect(steam.connect_through() == "steam", "players connect through Steam by default")
+	ProjectSettings.set_setting("steam/connect", "direct")
+	steam.initialize()
+	play.expect(steam.connect_through() == "direct", "the connect setting is read")
+	play.expect(not steam.bridge_available(), "no bridge when players connect directly")
+	play.expect(_lobby_ids().filter(_is_steam_entry).is_empty(), "no Steam page entries (direct)")
+	var created: Dictionary = play.watch(steam.lobby_created)
+	steam.create_lobby(4)
+	await play.wait_watched(created, 30)
+	play.expect(not steam.bridged_to_net, "a lobby does not bridge when direct")
+	play.expect(net.call(&"transport") == transport, "online play keeps its transport (direct)")
+	steam.leave_lobby()
+	ProjectSettings.set_setting("steam/connect", "steam")
+	steam.initialize()
+	(net.get(&"calls") as Array).clear()
 
 
 ## The whole flow against the real `Net` and `Lobby`, with a peer that needs

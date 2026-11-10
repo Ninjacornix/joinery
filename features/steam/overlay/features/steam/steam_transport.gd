@@ -4,10 +4,10 @@ extends NetTransport
 ## `NetTransport` exists) and a Steam multiplayer peer can be made; it is never
 ## referenced otherwise, so projects without online play never compile it.
 ##
-## Untested against the real extension: `SteamMultiplayerPeer.create_host
-## (virtual_port)` and `create_client(steam_id, virtual_port)` follow the
-## GodotSteam 4.x networking peer and are verified only with a fake peer until
-## the user approves a GodotSteam version.
+## `SteamMultiplayerPeer.create_host(virtual_port)` and
+## `create_client(steam_id, virtual_port)` are as in GodotSteam 4.23, whose
+## GDExtension ships the peer; `extension_check.gd` confirms them in a
+## project with the extension installed.
 ##
 ## Steam picks the route, so the ENet port is ignored; the client's address is
 ## the lobby owner's Steam id as text.

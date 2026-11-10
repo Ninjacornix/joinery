@@ -1,27 +1,32 @@
 # gdlint: disable=max-public-methods
 extends Node
 ## Steam achievements, stats, rich presence and friend lobbies, through the
-## GodotSteam extension when the user has installed it. Joinery never
-## downloads, bundles or installs the extension.
+## GodotSteam extension. Joinery downloads the one pinned, hash-checked
+## GodotSteam release into projects that have this feature (see
+## `policy/godotsteam.toml` in Joinery); it never uploads or publishes
+## anything to Steam.
 ##
 ## Without the extension (stock Godot) every method returns false, "" or 0 and
 ## nothing is printed apart from one verbose line, so the game runs the same
 ## with or without Steam. The singleton is held as a plain Object and called by
 ## method name, so this script parses on stock Godot.
 ##
-## Untested against the real extension: the method and signal names below
-## follow GodotSteam 4.x and are verified only with a fake singleton until the
-## user approves a GodotSteam version. They live in the constants and the
-## `_on_*` handlers so one place changes when a version is approved.
+## Checked against GodotSteam 4.23 (GDExtension): every singleton method this
+## script calls is in METHODS, the init methods in INIT_METHODS, the signals
+## and their argument counts in SIGNALS and SIGNAL_ARGS. A project with the
+## extension installed can confirm them with
+## `res://tests/features/steam/extension_check.gd`.
 ##
-## Project settings: `steam/app_id` (0 = not configured),
+## Project settings: `steam/app_id` (0 = not configured), `steam/connect`
+## ("steam" = online play can run over Steam lobbies, "direct" = ENet only),
 ## `steam/achievement_on_complete` (achievement unlocked when a level is
 ## completed, "" = none), `steam/embed_callbacks` (the extension runs Steam
 ## callbacks itself; otherwise this node calls `run_callbacks` every frame).
 ##
-## With the online-play feature, a joined lobby switches `Net` to
-## `steam_transport.gd` when a Steam multiplayer peer is available; otherwise
-## online play keeps ENet. Then the online page gains "Host on Steam" and
+## With the online-play feature and `steam/connect` = "steam", a hosted or
+## joined Steam lobby installs `steam_transport.gd` as `Net`'s transport when a
+## Steam multiplayer peer is available; otherwise (or with "direct") online
+## play keeps ENet. Then the online page gains "Host on Steam" and
 ## "Join friend", the player's Steam name is the default online name (a name
 ## the player typed still wins), and the bridge ends with the online session.
 
@@ -42,6 +47,9 @@ const TRANSPORT_PATH := "res://features/steam/steam_transport.gd"
 const APP_ID_SETTING := "steam/app_id"
 const COMPLETE_SETTING := "steam/achievement_on_complete"
 const EMBED_SETTING := "steam/embed_callbacks"
+const CONNECT_SETTING := "steam/connect"
+const CONNECT_STEAM := "steam"
+const CONNECT_DIRECT := "direct"
 const PORT_SETTING := "online/default_port"
 const MAX_CLIENTS_SETTING := "online/max_clients"
 const DEFAULT_PORT := 24565
@@ -52,8 +60,31 @@ const STATUS_NO_APP_ID := "no app id"
 const STATUS_INIT_FAILED := "init failed: "
 const STATUS_READY := "ready"
 
-## Init methods tried in order; the first the singleton has is used.
+## Init methods tried in order; the first the singleton has is used. Both take
+## (app_id, embed_callbacks) in GodotSteam 4.23.
 const INIT_METHODS: Array[String] = ["steamInitEx", "steamInit"]
+## Every other singleton method this script calls.
+const METHODS: Array[String] = [
+	"steamShutdown",
+	"run_callbacks",
+	"setAchievement",
+	"clearAchievement",
+	"setStatInt",
+	"setStatFloat",
+	"storeStats",
+	"setRichPresence",
+	"clearRichPresence",
+	"createLobby",
+	"joinLobby",
+	"leaveLobby",
+	"getLobbyOwner",
+	"getPersonaName",
+	"getSteamID",
+	"activateGameOverlay",
+	"activateGameOverlayInviteDialog",
+]
+## SteamMultiplayerPeer methods `steam_transport.gd` calls.
+const PEER_METHODS: Array[String] = ["create_host", "create_client"]
 ## Steam lobby types (ELobbyType).
 const LOBBY_FRIENDS_ONLY := 1
 const LOBBY_PUBLIC := 2
@@ -67,6 +98,12 @@ const SIGNALS := {
 	"lobby_created": &"_on_lobby_created",
 	"lobby_joined": &"_on_lobby_joined",
 	"join_requested": &"_on_join_requested",
+}
+## How many arguments each of those signals carries in GodotSteam 4.23.
+const SIGNAL_ARGS := {
+	"lobby_created": 2,
+	"lobby_joined": 4,
+	"join_requested": 2,
 }
 
 ## True once Steam initialised.
@@ -226,11 +263,19 @@ func steam_id() -> int:
 	return int(_steam.call(&"getSteamID"))
 
 
-## Whether a lobby can carry online play: online play is added, its transport
-## hook exists and a Steam multiplayer peer can be made.
+## "steam" or "direct": how players connect (`steam/connect`).
+func connect_through() -> String:
+	var value: String = str(ProjectSettings.get_setting(CONNECT_SETTING, CONNECT_STEAM))
+	return CONNECT_DIRECT if value == CONNECT_DIRECT else CONNECT_STEAM
+
+
+## Whether a lobby can carry online play: players connect through Steam,
+## online play is added, its transport hook exists and a Steam multiplayer
+## peer can be made.
 func bridge_available() -> bool:
 	return (
 		available
+		and connect_through() == CONNECT_STEAM
 		and get_node_or_null(NET_PATH) != null
 		and _class_known(NET_TRANSPORT_CLASS)
 		and (transport_peer_factory.is_valid() or ClassDB.class_exists(PEER_CLASS))
@@ -276,11 +321,11 @@ func _start(steam: Object) -> String:
 	for method: String in INIT_METHODS:
 		if not steam.has_method(method):
 			continue
-		var args: Array = [true, _app_id(), embed]
+		var args: Array = [_app_id(), embed]
 		var arity: int = _arity(steam, method)
 		if arity >= 0 and arity < args.size():
 			args.resize(arity)
-		_embedded = embed and args.size() >= 3
+		_embedded = embed and args.size() >= 2
 		var result: Variant = steam.callv(method, args)
 		return _init_problem(method, result)
 	return "the extension has no init method this wrapper knows"
@@ -336,9 +381,9 @@ func _on_level_completed(_result: Dictionary) -> void:
 
 
 # Signal handlers take any arguments, so a GodotSteam version that adds one
-# does not break the connection. GodotSteam 4.x: lobby_created(result,
-# lobby_id), lobby_joined(lobby_id, permissions, locked, response),
-# join_requested(lobby_id, steam_id).
+# does not break the connection. GodotSteam 4.23: lobby_created(connect,
+# lobby_id), lobby_joined(lobby, permissions, locked, response),
+# join_requested(lobby_id, steam_id); see SIGNAL_ARGS.
 func _on_lobby_created(...args: Array) -> void:
 	var result: int = int(args[0]) if args.size() > 0 else -1
 	var id: int = int(args[1]) if args.size() > 1 else 0
