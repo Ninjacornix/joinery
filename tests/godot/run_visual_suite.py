@@ -29,6 +29,7 @@ from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 
+from run_classic_view_test import capture_names, theme_pass
 from run_startup_test import isolated_editor, isolated_environment
 
 from joinery.distribution import engine_binary
@@ -101,6 +102,7 @@ STARTUP_SCREENS = (
     "setup-1-details",
     "setup-2-tools",
     "setup-2-steam-error",
+    "setup-2-steam-too-big",
     "setup-3-art",
     "setup-failed",
     "setup-creating",
@@ -365,6 +367,23 @@ def editor(theme: str, capture: Path, logs: Path) -> Harness:
     return harness
 
 
+def classic_view(theme: str, capture: Path, logs: Path) -> Harness:
+    """Joinery's layout, Godot's classic one and back (run_classic_view_test.py)."""
+    harness = Harness(f"classic-view-{theme}")
+    harness.expected = capture_names(theme)
+    lines: list[str] = []
+    harness.errors = [
+        problem
+        for problem in theme_pass(theme, capture, logs=logs, findings=lines)
+        if not problem.startswith("missing capture")
+    ]
+    for line in lines:
+        if match := FINDING.match(line.strip()):
+            harness.findings.append(Finding(*match.groups()))
+    harness.captures = [name for name in harness.expected if (capture / name).is_file()]
+    return harness
+
+
 def legacy(name: str, capture: Path, logs: Path) -> Harness:
     script, expected = LEGACY[name]
     harness = Harness(f"legacy-{name}")
@@ -396,6 +415,8 @@ def plan(args: argparse.Namespace) -> list[tuple[str, Callable[[Path, Path], Har
     jobs.append(("sidebar", sidebar))
     for theme in args.themes:
         jobs.append((f"editor-{theme}", partial(editor, theme)))
+    for theme in args.themes:
+        jobs.append((f"classic-view-{theme}", partial(classic_view, theme)))
     if not args.skip_legacy:
         for name in LEGACY:
             jobs.append((f"legacy-{name}", partial(legacy, name)))

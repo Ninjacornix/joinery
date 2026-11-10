@@ -427,7 +427,7 @@ func _check_readiness_parts(themed: Control) -> void:
 	switch_row.set_on(false)
 	_check(flips == [true] and not switch_row.is_on(), "set_on changes it quietly")
 	_check(not switch_row.reason.visible, "No reason while the switch can change")
-	switch_row.set_disabled_reason("Needs Online play first.")
+	switch_row.set_disabled_reason("Needs online play first.")
 	_check(switch_row.switch_button.disabled, "A reason disables the switch")
 	_check(switch_row.reason.visible, "A disabled switch says why")
 	switch_row.set_disabled_reason("")

@@ -18,7 +18,8 @@ const MIN_TARGET := 24.0
 const BODY_CONTRAST := 4.5
 const LARGE_CONTRAST := 3.0
 const TOLERANCE := 1.0
-## Known findings in stock Godot UI, as {kind, class, text, reason}.
+## Known findings in stock Godot UI, as {kind, class, text, reason}, and optionally the class
+## of an ancestor the control must sit in ("inside").
 const ALLOWED := [
 	{
 		"kind": "contrast",
@@ -31,6 +32,19 @@ const ALLOWED := [
 		"class": "SceneTreeEditor",
 		"text": "",
 		"reason": "Stock Godot Scene dock: its tree draws into the dock margin by design",
+	},
+	{
+		"kind": "overflow",
+		"class": "Tree",
+		"text": "",
+		"inside": "FileSystemDock",
+		"reason": "Stock Godot FileSystem dock in a side column: its tree fills the dock margin",
+	},
+	{
+		"kind": "overflow",
+		"class": "EditorInspector",
+		"text": "",
+		"reason": "Stock Godot Inspector in a side column: it fills the dock margin by design",
 	},
 ]
 ## How far up the tree a tooltip may sit and still explain an ellipsis.
@@ -148,7 +162,17 @@ static func _allowed(kind: String, control: Control) -> bool:
 		text = (control as Label).text
 	for entry: Dictionary in ALLOWED:
 		if entry["kind"] == kind and control.is_class(entry["class"]) and entry["text"] == text:
+			if not entry.has("inside") or _inside(control, str(entry["inside"])):
+				return true
+	return false
+
+
+static func _inside(control: Control, type: String) -> bool:
+	var node := control.get_parent()
+	while node != null:
+		if node.is_class(type):
 			return true
+		node = node.get_parent()
 	return false
 
 
