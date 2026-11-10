@@ -15,6 +15,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, BinaryIO, Protocol
 
+from bridge.chat_record import ChatRecorder
 from bridge.host import Bridge
 from bridge.models import Selection
 from bridge.protocol import (
@@ -34,9 +35,14 @@ from joinery.gateway import ProjectGateway
 from joinery.gateway_rpc import GatewayRPC
 from joinery.timing import TurnTiming
 
+#: The open chat's recorder while a host serves; it sees every event the sidebar does.
+_recorder: ChatRecorder | None = None
+
 
 def emit(event: dict[str, Any]) -> None:
     print(json.dumps(event), flush=True)
+    if _recorder is not None:
+        _recorder.observe(event)
 
 
 _FEATURE_OFFER = re.compile(r"\s*Add (?:it|them) with (/feature add [a-z0-9-]+)\?")
@@ -161,6 +167,17 @@ async def input_reader(stream: BinaryIO) -> tuple[asyncio.StreamReader, InputTra
 
 
 async def serve(project: Path, agent_id: str, profile_id: str = "") -> int:
+    global _recorder
+    recorder = _recorder = ChatRecorder(project, agent_id, profile_id)
+    try:
+        return await _serve(project, agent_id, profile_id, recorder)
+    finally:
+        _recorder = None
+
+
+async def _serve(
+    project: Path, agent_id: str, profile_id: str, recorder: ChatRecorder
+) -> int:
     bridge: Bridge | None = None
     active: asyncio.Task[None] | None = None
     specialists: Specialists | None = None
@@ -283,20 +300,29 @@ async def serve(project: Path, agent_id: str, profile_id: str = "") -> int:
             editor = data.get("editor_context", {})
             if not isinstance(editor, dict):
                 raise TypeError("Editor scene context is invalid.")
+            attachments = chat_attachments.validate(
+                project, data.get("attachments", [])
+            )
+            # The sidebar names the chat ("" for a new one); without one, the same chat.
+            if "chat_id" in data:
+                switched = await recorder.switch(str(data["chat_id"]), bridge)
+                if switched is not None:
+                    emit(switched)
+            text, started = recorder.begin(data, attachments)
+            if started is not None:
+                emit(started)
             prompt = Prompt(
-                text=str(data["text"]),
+                text=text,
                 project_dir=str(project),
                 targets=tuple(entry.get("id", "") for entry in targets),
                 target_context=targets,
                 editor_context={str(k): str(v) for k, v in editor.items()},
                 selection=Selection.model_validate(data.get("selection", {})),
-                attachments=chat_attachments.validate(
-                    project, data.get("attachments", [])
-                ),
+                attachments=attachments,
             )
             gateway.editor_context = prompt.editor_context
             gateway.target_context = prompt.target_context
-            gateway.request_summary = prompt.text
+            gateway.request_summary = str(data["text"])
             gateway.progress("Thinking through your request…")
             async for event in bridge.send(prompt):
                 if isinstance(event, Execution):
@@ -379,6 +405,7 @@ async def serve(project: Path, agent_id: str, profile_id: str = "") -> int:
                 emit(timing.save(project, outcome))
             except (OSError, ValueError, UnicodeError):
                 emit(timing.report(outcome))
+            recorder.finish(bridge)
 
     try:
         bridge = Bridge(agent_id)
