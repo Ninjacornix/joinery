@@ -1,0 +1,115 @@
+@tool
+extends SubViewportContainer
+## An orbitable view of one scene in its own world, lit by Godot's empty-editor sky and sun.
+## Drag to orbit; the wheel, a trackpad pinch or two-finger scroll zoom. The camera frames the
+## meshes' bounds whenever the view is resized.
+
+const CONTEXT_SCRIPT := preload("preview_context.gd")
+const UI_THEME := preload("ui_theme.gd")
+## Minimum side as a multiple of the editor font size.
+const MIN_EM := 14.0
+## Orbit radians per dragged pixel, and the zoom range as multiples of the model radius.
+const ORBIT_SPEED := 0.01
+const ZOOM_RANGE := Vector2(0.05, 30.0)
+
+var camera: Camera3D
+var _pivot: Node3D
+var _viewport: SubViewport
+var _bounds := AABB()
+var _radius := 0.5
+var _world: WorldEnvironment
+
+
+func _init() -> void:
+	stretch = true
+	mouse_target = false
+	mouse_force_pass_scroll_events = false
+	size_flags_vertical = Control.SIZE_EXPAND_FILL
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_THEME_CHANGED:
+		var side := roundf(UI_THEME.font_size(self, "body") * MIN_EM)
+		custom_minimum_size = Vector2(side, side)
+	elif what == NOTIFICATION_EXIT_TREE and _world != null:
+		# Let the sky go while the renderer still exists. A viewer freed later, as at
+		# editor shutdown, would otherwise leak the sky's radiance textures. Viewers are
+		# freed when they leave the workspace, never shown again.
+		_world.environment = null
+		_world = null
+
+
+## Instantiate [param scene] into a fresh world with a camera aimed at its meshes.
+func show_scene(scene: PackedScene) -> void:
+	_viewport = SubViewport.new()
+	_viewport.own_world_3d = true
+	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child(_viewport)
+	var root := Node3D.new()
+	_viewport.add_child(root)
+	var instance := scene.instantiate(PackedScene.GEN_EDIT_STATE_DISABLED)
+	root.add_child(instance)
+	var meshes: Array[Node] = instance.find_children("*", "MeshInstance3D", true, false)
+	if instance is MeshInstance3D:
+		meshes.append(instance)
+	var found := false
+	for node: Node in meshes:
+		var mesh := node as MeshInstance3D
+		var box: AABB = mesh.global_transform * mesh.get_aabb()
+		_bounds = _bounds.merge(box) if found else box
+		found = true
+	_radius = maxf(_bounds.size.length() * 0.5, 0.5)
+	_pivot = Node3D.new()
+	root.add_child(_pivot)
+	_pivot.position = _bounds.get_center()
+	_pivot.rotation = Vector3(-0.4, PI / 4.0, 0)
+	camera = Camera3D.new()
+	_pivot.add_child(camera)
+	camera.fov = 42
+	camera.position.z = _radius * 2.0
+	camera.near = maxf(_radius * 0.001, 0.001)
+	camera.far = maxf(_radius * 20.0, 100.0)
+	camera.current = true
+	_viewport.size_changed.connect(_frame)
+	_frame()
+	var context: RefCounted = CONTEXT_SCRIPT.new()
+	context.apply(root, camera)
+	for node: Node in root.get_children():
+		if node is WorldEnvironment:
+			_world = node
+
+
+func _frame() -> void:
+	if not is_instance_valid(camera) or not is_instance_valid(_pivot):
+		return
+	if not _pivot.is_inside_tree():
+		return
+	var local_bounds: AABB = _pivot.global_transform.affine_inverse() * _bounds
+	var half := local_bounds.size * 0.5
+	var aspect := float(maxi(_viewport.size.x, 1)) / maxi(_viewport.size.y, 1)
+	var tangent := tan(deg_to_rad(camera.fov * 0.5))
+	var fit := maxf(half.y / tangent, half.x / (tangent * aspect))
+	camera.position.z = maxf((fit + half.z) * 1.15, 0.1)
+
+
+func _gui_input(event: InputEvent) -> void:
+	if camera == null:
+		return
+	if event is InputEventMouseMotion and event.button_mask & MOUSE_BUTTON_MASK_LEFT:
+		_pivot.rotation.y -= event.relative.x * ORBIT_SPEED
+		_pivot.rotation.x = clampf(_pivot.rotation.x - event.relative.y * ORBIT_SPEED, -1.5, 1.5)
+	if event is InputEventMouseButton and event.pressed:
+		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+			_zoom(pow(0.9, event.factor))
+		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+			_zoom(pow(1.1, event.factor))
+	if event is InputEventMagnifyGesture and event.factor > 0:
+		_zoom(1.0 / event.factor)
+	if event is InputEventPanGesture:
+		_zoom(exp(event.delta.y * 0.05))
+
+
+func _zoom(factor: float) -> void:
+	camera.position.z = clampf(
+		camera.position.z * factor, _radius * ZOOM_RANGE.x, _radius * ZOOM_RANGE.y
+	)
