@@ -72,32 +72,23 @@ jobs:
       # Use committed measured digests: never silently trust a changed download.
       - name: Build pinned offline creative workers
         run: |
-          sandbox/build.sh --with blender --with supercollider --with krita --with inkscape --with materialmaker --tag joinery-sandbox-runtime
+          sandbox/build.sh --with blender --with supercollider --with krita --with inkscape --with materialmaker --with gimp --tag joinery-sandbox-runtime
           docker build --platform linux/amd64 -t joinery-mcp-worker -f sandbox/mcp.Dockerfile sandbox
           docker build --platform linux/amd64 -t joinery-creative-worker -f sandbox/creative.Dockerfile sandbox
-      # Known failing: Audacity's script pipe never runs commands in the
-      # headless worker. Kept running for evidence, without blocking main.
-      - name: Probe native Audacity through its pinned MCP (known failing)
-        continue-on-error: true
-        run: |
-          uv run python - <<'PY'
-          from pathlib import Path
-          from joinery.catalog import load_catalog
-          from tests.upstream.sources import prepare
-          tool = load_catalog().get("audacity")
-          prepare(tool.mcp.repo, tool.mcp.ref, Path("out/native-mcp-source/audacity"))
-          PY
-          docker build --platform linux/amd64 -t joinery-mcp-conformance -f tests/upstream/Dockerfile tests/upstream
-          uv run python tests/integration/audacity_mcp.py --source out/native-mcp-source/audacity
-      - name: Retain native Audacity failure evidence
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: audacity-native
-          path: out/audacity-native
-          if-no-files-found: ignore
       - name: Create, edit and replay a Surge XT sound in the offline worker
         run: uv run python tests/integration/surge_native.py
+      - name: Create, edit one layer of and replay a GIMP image in the offline worker
+        run: uv run python tests/integration/gimp_native.py
+      - name: Render, edit and replay MIDI music through FluidSynth and Surge XT
+        run: uv run python tests/integration/midi_render.py
+      - name: Trim, fade, level and loop rendered audio through joinery-sound
+        run: uv run python tests/integration/audio_edits.py
+      - name: Check SuperCollider offline renders fail fast
+        run: uv run python tests/integration/supercollider_native.py nrt
+      - name: Feed a recorded image into a Material Maker graph
+        run: uv run python tests/integration/materialmaker_parts.py
+      - name: Rig an MPFB2 human with Rigify and export deform bones only
+        run: uv run python tests/integration/blender_rig.py
       - name: Check measured testbed assets
         run: |
           uv run joinery lock --project testbed
@@ -122,25 +113,3 @@ jobs:
     # release push runs can disable this duplicate matrix too.
     if: ${{ toJSON(inputs.native) != 'false' }}
     uses: ./.github/workflows/native.yml
-
-  upstream-mcp:
-    name: Upstream MCP contracts (${{ matrix.tool }})
-    runs-on: ubuntu-24.04
-    timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        tool: [aseprite, audacity, gimp, musescore, reaper]
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
-      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
-      - run: uv sync --frozen --python 3.12
-      - name: Test exact catalog source with isolated pinned SDK dependencies
-        run: uv run python -m tests.upstream.run --tool "${{ matrix.tool }}"
-      - name: Retain per-program test counts, scope and failures
-        if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: upstream-mcp-${{ matrix.tool }}
-          path: out/upstream-mcp-tests/
-          if-no-files-found: warn

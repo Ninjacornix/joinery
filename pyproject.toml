@@ -40,3 +40,6 @@ strict = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "blueprint_matrix: every blueprint x feature set played in stock Godot (slow; JOINERY_BLUEPRINT_MATRIX=1 or -m blueprint_matrix)",
+]
