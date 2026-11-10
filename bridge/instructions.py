@@ -19,6 +19,9 @@ OBJECT_GUIDE = (
     "Place it in the level as an instance of that scene or model, once per copy, so clicking "
     "any part selects the whole object and it moves as one. Never assemble an object from "
     "loose meshes directly in the level. "
+    "A scene in editor_context.unsaved_scenes is open with edits not saved yet: change it "
+    "live with edit_scene, never with a staged file edit, which can't be accepted until "
+    "those edits are saved. "
 )
 
 #: The game: read the brief and setup with the art direction, extend the game
@@ -30,6 +33,8 @@ GAME_GUIDE = (
     "When their suggestions fit what the user is doing, offer one at a time, in one "
     "short line, and never act on a suggestion the user has not asked for. "
     "The user adds or removes features with /feature, and edits the brief with /brief. "
+    "When the user asks you to look at something in the editor, call view_editor to see "
+    "the viewport as they see it. "
     + ATTACHMENT_NOTE
     + " "
     + OBJECT_GUIDE

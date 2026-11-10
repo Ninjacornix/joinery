@@ -777,7 +777,7 @@ func _accept_scene_edit(quiet := false) -> void:
 			_file_accept_live_id = _edits.transaction_id
 		for change: Dictionary in _file_review.get("changes", []):
 			if EditorInterface.get_unsaved_scenes().has("res://" + str(change["path"])):
-				_review_failed("This scene has unsaved changes. Save it, then accept again.")
+				_review_failed("Save this scene's unsaved edits and ask again, or Discard.")
 				return
 		if not bool(_chat.get("_connected")):
 			_review_failed("Journeyman isn't connected. Reconnect, then accept again.")

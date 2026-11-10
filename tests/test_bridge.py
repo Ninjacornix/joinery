@@ -129,3 +129,4 @@ def test_agents_build_objects_as_one_unit() -> None:
     assert OBJECT_GUIDE in GAME_GUIDE
     assert "its own scene" in OBJECT_GUIDE and "instance" in OBJECT_GUIDE
     assert "Never assemble an object from loose meshes" in OBJECT_GUIDE
+    assert "unsaved_scenes" in OBJECT_GUIDE and "edit_scene" in OBJECT_GUIDE
