@@ -1,0 +1,82 @@
+[gd_scene format=3 uid="uid://yl4y2oejash8"]
+
+[ext_resource type="Script" uid="uid://b5yor343m71q3" path="res://game/player/player.gd" id="1_player"]
+[ext_resource type="Script" uid="uid://odxnxsmwuv62" path="res://game/player/orbit_camera.gd" id="2_orbit_ca"]
+
+[sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
+radius = 0.4
+height = 1.8
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_body"]
+albedo_color = Color(0.2392, 0.4902, 0.8471, 1)
+roughness = 0.7
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_nose"]
+albedo_color = Color(0.949, 0.9569, 0.9686, 1)
+roughness = 0.7
+
+[sub_resource type="CapsuleMesh" id="CapsuleMesh_body"]
+material = SubResource("StandardMaterial3D_body")
+radius = 0.4
+height = 1.8
+
+[sub_resource type="BoxMesh" id="BoxMesh_nose"]
+material = SubResource("StandardMaterial3D_nose")
+size = Vector3(0.24, 0.16, 0.3)
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_reach"]
+radius = 0.9
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_arm"]
+radius = 0.25
+
+[node name="Player" type="CharacterBody3D" groups=["player", "saveable"]]
+collision_layer = 2
+collision_mask = 5
+floor_snap_length = 0.3
+script = ExtResource("1_player")
+
+[node name="Shape" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+shape = SubResource("CapsuleShape3D_body")
+
+[node name="Pivot" type="Node3D" parent="."]
+
+[node name="Visual" type="Node3D" parent="Pivot"]
+
+[node name="Body" type="MeshInstance3D" parent="Pivot/Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+mesh = SubResource("CapsuleMesh_body")
+
+[node name="Nose" type="MeshInstance3D" parent="Pivot/Visual"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.42, -0.42)
+mesh = SubResource("BoxMesh_nose")
+
+[node name="CarryPoint" type="Marker3D" parent="Pivot"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.35, -1.05)
+
+[node name="InteractArea" type="Area3D" parent="Pivot"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, -0.8)
+collision_layer = 0
+collision_mask = 5
+monitorable = false
+
+[node name="Reach" type="CollisionShape3D" parent="Pivot/InteractArea"]
+shape = SubResource("SphereShape3D_reach")
+
+[node name="CameraRig" type="Node3D" parent="."]
+top_level = true
+script = ExtResource("2_orbit_ca")
+
+[node name="Pitch" type="Node3D" parent="CameraRig"]
+
+[node name="SpringArm3D" type="SpringArm3D" parent="CameraRig/Pitch"]
+collision_mask = 1
+shape = SubResource("SphereShape3D_arm")
+spring_length = 5.0
+margin = 0.1
+
+[node name="Camera3D" type="Camera3D" parent="CameraRig/Pitch/SpringArm3D"]
+fov = 70.0
+near = 0.1
+far = 300.0

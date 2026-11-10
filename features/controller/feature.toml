@@ -1,0 +1,89 @@
+# Gamepad support for every blueprint: pad bindings for each standard action
+# the project has (features never create actions), a Controller autoload with
+# button prompts, rumble and pad-friendly menus, and a "Controls" settings page
+# to rebind keys and buttons. Text prompts only; no glyph images.
+id = "controller"
+name = "Controller support"
+summary = "Play with a gamepad: pad bindings for every action, button prompts, menu navigation, rumble and a Controls page to rebind keys and buttons."
+version = 1
+requires = []
+conflicts = []
+enhances = []
+blueprints = ["*"]
+extra_roots = []
+
+[autoload]
+Controller = "res://features/controller/controller.gd"
+
+# Pad bindings by action name (the standard vocabulary). Only actions that the
+# blueprint already has receive them. Sticks get a 0.25 deadzone.
+[input.move_left]
+pad_axes = ["0-"]
+pad_buttons = [13]
+deadzone = 0.25
+
+[input.move_right]
+pad_axes = ["0+"]
+pad_buttons = [14]
+deadzone = 0.25
+
+[input.move_up]
+pad_axes = ["1-"]
+pad_buttons = [11]
+deadzone = 0.25
+
+[input.move_down]
+pad_axes = ["1+"]
+pad_buttons = [12]
+deadzone = 0.25
+
+[input.move_forward]
+pad_axes = ["1-"]
+pad_buttons = [11]
+deadzone = 0.25
+
+[input.move_back]
+pad_axes = ["1+"]
+pad_buttons = [12]
+deadzone = 0.25
+
+[input.look_left]
+pad_axes = ["2-"]
+deadzone = 0.25
+
+[input.look_right]
+pad_axes = ["2+"]
+deadzone = 0.25
+
+[input.look_up]
+pad_axes = ["3-"]
+deadzone = 0.25
+
+[input.look_down]
+pad_axes = ["3+"]
+deadzone = 0.25
+
+[input.jump]
+pad_buttons = [0]
+
+[input.interact]
+pad_buttons = [2]
+
+[input.attack]
+pad_axes = ["5+"]
+pad_buttons = [10]
+
+[input.dash]
+pad_buttons = [1]
+
+[input.sprint]
+pad_buttons = [7]
+
+[input.crouch]
+pad_buttons = [1]
+
+[input.restart]
+pad_buttons = [4]
+
+[input.pause]
+pad_buttons = [6]

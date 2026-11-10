@@ -1,0 +1,38 @@
+id = "puzzle-cards"
+name = "Memory cards"
+pitch = "Flip cards two at a time and find every matching pair in as few moves as you can."
+version = 1
+dimension = "ui"
+icon = "GridContainer"
+default_features = ["controller", "save-load", "translations"]
+bible_preset = "cards-ui"
+suggested_tools = ["godot", "krita", "supercollider"]
+main_scene = "res://core/main.tscn"
+
+[hooks]
+level_scene = "res://game/level.tscn"
+player_scene = ""
+spawnable_scenes = []
+
+[brief]
+genre = ["puzzle", "cards", "memory"]
+camera = "No camera: a fixed, full-screen table with 16 cards in a 4 by 4 grid. Moves, pairs, score and stars run along the top edge; whose turn it is shows there too in a two-player game."
+core_loop = "30 s: flip two cards, remember what they showed, match a pair. 5 min: clear all 8 pairs before the 30-move limit runs out. Session: clear the board in fewer moves for three stars, keep a matching streak going for bonus points, or play a friend on the same screen."
+progression = "Win: match every pair; 1 to 3 stars by the moves used, plus 100 points a pair and 50 more for each match in a row. Lose: run out of moves with pairs left (single player only). Two players: a match keeps your turn, a miss passes it, most pairs wins."
+verbs = [
+  ["Choose", "ui_left / ui_right / ui_up / ui_down, or point with the mouse", "A bright ring moves to the card"],
+  ["Flip", "ui_accept, or click", "The card turns over to show its symbol; a match fades out, a miss turns back after a short pause"],
+  ["Restart", "restart", "A fresh shuffle (the same deal when a seed is set)"],
+]
+
+[project.settings]
+"display/window/size/viewport_width" = 1280
+"display/window/size/viewport_height" = 720
+"display/window/stretch/mode" = "canvas_items"
+"display/window/stretch/aspect" = "expand"
+
+[autoload]
+MemoryCards = "res://game/cards_menu.gd"
+
+[input.restart]
+keys = ["R"]

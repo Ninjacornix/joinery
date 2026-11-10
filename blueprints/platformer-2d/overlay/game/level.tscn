@@ -1,0 +1,65 @@
+[gd_scene format=3 uid="uid://6l83t3smhigil"]
+
+[ext_resource type="Script" uid="uid://2dg2g80t77b4q" path="res://game/level.gd" id="1_level"]
+[ext_resource type="Script" uid="uid://3vdop8hfij0sj" path="res://game/ui/hud.gd" id="2_hud"]
+
+[node name="Level" type="Node2D" groups=["saveable"]]
+script = ExtResource("1_level")
+
+[node name="Backdrop" type="CanvasLayer" parent="."]
+layer = -10
+
+[node name="Sky" type="ColorRect" parent="Backdrop"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.560784, 0.737255, 0.858824, 1)
+
+[node name="Haze" type="ColorRect" parent="Backdrop"]
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -320.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+color = Color(0.792157, 0.878431, 0.92549, 0.6)
+
+[node name="FarHills" type="Parallax2D" parent="."]
+scroll_scale = Vector2(0.25, 1)
+repeat_size = Vector2(640, 0)
+repeat_times = 3
+
+[node name="Hills" type="Polygon2D" parent="FarHills"]
+color = Color(0.717647, 0.827451, 0.901961, 1)
+polygon = PackedVector2Array(0, 320, 0, 170, 60, 150, 130, 166, 210, 132, 290, 160, 360, 140, 450, 168, 530, 128, 600, 156, 640, 170, 640, 320)
+
+[node name="NearHills" type="Parallax2D" parent="."]
+scroll_scale = Vector2(0.5, 1)
+repeat_size = Vector2(640, 0)
+repeat_times = 3
+
+[node name="Hills" type="Polygon2D" parent="NearHills"]
+color = Color(0.478431, 0.639216, 0.541176, 1)
+polygon = PackedVector2Array(0, 320, 0, 200, 80, 184, 150, 206, 240, 176, 320, 198, 400, 186, 480, 210, 560, 180, 640, 200, 640, 320)
+
+[node name="World" type="Node2D" parent="."]
+
+[node name="Hazards" type="Node2D" parent="."]
+
+[node name="Coins" type="Node2D" parent="."]
+
+[node name="Checkpoints" type="Node2D" parent="."]
+
+[node name="Goals" type="Node2D" parent="."]
+
+[node name="Spawns" type="Node2D" parent="."]
+
+[node name="Players" type="Node2D" parent="."]
+
+[node name="HUD" type="CanvasLayer" parent="."]
+script = ExtResource("2_hud")

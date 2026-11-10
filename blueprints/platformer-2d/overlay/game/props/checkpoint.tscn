@@ -1,0 +1,28 @@
+[gd_scene format=3 uid="uid://6lxf5nklm3ydd"]
+
+[ext_resource type="Script" uid="uid://ig79mrp8qyypr" path="res://game/props/checkpoint.gd" id="1_checkpoint"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_post"]
+size = Vector2(12, 24)
+
+[node name="Checkpoint" type="Area2D" groups=["checkpoint"]]
+collision_layer = 4
+collision_mask = 2
+monitorable = false
+script = ExtResource("1_checkpoint")
+
+[node name="Shape" type="CollisionShape2D" parent="."]
+position = Vector2(0, -12)
+shape = SubResource("RectangleShape2D_post")
+
+[node name="Foot" type="Polygon2D" parent="."]
+color = Color(0.333333, 0.364706, 0.431373, 1)
+polygon = PackedVector2Array(-4, -2, 4, -2, 4, 0, -4, 0)
+
+[node name="Pole" type="Polygon2D" parent="."]
+color = Color(0.85098, 0.866667, 0.901961, 1)
+polygon = PackedVector2Array(-1, -24, 1, -24, 1, -2, -1, -2)
+
+[node name="Banner" type="Polygon2D" parent="."]
+color = Color(0.54902, 0.584314, 0.65098, 1)
+polygon = PackedVector2Array(1, -24, 9, -21, 1, -18)

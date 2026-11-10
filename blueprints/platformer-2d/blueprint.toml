@@ -1,0 +1,56 @@
+id = "platformer-2d"
+name = "2D platformer"
+pitch = "Run, jump and collect coins across a short side-scrolling level, dodge the spikes and reach the flag."
+version = 1
+dimension = "2d"
+icon = "CharacterBody2D"
+default_features = ["controller", "save-load"]
+bible_preset = "pixel-2d"
+suggested_tools = ["godot", "krita", "gimp", "surge-xt"]
+main_scene = "res://core/main.tscn"
+
+[autoload]
+Platformer = "res://game/platformer.gd"
+
+[hooks]
+level_scene = "res://game/level.tscn"
+player_scene = "res://game/player/player.tscn"
+spawnable_scenes = []
+
+[brief]
+genre = ["platformer"]
+camera = "Side view at a 320 × 180 base resolution, scaled ×4. The camera follows the player with a little look-ahead in the running direction and stays inside the level."
+core_loop = "30 s: run and jump between platforms, over pits and past spikes. 5 min: collect the level's eight coins and reach the flag. Session: beat the level faster, with fewer falls."
+progression = "Win: touch the flag. Lose: none; spikes and pits send you back to the last checkpoint and count a fall."
+verbs = [
+    ["Run", "move_left / move_right", "Quick start and stop; the body leans into the run"],
+    ["Jump", "jump", "Tap for a hop, hold for a full jump; squash and stretch, dust on take-off and landing"],
+    ["Drop through", "move_down + jump", "Falls through thin one-way platforms"],
+    ["Retry", "restart", "Back to the last checkpoint"],
+]
+
+[project.settings]
+"display/window/size/viewport_width" = 1280
+"display/window/size/viewport_height" = 720
+"display/window/stretch/mode" = "canvas_items"
+"display/window/stretch/aspect" = "expand"
+"rendering/textures/canvas_textures/default_texture_filter" = 0
+"layer_names/2d_physics/layer_1" = "world"
+"layer_names/2d_physics/layer_2" = "players"
+"layer_names/2d_physics/layer_3" = "pickups"
+"layer_names/2d_physics/layer_4" = "one_way"
+
+[input.move_left]
+keys = ["A", "Left"]
+
+[input.move_right]
+keys = ["D", "Right"]
+
+[input.move_down]
+keys = ["S", "Down"]
+
+[input.jump]
+keys = ["Space", "W", "Up"]
+
+[input.restart]
+keys = ["R"]

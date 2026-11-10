@@ -1,0 +1,85 @@
+[gd_scene format=3 uid="uid://cnhk7ddlu1lnw"]
+
+[ext_resource type="Script" uid="uid://btx3gyttbqt4w" path="res://game/level.gd" id="1_level"]
+[ext_resource type="Script" uid="uid://blotf1lid4okv" path="res://game/ui/hud.gd" id="2_hud"]
+[ext_resource type="Script" uid="uid://baucdafi25q3v" path="res://game/ui/result_panel.gd" id="3_result"]
+
+[node name="Level" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+script = ExtResource("1_level")
+
+[node name="Table" type="ColorRect" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.0705882, 0.227451, 0.2, 1)
+
+[node name="Players" type="Node" parent="."]
+
+[node name="Layout" type="MarginContainer" parent="."]
+unique_name_in_owner = true
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+
+[node name="Column" type="VBoxContainer" parent="Layout"]
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Hud" type="PanelContainer" parent="Layout/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+script = ExtResource("2_hud")
+
+[node name="Center" type="CenterContainer" parent="Layout/Column"]
+layout_mode = 2
+size_flags_vertical = 3
+mouse_filter = 2
+
+[node name="Felt" type="PanelContainer" parent="Layout/Column/Center"]
+unique_name_in_owner = true
+layout_mode = 2
+mouse_filter = 2
+
+[node name="Grid" type="GridContainer" parent="Layout/Column/Center/Felt"]
+unique_name_in_owner = true
+layout_mode = 2
+columns = 4
+
+[node name="Hint" type="Label" parent="Layout/Column"]
+unique_name_in_owner = true
+layout_mode = 2
+theme_type_variation = &"HintLabel"
+text = "Arrow keys or mouse to choose a card, Enter or click to flip it. R deals again, Esc pauses."
+horizontal_alignment = 1
+
+[node name="Result" type="Control" parent="."]
+unique_name_in_owner = true
+visible = false
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("3_result")
+
+[node name="MismatchTimer" type="Timer" parent="."]
+one_shot = true
+wait_time = 0.8

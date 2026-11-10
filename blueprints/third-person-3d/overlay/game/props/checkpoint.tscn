@@ -1,0 +1,54 @@
+[gd_scene format=3 uid="uid://6nqevexwdkem"]
+
+[ext_resource type="Script" uid="uid://bnijx64a1ea82" path="res://game/props/checkpoint.gd" id="1_checkpoi"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_zone"]
+size = Vector3(2.6, 2.2, 2.6)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_pad"]
+albedo_color = Color(0.3608, 0.3882, 0.4314, 1)
+roughness = 0.85
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_pole"]
+albedo_color = Color(0.8471, 0.8667, 0.8902, 1)
+roughness = 0.85
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_pad"]
+material = SubResource("StandardMaterial3D_pad")
+top_radius = 1.2
+bottom_radius = 1.3
+height = 0.1
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_pole"]
+material = SubResource("StandardMaterial3D_pole")
+top_radius = 0.05
+bottom_radius = 0.05
+height = 2.2
+
+[sub_resource type="BoxMesh" id="BoxMesh_flag"]
+size = Vector3(0.7, 0.45, 0.05)
+
+[node name="Checkpoint" type="Area3D" groups=["checkpoint"]]
+collision_layer = 0
+collision_mask = 2
+monitorable = false
+script = ExtResource("1_checkpoi")
+
+[node name="Zone" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.1, 0)
+shape = SubResource("BoxShape3D_zone")
+
+[node name="Pad" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, 0)
+mesh = SubResource("CylinderMesh_pad")
+
+[node name="Pole" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1, 1.1, 0)
+mesh = SubResource("CylinderMesh_pole")
+
+[node name="Flag" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.38, 1.95, 0)
+mesh = SubResource("BoxMesh_flag")
+
+[node name="Respawn" type="Marker3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.1, 0)

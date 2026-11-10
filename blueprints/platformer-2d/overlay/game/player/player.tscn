@@ -1,0 +1,69 @@
+[gd_scene format=3 uid="uid://hn342xo6i0u0x"]
+
+[ext_resource type="Script" uid="uid://r46c1lusf4li8" path="res://game/player/player.gd" id="1_player"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_body"]
+size = Vector2(10, 14)
+
+[node name="Player" type="CharacterBody2D" groups=["player", "saveable"]]
+collision_layer = 2
+collision_mask = 9
+floor_snap_length = 3.0
+script = ExtResource("1_player")
+
+[node name="Shape" type="CollisionShape2D" parent="."]
+position = Vector2(0, -7)
+shape = SubResource("RectangleShape2D_body")
+
+[node name="Visual" type="Node2D" parent="."]
+
+[node name="Body" type="Polygon2D" parent="Visual"]
+color = Color(0.909804, 0.376471, 0.298039, 1)
+polygon = PackedVector2Array(-5, -15, 5, -15, 6, -14, 6, 0, -6, 0, -6, -14)
+
+[node name="Belly" type="Polygon2D" parent="Visual"]
+color = Color(0.721569, 0.270588, 0.184314, 1)
+polygon = PackedVector2Array(-6, -5, 6, -5, 6, 0, -6, 0)
+
+[node name="Scarf" type="Polygon2D" parent="Visual"]
+color = Color(0.184314, 0.721569, 0.65098, 1)
+polygon = PackedVector2Array(-6, -8, 6, -8, 6, -6, -6, -6)
+
+[node name="ScarfTail" type="Polygon2D" parent="Visual"]
+color = Color(0.184314, 0.721569, 0.65098, 1)
+polygon = PackedVector2Array(-6, -8, -6, -6, -10, -4, -10, -6)
+
+[node name="Eye" type="Polygon2D" parent="Visual"]
+color = Color(0.94902, 0.956863, 0.968627, 1)
+polygon = PackedVector2Array(1, -13, 4, -13, 4, -10, 1, -10)
+
+[node name="Pupil" type="Polygon2D" parent="Visual"]
+color = Color(0.0823529, 0.0901961, 0.117647, 1)
+polygon = PackedVector2Array(3, -12, 4, -12, 4, -10, 3, -10)
+
+[node name="Dust" type="CPUParticles2D" parent="."]
+emitting = false
+amount = 8
+lifetime = 0.35
+one_shot = true
+explosiveness = 1.0
+emission_shape = 3
+emission_rect_extents = Vector2(5, 1)
+direction = Vector2(0, -1)
+spread = 80.0
+gravity = Vector2(0, 60)
+initial_velocity_min = 12.0
+initial_velocity_max = 30.0
+scale_amount_min = 1.0
+scale_amount_max = 2.0
+color = Color(0.85098, 0.866667, 0.901961, 0.8)
+
+[node name="Camera" type="Camera2D" parent="."]
+position = Vector2(0, -16)
+zoom = Vector2(4, 4)
+process_callback = 0
+position_smoothing_enabled = true
+position_smoothing_speed = 7.0
+drag_vertical_enabled = true
+drag_top_margin = 0.25
+drag_bottom_margin = 0.1

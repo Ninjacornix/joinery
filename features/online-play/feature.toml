@@ -1,0 +1,38 @@
+id = "online-play"
+name = "Online play"
+summary = "Host or join over LAN or the internet with Godot's high-level multiplayer."
+version = 1
+requires = []
+conflicts = []
+enhances = []
+blueprints = ["*"]
+extra_roots = []
+
+[project.settings]
+"online/protocol_version" = 1
+"online/default_port" = 24565
+"online/max_clients" = 7
+"online/lan_port" = 47990
+"online/lan_broadcast" = "255.255.255.255"
+# Level-relative paths of nodes that `Game.spawn` adds children to online;
+# each gets a MultiplayerSpawner so the children reach every player.
+"online/spawn_parents" = []
+# Scenes `Game.spawn` may network-spawn (res:// paths).
+"online/spawnable_scenes" = []
+# Saveable nodes (level-relative path or save_id) left out of the world
+# snapshot a joining player receives, because their state reaches the player
+# another way (for example enemies that are network-spawned).
+"online/snapshot_exclude" = []
+
+[autoload]
+Net = "res://features/online-play/net.gd"
+Lobby = "res://features/online-play/lobby.gd"
+
+# Per starting point, adapters/<blueprint>/overlay ships an optional
+# features/online-play/adapter.gd (a NetAdapter: what the core contract alone
+# does not replicate for that game) and tests/features/online-play/
+# blueprint_check.gd (its two-process checks, run by pair_test.gd).
+[adapters.top-down.project.settings]
+"online/spawn_parents" = ["Enemies"]
+"online/spawnable_scenes" = ["res://game/enemies/chaser.tscn"]
+"online/snapshot_exclude" = ["level"]

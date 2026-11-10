@@ -1,0 +1,142 @@
+[gd_scene format=3 uid="uid://bkh5uxdqd6xvu"]
+
+[ext_resource type="Script" uid="uid://cfw9ew85w3nl2" path="res://game/level.gd" id="1_level"]
+[ext_resource type="Script" uid="uid://ec1fkbh86fit" path="res://game/arena/arena_floor.gd" id="2_floor"]
+[ext_resource type="Script" uid="uid://7b4twh60mbr" path="res://game/arena/block.gd" id="3_block"]
+[ext_resource type="PackedScene" uid="uid://cs1ux7fpb43iw" path="res://game/pickups/gem.tscn" id="4_gem"]
+[ext_resource type="PackedScene" uid="uid://cvaeiyjibqo10" path="res://game/pickups/heart.tscn" id="5_heart"]
+[ext_resource type="Script" uid="uid://b1ypq5tnr6u5s" path="res://game/ui/hud.gd" id="6_hud"]
+
+[node name="Level" type="Node2D" groups=["saveable"]]
+script = ExtResource("1_level")
+
+[node name="Floor" type="Node2D" parent="."]
+script = ExtResource("2_floor")
+
+[node name="Walls" type="Node2D" parent="."]
+
+[node name="Top" type="StaticBody2D" parent="Walls"]
+position = Vector2(960, 20)
+script = ExtResource("3_block")
+size = Vector2(1920, 40)
+
+[node name="Bottom" type="StaticBody2D" parent="Walls"]
+position = Vector2(960, 1180)
+script = ExtResource("3_block")
+size = Vector2(1920, 40)
+
+[node name="Left" type="StaticBody2D" parent="Walls"]
+position = Vector2(20, 600)
+script = ExtResource("3_block")
+size = Vector2(40, 1200)
+
+[node name="Right" type="StaticBody2D" parent="Walls"]
+position = Vector2(1900, 600)
+script = ExtResource("3_block")
+size = Vector2(40, 1200)
+
+[node name="PillarNW" type="StaticBody2D" parent="Walls"]
+position = Vector2(560, 380)
+script = ExtResource("3_block")
+size = Vector2(120, 120)
+colour = Color(0.333, 0.369, 0.467, 1)
+edge_colour = Color(0.471, 0.522, 0.639, 1)
+
+[node name="PillarNE" type="StaticBody2D" parent="Walls"]
+position = Vector2(1360, 380)
+script = ExtResource("3_block")
+size = Vector2(120, 120)
+colour = Color(0.333, 0.369, 0.467, 1)
+edge_colour = Color(0.471, 0.522, 0.639, 1)
+
+[node name="PillarSW" type="StaticBody2D" parent="Walls"]
+position = Vector2(560, 820)
+script = ExtResource("3_block")
+size = Vector2(120, 120)
+colour = Color(0.333, 0.369, 0.467, 1)
+edge_colour = Color(0.471, 0.522, 0.639, 1)
+
+[node name="PillarSE" type="StaticBody2D" parent="Walls"]
+position = Vector2(1360, 820)
+script = ExtResource("3_block")
+size = Vector2(120, 120)
+colour = Color(0.333, 0.369, 0.467, 1)
+edge_colour = Color(0.471, 0.522, 0.639, 1)
+
+[node name="Pickups" type="Node2D" parent="."]
+
+[node name="Gem1" parent="Pickups" instance=ExtResource("4_gem")]
+position = Vector2(760, 600)
+save_id = "gem_1"
+
+[node name="Gem2" parent="Pickups" instance=ExtResource("4_gem")]
+position = Vector2(1160, 600)
+save_id = "gem_2"
+
+[node name="Gem3" parent="Pickups" instance=ExtResource("4_gem")]
+position = Vector2(960, 260)
+save_id = "gem_3"
+
+[node name="Gem4" parent="Pickups" instance=ExtResource("4_gem")]
+position = Vector2(960, 940)
+save_id = "gem_4"
+
+[node name="Gem5" parent="Pickups" instance=ExtResource("4_gem")]
+position = Vector2(300, 600)
+save_id = "gem_5"
+
+[node name="Gem6" parent="Pickups" instance=ExtResource("4_gem")]
+position = Vector2(1620, 600)
+save_id = "gem_6"
+
+[node name="Gem7" parent="Pickups" instance=ExtResource("4_gem")]
+position = Vector2(250, 250)
+save_id = "gem_7"
+
+[node name="Gem8" parent="Pickups" instance=ExtResource("4_gem")]
+position = Vector2(1670, 950)
+save_id = "gem_8"
+
+[node name="Heart1" parent="Pickups" instance=ExtResource("5_heart")]
+position = Vector2(250, 950)
+save_id = "heart_1"
+
+[node name="Heart2" parent="Pickups" instance=ExtResource("5_heart")]
+position = Vector2(1670, 250)
+save_id = "heart_2"
+
+[node name="EnemySpawns" type="Node2D" parent="."]
+
+[node name="NW" type="Marker2D" parent="EnemySpawns"]
+position = Vector2(140, 140)
+
+[node name="N" type="Marker2D" parent="EnemySpawns"]
+position = Vector2(960, 110)
+
+[node name="NE" type="Marker2D" parent="EnemySpawns"]
+position = Vector2(1780, 140)
+
+[node name="E" type="Marker2D" parent="EnemySpawns"]
+position = Vector2(1810, 600)
+
+[node name="SE" type="Marker2D" parent="EnemySpawns"]
+position = Vector2(1780, 1060)
+
+[node name="S" type="Marker2D" parent="EnemySpawns"]
+position = Vector2(960, 1090)
+
+[node name="SW" type="Marker2D" parent="EnemySpawns"]
+position = Vector2(140, 1060)
+
+[node name="W" type="Marker2D" parent="EnemySpawns"]
+position = Vector2(110, 600)
+
+[node name="Enemies" type="Node2D" parent="."]
+
+[node name="Players" type="Node2D" parent="."]
+
+[node name="Spawn" type="Marker2D" parent="." groups=["player_spawn"]]
+position = Vector2(960, 600)
+
+[node name="HUD" type="CanvasLayer" parent="."]
+script = ExtResource("6_hud")

@@ -1,0 +1,12 @@
+# English, the language the game's text is written in. Message ids are the
+# English text, so this file needs no entries; it makes English one of the
+# game's languages. Other languages go next to it as <code>.po files, started
+# with: godot --headless --path . --script
+#   res://features/translations/tools/extract_pot.gd -- --add=<code>
+msgid ""
+msgstr ""
+"Language: en\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"

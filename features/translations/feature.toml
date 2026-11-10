@@ -1,0 +1,117 @@
+# Play the game in more than one language. English text in the code is the
+# message id (msgid); translations are gettext PO files in `locale/`.
+#
+# - `Language` autoload: lists the languages, switches between them (saved in
+#   the player's settings), and loads every .po, .mo or imported CSV
+#   translation it finds in `res://locale/`, so adding a language never needs
+#   a project setting edit.
+# - Settings page "Language": the language list, plus a pseudo-locale switch
+#   in development builds that lengthens and accents every text, to find text
+#   that does not fit or is not translated.
+# - `res://features/translations/tools/extract_pot.gd`: rebuilds
+#   `locale/messages.pot` from the game's scripts and scenes, creates a new
+#   language's PO file, merges new text into existing PO files, and writes a
+#   CSV for spreadsheet work.
+#
+# Only English ships. Adding a language is a user request; PO text is writing,
+# not an asset.
+id = "translations"
+name = "Translations"
+summary = "Play in more than one language: a Language settings page, PO/CSV translation files in locale/, a pseudo-locale to check text length, and a tool that collects every text of the game."
+version = 1
+requires = []
+conflicts = []
+enhances = []
+blueprints = ["*"]
+extra_roots = ["locale"]
+
+[project.settings]
+"internationalization/locale/fallback" = "en"
+# The pseudo-locale adds 30 % to every text: the room the art bible's writing
+# section asks translations to have.
+"internationalization/pseudolocalization/expansion_ratio" = 0.3
+
+[autoload]
+Language = "res://features/translations/language.gd"
+
+[append]
+"internationalization/locale/translations" = ["res://locale/en.po"]
+
+# --- Per blueprint: the files Godot's own POT generator reads (Project
+# Settings > Localization > POT Generation). Written by
+#   JOINERY_REFRESH_POT=1 uv run pytest tests/blueprints/test_feature_translations.py -k shipped
+# together with adapters/<blueprint>/overlay/locale/messages.pot. Do not edit
+# below this line by hand.
+
+[adapters.blank.append]
+"internationalization/locale/translations_pot_files" = [
+	"res://core/menus.gd",
+	"res://core/ui/settings_pages.gd",
+	"res://core/ui/ui_style.gd",
+	"res://features/translations/language.gd",
+	"res://features/translations/language_page.gd",
+	"res://game/level.tscn",
+]
+
+[adapters.first-person-3d.append]
+"internationalization/locale/translations_pot_files" = [
+	"res://core/menus.gd",
+	"res://core/ui/settings_pages.gd",
+	"res://core/ui/ui_style.gd",
+	"res://features/translations/language.gd",
+	"res://features/translations/language_page.gd",
+	"res://game/look_settings.gd",
+	"res://game/props/switch.gd",
+	"res://game/ui/hud.gd",
+]
+
+[adapters.platformer-2d.append]
+"internationalization/locale/translations_pot_files" = [
+	"res://core/menus.gd",
+	"res://core/ui/settings_pages.gd",
+	"res://core/ui/ui_style.gd",
+	"res://features/translations/language.gd",
+	"res://features/translations/language_page.gd",
+	"res://game/platformer.gd",
+	"res://game/ui/gameplay_page.gd",
+	"res://game/ui/hud.gd",
+]
+
+[adapters.puzzle-cards.append]
+"internationalization/locale/translations_pot_files" = [
+	"res://core/menus.gd",
+	"res://core/ui/settings_pages.gd",
+	"res://core/ui/ui_style.gd",
+	"res://features/translations/language.gd",
+	"res://features/translations/language_page.gd",
+	"res://game/cards_menu.gd",
+	"res://game/level.gd",
+	"res://game/level.tscn",
+	"res://game/ui/hud.gd",
+	"res://game/ui/result_panel.gd",
+]
+
+[adapters.third-person-3d.append]
+"internationalization/locale/translations_pot_files" = [
+	"res://core/menus.gd",
+	"res://core/ui/settings_pages.gd",
+	"res://core/ui/ui_style.gd",
+	"res://features/translations/language.gd",
+	"res://features/translations/language_page.gd",
+	"res://game/level.gd",
+	"res://game/props/crate.gd",
+	"res://game/props/lever.gd",
+	"res://game/ui/camera_settings_page.gd",
+	"res://game/ui/hud.gd",
+]
+
+[adapters.top-down.append]
+"internationalization/locale/translations_pot_files" = [
+	"res://core/menus.gd",
+	"res://core/ui/settings_pages.gd",
+	"res://core/ui/ui_style.gd",
+	"res://features/translations/language.gd",
+	"res://features/translations/language_page.gd",
+	"res://game/level.gd",
+	"res://game/ui/hud.gd",
+]

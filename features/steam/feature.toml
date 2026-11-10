@@ -1,0 +1,24 @@
+id = "steam"
+name = "Steam"
+summary = "Achievements, stats, rich presence and friend lobbies through the GodotSteam extension, once you install it. Without it every call does nothing."
+version = 1
+requires = []
+conflicts = []
+enhances = ["online-play"]
+blueprints = ["*"]
+extra_roots = []
+
+[[external]]
+name = "GodotSteam GDExtension"
+source = "TBD, pending user approval"
+version = "TBD, pending user approval"
+install = "separate, user-approved step; not designed yet"
+required = false
+
+[project.settings]
+"steam/app_id" = 0
+"steam/achievement_on_complete" = ""
+"steam/embed_callbacks" = false
+
+[autoload]
+SteamService = "res://features/steam/steam_service.gd"

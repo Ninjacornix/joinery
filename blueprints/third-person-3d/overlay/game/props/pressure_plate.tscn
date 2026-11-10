@@ -1,0 +1,35 @@
+[gd_scene format=3 uid="uid://f4rntboqe5gq"]
+
+[ext_resource type="Script" uid="uid://bn7pndp2syl05" path="res://game/props/pressure_plate.gd" id="1_pressure"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_plate"]
+size = Vector3(1.6, 0.8, 1.6)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_rim"]
+albedo_color = Color(0.2275, 0.2431, 0.2706, 1)
+roughness = 0.85
+
+[sub_resource type="BoxMesh" id="BoxMesh_rim"]
+material = SubResource("StandardMaterial3D_rim")
+size = Vector3(2, 0.06, 2)
+
+[sub_resource type="BoxMesh" id="BoxMesh_top"]
+size = Vector3(1.6, 0.1, 1.6)
+
+[node name="PressurePlate" type="Area3D" groups=["pressure_plate"]]
+collision_layer = 0
+collision_mask = 4
+monitorable = false
+script = ExtResource("1_pressure")
+
+[node name="Zone" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, 0)
+shape = SubResource("BoxShape3D_plate")
+
+[node name="Rim" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.03, 0)
+mesh = SubResource("BoxMesh_rim")
+
+[node name="Top" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.08, 0)
+mesh = SubResource("BoxMesh_top")

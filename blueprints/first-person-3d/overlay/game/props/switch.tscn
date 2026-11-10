@@ -1,0 +1,43 @@
+[gd_scene format=3 uid="uid://ph98hjr9dqm7"]
+
+[ext_resource type="Script" uid="uid://ws9apw47gwrx" path="res://game/props/switch.gd" id="1_switch"]
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_post"]
+height = 1.0
+radius = 0.1
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_lamp"]
+size = Vector3(0.5, 0.5, 0.5)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_post"]
+albedo_color = Color(0.3, 0.32, 0.36, 1)
+roughness = 0.5
+metallic = 0.6
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_post"]
+material = SubResource("StandardMaterial3D_post")
+top_radius = 0.08
+bottom_radius = 0.12
+height = 1.0
+
+[sub_resource type="BoxMesh" id="BoxMesh_lamp"]
+size = Vector3(0.45, 0.45, 0.45)
+
+[node name="Switch" type="StaticBody3D"]
+script = ExtResource("1_switch")
+
+[node name="PostCollision" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
+shape = SubResource("CylinderShape3D_post")
+
+[node name="LampCollision" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.25, 0)
+shape = SubResource("BoxShape3D_lamp")
+
+[node name="Post" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.5, 0)
+mesh = SubResource("CylinderMesh_post")
+
+[node name="Lamp" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.25, 0)
+mesh = SubResource("BoxMesh_lamp")

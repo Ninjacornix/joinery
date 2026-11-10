@@ -1,0 +1,21 @@
+id = "save-load"
+name = "Save and load"
+summary = "Three save slots with an autosave at checkpoints: Continue and Load in the main menu, Save and Load in the pause menu."
+version = 1
+requires = []
+conflicts = []
+enhances = ["online-play"]
+blueprints = ["*"]
+extra_roots = []
+
+# Saves live in `save/directory` as slot_<n>.json (slot 0 is the autosave).
+# Raise `save/data_version` when saved state changes shape and register a
+# step with `SaveGame.add_migration`; older slots are upgraded on load.
+[project.settings]
+"save/directory" = "user://saves"
+"save/data_version" = 1
+"save/autosave_on_checkpoint" = true
+"save/autosave_min_interval" = 10.0
+
+[autoload]
+SaveGame = "res://features/save-load/save_game.gd"

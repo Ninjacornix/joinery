@@ -1,0 +1,68 @@
+id = "first-person-3d"
+name = "First-person 3D"
+pitch = "Look around, find and use three switches to open the exit door, then walk out."
+version = 1
+dimension = "3d"
+icon = "Camera3D"
+default_features = ["controller", "save-load"]
+bible_preset = "stylised-pbr-3d"
+suggested_tools = ["godot", "blender", "material-maker", "krita", "supercollider"]
+main_scene = "res://core/main.tscn"
+
+[hooks]
+level_scene = "res://game/level.tscn"
+player_scene = "res://game/player/player.tscn"
+spawnable_scenes = []
+
+[brief]
+genre = ["first-person", "exploration", "puzzle"]
+camera = "First person at eye height (1.6 m), mouse or right-stick look, pitch clamped to 85 degrees up and down."
+core_loop = "30 s: look around a room and walk to the next switch. 5 min: find and use all three switches, one of them up on a ledge, to open the exit door. Session: reach the exit faster."
+progression = "Win: walk through the open exit door into the exit zone. Lose: none. The door stays shut until all three switches are on."
+verbs = [
+  ["Look", "mouse / look_left / look_right / look_up / look_down", "The view turns; the crosshair shows what you aim at"],
+  ["Walk", "move_forward / move_back / move_left / move_right", "Steady steps; sprint to go faster"],
+  ["Jump", "jump", "A short hop up onto the ledge"],
+  ["Use", "interact", "The switch lights up green; the hint under the crosshair shows what you can use"],
+]
+
+[project.settings]
+"display/window/size/viewport_width" = 1280
+"display/window/size/viewport_height" = 720
+
+[autoload]
+FirstPersonLook = "res://game/look_settings.gd"
+
+[input.move_forward]
+keys = ["W", "Up"]
+
+[input.move_back]
+keys = ["S", "Down"]
+
+[input.move_left]
+keys = ["A", "Left"]
+
+[input.move_right]
+keys = ["D", "Right"]
+
+[input.look_left]
+keys = ["J"]
+
+[input.look_right]
+keys = ["L"]
+
+[input.look_up]
+keys = ["I"]
+
+[input.look_down]
+keys = ["K"]
+
+[input.jump]
+keys = ["Space"]
+
+[input.sprint]
+keys = ["Shift"]
+
+[input.interact]
+keys = ["E", "F"]
+mouse = ["left"]

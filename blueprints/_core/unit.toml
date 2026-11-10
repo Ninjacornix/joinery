@@ -1,0 +1,19 @@
+# The shared game core, applied with every blueprint before it.
+# Overlay roots: core/, tests/support/, default_bus_layout.tres.
+id = "_core"
+kind = "core"
+name = "Game core"
+version = 1
+
+# Order matters: later autoloads may use earlier ones in _ready.
+[autoload]
+Settings = "res://core/settings.gd"
+GameEvents = "res://core/game_events.gd"
+Menus = "res://core/menus.gd"
+Game = "res://core/game.gd"
+
+[project.settings]
+"audio/buses/default_bus_layout" = "res://default_bus_layout.tres"
+
+[input.pause]
+keys = ["Escape", "P"]

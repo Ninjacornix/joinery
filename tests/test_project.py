@@ -86,3 +86,39 @@ def test_refuses_non_empty_folder(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="not empty"):
         create_project(tmp_path, "G", Selection(["godot"], []), load_catalog())
     assert (tmp_path / "keep.txt").read_text() == "x"
+
+
+def test_new_project_has_design_and_reference_folders(tmp_path: Path) -> None:
+    project = tmp_path / "game"
+    create_project(project, "G", Selection(["godot"], []), load_catalog())
+    assert (project / "design").is_dir()
+    # Reference boards stay out of Godot's import and every export.
+    assert (project / "art/reference/.gdignore").is_file()
+    assert "[game]" not in (project / "joinery.toml").read_text()
+    assert check_assets(project, load_catalog()) == []
+
+
+def test_new_project_from_blueprint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from joinery import blueprints
+    from tests.blueprints.conftest import build_catalogue
+
+    catalogue = build_catalogue(tmp_path / "catalogue")
+    monkeypatch.setattr(blueprints, "BLUEPRINTS_DIR", catalogue.blueprints)
+    monkeypatch.setattr(blueprints, "FEATURES_DIR", catalogue.features)
+    project = tmp_path / "game"
+    create_project(
+        project, "G", Selection(["godot"], []), load_catalog(),
+        blueprint="alpha", features=["controller"],
+    )
+    assert (project / "game/level.tscn").is_file()
+    assert 'run/main_scene="res://core/main.tscn"' in (project / "project.godot").read_text()
+    assert blueprints.read_record(project) == blueprints.GameRecord(
+        blueprint="alpha", blueprint_version=1,
+        features=["controller"], feature_versions={"controller": 1},
+    )
+    assert check_assets(project, load_catalog()) == []
+    with pytest.raises(ValueError, match="Unknown blueprint: nope"):
+        create_project(tmp_path / "other", "G", Selection(["godot"], []), load_catalog(), blueprint="nope")
+    assert not (tmp_path / "other").exists()
+    with pytest.raises(ValueError, match="need a blueprint"):
+        create_project(tmp_path / "third", "G", Selection(["godot"], []), load_catalog(), features=["net"])

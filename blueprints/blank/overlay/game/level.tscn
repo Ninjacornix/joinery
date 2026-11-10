@@ -1,0 +1,77 @@
+[gd_scene format=3 uid="uid://5byke27h5txa"]
+
+[ext_resource type="Script" uid="uid://u331qaylkiwt" path="res://game/level.gd" id="1_level"]
+
+[sub_resource type="Gradient" id="Gradient_glow"]
+colors = PackedColorArray(1, 0.94, 0.82, 1, 1, 0.94, 0.82, 0)
+
+[sub_resource type="GradientTexture2D" id="GradientTexture2D_glow"]
+gradient = SubResource("Gradient_glow")
+width = 256
+height = 256
+fill = 1
+fill_from = Vector2(0.5, 0.5)
+fill_to = Vector2(1, 0.5)
+
+[node name="Level" type="Node2D"]
+script = ExtResource("1_level")
+
+[node name="Sky" type="ColorRect" parent="."]
+offset_left = -320.0
+offset_top = -240.0
+offset_right = 1600.0
+offset_bottom = 560.0
+mouse_filter = 2
+color = Color(0.168627, 0.192157, 0.258824, 1)
+
+[node name="Floor" type="ColorRect" parent="."]
+offset_left = -320.0
+offset_top = 560.0
+offset_right = 1600.0
+offset_bottom = 960.0
+mouse_filter = 2
+color = Color(0.427451, 0.462745, 0.537255, 1)
+
+[node name="Edge" type="ColorRect" parent="Floor"]
+offset_right = 1920.0
+offset_bottom = 8.0
+mouse_filter = 2
+color = Color(0.94902, 0.713726, 0.196078, 1)
+
+[node name="Glow" type="PointLight2D" parent="."]
+position = Vector2(640, 300)
+energy = 0.45
+texture = SubResource("GradientTexture2D_glow")
+texture_scale = 5.0
+
+[node name="World" type="Node2D" parent="."]
+
+[node name="Players" type="Node2D" parent="."]
+
+[node name="Spawn" type="Marker2D" parent="." groups=["player_spawn"]]
+position = Vector2(640, 552)
+
+[node name="Camera" type="Camera2D" parent="."]
+position = Vector2(640, 360)
+
+[node name="Welcome" type="Label" parent="."]
+offset_left = 240.0
+offset_top = 250.0
+offset_right = 1040.0
+offset_bottom = 330.0
+theme_override_colors/font_color = Color(0.933333, 0.945098, 0.964706, 1)
+theme_override_font_sizes/font_size = 48
+text = "Your game starts here"
+horizontal_alignment = 1
+vertical_alignment = 1
+
+[node name="Hint" type="Label" parent="."]
+offset_left = 240.0
+offset_top = 340.0
+offset_right = 1040.0
+offset_bottom = 390.0
+theme_override_colors/font_color = Color(0.72549, 0.756863, 0.815686, 1)
+theme_override_font_sizes/font_size = 22
+text = "Press Esc or P to pause."
+horizontal_alignment = 1
+vertical_alignment = 1

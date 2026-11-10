@@ -1,0 +1,56 @@
+id = "top-down"
+name = "Top-down arena"
+pitch = "Move in eight directions, swing and dash through three waves of chasing enemies, and grab gems for score before your health runs out."
+version = 1
+dimension = "2d"
+icon = "CharacterBody2D"
+default_features = ["controller", "save-load"]
+bible_preset = "flat-2d"
+suggested_tools = ["godot", "krita", "inkscape", "surge-xt"]
+main_scene = "res://core/main.tscn"
+
+[hooks]
+level_scene = "res://game/level.tscn"
+player_scene = "res://game/player/player.tscn"
+spawnable_scenes = ["res://game/enemies/chaser.tscn"]
+
+[brief]
+genre = ["top-down action", "arena"]
+camera = "Straight overhead. The camera follows the player with a little smoothing, stops at the arena walls, and shakes briefly when the player is hit (scaled by the screen shake setting)."
+core_loop = "30 s: keep moving, swing at the enemies closing in and dash out when surrounded. 5 min: clear three waves and pick up gems between fights, healing with hearts. Session: clear the arena with a higher score."
+progression = "Win: clear all three waves. Lose: health reaches zero; Try again restarts the arena. Score: gems and defeated enemies."
+verbs = [
+    ["Move", "move_left / move_right / move_up / move_down", "Eight directions at one speed; the nose turns to face the way you move"],
+    ["Attack", "attack, left mouse button", "A swipe arc in front; enemies flash and are knocked back"],
+    ["Dash", "dash", "A quick burst you cannot be hit during, then a short cooldown on the HUD"],
+    ["Collect", "walk over a gem or heart", "Score goes up; a heart restores one health"],
+]
+
+[project.settings]
+"display/window/size/viewport_width" = 1280
+"display/window/size/viewport_height" = 720
+"display/window/stretch/mode" = "canvas_items"
+"display/window/stretch/aspect" = "expand"
+"layer_names/2d_physics/layer_1" = "world"
+"layer_names/2d_physics/layer_2" = "players"
+"layer_names/2d_physics/layer_3" = "enemies"
+"layer_names/2d_physics/layer_4" = "pickups"
+
+[input.move_left]
+keys = ["A", "Left"]
+
+[input.move_right]
+keys = ["D", "Right"]
+
+[input.move_up]
+keys = ["W", "Up"]
+
+[input.move_down]
+keys = ["S", "Down"]
+
+[input.attack]
+keys = ["J"]
+mouse = ["left"]
+
+[input.dash]
+keys = ["Space", "K", "Shift"]

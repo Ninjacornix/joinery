@@ -1,0 +1,29 @@
+[gd_scene format=3 uid="uid://yq87hqoid544"]
+
+[ext_resource type="Script" uid="uid://bey5m4xm7govc" path="res://core/main.gd" id="1_main"]
+
+[node name="Main" type="Node"]
+script = ExtResource("1_main")
+
+[node name="Backdrop" type="CanvasLayer" parent="."]
+layer = -1
+
+[node name="Fill" type="ColorRect" parent="Backdrop"]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+mouse_filter = 2
+color = Color(0.0823529, 0.0901961, 0.117647, 1)
+
+[node name="Band" type="ColorRect" parent="Backdrop"]
+anchors_preset = 12
+anchor_top = 1.0
+anchor_right = 1.0
+anchor_bottom = 1.0
+offset_top = -96.0
+grow_horizontal = 2
+grow_vertical = 0
+mouse_filter = 2
+color = Color(0.94902, 0.713726, 0.196078, 1)

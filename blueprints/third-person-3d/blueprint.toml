@@ -1,0 +1,68 @@
+id = "third-person-3d"
+name = "3D third-person adventure"
+pitch = "Run, jump and climb around an arena with an orbit camera, carry a crate to open a gate, pull a lever, and collect five coins."
+version = 1
+dimension = "3d"
+icon = "CharacterBody3D"
+default_features = ["controller", "save-load"]
+bible_preset = "lowpoly-3d"
+suggested_tools = ["godot", "blender", "material-maker", "krita", "surge-xt"]
+main_scene = "res://core/main.tscn"
+
+[hooks]
+level_scene = "res://game/level.tscn"
+player_scene = "res://game/player/player.tscn"
+spawnable_scenes = []
+
+[brief]
+genre = ["3d platformer", "adventure"]
+camera = "Third person. An orbit camera on a spring arm sits about 5 m behind and above the player; mouse or right stick orbits it, and it pulls in when a wall is in the way."
+core_loop = "30 s: run, jump and line up the camera to reach the next platform. 5 min: find the five coins, using the crate and the lever to open the way. Session: clear the arena faster."
+progression = "Win: collect all five coins. Lose: none; falling off the arena sends you back to the last checkpoint."
+verbs = [
+    ["Run", "move_forward / move_back / move_left / move_right", "Body turns to face the way you run"],
+    ["Sprint", "sprint", "Faster run, longer jumps"],
+    ["Jump", "jump", "Hold for a higher jump, tap for a short hop"],
+    ["Look", "look_left / look_right / look_up / look_down, mouse", "Camera orbits the player"],
+    ["Interact", "interact", "Pick up and put down the crate, pull the lever"],
+]
+
+[project.settings]
+"display/window/size/viewport_width" = 1280
+"display/window/size/viewport_height" = 720
+"layer_names/3d_physics/layer_1" = "world"
+"layer_names/3d_physics/layer_2" = "players"
+"layer_names/3d_physics/layer_3" = "props"
+
+[input.move_forward]
+keys = ["W", "Up"]
+
+[input.move_back]
+keys = ["S", "Down"]
+
+[input.move_left]
+keys = ["A", "Left"]
+
+[input.move_right]
+keys = ["D", "Right"]
+
+[input.look_left]
+keys = ["J"]
+
+[input.look_right]
+keys = ["L"]
+
+[input.look_up]
+keys = ["I"]
+
+[input.look_down]
+keys = ["K"]
+
+[input.jump]
+keys = ["Space"]
+
+[input.sprint]
+keys = ["Shift"]
+
+[input.interact]
+keys = ["E", "F"]

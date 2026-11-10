@@ -1,0 +1,32 @@
+[gd_scene format=3 uid="uid://vekpmob3hqq9o"]
+
+[ext_resource type="Script" uid="uid://ynolt16kk50mc" path="res://game/props/goal.gd" id="1_goal"]
+
+[sub_resource type="RectangleShape2D" id="RectangleShape2D_pole"]
+size = Vector2(10, 46)
+
+[node name="Goal" type="Area2D" groups=["goal"]]
+collision_layer = 4
+collision_mask = 2
+monitorable = false
+script = ExtResource("1_goal")
+
+[node name="Shape" type="CollisionShape2D" parent="."]
+position = Vector2(0, -23)
+shape = SubResource("RectangleShape2D_pole")
+
+[node name="Base" type="Polygon2D" parent="."]
+color = Color(0.333333, 0.364706, 0.431373, 1)
+polygon = PackedVector2Array(-5, -3, 5, -3, 5, 0, -5, 0)
+
+[node name="Pole" type="Polygon2D" parent="."]
+color = Color(0.85098, 0.866667, 0.901961, 1)
+polygon = PackedVector2Array(-1, -46, 1, -46, 1, -3, -1, -3)
+
+[node name="Knob" type="Polygon2D" parent="."]
+color = Color(0.94902, 0.713726, 0.196078, 1)
+polygon = PackedVector2Array(-2, -49, 2, -49, 2, -46, -2, -46)
+
+[node name="Flag" type="Polygon2D" parent="."]
+color = Color(0.937255, 0.341176, 0.372549, 1)
+polygon = PackedVector2Array(-1, -45, -15, -40, -1, -35)

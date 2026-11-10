@@ -1,0 +1,638 @@
+# Every text of this game, collected from its scripts and scenes.
+# Rebuild after changing text or adding features:
+#   godot --headless --path . --script res://features/translations/tools/extract_pot.gd
+# Start a language with `-- --add=<code>`; merge new text into existing
+# languages with `-- --update-po`.
+msgid ""
+msgstr ""
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: res://core/menus.gd
+msgid "Paused"
+msgstr ""
+
+#: res://core/menus.gd
+msgid "Settings"
+msgstr ""
+
+#: res://core/menus.gd
+msgid "Play"
+msgstr ""
+
+#: res://core/menus.gd
+msgid "Quit"
+msgstr ""
+
+#: res://core/menus.gd
+msgid "Resume"
+msgstr ""
+
+#: res://core/menus.gd
+#: res://features/controller/bindings.gd
+#: res://features/online-play/net.gd
+msgid "Restart"
+msgstr ""
+
+#: res://core/menus.gd
+msgid "Main menu"
+msgstr ""
+
+#: res://core/menus.gd
+msgid "Video"
+msgstr ""
+
+#: res://core/menus.gd
+msgid "Audio"
+msgstr ""
+
+#: res://core/menus.gd
+msgid "Accessibility"
+msgstr ""
+
+#: res://core/ui/settings_pages.gd
+msgid "Full screen"
+msgstr ""
+
+#: res://core/ui/settings_pages.gd
+msgid "Vertical sync"
+msgstr ""
+
+#: res://core/ui/settings_pages.gd
+msgid "Master volume"
+msgstr ""
+
+#: res://core/ui/settings_pages.gd
+msgid "Music volume"
+msgstr ""
+
+#: res://core/ui/settings_pages.gd
+msgid "Effects volume"
+msgstr ""
+
+#: res://core/ui/settings_pages.gd
+msgid "Screen shake"
+msgstr ""
+
+#: res://core/ui/settings_pages.gd
+msgid "Reduced motion"
+msgstr ""
+
+#: res://core/ui/ui_style.gd
+#: res://features/controller/bindings.gd
+msgid "Back"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Not bound"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Left stick"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Right stick"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Left mouse button"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Right mouse button"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Middle mouse button"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Mouse wheel up"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Mouse wheel down"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Mouse button %d"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "D-pad up"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "D-pad down"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "D-pad left"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "D-pad right"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Touchpad"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Paddle %d"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Button %d"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Left stick left"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Left stick right"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Left stick up"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Left stick down"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Right stick left"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Right stick right"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Right stick up"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Right stick down"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Axis %d"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Move left"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Move right"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Move up"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Move down"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Move forward"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Move back"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Look left"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Look right"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Look up"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Look down"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Jump"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Crouch"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Sprint"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Dash"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Attack"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Interact"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Pause"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Xbox"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "PlayStation"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Nintendo"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Automatic"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Cross"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Circle"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Square"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Triangle"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Share"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Options"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Mute"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Home"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Left stick click"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Right stick click"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Capture"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+msgid "Guide"
+msgstr ""
+
+#: res://features/controller/bindings.gd
+#: res://features/online-play/ui/lobby_page.gd
+msgid "Start"
+msgstr ""
+
+#: res://features/controller/controller.gd
+msgid "Controls"
+msgstr ""
+
+#: res://features/controller/controller.gd
+msgid "Controller connected"
+msgstr ""
+
+#: res://features/controller/controller.gd
+msgid "Controller disconnected"
+msgstr ""
+
+#: res://features/controller/controls_page.gd
+msgid "No key or button pressed; nothing changed."
+msgstr ""
+
+#: res://features/controller/controls_page.gd
+msgid "Nothing changed."
+msgstr ""
+
+#: res://features/controller/controls_page.gd
+msgid "Press a button…"
+msgstr ""
+
+#: res://features/controller/controls_page.gd
+msgid "Press a key…"
+msgstr ""
+
+#: res://features/controller/controls_page.gd
+msgid "Waiting for %s. Escape cancels."
+msgstr ""
+
+#: res://features/controller/controls_page.gd
+msgid "Choose a binding, then press the new key or button. Escape cancels."
+msgstr ""
+
+#: res://features/controller/controls_page.gd
+msgid "Action"
+msgstr ""
+
+#: res://features/controller/controls_page.gd
+msgid "Keyboard and mouse"
+msgstr ""
+
+#: res://features/controller/controls_page.gd
+msgid "Controller"
+msgstr ""
+
+#: res://features/controller/controls_page.gd
+msgid "Stick deadzone"
+msgstr ""
+
+#: res://features/controller/controls_page.gd
+msgid "Invert look up and down"
+msgstr ""
+
+#: res://features/controller/controls_page.gd
+msgid "Rumble"
+msgstr ""
+
+#: res://features/controller/controls_page.gd
+msgid "Button names"
+msgstr ""
+
+#: res://features/controller/controls_page.gd
+msgid "Reset to defaults"
+msgstr ""
+
+#: res://features/controller/controls_page.gd
+msgid "No controller connected."
+msgstr ""
+
+#: res://features/controller/controls_page.gd
+msgid "Controller: %s"
+msgstr ""
+
+#: res://features/controller/controls_page.gd
+msgid "%s and %s swapped bindings."
+msgstr ""
+
+#: res://features/controller/controls_page.gd
+msgid "%s: %s"
+msgstr ""
+
+#: res://features/controller/controls_page.gd
+msgid "Controls are back to the game's defaults."
+msgstr ""
+
+#: res://features/online-play/lobby.gd
+#: res://features/online-play/net.gd
+msgid "Play online"
+msgstr ""
+
+#: res://features/online-play/lobby.gd
+msgid "Player %d"
+msgstr ""
+
+#: res://features/online-play/net.gd
+msgid "Player"
+msgstr ""
+
+#: res://features/online-play/net.gd
+msgid "Could not host a game on port %d."
+msgstr ""
+
+#: res://features/online-play/net.gd
+msgid "Could not connect to %s."
+msgstr ""
+
+#: res://features/online-play/net.gd
+msgid "Leave game"
+msgstr ""
+
+#: res://features/online-play/net.gd
+msgid "The host runs a different version of the game (host %d, yours %d)."
+msgstr ""
+
+#: res://features/online-play/net.gd
+msgid "The host is playing a different game."
+msgstr ""
+
+#: res://features/online-play/net.gd
+msgid "The host did not let you in."
+msgstr ""
+
+#: res://features/online-play/net.gd
+msgid "The host did not answer."
+msgstr ""
+
+#: res://features/online-play/net.gd
+msgid "Could not reach the host."
+msgstr ""
+
+#: res://features/online-play/net.gd
+msgid "The host left the game."
+msgstr ""
+
+#: res://features/online-play/ui/lobby_page.gd
+msgid "Your name"
+msgstr ""
+
+#: res://features/online-play/ui/lobby_page.gd
+msgid "Name"
+msgstr ""
+
+#: res://features/online-play/ui/lobby_page.gd
+msgid "Host game"
+msgstr ""
+
+#: res://features/online-play/ui/lobby_page.gd
+msgid "Address, such as 192.168.1.20"
+msgstr ""
+
+#: res://features/online-play/ui/lobby_page.gd
+msgid "Address"
+msgstr ""
+
+#: res://features/online-play/ui/lobby_page.gd
+msgid "Join"
+msgstr ""
+
+#: res://features/online-play/ui/lobby_page.gd
+msgid "Looking for games on your network…"
+msgstr ""
+
+#: res://features/online-play/ui/lobby_page.gd
+msgid "Ready"
+msgstr ""
+
+#: res://features/online-play/ui/lobby_page.gd
+msgid "Leave"
+msgstr ""
+
+#: res://features/online-play/ui/lobby_page.gd
+msgid "Cannot look for games on this network right now."
+msgstr ""
+
+#: res://features/online-play/ui/lobby_page.gd
+msgid "Hosting on port %d. Players can join now."
+msgstr ""
+
+#: res://features/online-play/ui/lobby_page.gd
+msgid "Connecting…"
+msgstr ""
+
+#: res://features/online-play/ui/lobby_page.gd
+msgid "Connected. Waiting for the host to start."
+msgstr ""
+
+#: res://features/online-play/ui/lobby_page.gd
+msgid "Host a game, or join one on your network or by address."
+msgstr ""
+
+#: res://features/online-play/ui/lobby_page.gd
+msgid "%s: ready"
+msgstr ""
+
+#: res://features/online-play/ui/lobby_page.gd
+msgid "%s: not ready"
+msgstr ""
+
+#: res://features/online-play/ui/lobby_page.gd
+msgid "Join %s (%d of %d)"
+msgstr ""
+
+#: res://features/online-play/ui/lobby_page.gd
+msgid "Type the host's address first."
+msgstr ""
+
+#: res://features/online-play/ui/lobby_page.gd
+msgid "Everyone needs to be ready first."
+msgstr ""
+
+#: res://features/save-load/save_game.gd
+msgid "Autosave"
+msgstr ""
+
+#: res://features/save-load/save_game.gd
+msgid "Slot %d"
+msgstr ""
+
+#: res://features/save-load/save_game.gd
+msgid "Continue"
+msgstr ""
+
+#: res://features/save-load/save_game.gd
+#: res://features/save-load/slots_page.gd
+msgid "Load"
+msgstr ""
+
+#: res://features/save-load/save_game.gd
+#: res://features/save-load/slots_page.gd
+msgid "Save"
+msgstr ""
+
+#: res://features/save-load/save_game.gd
+msgid "Could not load the save."
+msgstr ""
+
+#: res://features/save-load/slots_page.gd
+msgid "Delete"
+msgstr ""
+
+#: res://features/save-load/slots_page.gd
+msgid "Empty"
+msgstr ""
+
+#: res://features/save-load/slots_page.gd
+msgid "Saved {when}, played {time}"
+msgstr ""
+
+#: res://features/save-load/slots_page.gd
+msgid "Press again to overwrite"
+msgstr ""
+
+#: res://features/save-load/slots_page.gd
+msgid "Saved"
+msgstr ""
+
+#: res://features/save-load/slots_page.gd
+msgid "Could not save."
+msgstr ""
+
+#: res://features/save-load/slots_page.gd
+msgid "Press again to delete"
+msgstr ""
+
+#: res://features/steam/steam_service.gd
+msgid "Creating a Steam lobby…"
+msgstr ""
+
+#: res://features/steam/steam_service.gd
+msgid "Steam is not available."
+msgstr ""
+
+#: res://features/steam/steam_service.gd
+msgid "Choose a friend's game in the Steam overlay."
+msgstr ""
+
+#: res://features/steam/steam_service.gd
+msgid "Steam could not create the lobby (code %d)."
+msgstr ""
+
+#: res://features/steam/steam_service.gd
+msgid "Steam could not join the lobby (code %d)."
+msgstr ""
+
+#: res://features/steam/steam_service.gd
+msgid "Online play over Steam could not start (error %d)."
+msgstr ""
+
+#: res://features/translations/language.gd
+#: res://features/translations/language_page.gd
+msgid "Language"
+msgstr ""
+
+#: res://features/translations/language_page.gd
+msgid "Pseudo-locale"
+msgstr ""
+
+#: res://features/translations/language_page.gd
+msgid "Makes every text longer and accented, to spot text that does not fit."
+msgstr ""
+
+#: res://features/translations/language_page.gd
+msgid "Only English so far. Add a language as a .po file in locale/."
+msgstr ""
+
+#: res://game/level.tscn
+msgid "Your game starts here"
+msgstr ""
+
+#: res://game/level.tscn
+msgid "Press Esc or P to pause."
+msgstr ""

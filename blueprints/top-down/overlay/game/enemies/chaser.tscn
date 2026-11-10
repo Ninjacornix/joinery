@@ -1,0 +1,31 @@
+[gd_scene format=3 uid="uid://lssk00fa81tr"]
+
+[ext_resource type="Script" uid="uid://4juyc0g5je5p" path="res://game/enemies/chaser.gd" id="1_chaser"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_body"]
+radius = 16.0
+
+[node name="Chaser" type="CharacterBody2D" groups=["enemy", "net_synced"]]
+z_index = 1
+collision_layer = 4
+collision_mask = 5
+motion_mode = 1
+script = ExtResource("1_chaser")
+
+[node name="Shape" type="CollisionShape2D" parent="."]
+shape = SubResource("CircleShape2D_body")
+
+[node name="Pivot" type="Node2D" parent="."]
+
+[node name="Shadow" type="Polygon2D" parent="Pivot"]
+position = Vector2(0, 5)
+color = Color(0, 0, 0, 0.25)
+polygon = PackedVector2Array(20, 0, -14, -16, -8, 0, -14, 16)
+
+[node name="Body" type="Polygon2D" parent="Pivot"]
+color = Color(0.851, 0.322, 0.278, 1)
+polygon = PackedVector2Array(20, 0, -14, -16, -8, 0, -14, 16)
+
+[node name="Eye" type="Polygon2D" parent="Pivot"]
+color = Color(0.157, 0.169, 0.208, 1)
+polygon = PackedVector2Array(10, 0, 4, -4, 4, 4)

@@ -1,0 +1,59 @@
+[gd_scene format=3 uid="uid://buoey88finxwn"]
+
+[ext_resource type="Script" uid="uid://65ptrk1ld7rt" path="res://game/props/lever.gd" id="1_lever"]
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_lever"]
+size = Vector3(0.9, 1.3, 0.8)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_base"]
+albedo_color = Color(0.2902, 0.3098, 0.3412, 1)
+roughness = 0.85
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_stick"]
+albedo_color = Color(0.851, 0.6431, 0.2549, 1)
+roughness = 0.6
+
+[sub_resource type="BoxMesh" id="BoxMesh_base"]
+material = SubResource("StandardMaterial3D_base")
+size = Vector3(0.9, 0.3, 0.7)
+
+[sub_resource type="BoxMesh" id="BoxMesh_stick"]
+material = SubResource("StandardMaterial3D_stick")
+size = Vector3(0.1, 0.9, 0.1)
+
+[sub_resource type="SphereMesh" id="SphereMesh_knob"]
+material = SubResource("StandardMaterial3D_stick")
+radius = 0.12
+height = 0.24
+
+[sub_resource type="SphereMesh" id="SphereMesh_lamp"]
+radius = 0.1
+height = 0.2
+
+[node name="Lever" type="AnimatableBody3D" groups=["interactable", "saveable"]]
+collision_mask = 0
+sync_to_physics = false
+script = ExtResource("1_lever")
+
+[node name="Shape" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.65, 0)
+shape = SubResource("BoxShape3D_lever")
+
+[node name="Base" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.15, 0)
+mesh = SubResource("BoxMesh_base")
+
+[node name="Handle" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.3, 0)
+
+[node name="Stick" type="MeshInstance3D" parent="Handle"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.45, 0)
+mesh = SubResource("BoxMesh_stick")
+
+[node name="Knob" type="MeshInstance3D" parent="Handle"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.9, 0)
+mesh = SubResource("SphereMesh_knob")
+
+[node name="Lamp" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.32, 0.36, 0.2)
+mesh = SubResource("SphereMesh_lamp")

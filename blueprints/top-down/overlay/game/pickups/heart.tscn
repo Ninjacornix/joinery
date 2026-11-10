@@ -1,0 +1,30 @@
+[gd_scene format=3 uid="uid://cvaeiyjibqo10"]
+
+[ext_resource type="Script" uid="uid://bdeww6qgyj24h" path="res://game/pickups/pickup.gd" id="1_pickup"]
+
+[sub_resource type="CircleShape2D" id="CircleShape2D_reach"]
+radius = 16.0
+
+[node name="Heart" type="Area2D" groups=["saveable", "pickup"]]
+collision_layer = 8
+collision_mask = 2
+monitorable = false
+script = ExtResource("1_pickup")
+save_id = "heart"
+kind = "heart"
+amount = 1
+
+[node name="Shape" type="CollisionShape2D" parent="."]
+shape = SubResource("CircleShape2D_reach")
+
+[node name="Shadow" type="Polygon2D" parent="."]
+position = Vector2(0, 16)
+scale = Vector2(1, 0.35)
+color = Color(0, 0, 0, 0.25)
+polygon = PackedVector2Array(0, 12, -12, 0, -12, -6, -7, -11, 0, -6, 7, -11, 12, -6, 12, 0)
+
+[node name="Art" type="Node2D" parent="."]
+
+[node name="Body" type="Polygon2D" parent="Art"]
+color = Color(0.937, 0.373, 0.478, 1)
+polygon = PackedVector2Array(0, 12, -12, 0, -12, -6, -7, -11, 0, -6, 7, -11, 12, -6, 12, 0)

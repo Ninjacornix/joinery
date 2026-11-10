@@ -1,0 +1,28 @@
+id = "blank"
+name = "Blank"
+pitch = "An empty, lit level with a main menu, pause and settings already working. Build anything from here."
+version = 1
+dimension = "2d"
+icon = "Node2D"
+default_features = []
+bible_preset = "none"
+suggested_tools = ["godot"]
+main_scene = "res://core/main.tscn"
+
+[hooks]
+level_scene = "res://game/level.tscn"
+player_scene = ""
+spawnable_scenes = []
+
+[brief]
+genre = []
+camera = "A fixed 2D camera framing the whole level. Change it once the game has a player."
+core_loop = "Not decided yet. The starting point gives you menus, pause and settings; the loop is yours to design."
+progression = "Not decided yet."
+verbs = []
+
+[project.settings]
+"display/window/size/viewport_width" = 1280
+"display/window/size/viewport_height" = 720
+"display/window/stretch/mode" = "canvas_items"
+"display/window/stretch/aspect" = "expand"
