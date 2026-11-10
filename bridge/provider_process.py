@@ -171,7 +171,8 @@ async def stop_process(process: asyncio.subprocess.Process | None) -> None:
             await process.wait()
             # taskkill returns after requesting child termination. The Node
             # wrapper can exit before its native provider has released files.
-            waiter = asyncio.create_task(asyncio.to_thread(tree.wait_and_close, 5))
+            # Busy machines (shared CI runners) can take more than 5s here.
+            waiter = asyncio.create_task(asyncio.to_thread(tree.wait_and_close, 15))
             waiting = True
             try:
                 await asyncio.shield(waiter)
