@@ -73,6 +73,22 @@ def test_patch_does_not_delete_load_bearing_upstream_code(patch: Path) -> None:
             )
 
 
+# Patches that deliberately replace code an earlier Joinery patch added, by number.
+DELETION_ALLOWANCE = {
+    # The three-step wizard (worker threads, readiness rows, Look and sound)
+    # replaces the questionnaire 0001 put into project_dialog.cpp. Of the lines
+    # it removes, all but a few dozen generic ones ("}", "break;") are Joinery's.
+    "0008": 500,
+    # The start-screen and setup restyle rewrites the wizard and empty project
+    # list that 0001, 0008 and 0009 added. Checked against 4.7.2-stable: the
+    # only upstream lines removed are replaced in place (button icons, the
+    # Import label, "Filter projects" casing, the main view panel style).
+    "0012": 130,
+    "0013": 70,
+    "0014": 30,
+}
+
+
 @pytest.mark.parametrize("patch", patches(), ids=lambda p: p.name)
 def test_patch_deletions_stay_small(patch: Path) -> None:
     """A Joinery patch adds; it should barely remove anything.
@@ -81,7 +97,8 @@ def test_patch_deletions_stay_small(patch: Path) -> None:
     Wholesale deletion means an edit went wrong, which is what this catches.
     """
     deleted = [line for line in removed_lines(patch) if line.strip()]
-    assert len(deleted) <= 20, (
+    limit = DELETION_ALLOWANCE.get(patch.name.split("-", 1)[0], 20)
+    assert len(deleted) <= limit, (
         f"{patch.name} removes {len(deleted)} upstream lines. If that is "
         "deliberate, raise this limit in the test and say why."
     )

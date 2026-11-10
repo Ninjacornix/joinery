@@ -1,0 +1,361 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Tue, 10 Nov 2026 02:18:31 +0100
+Subject: [PATCH] feat(editor): one header for start screens, aligned setup
+ edges
+
+The wordmark sits in one page header at the page's content inset on the connect, API key and project screens. The setup wizard's footer ends on the page's right edge, the page fades out above the footer, disclosures start their chevron on the content edge, and the catalog banner offers Retry as a button beside Details with plain copy.
+
+Joinery-only start screen and setup flow, not intended for upstream.
+---
+ editor/project_manager/project_dialog.cpp  | 127 ++++++++++++++++++---
+ editor/project_manager/project_dialog.h    |   2 +
+ editor/project_manager/project_manager.cpp |  52 +++++++--
+ editor/project_manager/project_manager.h   |   3 +
+ 4 files changed, 159 insertions(+), 25 deletions(-)
+
+diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
+index 944988e..f71843f 100644
+--- a/editor/project_manager/project_dialog.cpp
++++ b/editor/project_manager/project_dialog.cpp
+@@ -64,6 +64,9 @@
+ #include "scene/gui/text_edit.h"
+ #include "scene/gui/texture_rect.h"
+ #include "scene/main/timer.h"
++#include "scene/resources/atlas_texture.h"
++#include "scene/resources/gradient.h"
++#include "scene/resources/gradient_texture.h"
+ #include "scene/resources/style_box_flat.h"
+ #include "scene/resources/style_box_line.h"
+ #include "servers/display/display_server.h"
+@@ -650,14 +653,29 @@ static bool _joinery_parse_json(const String &p_output, int p_exit, Dictionary &
+ 
+ // What went wrong with the app list, in words a newcomer can act on. The raw
+ // output goes under Details, never in the sentence.
+-static String _joinery_catalog_failure(const String &p_output, int p_exit) {
++static bool _joinery_helper_missing(const String &p_output, int p_exit) {
+ 	const String lower = p_output.to_lower();
+-	if (p_exit < 0 || p_exit == 127 || lower.contains("uv: command not found") || lower.contains("uv: not found") || lower.contains("'uv' is not recognized")) {
+-		return TTR("Joinery couldn't find uv, which it needs to list your apps. Install uv, then retry, or create a plain Godot project.");
++	return p_exit < 0 || p_exit == 127 || lower.contains("uv: command not found") || lower.contains("uv: not found") || lower.contains("'uv' is not recognized");
++}
++
++static String _joinery_catalog_failure(const String &p_output, int p_exit) {
++	if (_joinery_helper_missing(p_output, p_exit)) {
++		return TTR("Joinery is missing a helper it needs to list your apps. Install it (see Details), then retry, or create a plain Godot project.");
+ 	}
+ 	return TTR("Joinery couldn't list your apps. Retry, or create a plain Godot project.");
+ }
+ 
++// The Details text: the tool's name and where to get it go here, not in the
++// sentence, followed by whatever the command printed.
++static String _joinery_catalog_details(const String &p_output, int p_exit, const String &p_reason) {
++	const String raw = p_output.is_empty() ? p_reason : p_output;
++	if (!_joinery_helper_missing(p_output, p_exit)) {
++		return raw;
++	}
++	const String how = TTR("The helper is uv. Install it from https://docs.astral.sh/uv/ and run Joinery's installer again.");
++	return raw.is_empty() ? how : how + "\n\n" + raw;
++}
++
+ // A connector's name for people: "hi-godot/godot-ai" reads "Godot AI". The
+ // raw id stays in the tooltip for anyone who needs it.
+ static String _joinery_connector_name(const String &p_label) {
+@@ -762,12 +780,77 @@ void ProjectDialog::_joinery_fit_scroll() {
+ 			frame->add_theme_constant_override(SNAME("margin_left"), ring);
+ 		}
+ 	}
+-}
+-
++	// The page's right edge sits inside the scrollbar's gutter (reserved even
++	// when nothing scrolls) and the inner ring; the footer ends on that same
++	// edge, so the primary action lines up with the fields above it.
++	int gutter = ring;
++	if (joinery_scroll->get_v_scroll_bar()) {
++		gutter += joinery_scroll->get_v_scroll_bar()->get_minimum_size().x;
++	}
++	gutter += joinery_scroll->get_theme_constant(SNAME("scrollbar_h_separation"));
++	const Ref<StyleBox> scroll_panel = joinery_scroll->get_theme_stylebox(SceneStringName(panel));
++	if (scroll_panel.is_valid()) {
++		gutter += scroll_panel->get_margin(SIDE_RIGHT);
++	}
++	if (joinery_footer_frame) {
++		joinery_footer_frame->add_theme_constant_override(SNAME("margin_right"), gutter);
++	}
++	if (joinery_scroll_fade_frame && joinery_scroll_fade) {
++		joinery_scroll_fade_frame->add_theme_constant_override(SNAME("margin_right"), gutter - ring);
++		joinery_scroll_fade->set_custom_minimum_size(Size2(0, _joinery_space(5)));
++		Color ground = get_theme_color(SNAME("base_color"), EditorStringName(Editor));
++		const Ref<StyleBoxFlat> window = get_theme_stylebox(SceneStringName(panel));
++		if (window.is_valid()) {
++			ground = window->get_bg_color();
++		}
++		Ref<Gradient> ramp;
++		ramp.instantiate();
++		ramp->set_color(0, Color(ground, 0.0));
++		ramp->set_color(1, ground);
++		Ref<GradientTexture2D> fade;
++		fade.instantiate();
++		fade->set_gradient(ramp);
++		fade->set_fill_from(Vector2(0, 0));
++		fade->set_fill_to(Vector2(0, 1));
++		fade->set_width(4);
++		fade->set_height(64);
++		joinery_scroll_fade->set_texture(fade);
++	}
++}
++
++// One disclosure look everywhere ("Advanced", "Details"): the chevron first,
++// its glyph on the content's left edge, then the label in regular weight.
++// The editor's tree arrows sit in the middle of a padded square, so the
++// padding is cut off; both arrows get one width so the label never moves
++// when the disclosure opens.
+ void ProjectDialog::_joinery_set_disclosure(Button *p_button, bool p_open) {
+-	if (p_button) {
+-		p_button->set_button_icon(get_editor_theme_icon(p_open ? SNAME("GuiTreeArrowDown") : SNAME("GuiTreeArrowRight")));
++	if (!p_button) {
++		return;
++	}
++	const Ref<Texture2D> closed = get_editor_theme_icon(SNAME("GuiTreeArrowRight"));
++	const Ref<Texture2D> open = get_editor_theme_icon(SNAME("GuiTreeArrowDown"));
++	const Ref<Texture2D> icon = p_open ? open : closed;
++	Ref<Texture2D> shown = icon;
++	if (icon.is_valid() && closed.is_valid() && open.is_valid()) {
++		const Ref<Image> image = icon->get_image();
++		const Ref<Image> image_closed = closed->get_image();
++		const Ref<Image> image_open = open->get_image();
++		if (image.is_valid() && image_closed.is_valid() && image_open.is_valid()) {
++			const Rect2i used = image->get_used_rect();
++			const int width = MAX(image_closed->get_used_rect().size.x, image_open->get_used_rect().size.x);
++			const float scale = icon->get_width() / (float)MAX(1, image->get_width());
++			if (used.size.x > 0 && width > 0) {
++				Ref<AtlasTexture> trimmed;
++				trimmed.instantiate();
++				trimmed->set_atlas(icon);
++				const float x = used.position.x * scale;
++				trimmed->set_region(Rect2(x, 0, MIN(width * scale, icon->get_width() - x), icon->get_height()));
++				shown = trimmed;
++			}
++		}
+ 	}
++	p_button->set_button_icon(shown);
++	p_button->set_theme_type_variation(SNAME("JoineryTextButton"));
+ }
+ 
+ // The first page keeps what you must decide and loses what you must read.
+@@ -971,7 +1054,7 @@ void ProjectDialog::_joinery_update_folder_label() {
+ }
+ 
+ void ProjectDialog::_joinery_toggle_advanced(bool p_open) {
+-	joinery_advanced->set_button_icon(get_editor_theme_icon(p_open ? SNAME("GuiTreeArrowDown") : SNAME("GuiTreeArrowRight")));
++	_joinery_set_disclosure(joinery_advanced, p_open);
+ 	joinery_renderer_box->set_visible(p_open && joinery_page == JOINERY_PAGE_NAME);
+ }
+ 
+@@ -1078,7 +1161,7 @@ void ProjectDialog::_joinery_load_finished() {
+ 	String reason;
+ 	if (!_joinery_parse_json(joinery_load_output[0], joinery_load_exit[0], doc, reason)) {
+ 		const String output = joinery_load_output[0].strip_edges();
+-		_joinery_show_banner(_joinery_catalog_failure(output, joinery_load_exit[0]), output.is_empty() ? reason : output);
++		_joinery_show_banner(_joinery_catalog_failure(output, joinery_load_exit[0]), _joinery_catalog_details(output, joinery_load_exit[0], reason));
+ 		return;
+ 	}
+ 	_joinery_build_catalog(doc.get("tools", Array()));
+@@ -1950,7 +2033,7 @@ void ProjectDialog::_joinery_retry_create() {
+ 
+ void ProjectDialog::_joinery_toggle_details(bool p_open) {
+ 	joinery_details->set_visible(p_open);
+-	joinery_details_button->set_button_icon(get_editor_theme_icon(p_open ? SNAME("GuiTreeArrowDown") : SNAME("GuiTreeArrowRight")));
++	_joinery_set_disclosure(joinery_details_button, p_open);
+ }
+ 
+ void ProjectDialog::_nonempty_confirmation_ok_pressed() {
+@@ -2499,8 +2582,8 @@ void ProjectDialog::_notification(int p_what) {
+ 			create_dir->set_button_icon(get_editor_theme_icon(SNAME("FolderCreate")));
+ 			project_browse->set_button_icon(get_editor_theme_icon(SNAME("FolderBrowse")));
+ 			install_browse->set_button_icon(get_editor_theme_icon(SNAME("FolderBrowse")));
+-			joinery_advanced->set_button_icon(get_editor_theme_icon(joinery_advanced->is_pressed() ? SNAME("GuiTreeArrowDown") : SNAME("GuiTreeArrowRight")));
+-			joinery_details_button->set_button_icon(get_editor_theme_icon(joinery_details_button->is_pressed() ? SNAME("GuiTreeArrowDown") : SNAME("GuiTreeArrowRight")));
++			_joinery_set_disclosure(joinery_advanced, joinery_advanced->is_pressed());
++			_joinery_set_disclosure(joinery_details_button, joinery_details_button->is_pressed());
+ 			_joinery_set_disclosure(joinery_apps_advanced, joinery_apps_advanced->is_pressed());
+ 			_joinery_set_disclosure(joinery_banner_details_button, joinery_banner_details_button->is_pressed());
+ 			for (Button *toggle : joinery_custom_toggles) {
+@@ -2603,6 +2686,18 @@ ProjectDialog::ProjectDialog() {
+ 	// a page starts to scroll. The frame puts that gutter in the margin.
+ 	joinery_scroll->set_vertical_scroll_mode(ScrollContainer::SCROLL_MODE_RESERVE);
+ 	joinery_scroll_frame->add_child(joinery_scroll);
++	// A short fade where the page meets the footer rule, so a line that runs
++	// under it fades out instead of being sliced through. It stops short of
++	// the scrollbar, which stays the scroll cue, and takes no input.
++	joinery_scroll_fade_frame = memnew(MarginContainer);
++	joinery_scroll_fade_frame->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
++	joinery_scroll_fade_frame->set_v_size_flags(Control::SIZE_SHRINK_END);
++	joinery_scroll_frame->add_child(joinery_scroll_fade_frame);
++	joinery_scroll_fade = memnew(TextureRect);
++	joinery_scroll_fade->set_mouse_filter(Control::MOUSE_FILTER_IGNORE);
++	joinery_scroll_fade->set_expand_mode(TextureRect::EXPAND_IGNORE_SIZE);
++	joinery_scroll_fade->set_stretch_mode(TextureRect::STRETCH_SCALE);
++	joinery_scroll_fade_frame->add_child(joinery_scroll_fade);
+ 	joinery_scroll_inner = memnew(MarginContainer);
+ 	joinery_scroll_inner->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+ 	joinery_scroll_inner->set_v_size_flags(Control::SIZE_EXPAND_FILL);
+@@ -2635,10 +2730,12 @@ ProjectDialog::ProjectDialog() {
+ 	HBoxContainer *banner_actions = memnew(HBoxContainer);
+ 	banner_actions->add_theme_constant_override(SNAME("separation"), _joinery_space(2));
+ 	banner_box->add_child(banner_actions);
+-	// Quiet: the step's one primary, in the footer, is "Create plain project".
++	// Secondary: the step's one primary, in the footer, is "Create plain
++	// project". Retry and the Details disclosure share one row on the
++	// banner's left edge.
+ 	joinery_banner_retry = memnew(Button);
+ 	joinery_banner_retry->set_text(TTRC("Retry"));
+-	joinery_banner_retry->set_theme_type_variation(SNAME("JoineryTextButton"));
++	joinery_banner_retry->set_theme_type_variation(SNAME("JoinerySecondaryButton"));
+ 	joinery_banner_retry->connect(SceneStringName(pressed), callable_mp(this, &ProjectDialog::_joinery_start_load));
+ 	banner_actions->add_child(joinery_banner_retry);
+ 	joinery_banner_plain = memnew(Button);
+@@ -2654,7 +2751,7 @@ ProjectDialog::ProjectDialog() {
+ 	joinery_banner_details_button->set_h_size_flags(Control::SIZE_SHRINK_BEGIN);
+ 	joinery_banner_details_button->hide();
+ 	joinery_banner_details_button->connect(SceneStringName(toggled), callable_mp(this, &ProjectDialog::_joinery_toggle_banner_details));
+-	banner_box->add_child(joinery_banner_details_button);
++	banner_actions->add_child(joinery_banner_details_button);
+ 	joinery_banner_details = memnew(Label);
+ 	joinery_banner_details->set_theme_type_variation(SNAME("JoineryMuted"));
+ 	joinery_banner_details->set_autowrap_mode(TextServer::AUTOWRAP_ARBITRARY);
+diff --git a/editor/project_manager/project_dialog.h b/editor/project_manager/project_dialog.h
+index fe14443..7ee6606 100644
+--- a/editor/project_manager/project_dialog.h
++++ b/editor/project_manager/project_dialog.h
+@@ -136,6 +136,8 @@ private:
+ 	// focus rings, and the scrollbar stays within the column's right edge.
+ 	MarginContainer *joinery_scroll_frame = nullptr;
+ 	MarginContainer *joinery_scroll_inner = nullptr;
++	MarginContainer *joinery_scroll_fade_frame = nullptr;
++	TextureRect *joinery_scroll_fade = nullptr;
+ 	HBoxContainer *joinery_footer = nullptr;
+ 	Button *joinery_cancel = nullptr;
+ 	Button *joinery_back = nullptr;
+diff --git a/editor/project_manager/project_manager.cpp b/editor/project_manager/project_manager.cpp
+index 258a308..31e5231 100644
+--- a/editor/project_manager/project_manager.cpp
++++ b/editor/project_manager/project_manager.cpp
+@@ -252,6 +252,7 @@ void ProjectManager::_update_theme(bool p_skip_creation) {
+ 
+ 		background_panel->add_theme_style_override(SceneStringName(panel), get_theme_stylebox("Background", EditorStringName(EditorStyles)));
+ 		main_view_container->add_theme_style_override(SceneStringName(panel), get_theme_stylebox("panel_container", "ProjectManager"));
++		_joinery_fit_header();
+ 
+ 		// Joinery: this is Joinery's project manager, so it says so. The upstream
+ 		// logo is an icon; replace it with the word, in the display size and
+@@ -1570,7 +1571,7 @@ ProjectManager::ProjectManager() {
+ 		_add_main_view(MAIN_VIEW_PROJECTS, TTRC("Projects"), Ref<Texture2D>(), local_projects_vb);
+ 
+ 		// Joinery: one quiet line under the wordmark saying what this is for.
+-		Label *joinery_tagline = memnew(Label);
++		joinery_tagline = memnew(Label);
+ 		joinery_tagline->set_text(TTRC("Make your game by talking to the apps you already use."));
+ 		joinery_tagline->set_theme_type_variation(SNAME("JoineryMuted"));
+ 		joinery_tagline->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
+@@ -2055,10 +2056,25 @@ ProjectManager::ProjectManager() {
+ 	_joinery_show_connection();
+ }
+ 
++// The header's side insets are the page panel's content margins, so the
++// wordmark starts on the same left edge as everything inside the page.
++void ProjectManager::_joinery_fit_header() {
++	if (!joinery_header || !main_view_container) {
++		return;
++	}
++	Ref<StyleBox> page = main_view_container->get_theme_stylebox(SceneStringName(panel));
++	const int left = page.is_valid() ? (int)page->get_margin(SIDE_LEFT) : 0;
++	const int right = page.is_valid() ? (int)page->get_margin(SIDE_RIGHT) : 0;
++	joinery_header->add_theme_constant_override(SNAME("margin_left"), left);
++	joinery_header->add_theme_constant_override(SNAME("margin_right"), right);
++}
++
+ void ProjectManager::_joinery_show_connection() {
+ 	if (joinery_connect) {
+ 		main_view_container->hide();
+-		title_bar_logo->show();
++		if (joinery_tagline) {
++			joinery_tagline->hide();
++		}
+ 		joinery_connect->call("open_settings");
+ 		return;
+ 	}
+@@ -2094,7 +2110,9 @@ void ProjectManager::_joinery_show_connection() {
+ 	joinery_connect->connect(SNAME("connected"), callable_mp(this, &ProjectManager::_joinery_agent_connected));
+ 	main_vbox->add_child(joinery_connect);
+ 	main_view_container->hide();
+-	title_bar_logo->show();
++	if (joinery_tagline) {
++		joinery_tagline->hide();
++	}
+ 	joinery_home = home;
+ 	// The agent in use, as a chip at the end of the project list's top bar.
+ 	// Pressing it reopens the connect screen.
+@@ -2177,7 +2195,9 @@ void ProjectManager::_joinery_agent_connected(const String &p_agent, const Strin
+ 	OS::get_singleton()->set_environment("JOINERY_MODEL_PROFILE", profile);
+ 	joinery_connect->hide();
+ 	main_view_container->show();
+-	title_bar_logo->hide();
++	if (joinery_tagline) {
++		joinery_tagline->show();
++	}
+ 	_update_list_placeholder();
+ 	_joinery_update_agent_chip();
+ }
+@@ -2195,10 +2215,18 @@ void ProjectManager::_joinery_agent_connected(const String &p_agent, const Strin
+ // means a later Godot release that moves things degrades into showing more UI
+ // rather than breaking.
+ void ProjectManager::_joinery_simplify() {
+-	// The wordmark sits on the page, on the same left edge as the line and
+-	// the bar under it. The title bar's copy only shows on the connect
+-	// screen, where there is no page.
+-	if (local_projects_vb && !joinery_wordmark) {
++	// One page header for every start screen: the wordmark (and, on the
++	// project list, the line under it) above the page, at the page's content
++	// inset. The connect, API key and project screens all keep it in the
++	// same place, so moving between them reads as one app. The title bar's
++	// copy is never shown.
++	if (main_vbox && main_view_container && !joinery_wordmark) {
++		joinery_header = memnew(MarginContainer);
++		joinery_header->set_name("JoineryHeader");
++		main_vbox->add_child(joinery_header);
++		main_vbox->move_child(joinery_header, main_view_container->get_index());
++		VBoxContainer *header_box = memnew(VBoxContainer);
++		joinery_header->add_child(header_box);
+ 		joinery_wordmark = memnew(Button);
+ 		joinery_wordmark->set_theme_type_variation(SNAME("JoineryWordmark"));
+ 		joinery_wordmark->set_text("Joinery");
+@@ -2206,8 +2234,12 @@ void ProjectManager::_joinery_simplify() {
+ 		joinery_wordmark->set_tooltip_text(TTR("About Joinery"));
+ 		joinery_wordmark->set_h_size_flags(Control::SIZE_SHRINK_BEGIN);
+ 		joinery_wordmark->connect(SceneStringName(pressed), callable_mp(this, &ProjectManager::_show_about));
+-		local_projects_vb->add_child(joinery_wordmark);
+-		local_projects_vb->move_child(joinery_wordmark, 0);
++		header_box->add_child(joinery_wordmark);
++		if (joinery_tagline) {
++			joinery_tagline->get_parent()->remove_child(joinery_tagline);
++			header_box->add_child(joinery_tagline);
++		}
++		_joinery_fit_header();
+ 	}
+ 	if (title_bar_logo) {
+ 		title_bar_logo->hide();
+diff --git a/editor/project_manager/project_manager.h b/editor/project_manager/project_manager.h
+index 8362a4f..d8739e2 100644
+--- a/editor/project_manager/project_manager.h
++++ b/editor/project_manager/project_manager.h
+@@ -186,6 +186,9 @@ class ProjectManager : public Control {
+ 	Button *joinery_agent_chip = nullptr;
+ 	// The wordmark on the page, flush with the line and the bar under it.
+ 	Button *joinery_wordmark = nullptr;
++	MarginContainer *joinery_header = nullptr;
++	Label *joinery_tagline = nullptr;
++	void _joinery_fit_header();
+ 	String joinery_home;
+ 	void _joinery_update_agent_chip();
+ 

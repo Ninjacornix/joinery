@@ -1,0 +1,136 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Tue, 10 Nov 2026 07:48:19 +0100
+Subject: [PATCH] feat(editor): setup progress follows its steps
+
+Joinery-only start screen and setup flow, not intended for upstream.
+---
+ editor/project_manager/project_dialog.cpp | 46 ++++++++++++++++++++---
+ editor/project_manager/project_dialog.h   |  4 ++
+ 2 files changed, 44 insertions(+), 6 deletions(-)
+
+diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
+index f71843f..98eff25 100644
+--- a/editor/project_manager/project_dialog.cpp
++++ b/editor/project_manager/project_dialog.cpp
+@@ -37,7 +37,7 @@
+ // Joinery: one size for the whole creation flow, so the dialog never resizes
+ // between steps. Long pages scroll inside it.
+ #define JOINERY_DIALOG_WIDTH 720
+-#define JOINERY_DIALOG_HEIGHT 620
++#define JOINERY_DIALOG_HEIGHT 700
+ #include "core/io/file_access.h"
+ #include "core/io/zip_io.h"
+ #include "core/object/callable_mp.h"
+@@ -807,6 +807,9 @@ void ProjectDialog::_joinery_fit_scroll() {
+ 		ramp.instantiate();
+ 		ramp->set_color(0, Color(ground, 0.0));
+ 		ramp->set_color(1, ground);
++		// The lower part is solid ground: a row cut by the edge is hidden
++		// whole, and only rows fully above it fade.
++		ramp->set_offset(1, 0.55);
+ 		Ref<GradientTexture2D> fade;
+ 		fade.instantiate();
+ 		fade->set_gradient(ramp);
+@@ -1939,6 +1942,8 @@ void ProjectDialog::_joinery_create_progress(int p_step, int p_state) {
+ 			joinery_spin_timer->stop();
+ 		}
+ 	}
++	// A step that starts or ends moves the bar; a reset (pending) jumps.
++	_joinery_update_create_bar(p_state != JOINERY_STEP_PENDING);
+ }
+ 
+ void ProjectDialog::_joinery_spin_tick() {
+@@ -1951,14 +1956,15 @@ void ProjectDialog::_joinery_spin_tick() {
+ 	}
+ }
+ 
+-// Running: the accent bar moves. Stopped: the bar stays where it was, full
+-// and in the error colour, so nothing below it jumps.
++// Running and stopped share one fill: it shows how far the steps got. A
++// failure keeps the fill where it stopped and only turns it the error colour,
++// so the bar never claims more than the step list below it.
+ void ProjectDialog::_joinery_style_create_bar(bool p_failed) {
+ 	if (!joinery_create_bar) {
+ 		return;
+ 	}
+-	joinery_create_bar->set_indeterminate(!p_failed);
+-	joinery_create_bar->set_value(p_failed ? joinery_create_bar->get_max() : 0);
++	joinery_create_bar->set_indeterminate(false);
++	_joinery_update_create_bar(false);
+ 	if (!p_failed) {
+ 		joinery_create_bar->remove_theme_style_override(SNAME("fill"));
+ 		return;
+@@ -1969,6 +1975,34 @@ void ProjectDialog::_joinery_style_create_bar(bool p_failed) {
+ 	joinery_create_bar->add_theme_style_override(SNAME("fill"), failed);
+ }
+ 
++// Done steps count whole, the running one counts part way, and the fill never
++// drops below a visible minimum so it reads as a bar, not a dot.
++void ProjectDialog::_joinery_update_create_bar(bool p_animate) {
++	if (!joinery_create_bar) {
++		return;
++	}
++	double done = 0.0;
++	for (int i = 0; i < JOINERY_CREATE_STEPS; i++) {
++		if (joinery_create_states[i] == JOINERY_STEP_DONE) {
++			done += 1.0;
++		} else if (joinery_create_states[i] == JOINERY_STEP_RUNNING) {
++			done += 0.4;
++		}
++	}
++	const double max_value = joinery_create_bar->get_max();
++	const double target = MAX(max_value * 0.04, max_value * done / JOINERY_CREATE_STEPS);
++	if (joinery_bar_tween.is_valid()) {
++		joinery_bar_tween->kill();
++		joinery_bar_tween.unref();
++	}
++	if (!p_animate || !joinery_create_bar->is_inside_tree() || Math::is_equal_approx(joinery_create_bar->get_value(), target)) {
++		joinery_create_bar->set_value(target);
++		return;
++	}
++	joinery_bar_tween = create_tween();
++	joinery_bar_tween->tween_property(joinery_create_bar, NodePath("value"), target, 0.25)->set_trans(Tween::TRANS_CUBIC)->set_ease(Tween::EASE_OUT);
++}
++
+ void ProjectDialog::_joinery_create_finished() {
+ 	joinery_create_thread.wait_to_finish();
+ 	joinery_create_running = false;
+@@ -3087,7 +3121,7 @@ ProjectDialog::ProjectDialog() {
+ 	vb->add_child(joinery_creating);
+ 	joinery_create_bar = memnew(ProgressBar);
+ 	joinery_create_bar->set_theme_type_variation(SNAME("JoineryProgress"));
+-	joinery_create_bar->set_indeterminate(true);
++	joinery_create_bar->set_indeterminate(false);
+ 	joinery_create_bar->set_show_percentage(false);
+ 	joinery_create_bar->set_custom_minimum_size(Size2(0, 4) * EDSCALE);
+ 	joinery_creating->add_child(joinery_create_bar);
+diff --git a/editor/project_manager/project_dialog.h b/editor/project_manager/project_dialog.h
+index 7ee6606..eed15c3 100644
+--- a/editor/project_manager/project_dialog.h
++++ b/editor/project_manager/project_dialog.h
+@@ -32,6 +32,7 @@
+ 
+ #include "core/os/thread.h"
+ #include "core/templates/safe_refcount.h"
++#include "scene/animation/tween.h"
+ #include "scene/gui/dialogs.h"
+ 
+ class Button;
+@@ -186,6 +187,8 @@ private:
+ 	// The "Setting up your project" page.
+ 	VBoxContainer *joinery_creating = nullptr;
+ 	ProgressBar *joinery_create_bar = nullptr;
++	// The bar follows the step list: finished steps plus part of the running one.
++	Ref<Tween> joinery_bar_tween;
+ 	TextureRect *joinery_create_icons[JOINERY_CREATE_STEPS] = {};
+ 	Label *joinery_create_labels[JOINERY_CREATE_STEPS] = {};
+ 	// A failure: a tinted banner with plain text, like the app-list one.
+@@ -300,6 +303,7 @@ private:
+ 	void _joinery_align_names();
+ 	void _joinery_spin_tick();
+ 	void _joinery_style_create_bar(bool p_failed);
++	void _joinery_update_create_bar(bool p_animate);
+ 	void _joinery_trim_first_page();
+ 	void _joinery_hide_wizard();
+ 	void _joinery_reset_pages();

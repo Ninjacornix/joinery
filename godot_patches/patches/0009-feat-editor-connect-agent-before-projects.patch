@@ -5,26 +5,87 @@ Subject: [PATCH] feat(editor): connect agent before projects
 
 Joinery-only startup flow, not intended for upstream. Load the addon connection screen before exposing project actions, remember the selected agent, and allow changing it from the project list. Login stays with each provider CLI.
 ---
- editor/project_manager/project_manager.cpp | 71 ++++++++++++++++++++++
- editor/project_manager/project_manager.h   |  3 +
- 2 files changed, 74 insertions(+)
+ editor/project_manager/project_manager.cpp | 197 ++++++++++++++++++---
+ editor/project_manager/project_manager.h   |  10 ++
+ 2 files changed, 185 insertions(+), 22 deletions(-)
 
 diff --git a/editor/project_manager/project_manager.cpp b/editor/project_manager/project_manager.cpp
-index af3aeec..f6b61ac 100644
+index af3aeec..da31dbb 100644
 --- a/editor/project_manager/project_manager.cpp
 +++ b/editor/project_manager/project_manager.cpp
-@@ -36,7 +36,10 @@
+@@ -36,7 +36,11 @@
  #include "core/io/config_file.h"
  #include "core/io/dir_access.h"
  #include "core/io/file_access.h"
++#include "core/io/image.h"
 +#include "core/io/resource_loader.h"
-+#include "core/object/script_language.h"
  #include "core/object/callable_mp.h"
 +#include "core/object/class_db.h"
++#include "core/object/script_language.h"
  #include "core/os/keyboard.h"
  #include "core/os/os.h"
  #include "core/version.h"
-@@ -563,6 +566,9 @@ void ProjectManager::_run_project_confirm() {
+@@ -68,6 +72,7 @@
+ #include "scene/gui/separator.h"
+ #include "scene/main/scene_tree.h"
+ #include "scene/main/window.h"
++#include "scene/resources/image_texture.h"
+ #include "scene/theme/theme_db.h"
+ #include "servers/display/display_server.h"
+ #include "servers/navigation_3d/navigation_server_3d.h"
+@@ -115,11 +120,12 @@ void ProjectManager::_notification(int p_what) {
+ 		} break;
+ 
+ 		case NOTIFICATION_TRANSLATION_CHANGED: {
+-			// TRANSLATORS: This refers to the application where users manage their Godot projects.
+-			SceneTree::get_singleton()->get_root()->set_title(GODOT_VERSION_NAME + String(" - ") + TTR("Project Manager", "Application"));
++			// Joinery: the window is Joinery's, and the build string stays in About.
++			SceneTree::get_singleton()->get_root()->set_title("Joinery");
+ 
+-			const String line1 = TTR("You don't have any projects yet.");
+-			const String line2 = TTR("Get started by creating a new one,\nimporting one that exists, or by downloading a project template from the Asset Store!");
++			// Joinery: why the list is empty and the one action that fills it.
++			const String line1 = TTR("No projects yet.");
++			const String line2 = TTR("Create one and Journeyman will help you build it.");
+ 			empty_list_message->set_text(vformat("[center][b]%s[/b] %s[/center]", line1, line2));
+ 
+ 			_titlebar_resized();
+@@ -247,9 +253,11 @@ void ProjectManager::_update_theme(bool p_skip_creation) {
+ 		main_view_container->add_theme_style_override(SceneStringName(panel), get_theme_stylebox("panel_container", "ProjectManager"));
+ 
+ 		// Joinery: this is Joinery's project manager, so it says so. The upstream
+-		// logo is an icon; replace it with a word rather than dressing it up.
++		// logo is an icon; replace it with the word, in the display size and
++		// the plain font colour (the JoineryWordmark variation).
+ 		title_bar_logo->set_button_icon(Ref<Texture2D>());
+-		title_bar_logo->set_text("JOINER");
++		title_bar_logo->set_text("Joinery");
++		title_bar_logo->set_theme_type_variation(SNAME("JoineryWordmark"));
+ 
+ 		_set_main_view_icon(MAIN_VIEW_PROJECTS, get_editor_theme_icon("ProjectList"));
+ 		_set_main_view_icon(MAIN_VIEW_ASSETLIB, get_editor_theme_icon("AssetStore"));
+@@ -495,16 +503,10 @@ void ProjectManager::_update_list_placeholder() {
+ 		return;
+ 	}
+ 
+-	empty_list_open_assetlib->set_visible(asset_library);
+-
+-	const int network_mode = EDITOR_GET("network/connection/network_mode");
+-	if (network_mode == EditorSettings::NETWORK_OFFLINE) {
+-		empty_list_open_assetlib->set_text(TTRC("Go Online and Open Asset Store"));
+-		empty_list_online_warning->set_visible(true);
+-	} else {
+-		empty_list_open_assetlib->set_text(TTRC("Open Asset Store"));
+-		empty_list_online_warning->set_visible(false);
+-	}
++	// Joinery: a project starts from Create, never from the Asset Store, so
++	// neither the store button nor its online note is offered here.
++	empty_list_open_assetlib->set_visible(false);
++	empty_list_online_warning->set_visible(false);
+ 
+ 	empty_list_placeholder->show();
+ }
+@@ -563,6 +565,9 @@ void ProjectManager::_run_project_confirm() {
  }
  
  void ProjectManager::_open_selected_projects() {
@@ -34,7 +95,7 @@ index af3aeec..f6b61ac 100644
  	// Show loading text to tell the user that the project manager is busy loading.
  	// This is especially important for the Web project manager.
  	loading_label->show();
-@@ -758,11 +764,17 @@ void ProjectManager::_install_project(const String &p_zip_path, const String &p_
+@@ -758,11 +763,17 @@ void ProjectManager::_install_project(const String &p_zip_path, const String &p_
  }
  
  void ProjectManager::_import_project() {
@@ -52,7 +113,94 @@ index af3aeec..f6b61ac 100644
  	project_dialog->set_mode(ProjectDialog::MODE_NEW);
  	project_dialog->show_dialog();
  }
-@@ -1985,6 +1997,65 @@ ProjectManager::ProjectManager() {
+@@ -871,6 +882,12 @@ void ProjectManager::_update_project_buttons() {
+ 	run_btn->set_disabled(empty_selection || is_missing_project_selected);
+ 
+ 	erase_missing_btn->set_disabled(!project_list->is_any_project_missing());
++
++	// Joinery: the top bar's Open follows the sidebar's Edit, which is hidden.
++	if (joinery_open_btn) {
++		joinery_open_btn->set_disabled(open_btn->is_disabled());
++		joinery_open_btn->set_tooltip_text(open_btn->is_disabled() ? TTR("Select a project first.") : String());
++	}
+ }
+ 
+ void ProjectManager::_open_options_popup() {
+@@ -1451,7 +1468,7 @@ ProjectManager::ProjectManager() {
+ 
+ 		title_bar_logo = memnew(Button);
+ 		title_bar_logo->set_flat(true);
+-		title_bar_logo->set_tooltip_text(TTR("About Godot"));
++		title_bar_logo->set_tooltip_text(TTR("About Joinery"));
+ 		left_hbox->add_child(title_bar_logo);
+ 		title_bar_logo->connect(SceneStringName(pressed), callable_mp(this, &ProjectManager::_show_about));
+ 
+@@ -1528,11 +1545,19 @@ ProjectManager::ProjectManager() {
+ 		local_projects_vb->set_name("LocalProjectsTab");
+ 		_add_main_view(MAIN_VIEW_PROJECTS, TTRC("Projects"), Ref<Texture2D>(), local_projects_vb);
+ 
++		// Joinery: one quiet line under the wordmark saying what this is for.
++		Label *joinery_tagline = memnew(Label);
++		joinery_tagline->set_text(TTRC("Make your game by talking to the apps you already use."));
++		joinery_tagline->set_theme_type_variation(SNAME("JoineryMuted"));
++		joinery_tagline->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
++		local_projects_vb->add_child(joinery_tagline);
++
+ 		// Project list's top bar.
+ 		{
+ 			HBoxContainer *hb = memnew(HBoxContainer);
+ 			hb->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+ 			local_projects_vb->add_child(hb);
++			joinery_top_bar = hb;
+ 
+ 			create_btn = memnew(Button);
+ 			create_btn->set_text(TTRC("Create"));
+@@ -1546,6 +1571,15 @@ ProjectManager::ProjectManager() {
+ 			import_btn->connect(SceneStringName(pressed), callable_mp(this, &ProjectManager::_import_project));
+ 			hb->add_child(import_btn);
+ 
++			// Joinery: the per-project sidebar is hidden, so opening the
++			// selected project is the bar's one primary action.
++			joinery_open_btn = memnew(Button);
++			joinery_open_btn->set_text(TTRC("Open"));
++			joinery_open_btn->set_theme_type_variation(SNAME("JoineryPrimaryButton"));
++			joinery_open_btn->set_disabled(true);
++			joinery_open_btn->connect(SceneStringName(pressed), callable_mp(this, &ProjectManager::_open_selected_projects_check_recovery_mode));
++			hb->add_child(joinery_open_btn);
++
+ 			scan_btn = memnew(Button);
+ 			scan_btn->set_text(TTRC("Scan"));
+ 			scan_btn->set_shortcut(ED_SHORTCUT("project_manager/scan_projects", TTRC("Scan Projects"), KeyModifierMask::CMD_OR_CTRL | Key::S));
+@@ -1628,14 +1662,14 @@ ProjectManager::ProjectManager() {
+ 				empty_list_placeholder->add_child(empty_list_actions);
+ 
+ 				empty_list_create_project = memnew(Button);
+-				empty_list_create_project->set_text(TTRC("Create New Project"));
+-				empty_list_create_project->set_theme_type_variation("PanelBackgroundButton");
++				empty_list_create_project->set_text(TTRC("Create project"));
++				empty_list_create_project->set_theme_type_variation("JoineryPrimaryButton");
+ 				empty_list_actions->add_child(empty_list_create_project);
+ 				empty_list_create_project->connect(SceneStringName(pressed), callable_mp(this, &ProjectManager::_new_project));
+ 
+ 				empty_list_import_project = memnew(Button);
+-				empty_list_import_project->set_text(TTRC("Import Existing Project"));
+-				empty_list_import_project->set_theme_type_variation("PanelBackgroundButton");
++				empty_list_import_project->set_text(String::utf8("Open existing…"));
++				empty_list_import_project->set_theme_type_variation("FlatButton");
+ 				empty_list_actions->add_child(empty_list_import_project);
+ 				empty_list_import_project->connect(SceneStringName(pressed), callable_mp(this, &ProjectManager::_import_project));
+ 
+@@ -1758,6 +1792,9 @@ ProjectManager::ProjectManager() {
+ 		footer_bar->set_alignment(BoxContainer::ALIGNMENT_END);
+ 		footer_bar->add_theme_constant_override("separation", 20 * EDSCALE);
+ 		main_vbox->add_child(footer_bar);
++		// Joinery: no version string or update check on the main screen. The
++		// build string stays in About, one click away on the wordmark.
++		footer_bar->hide();
+ 
+ #ifdef ENGINE_UPDATE_CHECK_ENABLED
+ 		EngineUpdateLabel *update_label = memnew(EngineUpdateLabel);
+@@ -1985,6 +2022,116 @@ ProjectManager::ProjectManager() {
  	_update_size_limits();
  
  	_joinery_simplify();
@@ -97,12 +245,62 @@ index af3aeec..f6b61ac 100644
 +	joinery_connect->connect(SNAME("connected"), callable_mp(this, &ProjectManager::_joinery_agent_connected));
 +	main_vbox->add_child(joinery_connect);
 +	main_view_container->hide();
-+	Button *change_agent = memnew(Button);
-+	change_agent->set_text(TTRC("Change agent"));
-+	change_agent->set_h_size_flags(Control::SIZE_SHRINK_BEGIN);
-+	change_agent->connect(SceneStringName(pressed), callable_mp(this, &ProjectManager::_joinery_show_connection));
-+	local_projects_vb->add_child(change_agent);
-+	local_projects_vb->move_child(change_agent, 0);
++	joinery_home = home;
++	// The agent in use, as a chip at the end of the project list's top bar.
++	// Pressing it reopens the connect screen.
++	joinery_agent_chip = memnew(Button);
++	joinery_agent_chip->set_flat(true);
++	joinery_agent_chip->set_expand_icon(false);
++	joinery_agent_chip->set_tooltip_text(TTR("Change the agent Journeyman uses"));
++	joinery_agent_chip->connect(SceneStringName(pressed), callable_mp(this, &ProjectManager::_joinery_show_connection));
++	if (joinery_top_bar) {
++		joinery_top_bar->add_child(joinery_agent_chip);
++	} else {
++		local_projects_vb->add_child(joinery_agent_chip);
++	}
++	_joinery_update_agent_chip();
++}
++
++void ProjectManager::_joinery_update_agent_chip() {
++	if (!joinery_agent_chip) {
++		return;
++	}
++	String agent;
++	if (EditorSettings::get_singleton()->has_setting("joinery/agent")) {
++		agent = EditorSettings::get_singleton()->get_setting("joinery/agent");
++	}
++	// The same names the connect screen shows.
++	String name = agent;
++	if (agent == "claude") {
++		name = "Claude Code";
++	} else if (agent == "codex") {
++		name = "Codex";
++	} else if (agent == "gemini") {
++		name = "Gemini";
++	} else if (agent == "opencode") {
++		name = "opencode";
++	}
++	joinery_agent_chip->set_visible(!agent.is_empty());
++	joinery_agent_chip->set_text(name + String::utf8(" · ") + TTR("Change"));
++	joinery_agent_chip->set_accessibility_name(vformat(TTR("Agent: %s. Change"), name));
++
++	// The provider's mark from the addon, at the editor's icon size. A missing
++	// or unreadable file leaves the chip as text.
++	Ref<Texture2D> icon;
++	const String base = joinery_home.path_join("godot_addon/joinery/icons/providers").path_join(agent);
++	for (const String &extension : { String(".svg"), String(".png") }) {
++		if (agent.is_empty() || !FileAccess::exists(base + extension)) {
++			continue;
++		}
++		Ref<Image> image = Image::load_from_file(base + extension);
++		if (image.is_valid() && !image->is_empty()) {
++			const int size = MAX(1, (int)Math::round(16 * EDSCALE));
++			image->resize(size, size, Image::INTERPOLATE_LANCZOS);
++			icon = ImageTexture::create_from_image(image);
++		}
++		break;
++	}
++	joinery_agent_chip->set_button_icon(icon);
 +}
 +
 +void ProjectManager::_joinery_agent_connected(const String &p_agent, const String &p_method) {
@@ -115,20 +313,47 @@ index af3aeec..f6b61ac 100644
 +	OS::get_singleton()->set_environment("JOINERY_MODEL_PROFILE", profile);
 +	joinery_connect->hide();
 +	main_view_container->show();
++	_joinery_update_agent_chip();
  }
  
  // Joinery: strip the Project Manager back to opening and creating projects.
+@@ -2028,6 +2175,13 @@ void ProjectManager::_joinery_simplify() {
+ 	if (donate_btn) {
+ 		donate_btn->hide();
+ 	}
++	// An empty list leads to Create, not to the Asset Store.
++	if (empty_list_open_assetlib) {
++		empty_list_open_assetlib->hide();
++	}
++	if (empty_list_online_warning) {
++		empty_list_online_warning->hide();
++	}
+ }
+ 
+ ProjectManager::~ProjectManager() {
+@@ -2044,4 +2198,3 @@ ProjectManager::~ProjectManager() {
+ 
+ 	EditorThemeManager::finalize();
+ }
+-
 diff --git a/editor/project_manager/project_manager.h b/editor/project_manager/project_manager.h
-index 5ab10b9..44152de 100644
+index 5ab10b9..25b3fb5 100644
 --- a/editor/project_manager/project_manager.h
 +++ b/editor/project_manager/project_manager.h
-@@ -171,6 +171,9 @@ class ProjectManager : public Control {
+@@ -171,6 +171,16 @@ class ProjectManager : public Control {
  	// stays reversible. Keeping a handle on the sidebar is why this is here.
  	VBoxContainer *joinery_project_sidebar = nullptr;
  	void _joinery_simplify();
 +	Control *joinery_connect = nullptr;
 +	void _joinery_show_connection();
 +	void _joinery_agent_connected(const String &p_agent, const String &p_method);
++	// The project list's top bar, the "Open" primary beside Create and
++	// Import, and the "[icon] Claude Code · Change" agent chip in that bar.
++	HBoxContainer *joinery_top_bar = nullptr;
++	Button *joinery_open_btn = nullptr;
++	Button *joinery_agent_chip = nullptr;
++	String joinery_home;
++	void _joinery_update_agent_chip();
  
  	HBoxContainer *open_btn_container = nullptr;
  	PopupMenu *open_options_popup = nullptr;

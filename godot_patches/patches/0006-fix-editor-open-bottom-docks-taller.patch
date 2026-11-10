@@ -5,14 +5,229 @@ Subject: [PATCH] fix(editor): open bottom docks taller
 
 Joinery-only shell preference. Not intended for upstream.
 ---
- editor/gui/editor_bottom_panel.cpp | 9 ++++++++-
- 1 file changed, 8 insertions(+), 1 deletion(-)
+ editor/docks/dock_tab_container.cpp  |  3 ++
+ editor/docks/editor_dock_manager.cpp | 14 ++++++
+ editor/docks/editor_dock_manager.h   |  4 ++
+ editor/docks/filesystem_dock.cpp     |  4 ++
+ editor/editor_node.cpp               | 61 +++++++++++++++++++++++++-
+ editor/gui/editor_bottom_panel.cpp   | 65 +++++++++++++++++++++++++---
+ editor/gui/editor_bottom_panel.h     |  8 ++++
+ 7 files changed, 152 insertions(+), 7 deletions(-)
 
+diff --git a/editor/docks/dock_tab_container.cpp b/editor/docks/dock_tab_container.cpp
+index f03fe97..31dad08 100644
+--- a/editor/docks/dock_tab_container.cpp
++++ b/editor/docks/dock_tab_container.cpp
+@@ -153,6 +153,9 @@ void DockTabContainer::_pre_popup() {
+ 	if (dock_slot >= EditorDock::DOCK_SLOT_RIGHT_UL && dock_slot <= EditorDock::DOCK_SLOT_RIGHT_BR) {
+ 		return; // Joinery's assistant column has no docking menu.
+ 	}
++	if (get_popup() != dock_context_popup || !get_dock(get_current_tab())) {
++		return; // Joinery: the bottom panel's menu lists its docks instead.
++	}
+ 	dock_context_popup->set_dock(get_dock(get_current_tab()));
+ }
+ 
+diff --git a/editor/docks/editor_dock_manager.cpp b/editor/docks/editor_dock_manager.cpp
+index 42997f5..b19fce3 100644
+--- a/editor/docks/editor_dock_manager.cpp
++++ b/editor/docks/editor_dock_manager.cpp
+@@ -718,6 +718,20 @@ void EditorDockManager::_make_dock_visible(EditorDock *p_dock, bool p_grab_focus
+ 	}
+ }
+ 
++Vector<EditorDock *> EditorDockManager::get_slot_docks(int p_slot) const {
++	Vector<EditorDock *> docks;
++	for (EditorDock *dock : all_docks) {
++		if (!dock->enabled || !dock->global || (dock->transient && !dock->is_open)) {
++			continue;
++		}
++		const int slot = dock->dock_slot_index == EditorDock::DOCK_SLOT_NONE ? (int)dock->default_slot : dock->dock_slot_index;
++		if (slot == p_slot) {
++			docks.push_back(dock);
++		}
++	}
++	return docks;
++}
++
+ void EditorDockManager::focus_dock(EditorDock *p_dock) {
+ 	ERR_FAIL_NULL(p_dock);
+ 	ERR_FAIL_COND_MSG(!all_docks.has(p_dock), vformat("Cannot focus unknown dock '%s'.", p_dock->get_display_title()));
+diff --git a/editor/docks/editor_dock_manager.h b/editor/docks/editor_dock_manager.h
+index c83a9eb..338bdc8 100644
+--- a/editor/docks/editor_dock_manager.h
++++ b/editor/docks/editor_dock_manager.h
+@@ -159,6 +159,10 @@ public:
+ 	void add_dock(EditorDock *p_dock);
+ 	void remove_dock(EditorDock *p_dock);
+ 
++	// Joinery: the docks that belong to a slot, open or closed, for that
++	// slot's own menu. Closed transient docks are left out, as in the layout.
++	Vector<EditorDock *> get_slot_docks(int p_slot) const;
++
+ 	EditorDockManager();
+ };
+ 
+diff --git a/editor/docks/filesystem_dock.cpp b/editor/docks/filesystem_dock.cpp
+index a5b29e2..1900b54 100644
+--- a/editor/docks/filesystem_dock.cpp
++++ b/editor/docks/filesystem_dock.cpp
+@@ -4428,6 +4428,10 @@ void FileSystemDock::_bind_methods() {
+ FileSystemDock::FileSystemDock() {
+ 	singleton = this;
+ 	set_name(TTRC("FileSystem"));
++	// Joinery: the tab reads "Files". The layout key stays "FileSystem", so
++	// saved layouts and the layout migration keep finding this dock.
++	set_layout_key("FileSystem");
++	set_title(TTRC("Files"));
+ 	set_icon_name("Folder");
+ 	set_dock_shortcut(ED_SHORTCUT_AND_COMMAND("docks/open_filesystem", TTRC("Open FileSystem Dock"), KeyModifierMask::ALT | Key::F));
+ 	// Joinery: assets go to the bottom alongside the hierarchy, for the
+diff --git a/editor/editor_node.cpp b/editor/editor_node.cpp
+index 3cee21a..c026039 100644
+--- a/editor/editor_node.cpp
++++ b/editor/editor_node.cpp
+@@ -855,6 +855,9 @@ bool EditorNode::_is_project_data_missing() {
+ 	return false;
+ }
+ 
++// Joinery: the bottom docks a Joinery layout opens, in their tab order.
++static const char *JOINERY_OPEN_BOTTOM_DOCKS[] = { "Scene", "FileSystem", "Inspector", "Output" };
++
+ void EditorNode::_notification(int p_what) {
+ 	switch (p_what) {
+ 		case NOTIFICATION_TRANSLATION_CHANGED: {
+@@ -998,13 +1001,38 @@ void EditorNode::_notification(int p_what) {
+ 
+ 		case NOTIFICATION_READY: {
+ 			// Store the default order of bottom docks. It can only be determined dynamically.
++			// Joinery: the default layout opens only Scene, Files, Inspector and
++			// Output, in that order. Every other bottom dock starts closed and
++			// stays one click away in the bottom panel's menu and Editor > Editor
++			// Docks; the debugger still opens itself on Run.
+ 			PackedStringArray bottom_docks;
+ 			bottom_docks.reserve_exact(bottom_panel->get_tab_count());
++			for (const char *key : JOINERY_OPEN_BOTTOM_DOCKS) {
++				for (int i = 0; i < bottom_panel->get_tab_count(); i++) {
++					EditorDock *dock = Object::cast_to<EditorDock>(bottom_panel->get_tab_control(i));
++					if (dock && dock->get_effective_layout_key() == key) {
++						bottom_docks.append(key);
++						break;
++					}
++				}
++			}
++			Array closed_docks;
+ 			for (int i = 0; i < bottom_panel->get_tab_count(); i++) {
+ 				EditorDock *dock = Object::cast_to<EditorDock>(bottom_panel->get_tab_control(i));
+-				bottom_docks.append(dock->get_effective_layout_key());
++				if (!dock) {
++					continue;
++				}
++				const String key = dock->get_effective_layout_key();
++				if (bottom_docks.has(key)) {
++					continue;
++				}
++				bottom_docks.append(key);
++				if (!dock->is_transient()) {
++					closed_docks.push_back(key);
++				}
+ 			}
+ 			default_layout->set_value("docks", "dock_9", String(",").join(bottom_docks));
++			default_layout->set_value("docks", "dock_closed", closed_docks);
+ 
+ 			RenderingServer::get_singleton()->viewport_set_disable_2d(get_scene_root()->get_viewport_rid(), true);
+ 			RenderingServer::get_singleton()->viewport_set_environment_mode(get_viewport()->get_viewport_rid(), RSE::VIEWPORT_ENVIRONMENT_DISABLED);
+@@ -6334,6 +6362,11 @@ void EditorNode::_load_editor_layout() {
+ 			_layout_menu_option(LAYOUT_DEFAULT);
+ 		} else {
+ 			ep.step(TTR("Loading docks..."), 1, true);
++			// Joinery: a new project starts from the Joinery default, which
++			// closes every bottom dock except Scene, Files, Inspector and
++			// Output. Stock Godot only needs the bottom panel's own settings
++			// here, because its docks already sit where its default puts them.
++			editor_dock_manager->load_docks_from_config(default_layout, "docks", true);
+ 			// Initialize some default values.
+ 			bottom_panel->load_layout_from_config(default_layout, EDITOR_NODE_CONFIG_SECTION);
+ 		}
+@@ -6362,6 +6395,30 @@ void EditorNode::_load_editor_layout() {
+ 			utilities.append_array(bottom);
+ 			config->set_value("docks", "dock_9", String(",").join(utilities));
+ 		}
++		// Joinery: layout 2 opens only Scene, Files, Inspector and Output, in
++		// that order, and closes the other utility docks once. A dock the user
++		// moved elsewhere stays where they put it.
++		if (int(config->get_value(EDITOR_NODE_CONFIG_SECTION, "joinery_shell_layout", 0)) < 2) {
++			PackedStringArray bottom = String(config->get_value("docks", "dock_9", "")).split(",", false);
++			PackedStringArray ordered;
++			for (const char *key : JOINERY_OPEN_BOTTOM_DOCKS) {
++				if (bottom.has(key)) {
++					ordered.append(key);
++					bottom.erase(key);
++				}
++			}
++			ordered.append_array(bottom);
++			config->set_value("docks", "dock_9", String(",").join(ordered));
++			config->set_value("docks", "dock_9_selected_tab_idx", 0);
++			Array closed = config->get_value("docks", "dock_closed", Array());
++			static const char *closed_by_default[] = { "Import", "History", "Signals", "Groups", "Audio", "Animation", "Shader Editor", "Debugger" };
++			for (const char *key : closed_by_default) {
++				if (ordered.has(key) && !closed.has(key)) {
++					closed.push_back(key);
++				}
++			}
++			config->set_value("docks", "dock_closed", closed);
++		}
+ 		editor_dock_manager->load_docks_from_config(config, "docks", true);
+ 
+ 		ep.step(TTR("Reopening scenes..."), 2, true);
+@@ -6379,7 +6436,7 @@ void EditorNode::_load_editor_layout() {
+ }
+ 
+ void EditorNode::_save_central_editor_layout_to_config(Ref<ConfigFile> p_config_file) {
+-	p_config_file->set_value(EDITOR_NODE_CONFIG_SECTION, "joinery_shell_layout", 1);
++	p_config_file->set_value(EDITOR_NODE_CONFIG_SECTION, "joinery_shell_layout", 2);
+ 	// Bottom panel.
+ 
+ 	bottom_panel->save_layout_to_config(p_config_file, EDITOR_NODE_CONFIG_SECTION);
 diff --git a/editor/gui/editor_bottom_panel.cpp b/editor/gui/editor_bottom_panel.cpp
-index 477dcd2..20dce54 100644
+index 477dcd2..3d3bea3 100644
 --- a/editor/gui/editor_bottom_panel.cpp
 +++ b/editor/gui/editor_bottom_panel.cpp
-@@ -231,7 +231,14 @@ void EditorBottomPanel::_update_center_split_offset() {
+@@ -44,11 +44,18 @@
+ #include "editor/themes/editor_scale.h"
+ #include "scene/gui/box_container.h"
+ #include "scene/gui/button.h"
++#include "scene/gui/popup_menu.h"
+ #include "scene/gui/separator.h"
+ #include "scene/gui/split_container.h"
++#include "scene/resources/placeholder_textures.h"
+ 
+ void EditorBottomPanel::_notification(int p_what) {
+ 	switch (p_what) {
++		case NOTIFICATION_POSTINITIALIZE: {
++			// Signals of the base classes are only known once construction is done.
++			connect("pre_popup_pressed", callable_mp(this, &EditorBottomPanel::_joinery_fill_docks_menu));
++		} break;
++
+ 		case NOTIFICATION_READY: {
+ 			set_accessibility_region(true);
+ 		} break;
+@@ -95,10 +102,10 @@ int EditorBottomPanel::get_bottom_panel_offset() {
+ void EditorBottomPanel::_repaint() {
+ 	bool panel_collapsed = get_current_tab() == -1;
+ 
+-	if (panel_collapsed && get_popup()) {
+-		set_popup(nullptr);
+-	} else if (!panel_collapsed && !get_popup()) {
+-		set_popup(dock_context_popup);
++	// Joinery: the ⋮ menu stays available while the panel is collapsed, so
++	// a closed dock can always be opened from here.
++	if (get_popup() != joinery_docks_menu) {
++		set_popup(joinery_docks_menu);
+ 	}
+ 	if (!panel_collapsed && (previous_tab != -1)) {
+ 		return;
+@@ -231,7 +238,42 @@ void EditorBottomPanel::_update_center_split_offset() {
  	DockSplitContainer *center_split = EditorNode::get_center_split();
  	ERR_FAIL_NULL(center_split);
  
@@ -20,11 +235,85 @@ index 477dcd2..20dce54 100644
 +	// Joinery: opening a utility dock should reveal a useful work area, even
 +	// when an earlier layout saved a nearly collapsed height. Larger sizes
 +	// remain intact, and the divider can still be dragged while the dock is open.
++	// Output and Review hold long text or a large preview and open at 35% of
++	// the height; every other dock opens at 25% at least.
 +	int offset = get_bottom_panel_offset();
-+	if (get_current_tab() >= 0) {
-+		offset = MIN(offset, -int(center_split->get_size().y * 0.45));
++	EditorDock *current = Object::cast_to<EditorDock>(get_current_tab_control());
++	if (current) {
++		const String key = current->get_effective_layout_key();
++		const float share = (key == "Output" || key == "Review") ? 0.35 : 0.25;
++		offset = MIN(offset, -int(center_split->get_size().y * share));
 +	}
 +	center_split->set_split_offset(offset);
++}
++
++void EditorBottomPanel::_joinery_fill_docks_menu() {
++	joinery_docks_menu->clear();
++	joinery_docks_menu->reset_size();
++	joinery_menu_docks = EditorDockManager::get_singleton()->get_slot_docks(EditorDock::DOCK_SLOT_BOTTOM);
++	EditorDock *current = Object::cast_to<EditorDock>(get_current_tab_control());
++	for (int i = 0; i < joinery_menu_docks.size(); i++) {
++		EditorDock *dock = joinery_menu_docks[i];
++		joinery_docks_menu->add_radio_check_item(dock->get_display_title(), i);
++		joinery_docks_menu->set_item_checked(-1, dock == current);
++		const bool open_here = get_tab_idx_from_control(dock) >= 0;
++		joinery_docks_menu->set_item_tooltip(-1, vformat(open_here ? TTR("Show %s.") : TTR("Open %s."), TTR(dock->get_display_title())));
++	}
++}
++
++void EditorBottomPanel::_joinery_docks_menu_option(int p_id) {
++	ERR_FAIL_INDEX(p_id, joinery_menu_docks.size());
++	EditorDock *dock = joinery_menu_docks[p_id];
++	ERR_FAIL_NULL(dock);
++	// Opens a closed dock and makes it the current tab, which also scrolls
++	// the tab bar to it.
++	dock->make_visible();
  }
  
  EditorDock *EditorBottomPanel::_get_dock_from_control(Control *p_control) const {
+@@ -295,6 +337,19 @@ EditorBottomPanel::EditorBottomPanel() :
+ 	set_deselect_enabled(true);
+ 	set_theme_type_variation("BottomPanel");
+ 
++	// Joinery: one ⋮ menu instead of overflow arrows. The arrows get a
++	// zero-size icon so they take no room; the menu reaches every tab, and
++	// choosing one scrolls the bar to it.
++	joinery_docks_menu = memnew(PopupMenu);
++	joinery_docks_menu->connect(SceneStringName(id_pressed), callable_mp(this, &EditorBottomPanel::_joinery_docks_menu_option));
++	add_child(joinery_docks_menu, false, INTERNAL_MODE_FRONT);
++	Ref<PlaceholderTexture2D> no_arrow;
++	no_arrow.instantiate();
++	no_arrow->set_size(Size2());
++	for (const StringName &arrow : { SNAME("increment"), SNAME("increment_highlight"), SNAME("decrement"), SNAME("decrement_highlight") }) {
++		add_theme_icon_override(arrow, no_arrow);
++	}
++
+ 	bottom_hbox = memnew(HBoxContainer);
+ 	bottom_hbox->set_mouse_filter(MOUSE_FILTER_IGNORE);
+ 	get_internal_container()->add_child(bottom_hbox);
+diff --git a/editor/gui/editor_bottom_panel.h b/editor/gui/editor_bottom_panel.h
+index 3c034b9..8699b44 100644
+--- a/editor/gui/editor_bottom_panel.h
++++ b/editor/gui/editor_bottom_panel.h
+@@ -38,6 +38,7 @@ class ConfigFile;
+ class EditorDock;
+ class EditorToaster;
+ class HBoxContainer;
++class PopupMenu;
+ 
+ class ProgressIndicator : public TextureProgressBar {
+ 	GDCLASS(ProgressIndicator, TextureProgressBar);
+@@ -76,6 +77,13 @@ class EditorBottomPanel : public DockTabContainer {
+ 	void _update_center_split_offset();
+ 	EditorDock *_get_dock_from_control(Control *p_control) const;
+ 
++	// Joinery: the ⋮ menu lists every bottom dock, open or closed, and
++	// replaces the tab bar's overflow arrows.
++	PopupMenu *joinery_docks_menu = nullptr;
++	Vector<EditorDock *> joinery_menu_docks;
++	void _joinery_fill_docks_menu();
++	void _joinery_docks_menu_option(int p_id);
++
+ protected:
+ 	void _notification(int p_what);
+ 

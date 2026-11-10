@@ -45,9 +45,10 @@ Joinery-only, not for upstream: it reroutes stock flows into Joinery's own.
  editor/project_manager/project_dialog.h    |  42 ++
  editor/project_manager/project_manager.cpp |  52 +-
  editor/project_manager/project_manager.h   |   7 +
- editor/settings/editor_settings.cpp        |  12 +-
- editor/themes/editor_theme_manager.cpp     |  11 +
- 6 files changed, 684 insertions(+), 6 deletions(-)
+ editor/settings/editor_settings.cpp        |  15 +-
+ editor/themes/editor_fonts.cpp             |   7 +-
+ editor/themes/editor_theme_manager.cpp     | 150 ++++++
+ 7 files changed, 832 insertions(+), 7 deletions(-)
 
 diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
 index 7c83dcc..d855bf5 100644
@@ -881,10 +882,10 @@ index 501cdb0..5ab10b9 100644
  	PopupMenu *open_options_popup = nullptr;
  
 diff --git a/editor/settings/editor_settings.cpp b/editor/settings/editor_settings.cpp
-index 8dc98d6..ee5339f 100644
+index 8dc98d6..025969d 100644
 --- a/editor/settings/editor_settings.cpp
 +++ b/editor/settings/editor_settings.cpp
-@@ -603,8 +603,12 @@ void EditorSettings::_load_defaults(Ref<ConfigFile> p_extra_config) {
+@@ -603,8 +603,15 @@ void EditorSettings::_load_defaults(Ref<ConfigFile> p_extra_config) {
  	// Theme
  	EDITOR_SETTING_BASIC(Variant::BOOL, PROPERTY_HINT_ENUM, "interface/theme/follow_system_theme", false, "")
  	EDITOR_SETTING_BASIC(Variant::STRING, PROPERTY_HINT_ENUM, "interface/theme/style", "Modern", "Modern,Classic")
@@ -892,14 +893,17 @@ index 8dc98d6..ee5339f 100644
 -	EDITOR_SETTING_BASIC(Variant::STRING, PROPERTY_HINT_ENUM, "interface/theme/spacing_preset", "Default", "Compact,Default,Spacious,Custom")
 +	// Joinery: its own preset, and the default for this build. The stock
 +	// presets stay available, so nothing is taken away.
-+	EDITOR_SETTING_BASIC(Variant::STRING, PROPERTY_HINT_ENUM, "interface/theme/color_preset", "Joinery", "Joinery,Default,Breeze Dark,Godot 2,Godot 3,Gray,Light,Solarized (Dark),Solarized (Light),Black (OLED),Custom")
++	EDITOR_SETTING_BASIC(Variant::STRING, PROPERTY_HINT_ENUM, "interface/theme/color_preset", "Joinery", "Joinery,Joinery Light,Default,Breeze Dark,Godot 2,Godot 3,Gray,Light,Solarized (Dark),Solarized (Light),Black (OLED),Custom")
++	// Joinery: the one accent both Joinery presets use, matching the
++	// Journeyman sidebar's Appearance setting. Other presets ignore it.
++	EDITOR_SETTING_BASIC(Variant::STRING, PROPERTY_HINT_ENUM, "interface/theme/joinery_accent", "Brass", "Brass,Blue,Green,Violet")
 +	// Joinery: roomier by default. Dense panels are how the stock editor fits
 +	// everything at once, and Joinery deliberately shows less.
 +	EDITOR_SETTING_BASIC(Variant::STRING, PROPERTY_HINT_ENUM, "interface/theme/spacing_preset", "Spacious", "Compact,Default,Spacious,Custom")
  	EDITOR_SETTING(Variant::INT, PROPERTY_HINT_ENUM, "interface/theme/icon_and_font_color", 0, "Auto,Dark,Light")
  	EDITOR_SETTING_BASIC(Variant::COLOR, PROPERTY_HINT_NONE, "interface/theme/base_color", Color(0.14, 0.14, 0.14), "")
  	EDITOR_SETTING_BASIC(Variant::COLOR, PROPERTY_HINT_NONE, "interface/theme/accent_color", Color(0.34, 0.62, 1.0), "")
-@@ -615,7 +619,9 @@ void EditorSettings::_load_defaults(Ref<ConfigFile> p_extra_config) {
+@@ -615,7 +622,9 @@ void EditorSettings::_load_defaults(Ref<ConfigFile> p_extra_config) {
  	EDITOR_SETTING(Variant::INT, PROPERTY_HINT_ENUM, "interface/theme/draw_relationship_lines", (int32_t)EditorThemeManager::RELATIONSHIP_SELECTED_ONLY, "None,Selected Only,All")
  	EDITOR_SETTING(Variant::FLOAT, PROPERTY_HINT_RANGE, "interface/theme/relationship_line_opacity", 0.1, "0.00,1,0.01")
  	EDITOR_SETTING(Variant::INT, PROPERTY_HINT_RANGE, "interface/theme/border_size", 0, "0,2,1")
@@ -910,24 +914,200 @@ index 8dc98d6..ee5339f 100644
  	EDITOR_SETTING(Variant::INT, PROPERTY_HINT_RANGE, "interface/theme/base_spacing", 4, "0,8,1")
  	EDITOR_SETTING(Variant::INT, PROPERTY_HINT_RANGE, "interface/theme/additional_spacing", 0, "0,8,1")
  	EDITOR_SETTING_BASIC(Variant::BOOL, PROPERTY_HINT_NONE, "interface/theme/use_monospace_font_for_editor_symbols", true, "")
+diff --git a/editor/themes/editor_fonts.cpp b/editor/themes/editor_fonts.cpp
+index 5f9592b..38720eb 100644
+--- a/editor/themes/editor_fonts.cpp
++++ b/editor/themes/editor_fonts.cpp
+@@ -161,7 +161,12 @@ void editor_register_fonts(const Ref<Theme> &p_theme) {
+ 	Dictionary default_features;
+ 	default_features["calt"] = false; // Disable contextual alternates by default.
+ 	default_features["ss04"] = true; // Serifed I, tailed l for better distinction.
+-	default_features["tnum"] = true; // Tabular numbers for better alignment.
++	// Joinery: no tabular numbers in the UI font. Inter's `tnum` also swaps the
++	// hyphen for `hyphen.tf`, a glyph about 40% wider centred in a figure-wide
++	// cell, so "low-poly" rendered as "low - poly" everywhere prose appears.
++	// Places that align changing numbers ask for tabular digits on their own
++	// font variation instead.
++	default_features["tnum"] = false;
+ 
+ 	String noto_cjk_path;
+ 	String noto_cjk_bold_path;
 diff --git a/editor/themes/editor_theme_manager.cpp b/editor/themes/editor_theme_manager.cpp
-index 39f60bf..62ab310 100644
+index 39f60bf..536ef7f 100644
 --- a/editor/themes/editor_theme_manager.cpp
 +++ b/editor/themes/editor_theme_manager.cpp
-@@ -343,6 +343,17 @@ EditorThemeManager::ThemeConfiguration EditorThemeManager::_create_theme_config(
+@@ -166,6 +166,10 @@ Ref<StyleBoxLine> EditorThemeManager::make_line_stylebox(Color p_color, int p_th
+ 
+ // Theme generation and population routines.
+ 
++// Joinery: defined below, beside the preset that uses them.
++static Color _joinery_accent_color(bool p_light);
++static void _joinery_populate_styles(const Ref<EditorTheme> &p_theme, const EditorThemeManager::ThemeConfiguration &p_config);
++
+ Ref<EditorTheme> EditorThemeManager::_create_base_theme(const Ref<EditorTheme> &p_old_theme) {
+ 	OS::get_singleton()->benchmark_begin_measure(get_benchmark_key(), "Create Base Theme");
+ 
+@@ -232,11 +236,138 @@ Ref<EditorTheme> EditorThemeManager::_create_base_theme(const Ref<EditorTheme> &
+ 
+ 	_populate_text_editor_styles(theme, config);
+ 	_populate_visual_shader_styles(theme, config);
++	_joinery_populate_styles(theme, config);
+ 
+ 	OS::get_singleton()->benchmark_end_measure(get_benchmark_key(), "Create Base Theme");
+ 	return theme;
+ }
+ 
++// Joinery: the accent both Joinery presets use, from the joinery_accent
++// setting. Each option has a dark and a light value, chosen to keep 4.5:1
++// against the preset's surfaces and against the text drawn on it. These are
++// the same values as the Journeyman sidebar's ACCENTS table.
++static Color _joinery_accent_color(bool p_light) {
++	const String accent = EDITOR_GET("interface/theme/joinery_accent");
++	if (accent == "Blue") {
++		return p_light ? Color::html("#1f6aa5") : Color::html("#6aaee0");
++	}
++	if (accent == "Green") {
++		return p_light ? Color::html("#2d7546") : Color::html("#79c48f");
++	}
++	if (accent == "Violet") {
++		return p_light ? Color::html("#6a4bc4") : Color::html("#b59cf0");
++	}
++	// Brass, the default.
++	return p_light ? Color::html("#875309") : Color::html("#e6b66b");
++}
++
++// Joinery: styles shared by the fork's C++ screens and the addon, so a
++// primary button in the Project Manager matches one in the sidebar. The addon
++// builds its own theme with the same names; this covers the engine side.
++static void _joinery_populate_styles(const Ref<EditorTheme> &p_theme, const EditorThemeManager::ThemeConfiguration &p_config) {
++	const Color accent = p_config.accent_color;
++	const Color on_accent = p_config.dark_theme ? Color::html("#1a1a1a") : Color::html("#ffffff");
++	const Color hover = p_config.dark_theme ? accent.lightened(0.08) : accent.darkened(0.08);
++	const Color pressed = p_config.dark_theme ? accent.darkened(0.08) : accent.darkened(0.16);
++	// Secondary text is a solid colour, never an alpha fade, so it keeps its
++	// contrast on every surface.
++	const Color text_muted = p_config.dark_theme ? Color::html("#b0b0aa") : Color::html("#5b5d55");
++	const Color danger = p_config.dark_theme ? Color::html("#f08a7e") : Color::html("#b4372b");
++	const int radius = 8 * EDSCALE;
++
++	p_theme->set_type_variation("JoineryPrimaryButton", "Button");
++	Ref<StyleBoxFlat> normal = p_config.button_style->duplicate();
++	normal->set_bg_color(accent);
++	normal->set_border_width_all(0);
++	normal->set_corner_radius_all(radius);
++	Ref<StyleBoxFlat> hovered = normal->duplicate();
++	hovered->set_bg_color(hover);
++	Ref<StyleBoxFlat> down = normal->duplicate();
++	down->set_bg_color(pressed);
++	// Classic fills button_style_focus, Modern only focus_style. A focus ring
++	// is never optional, so fall back to drawing one from the normal style.
++	Ref<StyleBoxFlat> focus;
++	if (p_config.button_style_focus.is_valid()) {
++		focus = p_config.button_style_focus->duplicate();
++	} else if (p_config.focus_style.is_valid()) {
++		focus = p_config.focus_style->duplicate();
++	} else {
++		focus = normal->duplicate();
++	}
++	focus->set_draw_center(false);
++	focus->set_border_width_all(2 * EDSCALE);
++	focus->set_border_color(accent);
++	focus->set_corner_radius_all(radius + 2 * EDSCALE);
++	focus->set_expand_margin_all(2 * EDSCALE);
++	Ref<StyleBoxFlat> disabled = p_config.button_style_disabled.is_valid() ? Ref<StyleBoxFlat>(p_config.button_style_disabled->duplicate()) : Ref<StyleBoxFlat>(normal->duplicate());
++	disabled->set_corner_radius_all(radius);
++	p_theme->set_stylebox(CoreStringName(normal), "JoineryPrimaryButton", normal);
++	p_theme->set_stylebox(SceneStringName(hover), "JoineryPrimaryButton", hovered);
++	p_theme->set_stylebox(SceneStringName(pressed), "JoineryPrimaryButton", down);
++	p_theme->set_stylebox("hover_pressed", "JoineryPrimaryButton", down);
++	p_theme->set_stylebox("focus", "JoineryPrimaryButton", focus);
++	p_theme->set_stylebox("disabled", "JoineryPrimaryButton", disabled);
++	for (const StringName &name : { SceneStringName(font_color), SNAME("font_hover_color"), SNAME("font_pressed_color"), SNAME("font_hover_pressed_color"), SNAME("font_focus_color"), SNAME("icon_normal_color"), SNAME("icon_hover_color"), SNAME("icon_pressed_color"), SNAME("icon_hover_pressed_color"), SNAME("icon_focus_color") }) {
++		p_theme->set_color(name, "JoineryPrimaryButton", on_accent);
++	}
++
++	// Type steps, as multiples of the editor font size (which already
++	// includes the editor scale): caption 0.85, title 1.3, display 1.7.
++	const int body = p_theme->get_font_size("main_size", EditorStringName(EditorFonts));
++	const Ref<Font> bold = p_theme->get_font("bold", EditorStringName(EditorFonts));
++
++	p_theme->set_type_variation("JoineryCaption", "Label");
++	p_theme->set_font_size(SceneStringName(font_size), "JoineryCaption", (int)Math::round(body * 0.85));
++	p_theme->set_color(SceneStringName(font_color), "JoineryCaption", text_muted);
++
++	p_theme->set_type_variation("JoineryMuted", "Label");
++	p_theme->set_color(SceneStringName(font_color), "JoineryMuted", text_muted);
++
++	p_theme->set_type_variation("JoineryTitle", "Label");
++	p_theme->set_font_size(SceneStringName(font_size), "JoineryTitle", (int)Math::round(body * 1.3));
++	p_theme->set_font(SceneStringName(font), "JoineryTitle", bold);
++
++	p_theme->set_type_variation("JoineryDisplay", "Label");
++	p_theme->set_font_size(SceneStringName(font_size), "JoineryDisplay", (int)Math::round(body * 1.7));
++	p_theme->set_font(SceneStringName(font), "JoineryDisplay", bold);
++
++	p_theme->set_type_variation("JoinerySection", "Label");
++	p_theme->set_font_size(SceneStringName(font_size), "JoinerySection", (int)Math::round(body * 0.85));
++	p_theme->set_font(SceneStringName(font), "JoinerySection", bold);
++	p_theme->set_color(SceneStringName(font_color), "JoinerySection", text_muted);
++
++	p_theme->set_type_variation("JoineryError", "Label");
++	p_theme->set_color(SceneStringName(font_color), "JoineryError", danger);
++
++	// A failure the user has to act on: a faint danger tint (12% over the
++	// surface) with plain text on it, md radius, SPACE.3 padding.
++	const int pad = 12 * EDSCALE;
++	p_theme->set_type_variation("JoineryBanner", "PanelContainer");
++	Ref<StyleBoxFlat> banner;
++	banner.instantiate();
++	banner->set_bg_color(p_config.base_color.lerp(danger, 0.12));
++	banner->set_corner_radius_all(radius);
++	banner->set_content_margin_all(pad);
++	p_theme->set_stylebox(SceneStringName(panel), "JoineryBanner", banner);
++
++	// A small status label, such as an app's readiness: a raised surface just
++	// off the ground (muted caption text keeps 4.5:1 on it, unlike the button
++	// fill, which reads as a button), sm radius, SPACE.2 by SPACE.1/2.
++	p_theme->set_type_variation("JoineryChip", "PanelContainer");
++	Ref<StyleBoxFlat> chip;
++	chip.instantiate();
++	chip->set_bg_color(p_config.dark_theme ? p_config.base_color.lerp(Color(1, 1, 1), 0.06) : p_config.base_color.lerp(Color(0, 0, 0), 0.04));
++	chip->set_corner_radius_all(6 * EDSCALE);
++	chip->set_content_margin_individual(8 * EDSCALE, 2 * EDSCALE, 8 * EDSCALE, 2 * EDSCALE);
++	p_theme->set_stylebox(SceneStringName(panel), "JoineryChip", chip);
++
++	// The wordmark in the Project Manager title bar: display size, bold, in
++	// the plain font colour, drawn as a flat button so it opens About.
++	p_theme->set_type_variation("JoineryWordmark", "FlatButton");
++	p_theme->set_font_size(SceneStringName(font_size), "JoineryWordmark", (int)Math::round(body * 1.7));
++	p_theme->set_font(SceneStringName(font), "JoineryWordmark", bold);
++}
++
+ EditorThemeManager::ThemeConfiguration EditorThemeManager::_create_theme_config() {
+ 	ThemeConfiguration config;
+ 
+@@ -343,6 +474,25 @@ EditorThemeManager::ThemeConfiguration EditorThemeManager::_create_theme_config(
  			} else if (config.preset == "Gray") {
  				preset_accent_color = Color(0.44, 0.73, 0.98);
  				preset_base_color = Color(0.24, 0.24, 0.24);
 +			} else if (config.preset == "Joinery") {
 +				// Joinery's own look, and this build's default. Flat and roomy
 +				// rather than high-contrast: a near-black neutral surface so
-+				// viewport content is what draws the eye, and a brass accent
-+				// that matches the Journeyman sidebar. The warm accent on a
-+				// slightly cool base is what keeps it from reading as grey.
-+				preset_accent_color = Color(0.85, 0.63, 0.26);
++				// viewport content is what draws the eye, and the accent the
++				// Journeyman sidebar uses. The warm default accent on a slightly
++				// cool base is what keeps it from reading as grey.
++				preset_accent_color = _joinery_accent_color(false);
 +				preset_base_color = Color(0.118, 0.118, 0.127);
 +				// Lower than the 0.3 default: less panel-on-panel banding.
 +				preset_contrast = 0.18;
++				preset_icon_saturation = 1;
++			} else if (config.preset == "Joinery Light") {
++				// The light counterpart, on the sidebar's light surface. The
++				// contrast is negative, as for every light preset, so recessed
++				// surfaces get lighter and inputs read as white wells.
++				preset_accent_color = _joinery_accent_color(true);
++				preset_base_color = Color(0.969, 0.965, 0.953);
++				preset_contrast = -0.12;
 +				preset_icon_saturation = 1;
  			} else if (config.preset == "Light") {
  				preset_accent_color = Color(0.18, 0.50, 1.00);

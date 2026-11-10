@@ -1,0 +1,204 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Tue, 10 Nov 2026 09:28:25 +0100
+Subject: [PATCH] fix(editor): plainer start screen chrome and setup state
+ colours
+
+Joinery-only start screen and setup flow, not intended for upstream.
+---
+ editor/project_manager/project_dialog.cpp  | 70 ++++++++++++++++++----
+ editor/project_manager/project_dialog.h    |  1 +
+ editor/project_manager/project_manager.cpp | 17 +++++-
+ 3 files changed, 75 insertions(+), 13 deletions(-)
+
+diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
+index 98eff25..5a608b6 100644
+--- a/editor/project_manager/project_dialog.cpp
++++ b/editor/project_manager/project_dialog.cpp
+@@ -37,7 +37,9 @@
+ // Joinery: one size for the whole creation flow, so the dialog never resizes
+ // between steps. Long pages scroll inside it.
+ #define JOINERY_DIALOG_WIDTH 720
+-#define JOINERY_DIALOG_HEIGHT 700
++#define JOINERY_DIALOG_HEIGHT 760
++// App list rows, in multiples of the editor font size.
++#define JOINERY_APP_ROW 2.0
+ #include "core/io/file_access.h"
+ #include "core/io/zip_io.h"
+ #include "core/object/callable_mp.h"
+@@ -67,6 +69,7 @@
+ #include "scene/resources/atlas_texture.h"
+ #include "scene/resources/gradient.h"
+ #include "scene/resources/gradient_texture.h"
++#include "scene/resources/image_texture.h"
+ #include "scene/resources/style_box_flat.h"
+ #include "scene/resources/style_box_line.h"
+ #include "servers/display/display_server.h"
+@@ -774,7 +777,11 @@ void ProjectDialog::_joinery_fit_scroll() {
+ 	joinery_scroll_inner->add_theme_constant_override(SNAME("margin_left"), ring);
+ 	joinery_scroll_inner->add_theme_constant_override(SNAME("margin_right"), ring);
+ 	joinery_scroll_inner->add_theme_constant_override(SNAME("margin_top"), ring);
+-	joinery_scroll_inner->add_theme_constant_override(SNAME("margin_bottom"), _joinery_space(5));
++	// The page ends one app row (or a section gap, if taller) above the
++	// footer rule: the fade below covers exactly that band, so the last line
++	// is never under it when the page is scrolled to its end.
++	const int fade_height = MAX(_joinery_space(5), _joinery_control_h(JOINERY_APP_ROW));
++	joinery_scroll_inner->add_theme_constant_override(SNAME("margin_bottom"), fade_height);
+ 	for (MarginContainer *frame : { joinery_header_frame, joinery_footer_frame }) {
+ 		if (frame) {
+ 			frame->add_theme_constant_override(SNAME("margin_left"), ring);
+@@ -797,7 +804,7 @@ void ProjectDialog::_joinery_fit_scroll() {
+ 	}
+ 	if (joinery_scroll_fade_frame && joinery_scroll_fade) {
+ 		joinery_scroll_fade_frame->add_theme_constant_override(SNAME("margin_right"), gutter - ring);
+-		joinery_scroll_fade->set_custom_minimum_size(Size2(0, _joinery_space(5)));
++		joinery_scroll_fade->set_custom_minimum_size(Size2(0, fade_height));
+ 		Color ground = get_theme_color(SNAME("base_color"), EditorStringName(Editor));
+ 		const Ref<StyleBoxFlat> window = get_theme_stylebox(SceneStringName(panel));
+ 		if (window.is_valid()) {
+@@ -807,9 +814,10 @@ void ProjectDialog::_joinery_fit_scroll() {
+ 		ramp.instantiate();
+ 		ramp->set_color(0, Color(ground, 0.0));
+ 		ramp->set_color(1, ground);
+-		// The lower part is solid ground: a row cut by the edge is hidden
+-		// whole, and only rows fully above it fade.
+-		ramp->set_offset(1, 0.55);
++		// The fade is one app row tall and its lower half is solid ground: a
++		// row cut by the edge has its text hidden, never sliced, and only the
++		// row above it softens.
++		ramp->set_offset(1, 0.5);
+ 		Ref<GradientTexture2D> fade;
+ 		fade.instantiate();
+ 		fade->set_gradient(ramp);
+@@ -1239,6 +1247,9 @@ void ProjectDialog::_joinery_build_catalog(const Array &p_tools) {
+ 	_joinery_clear_catalog();
+ 
+ 	const int control_height = _joinery_control_h(2.5);
++	// App rows are list rows, not buttons: one shared, tighter height, so
++	// every app fits above the footer at the dialog's usual size.
++	const int app_row_height = _joinery_control_h(JOINERY_APP_ROW);
+ 
+ 	struct Group {
+ 		const char *key;
+@@ -1293,7 +1304,7 @@ void ProjectDialog::_joinery_build_catalog(const Array &p_tools) {
+ 			// text at the trailing edge.
+ 			HBoxContainer *row = memnew(HBoxContainer);
+ 			row->add_theme_constant_override("separation", _joinery_space(3));
+-			row->set_custom_minimum_size(Size2(0, control_height));
++			row->set_custom_minimum_size(Size2(0, app_row_height));
+ 			rows->add_child(row);
+ 
+ 			CheckBox *box = memnew(CheckBox);
+@@ -1922,14 +1933,49 @@ bool ProjectDialog::_joinery_run_create_step(int p_step, String &r_output) const
+ 	return false;
+ }
+ 
++// A step icon redrawn in one colour, keeping its shape's alpha: the editor's
++// own icons are tuned for the dark theme (a mint check, a pale grey spinner)
++// and fade out on the light ground.
++Ref<Texture2D> ProjectDialog::_joinery_step_icon(const StringName &p_icon, int p_state) const {
++	const Ref<Texture2D> icon = get_editor_theme_icon(p_icon);
++	if (icon.is_null() || p_state == JOINERY_STEP_PENDING) {
++		return icon;
++	}
++	Ref<Image> image = icon->get_image();
++	if (image.is_null() || image->is_empty()) {
++		return icon;
++	}
++	image = image->duplicate();
++	if (image->is_compressed()) {
++		image->decompress();
++	}
++	image->convert(Image::FORMAT_RGBA8);
++	const bool dark = EditorThemeManager::is_dark_theme();
++	Color tint = get_theme_color(SceneStringName(font_color), SNAME("Label"));
++	if (p_state == JOINERY_STEP_DONE) {
++		// At least 3:1 on either ground (#2a6f43 on #f7f6f3, #6cc38a on #202123).
++		tint = dark ? Color::html("#6cc38a") : Color::html("#2a6f43");
++	} else if (p_state == JOINERY_STEP_FAILED) {
++		tint = get_theme_color(SceneStringName(font_color), SNAME("JoineryError"));
++	}
++	for (int y = 0; y < image->get_height(); y++) {
++		for (int x = 0; x < image->get_width(); x++) {
++			const Color pixel = image->get_pixel(x, y);
++			image->set_pixel(x, y, Color(tint, pixel.a * tint.a));
++		}
++	}
++	return ImageTexture::create_from_image(image);
++}
++
+ void ProjectDialog::_joinery_create_progress(int p_step, int p_state) {
+ 	if (p_step < 0 || p_step >= JOINERY_CREATE_STEPS) {
+ 		return;
+ 	}
+-	// The running step turns like the editor's own progress spinner.
++	// The running step turns like the editor's own progress spinner, drawn in
++	// the text colour: the step that is working is the easiest one to see.
+ 	static const char *icons[] = { "GuiRadioUnchecked", "Progress1", "StatusSuccess", "StatusError" };
+ 	joinery_create_states[p_step] = CLAMP(p_state, 0, 3);
+-	joinery_create_icons[p_step]->set_texture(get_editor_theme_icon(StringName(icons[joinery_create_states[p_step]])));
++	joinery_create_icons[p_step]->set_texture(_joinery_step_icon(StringName(icons[joinery_create_states[p_step]]), joinery_create_states[p_step]));
+ 	joinery_create_labels[p_step]->set_theme_type_variation(p_state == JOINERY_STEP_PENDING ? StringName("JoineryMuted") : StringName("JoineryLabel"));
+ 	bool spinning = false;
+ 	for (int i = 0; i < JOINERY_CREATE_STEPS; i++) {
+@@ -1951,7 +1997,7 @@ void ProjectDialog::_joinery_spin_tick() {
+ 	const StringName frame = StringName("Progress" + itos(joinery_spin_frame + 1));
+ 	for (int i = 0; i < JOINERY_CREATE_STEPS; i++) {
+ 		if (joinery_create_states[i] == JOINERY_STEP_RUNNING) {
+-			joinery_create_icons[i]->set_texture(get_editor_theme_icon(frame));
++			joinery_create_icons[i]->set_texture(_joinery_step_icon(frame, JOINERY_STEP_RUNNING));
+ 		}
+ 	}
+ }
+@@ -3081,9 +3127,9 @@ ProjectDialog::ProjectDialog() {
+ 	l->set_theme_type_variation(SNAME("JoineryMuted"));
+ 	loading->add_child(l);
+ 
+-	// Groups: 16 between them, 4 within.
++	// Groups: 12 between them, 4 within.
+ 	joinery_tool_list = memnew(VBoxContainer);
+-	joinery_tool_list->add_theme_constant_override(SNAME("separation"), _joinery_space(4));
++	joinery_tool_list->add_theme_constant_override(SNAME("separation"), _joinery_space(3));
+ 	joinery_container->add_child(joinery_tool_list);
+ 
+ 	// How Joinery connects to each app. Most people never need it, so the
+diff --git a/editor/project_manager/project_dialog.h b/editor/project_manager/project_dialog.h
+index eed15c3..aa29045 100644
+--- a/editor/project_manager/project_dialog.h
++++ b/editor/project_manager/project_dialog.h
+@@ -302,6 +302,7 @@ private:
+ 	void _joinery_apply_sizes();
+ 	void _joinery_align_names();
+ 	void _joinery_spin_tick();
++	Ref<Texture2D> _joinery_step_icon(const StringName &p_icon, int p_state) const;
+ 	void _joinery_style_create_bar(bool p_failed);
+ 	void _joinery_update_create_bar(bool p_animate);
+ 	void _joinery_trim_first_page();
+diff --git a/editor/project_manager/project_manager.cpp b/editor/project_manager/project_manager.cpp
+index 31e5231..c921760 100644
+--- a/editor/project_manager/project_manager.cpp
++++ b/editor/project_manager/project_manager.cpp
+@@ -251,7 +251,22 @@ void ProjectManager::_update_theme(bool p_skip_creation) {
+ 		main_vbox->add_theme_constant_override("separation", top_bar_separation);
+ 
+ 		background_panel->add_theme_style_override(SceneStringName(panel), get_theme_stylebox("Background", EditorStringName(EditorStyles)));
+-		main_view_container->add_theme_style_override(SceneStringName(panel), get_theme_stylebox("panel_container", "ProjectManager"));
++		// Joinery: the page has no fill or border of its own, only its insets.
++		// The project list panel inside it is the one surface, so the list,
++		// the agent row, the tagline and the wordmark share one left edge.
++		{
++			const Ref<StyleBox> page = get_theme_stylebox("panel_container", "ProjectManager");
++			Ref<StyleBoxEmpty> bare;
++			bare.instantiate();
++			if (page.is_valid()) {
++				// No top inset: with no edge to clear, the agent row follows the
++				// tagline at the page's usual gap.
++				for (const Side side : { SIDE_LEFT, SIDE_RIGHT, SIDE_BOTTOM }) {
++					bare->set_content_margin(side, page->get_margin(side));
++				}
++			}
++			main_view_container->add_theme_style_override(SceneStringName(panel), bare);
++		}
+ 		_joinery_fit_header();
+ 
+ 		// Joinery: this is Joinery's project manager, so it says so. The upstream

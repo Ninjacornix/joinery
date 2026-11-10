@@ -1,0 +1,671 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Joinery Build <build@joinery.invalid>
+Date: Tue, 10 Nov 2026 02:03:35 +0100
+Subject: [PATCH] feat(editor): steady start screens and project setup
+
+Equal-height empty-state actions, a flush agent row with a Change link, a faint-accent disabled primary, aligned app blurbs, Godot shown as always included, a footer rule with the page kept inside its column, a steady header and red bar on failure, a spinning running step, a cancellable setup and Create plain project as the primary after an app-list failure.
+
+Joinery-only start screen and setup flow, not intended for upstream.
+---
+ editor/project_manager/project_dialog.cpp  | 217 ++++++++++++++++-----
+ editor/project_manager/project_dialog.h    |  23 ++-
+ editor/project_manager/project_manager.cpp |  45 ++++-
+ editor/project_manager/project_manager.h   |   7 +-
+ editor/themes/editor_theme_manager.cpp     |  17 +-
+ 5 files changed, 247 insertions(+), 62 deletions(-)
+
+diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
+index d9982af..944988e 100644
+--- a/editor/project_manager/project_dialog.cpp
++++ b/editor/project_manager/project_dialog.cpp
+@@ -63,7 +63,9 @@
+ #include "scene/gui/separator.h"
+ #include "scene/gui/text_edit.h"
+ #include "scene/gui/texture_rect.h"
++#include "scene/main/timer.h"
+ #include "scene/resources/style_box_flat.h"
++#include "scene/resources/style_box_line.h"
+ #include "servers/display/display_server.h"
+ #include "servers/rendering/rendering_server.h"
+ 
+@@ -124,7 +126,8 @@ void ProjectDialog::_update_ok_button() {
+ 	// the catalog: past step 1 needs the app list.
+ 	bool blocked = invalid;
+ 	if (joinery_page == JOINERY_PAGE_NAME) {
+-		blocked = blocked || joinery_load_failed;
++		// After an app-list failure this button creates a plain project,
++		// which needs only a valid name and folder.
+ 	} else if (joinery_page == JOINERY_PAGE_CREATING) {
+ 		blocked = joinery_create_running;
+ 	} else {
+@@ -720,31 +723,44 @@ void ProjectDialog::_joinery_apply_sizes() {
+ 		}
+ 	}
+ 	_joinery_fit_scroll();
++	_joinery_align_names();
+ }
+ 
+-// The scroll frame reaches past the column by the focus ring on every side,
+-// and on the trailing side also by the scrollbar's reserved gutter. The inner
+-// margin takes the ring back, so the fields keep the header's left and right
+-// edges whether or not the page scrolls.
++// Every app's blurb starts at one x: each name column is as wide as the
++// widest name, so the list reads as two columns, not a ragged middle edge.
++void ProjectDialog::_joinery_align_names() {
++	float widest = 0;
++	for (CheckBox *box : joinery_boxes) {
++		box->set_custom_minimum_size(Size2(0, box->get_custom_minimum_size().y));
++		widest = MAX(widest, box->get_combined_minimum_size().x);
++	}
++	for (CheckBox *box : joinery_boxes) {
++		box->set_custom_minimum_size(Size2(widest, box->get_custom_minimum_size().y));
++	}
++}
++
++// The page scrolls inside the column, never past it. The dialog's outer
++// margin is one ring narrower on the leading side; the page's inner margin
++// gives that ring back (room for focus rings), and so do the header and
++// footer frames, so all three share one left edge. The scrollbar stays inside
++// the column's right edge, and the page ends with a section gap so its last
++// line never sits against the footer rule.
+ void ProjectDialog::_joinery_fit_scroll() {
+ 	if (!joinery_scroll_frame || !joinery_scroll || !joinery_scroll_inner) {
+ 		return;
+ 	}
+ 	const int ring = _joinery_space(1);
+-	int gutter = joinery_scroll->get_theme_constant(SNAME("scrollbar_h_separation"));
+-	if (joinery_scroll->get_v_scroll_bar()) {
+-		gutter += joinery_scroll->get_v_scroll_bar()->get_combined_minimum_size().x;
+-	}
+-	const Ref<StyleBox> panel = joinery_scroll->get_theme_stylebox(SceneStringName(panel));
+-	if (panel.is_valid()) {
+-		gutter += panel->get_margin(SIDE_RIGHT);
+-	}
+-	joinery_scroll_frame->add_theme_constant_override(SNAME("margin_left"), -ring);
+-	joinery_scroll_frame->add_theme_constant_override(SNAME("margin_top"), -ring);
+-	joinery_scroll_frame->add_theme_constant_override(SNAME("margin_bottom"), -ring);
+-	joinery_scroll_frame->add_theme_constant_override(SNAME("margin_right"), -(ring + gutter));
+ 	for (const StringName &side : { SNAME("margin_left"), SNAME("margin_right"), SNAME("margin_top"), SNAME("margin_bottom") }) {
+-		joinery_scroll_inner->add_theme_constant_override(side, ring);
++		joinery_scroll_frame->add_theme_constant_override(side, 0);
++	}
++	joinery_scroll_inner->add_theme_constant_override(SNAME("margin_left"), ring);
++	joinery_scroll_inner->add_theme_constant_override(SNAME("margin_right"), ring);
++	joinery_scroll_inner->add_theme_constant_override(SNAME("margin_top"), ring);
++	joinery_scroll_inner->add_theme_constant_override(SNAME("margin_bottom"), _joinery_space(5));
++	for (MarginContainer *frame : { joinery_header_frame, joinery_footer_frame }) {
++		if (frame) {
++			frame->add_theme_constant_override(SNAME("margin_left"), ring);
++		}
+ 	}
+ }
+ 
+@@ -785,8 +801,8 @@ void ProjectDialog::_joinery_trim_first_page() {
+ 
+ // Every other mode uses the stock dialog, which reuses this same window.
+ void ProjectDialog::_joinery_hide_wizard() {
+-	joinery_header->hide();
+-	joinery_footer->hide();
++	joinery_header_frame->hide();
++	joinery_footer_frame->hide();
+ 	joinery_banner->hide();
+ 	joinery_advanced->hide();
+ 	joinery_renderer_box->hide();
+@@ -849,10 +865,15 @@ void ProjectDialog::_joinery_show_step(int p_step) {
+ 	const bool last = p_step >= total - 1;
+ 	if (creating) {
+ 		const bool stopped = joinery_create_failed >= 0 && !joinery_create_running;
+-		joinery_step_label->hide();
++		// The header keeps its shape on every page: the caption line names
++		// the project, so the title stays where the steps had it.
++		joinery_step_label->show();
++		joinery_step_label->set_text(project_name->get_text().strip_edges());
+ 		joinery_intro->hide();
+ 		joinery_title->set_text(stopped ? TTR("Project setup stopped") : TTR(String::utf8("Setting up your project…")));
+-		joinery_create_bar->set_visible(!stopped && joinery_create_running);
++		// A failure keeps the bar's place and turns it to the error colour.
++		joinery_create_bar->show();
++		_joinery_style_create_bar(stopped);
+ 	} else {
+ 		static const char *titles[] = { TTRC("Name your game"), TTRC("Choose your apps"), TTRC("Look and sound") };
+ 		static const char *intros[] = { "", TTRC("Journeyman works inside these apps. You can change them later with /setup."), TTRC("Optional. Journeyman will ask before it matters.") };
+@@ -867,8 +888,14 @@ void ProjectDialog::_joinery_show_step(int p_step) {
+ 
+ 	joinery_back->set_visible(!first && !creating);
+ 	joinery_next->set_visible(!creating || (joinery_create_failed >= 0 && !joinery_create_running));
+-	joinery_next->set_text(creating ? TTR("Retry") : (last ? TTR("Create project") : TTR("Next")));
+-	joinery_cancel->set_disabled(creating && joinery_create_running);
++	// After an app-list failure the way forward is a plain project, so that
++	// becomes step 1's primary action instead of a Next that can't work.
++	const bool plain = first && joinery_load_failed;
++	joinery_next->set_text(creating ? TTR("Retry") : (plain ? TTR("Create plain project") : (last ? TTR("Create project") : TTR("Next"))));
++	joinery_banner_plain->hide();
++	// Cancel always works: while the worker runs it stops after the current
++	// step and nothing is registered.
++	joinery_cancel->set_disabled(false);
+ 	set_close_on_escape(!(creating && joinery_create_running));
+ 
+ 	if (first) {
+@@ -886,6 +913,10 @@ void ProjectDialog::_joinery_next_pressed() {
+ 		_joinery_retry_create();
+ 		return;
+ 	}
++	if (joinery_page == JOINERY_PAGE_NAME && joinery_load_failed) {
++		_joinery_create_plain();
++		return;
++	}
+ 	ok_pressed();
+ }
+ 
+@@ -897,7 +928,7 @@ void ProjectDialog::_joinery_back_pressed() {
+ 
+ void ProjectDialog::_joinery_cancel_pressed() {
+ 	if (joinery_create_running) {
+-		return;
++		joinery_create_cancel.set();
+ 	}
+ 	hide();
+ }
+@@ -1187,6 +1218,16 @@ void ProjectDialog::_joinery_build_catalog(const Array &p_tools) {
+ 			box->set_accessibility_name(name);
+ 			box->set_pressed(bool(tool.get("enabled", false)) || required);
+ 			row->add_child(box);
++			if (required) {
++				// Locked on, but drawn like a chosen app rather than a greyed
++				// one: the trailing "Always included" says why it can't change.
++				box->set_tooltip_text(TTR("Every project uses Godot."));
++				box->set_focus_mode(Control::FOCUS_NONE);
++				box->add_theme_icon_override(SNAME("checked_disabled"), box->get_theme_icon(SNAME("checked"), SNAME("CheckBox")));
++				for (const StringName &color : { SNAME("font_disabled_color") }) {
++					box->add_theme_color_override(color, box->get_theme_color(SceneStringName(font_color)));
++				}
++			}
+ 
+ 			const String blurb = tool.get("blurb", "");
+ 			Label *line = memnew(Label);
+@@ -1202,7 +1243,8 @@ void ProjectDialog::_joinery_build_catalog(const Array &p_tools) {
+ 			row->add_child(line);
+ 
+ 			// Readiness, in the words the CLI gives, with its reason on hover.
+-			const String status_text = tool.get("status_label", "");
++			// A required app says it is always included instead.
++			const String status_text = required ? TTR("Always included") : String(tool.get("status_label", ""));
+ 			if (!status_text.is_empty()) {
+ 				Label *state = memnew(Label);
+ 				state->set_theme_type_variation(SNAME("JoineryCaption"));
+@@ -1373,6 +1415,7 @@ void ProjectDialog::_joinery_build_catalog(const Array &p_tools) {
+ 			custom_toggle->connect(SceneStringName(toggled), callable_mp(this, &ProjectDialog::_joinery_toggle_custom).bind(index));
+ 		}
+ 	}
++	_joinery_align_names();
+ }
+ 
+ void ProjectDialog::_joinery_clear_questions() {
+@@ -1626,7 +1669,7 @@ void ProjectDialog::_joinery_begin_create() {
+ 		joinery_create_outputs[i] = String();
+ 		_joinery_create_progress(i, JOINERY_STEP_PENDING);
+ 	}
+-	joinery_create_error->hide();
++	joinery_create_banner->hide();
+ 	joinery_details_button->set_pressed(false);
+ 	joinery_details_button->hide();
+ 	joinery_details->hide();
+@@ -1679,8 +1722,9 @@ void ProjectDialog::_joinery_start_create() {
+ 		return;
+ 	}
+ 	joinery_create_running = true;
++	joinery_create_cancel.clear();
+ 	joinery_thread_failed = -1;
+-	joinery_create_error->hide();
++	joinery_create_banner->hide();
+ 	joinery_create_bar->show();
+ 	_joinery_show_step(JOINERY_PAGE_CREATING);
+ 	joinery_create_thread.start(&ProjectDialog::_joinery_create_thread_func, this);
+@@ -1689,6 +1733,9 @@ void ProjectDialog::_joinery_start_create() {
+ void ProjectDialog::_joinery_create_thread_func(void *p_userdata) {
+ 	ProjectDialog *self = static_cast<ProjectDialog *>(p_userdata);
+ 	for (int step = self->joinery_create_from; step < JOINERY_CREATE_STEPS; step++) {
++		if (self->joinery_create_cancel.is_set()) {
++			break;
++		}
+ 		callable_mp(self, &ProjectDialog::_joinery_create_progress).call_deferred(step, (int)JOINERY_STEP_RUNNING);
+ 		String output;
+ 		const bool ok = self->_joinery_run_create_step(step, output);
+@@ -1793,15 +1840,55 @@ void ProjectDialog::_joinery_create_progress(int p_step, int p_state) {
+ 	if (p_step < 0 || p_step >= JOINERY_CREATE_STEPS) {
+ 		return;
+ 	}
+-	static const char *icons[] = { "GuiRadioUnchecked", "ArrowRight", "StatusSuccess", "StatusError" };
+-	joinery_create_icons[p_step]->set_texture(get_editor_theme_icon(StringName(icons[CLAMP(p_state, 0, 3)])));
++	// The running step turns like the editor's own progress spinner.
++	static const char *icons[] = { "GuiRadioUnchecked", "Progress1", "StatusSuccess", "StatusError" };
++	joinery_create_states[p_step] = CLAMP(p_state, 0, 3);
++	joinery_create_icons[p_step]->set_texture(get_editor_theme_icon(StringName(icons[joinery_create_states[p_step]])));
+ 	joinery_create_labels[p_step]->set_theme_type_variation(p_state == JOINERY_STEP_PENDING ? StringName("JoineryMuted") : StringName("JoineryLabel"));
++	bool spinning = false;
++	for (int i = 0; i < JOINERY_CREATE_STEPS; i++) {
++		spinning = spinning || joinery_create_states[i] == JOINERY_STEP_RUNNING;
++	}
++	if (joinery_spin_timer && joinery_spin_timer->is_inside_tree()) {
++		if (spinning && joinery_spin_timer->is_stopped()) {
++			joinery_spin_timer->start();
++		} else if (!spinning) {
++			joinery_spin_timer->stop();
++		}
++	}
++}
++
++void ProjectDialog::_joinery_spin_tick() {
++	joinery_spin_frame = (joinery_spin_frame + 1) % 8;
++	const StringName frame = StringName("Progress" + itos(joinery_spin_frame + 1));
++	for (int i = 0; i < JOINERY_CREATE_STEPS; i++) {
++		if (joinery_create_states[i] == JOINERY_STEP_RUNNING) {
++			joinery_create_icons[i]->set_texture(get_editor_theme_icon(frame));
++		}
++	}
++}
++
++// Running: the accent bar moves. Stopped: the bar stays where it was, full
++// and in the error colour, so nothing below it jumps.
++void ProjectDialog::_joinery_style_create_bar(bool p_failed) {
++	if (!joinery_create_bar) {
++		return;
++	}
++	joinery_create_bar->set_indeterminate(!p_failed);
++	joinery_create_bar->set_value(p_failed ? joinery_create_bar->get_max() : 0);
++	if (!p_failed) {
++		joinery_create_bar->remove_theme_style_override(SNAME("fill"));
++		return;
++	}
++	const Ref<StyleBoxFlat> fill = joinery_create_bar->get_theme_stylebox(SNAME("fill"), SNAME("JoineryProgress"));
++	Ref<StyleBoxFlat> failed = fill.is_valid() ? Ref<StyleBoxFlat>(fill->duplicate()) : Ref<StyleBoxFlat>(memnew(StyleBoxFlat));
++	failed->set_bg_color(get_theme_color(SceneStringName(font_color), SNAME("JoineryError")));
++	joinery_create_bar->add_theme_style_override(SNAME("fill"), failed);
+ }
+ 
+ void ProjectDialog::_joinery_create_finished() {
+ 	joinery_create_thread.wait_to_finish();
+ 	joinery_create_running = false;
+-	joinery_create_bar->hide();
+ 	joinery_choices_file.unref();
+ 	joinery_create_failed = joinery_thread_failed;
+ 
+@@ -1838,8 +1925,9 @@ void ProjectDialog::_joinery_show_create_error(int p_step, const String &p_outpu
+ 		TTRC("Couldn't finish the project files."),
+ 	};
+ 	joinery_create_from = CLAMP(p_step, 0, JOINERY_CREATE_STEPS);
+-	joinery_create_error->set_text(TTR(failures[CLAMP(p_step, 0, 3)]) + " " + TTR("Retry, or cancel and check the details."));
+-	joinery_create_error->show();
++	const bool has_details = !p_output.strip_edges().is_empty();
++	joinery_create_error->set_text(TTR(failures[CLAMP(p_step, 0, 3)]) + " " + (has_details ? TTR("Open Details to see why, then retry.") : TTR("Check the folder, then retry.")));
++	joinery_create_banner->show();
+ 	joinery_details->set_text(p_output.strip_edges());
+ 	joinery_details_button->set_visible(!p_output.strip_edges().is_empty());
+ 	joinery_details_button->set_pressed(false);
+@@ -2378,8 +2466,8 @@ void ProjectDialog::show_dialog(bool p_reset_name, bool p_is_confirmed) {
+ 	if (wizard) {
+ 		// The wizard brings its own header and footer, so the primary button
+ 		// sits in one place on every step.
+-		joinery_header->show();
+-		joinery_footer->show();
++		joinery_header_frame->show();
++		joinery_footer_frame->show();
+ 		get_ok_button()->hide();
+ 		get_cancel_button()->hide();
+ 		joinery_name_label->set_text(TTRC("Name"));
+@@ -2421,6 +2509,16 @@ void ProjectDialog::_notification(int p_what) {
+ 			joinery_banner_details->add_theme_font_override(SceneStringName(font), get_theme_font(SNAME("source"), EditorStringName(EditorFonts)));
+ 			joinery_banner_details->add_theme_font_size_override(SceneStringName(font_size), get_theme_font_size(SNAME("source_size"), EditorStringName(EditorFonts)));
+ 			_joinery_fit_scroll();
++			// The footer rule: a hairline in the caption colour at low strength,
++			// not the editor's dark separator.
++			{
++				Ref<StyleBoxLine> rule;
++				rule.instantiate();
++				rule->set_color(Color(get_theme_color(SceneStringName(font_color), SNAME("JoineryCaption")), 0.25));
++				rule->set_thickness(MAX(1, (int)Math::round(EDSCALE)));
++				joinery_footer_rule->add_theme_style_override(SNAME("separator"), rule);
++				joinery_footer_rule->add_theme_constant_override(SNAME("separation"), MAX(1, (int)Math::round(EDSCALE)));
++			}
+ 			// CLI output keeps its columns in the editor's code font.
+ 			joinery_details->add_theme_font_override(SceneStringName(font), get_theme_font(SNAME("source"), EditorStringName(EditorFonts)));
+ 			joinery_details->add_theme_font_size_override(SceneStringName(font_size), get_theme_font_size(SNAME("source_size"), EditorStringName(EditorFonts)));
+@@ -2446,21 +2544,29 @@ ProjectDialog::ProjectDialog() {
+ 	// Joinery: one outer inset for every page, and one gap between the header,
+ 	// the page and the footer, from the shared spacing scale.
+ 	MarginContainer *margin = memnew(MarginContainer);
+-	for (const StringName &side : { SNAME("margin_left"), SNAME("margin_right"), SNAME("margin_top"), SNAME("margin_bottom") }) {
++	for (const StringName &side : { SNAME("margin_right"), SNAME("margin_top"), SNAME("margin_bottom") }) {
+ 		margin->add_theme_constant_override(side, _joinery_space(5));
+ 	}
++	// One ring narrower on the leading side; the header, page and footer each
++	// give it back (see _joinery_fit_scroll).
++	margin->add_theme_constant_override(SNAME("margin_left"), _joinery_space(5) - _joinery_space(1));
+ 	add_child(margin);
+-	// Header to page and page to footer: one section gap.
++	// Header to page: one section gap (the header frame's bottom margin).
++	// The footer rule sits flush under the page, so the gaps are set per frame.
+ 	VBoxContainer *shell = memnew(VBoxContainer);
+-	shell->add_theme_constant_override(SNAME("separation"), _joinery_space(5));
++	shell->add_theme_constant_override(SNAME("separation"), 0);
+ 	margin->add_child(shell);
+ 
+ 	// Joinery: "Step N of 3" above the step's title, then one sentence that
+ 	// introduces the step, 8 under the title. One heading per step.
++	joinery_header_frame = memnew(MarginContainer);
++	joinery_header_frame->add_theme_constant_override(SNAME("margin_left"), _joinery_space(1));
++	joinery_header_frame->add_theme_constant_override(SNAME("margin_bottom"), _joinery_space(5));
++	joinery_header_frame->hide();
++	shell->add_child(joinery_header_frame);
+ 	joinery_header = memnew(VBoxContainer);
+ 	joinery_header->add_theme_constant_override(SNAME("separation"), _joinery_space(2));
+-	joinery_header->hide();
+-	shell->add_child(joinery_header);
++	joinery_header_frame->add_child(joinery_header);
+ 	VBoxContainer *titles = memnew(VBoxContainer);
+ 	titles->add_theme_constant_override(SNAME("separation"), _joinery_space(1));
+ 	joinery_header->add_child(titles);
+@@ -2529,10 +2635,10 @@ ProjectDialog::ProjectDialog() {
+ 	HBoxContainer *banner_actions = memnew(HBoxContainer);
+ 	banner_actions->add_theme_constant_override(SNAME("separation"), _joinery_space(2));
+ 	banner_box->add_child(banner_actions);
+-	// Secondary, not primary: the step's one primary slot is Next.
++	// Quiet: the step's one primary, in the footer, is "Create plain project".
+ 	joinery_banner_retry = memnew(Button);
+ 	joinery_banner_retry->set_text(TTRC("Retry"));
+-	joinery_banner_retry->set_theme_type_variation(SNAME("JoinerySecondaryButton"));
++	joinery_banner_retry->set_theme_type_variation(SNAME("JoineryTextButton"));
+ 	joinery_banner_retry->connect(SceneStringName(pressed), callable_mp(this, &ProjectDialog::_joinery_start_load));
+ 	banner_actions->add_child(joinery_banner_retry);
+ 	joinery_banner_plain = memnew(Button);
+@@ -2907,15 +3013,22 @@ ProjectDialog::ProjectDialog() {
+ 		joinery_create_labels[i]->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+ 		step_row->add_child(joinery_create_labels[i]);
+ 	}
++	joinery_create_banner = memnew(PanelContainer);
++	joinery_create_banner->set_theme_type_variation(SNAME("JoineryBanner"));
++	joinery_create_banner->hide();
++	joinery_creating->add_child(joinery_create_banner);
+ 	joinery_create_error = memnew(Label);
+-	joinery_create_error->set_theme_type_variation(SNAME("JoineryError"));
++	joinery_create_error->set_theme_type_variation(SNAME("JoineryLabel"));
+ 	joinery_create_error->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
+ 	joinery_create_error->set_h_size_flags(Control::SIZE_EXPAND_FILL);
+ 	joinery_create_error->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
+ 	joinery_create_error->set_focus_mode(Control::FOCUS_ACCESSIBILITY);
+ 	joinery_create_error->set_accessibility_live(AccessibilityServerEnums::LIVE_POLITE);
+-	joinery_create_error->hide();
+-	joinery_creating->add_child(joinery_create_error);
++	joinery_create_banner->add_child(joinery_create_error);
++	joinery_spin_timer = memnew(Timer);
++	joinery_spin_timer->set_wait_time(0.1);
++	joinery_spin_timer->connect(SNAME("timeout"), callable_mp(this, &ProjectDialog::_joinery_spin_tick));
++	add_child(joinery_spin_timer);
+ 	joinery_details_button = memnew(Button);
+ 	joinery_details_button->set_theme_type_variation(SNAME("JoineryTextButton"));
+ 	joinery_details_button->set_toggle_mode(true);
+@@ -2963,10 +3076,20 @@ ProjectDialog::ProjectDialog() {
+ 
+ 	// Joinery: the wizard's footer. Cancel at the leading edge, Back and the
+ 	// one primary action at the trailing edge, in the same place every step.
++	// A hairline rule above it, so a page cut off by the scroll edge reads as
++	// "more above", not as clipped text.
++	joinery_footer_frame = memnew(MarginContainer);
++	joinery_footer_frame->add_theme_constant_override(SNAME("margin_left"), _joinery_space(1));
++	joinery_footer_frame->hide();
++	shell->add_child(joinery_footer_frame);
++	VBoxContainer *footer_block = memnew(VBoxContainer);
++	footer_block->add_theme_constant_override(SNAME("separation"), _joinery_space(4));
++	joinery_footer_frame->add_child(footer_block);
++	joinery_footer_rule = memnew(HSeparator);
++	footer_block->add_child(joinery_footer_rule);
+ 	joinery_footer = memnew(HBoxContainer);
+ 	joinery_footer->add_theme_constant_override(SNAME("separation"), _joinery_space(3));
+-	joinery_footer->hide();
+-	shell->add_child(joinery_footer);
++	footer_block->add_child(joinery_footer);
+ 	joinery_cancel = memnew(Button);
+ 	joinery_cancel->set_text(TTRC("Cancel"));
+ 	joinery_cancel->set_theme_type_variation(SNAME("JoineryTextButton"));
+diff --git a/editor/project_manager/project_dialog.h b/editor/project_manager/project_dialog.h
+index 0428f9a..fe14443 100644
+--- a/editor/project_manager/project_dialog.h
++++ b/editor/project_manager/project_dialog.h
+@@ -31,6 +31,7 @@
+ #pragma once
+ 
+ #include "core/os/thread.h"
++#include "core/templates/safe_refcount.h"
+ #include "scene/gui/dialogs.h"
+ 
+ class Button;
+@@ -45,6 +46,7 @@ class PanelContainer;
+ class ProgressBar;
+ class TextEdit;
+ class TextureRect;
++class Timer;
+ class ScrollContainer;
+ 
+ class ProjectDialog : public ConfirmationDialog {
+@@ -114,6 +116,11 @@ private:
+ 	// other modes; a new project uses this header and footer instead, so the
+ 	// primary action never moves between steps.
+ 	VBoxContainer *joinery_header = nullptr;
++	// The header and the footer sit in frames that take back the focus-ring
++	// room the page needs, so text in all three starts on one left edge.
++	MarginContainer *joinery_header_frame = nullptr;
++	MarginContainer *joinery_footer_frame = nullptr;
++	Control *joinery_footer_rule = nullptr;
+ 	Label *joinery_step_label = nullptr;
+ 	Label *joinery_title = nullptr;
+ 	// One sentence under the title, outside the scrolling page, so the title
+@@ -125,9 +132,8 @@ private:
+ 	Button *joinery_banner_plain = nullptr;
+ 	Button *joinery_banner_details_button = nullptr;
+ 	Label *joinery_banner_details = nullptr;
+-	// The page scrolls inside a frame that reaches past the column on every
+-	// side, so focus rings are not clipped and the scrollbar sits in the
+-	// dialog's margin instead of narrowing the fields.
++	// The page scrolls inside the column: its inner margin leaves room for
++	// focus rings, and the scrollbar stays within the column's right edge.
+ 	MarginContainer *joinery_scroll_frame = nullptr;
+ 	MarginContainer *joinery_scroll_inner = nullptr;
+ 	HBoxContainer *joinery_footer = nullptr;
+@@ -180,7 +186,13 @@ private:
+ 	ProgressBar *joinery_create_bar = nullptr;
+ 	TextureRect *joinery_create_icons[JOINERY_CREATE_STEPS] = {};
+ 	Label *joinery_create_labels[JOINERY_CREATE_STEPS] = {};
++	// A failure: a tinted banner with plain text, like the app-list one.
++	PanelContainer *joinery_create_banner = nullptr;
+ 	Label *joinery_create_error = nullptr;
++	// The running step's icon turns like the editor's own spinner.
++	Timer *joinery_spin_timer = nullptr;
++	int joinery_spin_frame = 0;
++	int joinery_create_states[JOINERY_CREATE_STEPS] = {};
+ 	Button *joinery_details_button = nullptr;
+ 	TextEdit *joinery_details = nullptr;
+ 
+@@ -206,6 +218,8 @@ private:
+ 
+ 	Thread joinery_create_thread;
+ 	bool joinery_create_running = false;
++	// Cancel while the worker runs: it stops before its next step.
++	SafeFlag joinery_create_cancel;
+ 	int joinery_create_from = 0;
+ 	int joinery_create_failed = -1;
+ 	int joinery_thread_failed = -1;
+@@ -281,6 +295,9 @@ private:
+ 	int _joinery_control_h(float p_factor) const;
+ 	Label *_joinery_caption(const String &p_text) const;
+ 	void _joinery_apply_sizes();
++	void _joinery_align_names();
++	void _joinery_spin_tick();
++	void _joinery_style_create_bar(bool p_failed);
+ 	void _joinery_trim_first_page();
+ 	void _joinery_hide_wizard();
+ 	void _joinery_reset_pages();
+diff --git a/editor/project_manager/project_manager.cpp b/editor/project_manager/project_manager.cpp
+index 0d4bcc9..258a308 100644
+--- a/editor/project_manager/project_manager.cpp
++++ b/editor/project_manager/project_manager.cpp
+@@ -70,6 +70,7 @@
+ #include "scene/gui/panel_container.h"
+ #include "scene/gui/rich_text_label.h"
+ #include "scene/gui/separator.h"
++#include "scene/gui/texture_rect.h"
+ #include "scene/main/scene_tree.h"
+ #include "scene/main/window.h"
+ #include "scene/resources/image_texture.h"
+@@ -271,6 +272,13 @@ void ProjectManager::_update_theme(bool p_skip_creation) {
+ 			// loses its contrast in the light theme.
+ 			empty_list_create_project->set_button_icon(Ref<Texture2D>());
+ 			empty_list_import_project->set_button_icon(Ref<Texture2D>());
++			// One control height for the pair (CONTROL_H.md, 2.5 x the font).
++			{
++				const int control_h = (int)Math::round(get_theme_font_size(SNAME("main_size"), EditorStringName(EditorFonts)) * 2.5);
++				for (Button *b : { empty_list_create_project, empty_list_import_project }) {
++					b->set_custom_minimum_size(Size2(0, control_h));
++				}
++			}
+ 			empty_list_open_assetlib->set_button_icon(get_editor_theme_icon("AssetStore"));
+ 
+ 			empty_list_online_warning->add_theme_font_override(SceneStringName(font), get_theme_font("italic", EditorStringName(EditorFonts)));
+@@ -521,7 +529,9 @@ void ProjectManager::_update_list_placeholder() {
+ 
+ 	empty_list_placeholder->show();
+ 	if (empty_list_create_project->is_visible_in_tree()) {
+-		callable_mp((Control *)empty_list_create_project, &Control::grab_focus).call_deferred(false);
++		// Focused for Enter, without drawing the ring until the keyboard is used,
++		// so the pair doesn't look like two sizes.
++		callable_mp((Control *)empty_list_create_project, &Control::grab_focus).call_deferred(true);
+ 	}
+ }
+ 
+@@ -1676,6 +1686,9 @@ ProjectManager::ProjectManager() {
+ 
+ 				FlowContainer *empty_list_actions = memnew(FlowContainer);
+ 				empty_list_actions->set_alignment(FlowContainer::ALIGNMENT_CENTER);
++				// The medium gap between a pair of actions.
++				empty_list_actions->add_theme_constant_override(SNAME("h_separation"), 12 * EDSCALE);
++				empty_list_actions->add_theme_constant_override(SNAME("v_separation"), 12 * EDSCALE);
+ 				empty_list_placeholder->add_child(empty_list_actions);
+ 
+ 				empty_list_create_project = memnew(Button);
+@@ -2085,15 +2098,28 @@ void ProjectManager::_joinery_show_connection() {
+ 	joinery_home = home;
+ 	// The agent in use, as a chip at the end of the project list's top bar.
+ 	// Pressing it reopens the connect screen.
++	joinery_agent_row = memnew(HBoxContainer);
++	joinery_agent_row->add_theme_constant_override(SNAME("separation"), 8 * EDSCALE);
++	joinery_agent_icon = memnew(TextureRect);
++	joinery_agent_icon->set_stretch_mode(TextureRect::STRETCH_KEEP_CENTERED);
++	joinery_agent_icon->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
++	joinery_agent_row->add_child(joinery_agent_icon);
++	joinery_agent_name = memnew(Label);
++	joinery_agent_name->set_theme_type_variation(SNAME("JoineryLabel"));
++	joinery_agent_name->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
++	joinery_agent_name->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
++	joinery_agent_row->add_child(joinery_agent_name);
+ 	joinery_agent_chip = memnew(Button);
+-	joinery_agent_chip->set_flat(true);
+-	joinery_agent_chip->set_expand_icon(false);
++	joinery_agent_chip->set_theme_type_variation(SNAME("JoineryLinkButton"));
++	joinery_agent_chip->set_text(TTR("Change"));
++	joinery_agent_chip->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
+ 	joinery_agent_chip->set_tooltip_text(TTR("Change the agent Journeyman uses"));
+ 	joinery_agent_chip->connect(SceneStringName(pressed), callable_mp(this, &ProjectManager::_joinery_show_connection));
++	joinery_agent_row->add_child(joinery_agent_chip);
+ 	if (joinery_top_bar) {
+-		joinery_top_bar->add_child(joinery_agent_chip);
++		joinery_top_bar->add_child(joinery_agent_row);
+ 	} else {
+-		local_projects_vb->add_child(joinery_agent_chip);
++		local_projects_vb->add_child(joinery_agent_row);
+ 	}
+ 	_joinery_update_agent_chip();
+ }
+@@ -2117,9 +2143,9 @@ void ProjectManager::_joinery_update_agent_chip() {
+ 	} else if (agent == "opencode") {
+ 		name = "opencode";
+ 	}
+-	joinery_agent_chip->set_visible(!agent.is_empty());
+-	joinery_agent_chip->set_text(name + String::utf8(" · ") + TTR("Change"));
+-	joinery_agent_chip->set_accessibility_name(vformat(TTR("Agent: %s. Change"), name));
++	joinery_agent_row->set_visible(!agent.is_empty());
++	joinery_agent_name->set_text(name);
++	joinery_agent_chip->set_accessibility_name(vformat(TTR("Change agent (now %s)"), name));
+ 
+ 	// The provider's mark from the addon, at the editor's icon size. A missing
+ 	// or unreadable file leaves the chip as text.
+@@ -2137,7 +2163,8 @@ void ProjectManager::_joinery_update_agent_chip() {
+ 		}
+ 		break;
+ 	}
+-	joinery_agent_chip->set_button_icon(icon);
++	joinery_agent_icon->set_texture(icon);
++	joinery_agent_icon->set_visible(icon.is_valid());
+ }
+ 
+ void ProjectManager::_joinery_agent_connected(const String &p_agent, const String &p_method) {
+diff --git a/editor/project_manager/project_manager.h b/editor/project_manager/project_manager.h
+index 49c7d23..8362a4f 100644
+--- a/editor/project_manager/project_manager.h
++++ b/editor/project_manager/project_manager.h
+@@ -175,9 +175,14 @@ class ProjectManager : public Control {
+ 	void _joinery_show_connection();
+ 	void _joinery_agent_connected(const String &p_agent, const String &p_method);
+ 	// The project list's top bar, the "Open" primary beside Create and
+-	// Import, and the "[icon] Claude Code · Change" agent chip in that bar.
++	// Import, and the "[icon] Claude Code  Change" agent row in that bar.
+ 	HBoxContainer *joinery_top_bar = nullptr;
+ 	Button *joinery_open_btn = nullptr;
++	// The agent row: its mark and name as plain text, then "Change" as a
++	// link. Flush with the page's left edge, like the wordmark above it.
++	HBoxContainer *joinery_agent_row = nullptr;
++	TextureRect *joinery_agent_icon = nullptr;
++	Label *joinery_agent_name = nullptr;
+ 	Button *joinery_agent_chip = nullptr;
+ 	// The wordmark on the page, flush with the line and the bar under it.
+ 	Button *joinery_wordmark = nullptr;
+diff --git a/editor/themes/editor_theme_manager.cpp b/editor/themes/editor_theme_manager.cpp
+index 3cb81fa..c5d3d6c 100644
+--- a/editor/themes/editor_theme_manager.cpp
++++ b/editor/themes/editor_theme_manager.cpp
+@@ -299,8 +299,10 @@ static void _joinery_populate_styles(const Ref<EditorTheme> &p_theme, const Edit
+ 	focus->set_border_color(accent);
+ 	focus->set_corner_radius_all(radius + 2 * EDSCALE);
+ 	focus->set_expand_margin_all(2 * EDSCALE);
+-	Ref<StyleBoxFlat> disabled = p_config.button_style_disabled.is_valid() ? Ref<StyleBoxFlat>(p_config.button_style_disabled->duplicate()) : Ref<StyleBoxFlat>(normal->duplicate());
+-	disabled->set_corner_radius_all(radius);
++	// Disabled keeps the accent at low strength, so a primary that isn't
++	// ready yet still reads as the main action rather than as an empty row.
++	Ref<StyleBoxFlat> disabled = normal->duplicate();
++	disabled->set_bg_color(Color(accent, 0.35));
+ 	p_theme->set_stylebox(CoreStringName(normal), "JoineryPrimaryButton", normal);
+ 	p_theme->set_stylebox(SceneStringName(hover), "JoineryPrimaryButton", hovered);
+ 	p_theme->set_stylebox(SceneStringName(pressed), "JoineryPrimaryButton", down);
+@@ -399,6 +401,14 @@ static void _joinery_populate_styles(const Ref<EditorTheme> &p_theme, const Edit
+ 	};
+ 	flush_left(SNAME("JoineryTextButton"), SNAME("FlatButton"), true);
+ 	flush_left(SNAME("JoineryCheckBox"), SNAME("CheckBox"), false);
++	// An inline action in the accent colour ("Change"), flush like a label.
++	flush_left(SNAME("JoineryLinkButton"), SNAME("FlatButton"), false);
++	for (const StringName &name : { SceneStringName(font_color), SNAME("font_focus_color"), SNAME("font_pressed_color") }) {
++		p_theme->set_color(name, "JoineryLinkButton", accent);
++	}
++	for (const StringName &name : { SNAME("font_hover_color"), SNAME("font_hover_pressed_color") }) {
++		p_theme->set_color(name, "JoineryLinkButton", hover);
++	}
+ 
+ 	// Colour roles shared with the sidebar (ui_theme.gd).
+ 	const Color text = p_config.dark_theme ? Color::html("#eeede8") : Color::html("#25262a");
+@@ -407,6 +417,9 @@ static void _joinery_populate_styles(const Ref<EditorTheme> &p_theme, const Edit
+ 	const Color border_subtle = p_config.dark_theme ? Color::html("#3a3c40") : Color::html("#d9d7d0");
+ 	const Color border_strong = p_config.dark_theme ? Color::html("#75787f") : Color::html("#7c7e76");
+ 	const int hairline = MAX(1, (int)Math::round(EDSCALE));
++	// Text on the faint accent of a disabled primary keeps 4.5:1 in plain text.
++	p_theme->set_color("font_disabled_color", "JoineryPrimaryButton", text);
++	p_theme->set_color("icon_disabled_color", "JoineryPrimaryButton", text);
+ 
+ 	// The one secondary button: raised fill with a hairline edge, quieter
+ 	// than the stock fill, the same shape and height as the primary.
