@@ -54,8 +54,8 @@ const MOTION := {
 ## Accent options: [dark, light]. All pass 4.5:1 on every surface and with on_accent.
 const ACCENTS := {
 	"brass": [Color("e6b66b"), Color("875309")],
-	"blue": [Color("6aaee0"), Color("1f6aa5")],
-	"green": [Color("79c48f"), Color("2d7546")],
+	"blue": [Color("6aaee0"), Color("1c64a0")],
+	"green": [Color("79c48f"), Color("2a7044")],
 	"violet": [Color("b59cf0"), Color("6a4bc4")],
 }
 ## Display names for the accents, also the values of the fork's joinery_accent setting.
@@ -102,23 +102,23 @@ const DARK := {
 	"surface": Color("202123"),
 	"surface_sunken": Color("18191b"),
 	"surface_raised": Color("2b2d30"),
-	"border_subtle": Color("3a3c40"),
-	"border_strong": Color("75787f"),
+	"border_subtle": Color("404247"),
+	"border_strong": Color("7c7f86"),
 	"text": Color("eeede8"),
 	"text_muted": Color("b0b0aa"),
-	"text_faint": Color("969690"),
+	"text_faint": Color("9d9d97"),
 	"success": Color("6cc38a"),
 	"danger": Color("f08a7e"),
 }
 const LIGHT := {
 	"surface": Color("f7f6f3"),
 	"surface_sunken": Color("ffffff"),
-	"surface_raised": Color("eeece6"),
-	"border_subtle": Color("d9d7d0"),
+	"surface_raised": Color("ebe9e2"),
+	"border_subtle": Color("c9c6bd"),
 	"border_strong": Color("7c7e76"),
 	"text": Color("25262a"),
-	"text_muted": Color("5b5d55"),
-	"text_faint": Color("6a6c65"),
+	"text_muted": Color("53554e"),
+	"text_faint": Color("5f615a"),
 	"success": Color("2a6f43"),
 	"danger": Color("b4372b"),
 }
@@ -329,6 +329,32 @@ static func icon(context: Node, name: String, tint := Color.WHITE) -> Texture2D:
 	return _icon(context, name, tint)
 
 
+## The official logo of app [param app_id] (icons/apps/<id>.svg, licences in
+## licenses/tool-logos.md) in its own colours at 20 × unit pixels, or null when Joinery has none.
+## A logo with a variant for dark backgrounds (<id>-dark.svg) uses it in the dark theme.
+## Logos are never tinted: selection and hover show around them, not on them.
+static func app_logo(context: Node, app_id: String) -> Texture2D:
+	if not has_app_logo(app_id):
+		return null
+	var path := _app_logo_path(app_id)
+	var dark_path := _app_logo_path(app_id + "-dark")
+	if is_dark(context) and FileAccess.file_exists(dark_path):
+		path = dark_path
+	var image := Image.new()
+	if image.load_svg_from_string(FileAccess.get_file_as_string(path), unit(context)) != OK:
+		return null
+	return ImageTexture.create_from_image(image)
+
+
+## True when Joinery ships the official logo of app [param app_id].
+static func has_app_logo(app_id: String) -> bool:
+	return not app_id.is_empty() and FileAccess.file_exists(_app_logo_path(app_id))
+
+
+static func _app_logo_path(name: String) -> String:
+	return _directory().path_join("icons/apps/%s.svg" % name)
+
+
 # --- Styles ----------------------------------------------------------------------------------
 
 
@@ -442,7 +468,8 @@ static func watch(root: Control) -> void:
 
 ## The Joinery theme for [param context]: palette colours under the "Joinery" type, base type
 ## styles (Label, RichTextLabel, LineEdit, TextEdit, Button, OptionButton, CheckButton,
-## PopupMenu, ItemList, separators, tooltips) and these type variations. LineEdit, TextEdit
+## PopupMenu, ItemList, separators, tooltips, check box and radio icons, scroll bars) and these
+## type variations. LineEdit, TextEdit
 ## and OptionButton share one field box (sunken fill, hairline border, radius md, SPACE.3
 ## insets); dialogs get their footer from ui_components.dialog_footer().
 ## Labels: JoineryCaption, JoineryFaint, JoineryBodyLarge, JoineryTitle, JoineryDisplay,

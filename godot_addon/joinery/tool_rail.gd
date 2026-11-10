@@ -4,9 +4,11 @@ extends VBoxContainer
 ## addon fills it: Godot, All assets, then each project app, and the viewport tools toggle at
 ## the bottom.
 ##
-## One monochrome icon family (icons/tools/*.svg, drawn in-house on a 20 px grid), tinted
-## text, and accent on the selected item. The selected item also gets an accent bar on the
-## rail's left edge and a raised pill behind its icon. Each app shows its readiness from
+## Each app shows its official logo in its own colours (icons/apps, see licenses/tool-logos.md);
+## an app without one (and All assets, the viewport tools toggle and custom tools) shows a
+## monochrome glyph tinted text, or accent when selected. The selected item gets an accent bar
+## on the rail's left edge and a raised pill behind its icon; a logo is never recoloured. Icons
+## are rendered again whenever the theme turns light or dark. Each app shows its readiness from
 ## `joinery status --catalog --background --json`, the one readiness source (ADR 0030): a dot
 ## only when the app needs something, and one pulse when it becomes ready. Hovering or focusing
 ## an app shows a card with the plain sentence, its one action, Check again and when it was
@@ -89,7 +91,8 @@ class RailItem:
 	var dot: Control
 	## Draw the accent bar when selected (apps), or only the pill (the toolbar toggle).
 	var marker := true
-	## Where the icon comes from: {"svg": path}, {"editor": icon name} or {"ui": icon name}.
+	## Where the icon comes from: {"logo": app id}, {"svg": path}, {"editor": icon name} or
+	## {"ui": icon name}.
 	var source: Dictionary = {}
 	var hover_amount := 0.0:
 		set(value):
@@ -279,8 +282,23 @@ func set_toolbar_shown(shown: bool) -> void:
 
 
 func _on_theme_rebuilt() -> void:
+	_restyle()
+
+
+func _notification(what: int) -> void:
+	# The palette can turn light or dark after the rail is built (the editor theme arrives or
+	# changes later): render the icons again then, not only when the Joinery theme is rebuilt.
+	if what == NOTIFICATION_THEME_CHANGED and is_inside_tree():
+		_restyle.call_deferred(false)
+
+
+## Render every icon again when the palette or scale it was rendered for has changed.
+func _restyle(force := true) -> void:
+	if not force and _icon_signature() == get_meta("icon_signature", []):
+		return
 	for item: RailItem in _all_items():
-		_style(item)
+		if item.is_inside_tree():
+			_style(item)
 
 
 func _add_all_assets() -> void:
@@ -311,8 +329,8 @@ func _button(node_name: String, title: String) -> Button:
 	button.icon_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	button.vertical_icon_alignment = VERTICAL_ALIGNMENT_CENTER
 	button.expand_icon = true
-	# Icons carry their tint (text, or accent when selected), so the button must not tint
-	# them again. White is the identity multiplier, not a palette colour.
+	# Glyphs carry their tint (text, or accent when selected) and logos their own colours, so
+	# the button must not tint them. White is the identity multiplier, not a palette colour.
 	for state: String in ["normal", "hover", "pressed", "hover_pressed", "focus", "disabled"]:
 		button.add_theme_color_override("icon_%s_color" % state, Color.WHITE)
 	UI_MOTION.press_feedback(button)
@@ -332,11 +350,22 @@ func _item(button: Button, source: Dictionary, marker: bool) -> RailItem:
 func _style(item: RailItem) -> void:
 	var side := float(UI_THEME.control_h(self, "lg"))
 	item.button.custom_minimum_size = Vector2(side, side)
-	# Rail glyphs are drawn on a 20 px grid: the ICON.md token.
+	# Rail icons are drawn on a 20 px grid: the ICON.md token.
 	var icon_size := UI_THEME.icon_px(self, "md")
 	item.button.add_theme_constant_override("icon_max_width", icon_size)
-	item.set_meta("icons", [_render(item.source, "text"), _render(item.source, "accent")])
+	if item.source.has("logo"):
+		# A logo keeps its colours when selected: the pill and the accent bar show selection.
+		var logo := UI_THEME.app_logo(self, str(item.source["logo"]))
+		item.set_meta("icons", [logo, logo])
+	else:
+		item.set_meta("icons", [_render(item.source, "text"), _render(item.source, "accent")])
+	set_meta("icon_signature", _icon_signature())
 	_sync(item, true)
+
+
+## What the icons were rendered for: light or dark, the accent and the scale.
+func _icon_signature() -> Array:
+	return [UI_THEME.is_dark(self), UI_THEME.prefs()["accent"], UI_THEME.unit(self)]
 
 
 func _sync(item: RailItem, instant := false) -> void:
@@ -360,8 +389,11 @@ func _all_items() -> Array[RailItem]:
 
 
 func _icon_source(id: String, domain: String) -> Dictionary:
+	if UI_THEME.has_app_logo(id):
+		return {"logo": id}
 	if id == "godot":
 		return {"editor": "GodotMonochrome"}
+	# In-house glyphs stand in where Joinery ships no official logo (see licenses/tool-logos.md).
 	var path := _glyph(id)
 	if FileAccess.file_exists(path):
 		return {"svg": path}

@@ -1,0 +1,20 @@
+Official application logos, shown in the Joinery tool rail and change cards to identify
+each app. They are not covered by the MIT licence of this add-on: each keeps its own
+licence (see sources.json), and names and logos are trademarks of their owners. They
+are used only to refer to the applications themselves.
+
+godot.svg              Godot Engine logo, (c) 2017 Andrea Calabro, CC BY 4.0
+krita.svg              Krita app icon, Krita contributors (KDE), GPL-3.0-or-later
+gimp.svg               GIMP logo (Wilber, shadow variant), The GIMP team, CC BY-SA 4.0
+inkscape.svg           Inkscape flat logo, Andrew Michael Fitzsimon, CC BY-SA 3.0 US
+inkscape-dark.svg      Inkscape flat logo, white variant, same author and licence
+material-maker.svg     Material Maker logo, Rodolphe Suescun and contributors, MIT
+surge-xt.svg           Surge XT icon, Surge Synth Team, GPL-3.0
+supercollider.svg      SuperCollider logo, SuperCollider contributors, GPL-3.0
+
+Each file is the official artwork from the project's own repository or website, optimised
+for size (metadata removed, numbers rounded) with colours and shapes unchanged. The
+modified CC BY-SA files are offered under the same licence. Blender's logo is not
+included (its usage terms require the word mark beside it); the rail shows an in-house
+glyph instead (../tools/blender.svg). Sources, pins and hashes: sources.json and
+licenses/tool-logos.md in the Joinery repository. No logo was generated.

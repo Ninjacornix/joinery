@@ -721,6 +721,12 @@ func _app_badge(app: String) -> Control:
 	var slug := app.to_lower().replace(" ", "_")
 	var base := (get_script() as Script).resource_path.get_base_dir()
 	for name: String in [slug, slug.replace("_", "-"), slug.replace("_", "")]:
+		if UI_THEME.has_app_logo(name):
+			# The app's official logo, in its own colours (no tint role).
+			var logo := STYLE.glyph("")
+			STYLE.on_theme(logo, func() -> void: logo.texture = UI_THEME.app_logo(logo, name))
+			badge.add_child(logo)
+			break
 		var path := base.path_join("icons/tools/%s.svg" % name)
 		if FileAccess.file_exists(path):
 			var picture := STYLE.glyph("text_muted")

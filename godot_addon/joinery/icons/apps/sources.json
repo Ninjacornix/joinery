@@ -1,0 +1,90 @@
+[
+  {
+    "file": "godot.svg",
+    "app": "Godot Engine",
+    "source": "https://github.com/godotengine/godot/blob/4.7.2-stable/misc/logo/icon.svg",
+    "pin": "tag 4.7.2-stable (commit ed1daf0bf001b61586d9930840f2f1394092c079)",
+    "source_sha256": "1443ae974842b81765d5b50e6a729ebbf41eba2e9e515ab0919f2ea5c8b8f475",
+    "licence": "CC-BY-4.0",
+    "copyright": "2017 Andrea Calabró",
+    "sha256": "ad0c6b44446f6fa9d32f0653b407c97f469adbf568429f4640fc60bb9eef5a9d",
+    "change": "editor metadata, unused definitions and ids removed; numbers rounded; 20x20 size with the original square viewBox; colours and shapes unchanged"
+  },
+  {
+    "file": "krita.svg",
+    "app": "Krita",
+    "source": "https://invent.kde.org/graphics/krita/-/blob/0ad7895407b7de242b5b9438ea2c3c979507e6d2/krita/pics/branding/default/sc-apps-krita.svgz",
+    "pin": "commit 0ad7895407b7de242b5b9438ea2c3c979507e6d2 (master, 2026-11-10); gzip-decompressed",
+    "source_sha256": "2aa7e4a604b50a68f707289735bd4215c63c5f60d979a04492b92b8ba3e76347",
+    "licence": "GPL-3.0-or-later",
+    "copyright": "Krita contributors (KDE)",
+    "sha256": "f9929d31206e8ea440137466f9556074a8ea1c5c57fcee014d72f67a4734bfd0",
+    "change": "editor metadata, unused definitions and ids removed; numbers rounded; 20x20 size with the original square viewBox; colours and shapes unchanged"
+  },
+  {
+    "file": "gimp.svg",
+    "app": "GIMP",
+    "source": "https://gitlab.gnome.org/GNOME/gimp-data/-/blob/bb251717687ec37a622763c4fa003a3c28461796/images/logo/gimp-logo-shadow.svg",
+    "pin": "commit bb251717687ec37a622763c4fa003a3c28461796 (main, 2026-11-09)",
+    "source_sha256": "04f1dccbcd4cdc8560c54fba6223d2656f915144158f07f6230a318c8105bcdb",
+    "licence": "CC-BY-SA-4.0",
+    "copyright": "The GIMP team (Wilber)",
+    "sha256": "b7d33d6269fa7ea20fad31353e169bb38b105dd85d480d8eaf542efcfdf4fa98",
+    "change": "editor metadata, unused definitions and ids removed; numbers rounded; 20x20 size with the original square viewBox; colours and shapes unchanged"
+  },
+  {
+    "file": "inkscape.svg",
+    "app": "Inkscape",
+    "source": "https://gitlab.com/inkscape/inkscape/-/blob/7cd0c014d2f19d17da7d3417907b2a7486348df4/share/branding/inkscape-flat.svg",
+    "pin": "commit 7cd0c014d2f19d17da7d3417907b2a7486348df4 (master, 2026-11-05)",
+    "source_sha256": "424b54a148228f68e5cc8947118dad9f7992361ca19b2fe2b5083fd6ff1b9bf0",
+    "licence": "CC-BY-SA-3.0-US",
+    "copyright": "Andrew Michael Fitzsimon",
+    "sha256": "ec978aeb1134b404c095f15f31ab6738b6f2e729701d0290c886420cad41bf49",
+    "change": "editor metadata, unused definitions and ids removed; numbers rounded; 20x20 size with the original square viewBox; colours and shapes unchanged"
+  },
+  {
+    "file": "inkscape-dark.svg",
+    "app": "Inkscape (variant for dark backgrounds)",
+    "source": "https://media.inkscape.org/media/resources/file/inkscape-flat-w-transp-white.svg",
+    "pin": "official 'Inkscape Flat Logo 1 Color Variant - White' linked from https://inkscape.org/about/branding/, fetched 2026-11-10",
+    "source_sha256": "009b1322edbf97573ad3276a5aca60ed85b5988b2033e344b03dba34cdaadf3d",
+    "licence": "CC-BY-SA-3.0-US",
+    "copyright": "Andrew Michael Fitzsimon",
+    "sha256": "62d52f69000023b1e42d1b59f061970aebc2333ba624568ef7d1a59cb9ded4c6",
+    "change": "editor metadata, unused definitions and ids removed; numbers rounded; 20x20 size with the original square viewBox; colours and shapes unchanged; unused <style> block removed"
+  },
+  {
+    "file": "material-maker.svg",
+    "app": "Material Maker",
+    "source": "https://github.com/RodZill4/material-maker/blob/7d6daae3c74c09720afe4138ce09699ab3591ce1/MaterialMakerLG.icon/Assets/mm.svg",
+    "pin": "commit 7d6daae3c74c09720afe4138ce09699ab3591ce1 (master)",
+    "source_sha256": "1fc5614861fb259840a50c5284810e9764c3fd5f0c8004667fba3774c30c9f5a",
+    "licence": "MIT",
+    "copyright": "2018-present Rodolphe Suescun and contributors",
+    "sha256": "7b8ab3c490a199535db6cd7881ee3e505611a2f0e80ec51bf989f43b7b7489ca",
+    "change": "editor metadata, unused definitions and ids removed; numbers rounded; 20x20 size with the original square viewBox; colours and shapes unchanged"
+  },
+  {
+    "file": "surge-xt.svg",
+    "app": "Surge XT",
+    "source": "https://github.com/surge-synthesizer/surge/blob/d307b472cd5e986baf61f9db0a4f173183aba3f9/resources/assets/Logo/SVG/surge_icon.svg",
+    "pin": "commit d307b472cd5e986baf61f9db0a4f173183aba3f9 (main); identical to the Linux app icon scripts/installer_linux/assets/icons/scalable/apps/surge-xt.svg",
+    "source_sha256": "0193bfeb28923ea0e6fd9eb9f85b81158ef0e972aed2e0d462f84fd73ec002f8",
+    "licence": "GPL-3.0",
+    "copyright": "Surge Synth Team",
+    "sha256": "34b1bb98b2d597aa596809d9eea3ae29f5f761248fd9621412cb9d7d581bbaa5",
+    "change": "editor metadata, unused definitions and ids removed; numbers rounded; 20x20 size with the original square viewBox; colours and shapes unchanged"
+  },
+  {
+    "file": "supercollider.svg",
+    "app": "SuperCollider",
+    "source": "https://github.com/supercollider/supercollider/blob/9bdaa413525ea8e88480d2f15a87bfcd73c1df96/icons/sc_logo.svg",
+    "pin": "commit 9bdaa413525ea8e88480d2f15a87bfcd73c1df96 (develop)",
+    "source_sha256": "7625fe90fd89f80c56d15ac0d63a7b0f554fa088fca4f25fcae27e163d5788fe",
+    "licence": "GPL-3.0",
+    "copyright": "SuperCollider contributors",
+    "sha256": "bb1160f6a26e98dc75dd0378e08f7ff18751f32d4344bf8220ec1ec79238b713",
+    "change": "editor metadata, unused definitions and ids removed; numbers rounded; 20x20 size with the original square viewBox; colours and shapes unchanged"
+  }
+]
