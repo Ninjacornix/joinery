@@ -355,6 +355,7 @@ func _build_rows(data: Dictionary) -> void:
 	_history.cli_prefix = cli_prefix
 	_history.project = _project()
 	_history.panel.applied.connect(_on_save)
+	_history.edited.connect(_show_status.bind("", false))
 	_list.add_child(_history)
 	_history.reload()
 	_advanced = UI_COMPONENTS.section("Advanced", true)

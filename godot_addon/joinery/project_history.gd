@@ -7,6 +7,9 @@ extends VBoxContainer
 ## passes [method save_args] to `joinery setup`. Hidden until the CLI answers, so an older
 ## CLI leaves history alone.
 
+## The choice or Custom's numbers changed.
+signal edited
+
 const COMMAND_SCRIPT := preload("command_job.gd")
 const UI_COMPONENTS := preload("ui_components.gd")
 const UI_MOTION := preload("ui_motion.gd")
@@ -37,8 +40,12 @@ func _init() -> void:
 	picker.accessibility_name = "Keep older versions"
 	picker.tooltip_text = POLICY.HINT
 	picker.item_selected.connect(_chosen)
-	add_child(UI_COMPONENTS.setting_row("Keep", picker))
+	var row := UI_COMPONENTS.setting_row("Keep", picker)
+	# Flush with the rows above, as Game features are: no settings-page inset in this list.
+	row.theme_type_variation = &""
+	add_child(row)
 	panel = POLICY.panel(false)
+	panel.theme_type_variation = &""
 	for field: UI_COMPONENTS.Field in [panel.keep, panel.space]:
 		(field.control as LineEdit).text_changed.connect(func(_t: String) -> void: _check())
 	add_child(panel)
@@ -118,6 +125,7 @@ func _differs(choice: Dictionary) -> bool:
 ## Ask what Save would remove under the chosen policy (a dry run), to say so before saving.
 func _check() -> void:
 	note.hide()
+	edited.emit()
 	if _check_job != null:
 		_check_job.call("cancel")
 		_check_job = null
