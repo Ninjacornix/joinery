@@ -134,7 +134,12 @@ def setup(project: Path) -> dict[str, Any]:
                     readiness.mark_setup("build", tag)
                     _docker_build(tag, worker + ".Dockerfile", revision)
                 ready.append(tool)
-            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+            except (
+                OSError,
+                ValueError,
+                RuntimeError,
+                subprocess.SubprocessError,
+            ) as exc:
                 unavailable.append({"tool": tool, "reason": str(exc)})
     finally:
         readiness.clear_setup()
@@ -164,11 +169,13 @@ def update_addon(project: Path) -> dict[str, str]:
     """Call with the project editor closed; stage first, keep a local backup."""
     if not (project / "project.godot").is_file():
         raise ValueError("Expected a Godot project.")
-    if editor_running(project):
+    target = project / "addons/joinery"
+    # Without the addon no editor can be running it (a brand-new project), so skip
+    # the process check, which is slow on Windows.
+    if target.is_dir() and editor_running(project):
         raise ValueError(
             "Close this project's editor before updating its addon; this preserves unsaved work and avoids script hot-reload during a live session."
         )
-    target = project / "addons/joinery"
     version = addon_version()
     uids_present = all(
         (target / uid.name).is_file()

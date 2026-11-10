@@ -138,7 +138,10 @@ def test_project_lease_survives_contending_process_and_releases_on_death(
         stderr=subprocess.PIPE,
     )
     try:
-        assert child.stdout is not None and child.stdout.readline().rstrip(b"\r\n") == b"ready"
+        assert (
+            child.stdout is not None
+            and child.stdout.readline().rstrip(b"\r\n") == b"ready"
+        )
         child.kill()
         child.wait(timeout=5)
         next_lease = ProjectLease(tmp_path)
@@ -285,7 +288,9 @@ def test_windows_codex_npm_layout_connects_without_executing_cmd(
         "import sys; assert sys.argv[1:]==['login','status']; print('Logged in using ChatGPT')"
     )
     monkeypatch.setattr(
-        platform_support, "sys", SimpleNamespace(platform="win32", executable=sys.executable)
+        platform_support,
+        "sys",
+        SimpleNamespace(platform="win32", executable=sys.executable),
     )
     monkeypatch.setattr(
         platform_support.shutil,
@@ -303,12 +308,25 @@ def test_worker_host_environment_has_windows_paths_without_provider_credentials(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     allowed = {
-        "USERPROFILE", "APPDATA", "LOCALAPPDATA", "TEMP", "TMP", "COMSPEC",
-        "HOMEDRIVE", "HOMEPATH", "SYSTEMROOT", "ProgramFiles",
+        "USERPROFILE",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "TEMP",
+        "TMP",
+        "COMSPEC",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "SYSTEMROOT",
+        "ProgramFiles",
     }
     forbidden = {
-        "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "JOINERY_MODEL_API_KEY",
-        "GOOGLE_API_KEY", "AWS_SECRET_ACCESS_KEY", "PYTHONPATH", "NODE_OPTIONS",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "JOINERY_MODEL_API_KEY",
+        "GOOGLE_API_KEY",
+        "AWS_SECRET_ACCESS_KEY",
+        "PYTHONPATH",
+        "NODE_OPTIONS",
     }
     for key in allowed | forbidden:
         monkeypatch.setenv(key, "fixture-" + key)
@@ -321,11 +339,23 @@ def test_native_server_inherits_selected_graphics_but_not_unrestricted_loaders(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     graphics = {
-        "DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY", "XDG_RUNTIME_DIR",
-        "VK_DRIVER_FILES", "VK_ICD_FILENAMES", "LIBGL_ALWAYS_SOFTWARE",
-        "GALLIUM_DRIVER", "MESA_LOADER_DRIVER_OVERRIDE",
+        "DISPLAY",
+        "WAYLAND_DISPLAY",
+        "XAUTHORITY",
+        "XDG_RUNTIME_DIR",
+        "VK_DRIVER_FILES",
+        "VK_ICD_FILENAMES",
+        "LIBGL_ALWAYS_SOFTWARE",
+        "GALLIUM_DRIVER",
+        "MESA_LOADER_DRIVER_OVERRIDE",
     }
-    excluded = {"OPENAI_API_KEY", "JOINERY_MODEL_API_KEY", "LD_PRELOAD", "LD_LIBRARY_PATH", "VK_LAYER_PATH"}
+    excluded = {
+        "OPENAI_API_KEY",
+        "JOINERY_MODEL_API_KEY",
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "VK_LAYER_PATH",
+    }
     for key in graphics | excluded:
         monkeypatch.setenv(key, "fixture-" + key)
     inherited = host_environment()
@@ -347,7 +377,8 @@ def test_native_windows_private_storage_has_only_owner_and_system_access(
     platform_support.private_file(secret)
     identity = subprocess.run(
         ["whoami.exe", "/user", "/fo", "csv", "/nh"],
-        capture_output=True, check=True,
+        capture_output=True,
+        check=True,
     )
     import re
 
@@ -358,7 +389,8 @@ def test_native_windows_private_storage_has_only_owner_and_system_access(
         # Query the native descriptor directly. Get-Acl can emit nonterminating
         # errors and serialize missing properties as null despite exit code 0.
         descriptor = win32security.GetNamedSecurityInfo(
-            str(path), win32security.SE_FILE_OBJECT,
+            str(path),
+            win32security.SE_FILE_OBJECT,
             win32security.DACL_SECURITY_INFORMATION,
         )
         control, _revision = descriptor.GetSecurityDescriptorControl()
@@ -367,7 +399,39 @@ def test_native_windows_private_storage_has_only_owner_and_system_access(
         assert acl is not None
         rules = [acl.GetAce(index) for index in range(acl.GetAceCount())]
         assert {win32security.ConvertSidToStringSid(rule[2]) for rule in rules} == {
-            owner, "S-1-5-18",
+            owner,
+            "S-1-5-18",
         }
-        assert all(rule[0][0] == win32security.ACCESS_ALLOWED_ACE_TYPE for rule in rules)
+        assert all(
+            rule[0][0] == win32security.ACCESS_ALLOWED_ACE_TYPE for rule in rules
+        )
         assert not any(rule[0][1] & win32security.INHERITED_ACE for rule in rules)
+
+
+def test_a_new_project_skips_the_editor_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from joinery import bootstrap
+
+    (tmp_path / "project.godot").write_text("config_version=5\n")
+
+    def never(_: Path) -> bool:
+        raise AssertionError("no addon yet, so no editor can be running it")
+
+    monkeypatch.setattr(bootstrap, "editor_running", never)
+    assert bootstrap.update_addon(tmp_path)["state"] == "updated"
+
+
+def test_a_slow_windows_process_query_is_a_plain_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from joinery import platform_support
+
+    def slow(_: str) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired("powershell", 45)
+
+    monkeypatch.setattr(platform_support.os, "name", "nt")
+    monkeypatch.setattr(platform_support.shutil, "which", lambda _: "powershell.exe")
+    monkeypatch.setattr(platform_support, "_windows_editor_query", slow)
+    with pytest.raises(ValueError, match="took too long"):
+        platform_support.editor_running(tmp_path)

@@ -139,20 +139,13 @@ def editor_running(project: Path) -> bool:
             raise ValueError(
                 "PowerShell is required to confirm the editor is closed before updating."
             )
-        result = subprocess.run(
-            [
-                powershell,
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); Get-CimInstance Win32_Process -Filter \"Name LIKE 'godot%' OR Name = 'Joinery.exe'\" | Select-Object ExecutablePath,CommandLine | ConvertTo-Json -Compress",
-            ],
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            check=False,
-            timeout=15,
-        )
+        try:
+            result = _windows_editor_query(powershell)
+        except subprocess.TimeoutExpired:
+            raise ValueError(
+                "Windows took too long to say whether the editor is running; addon "
+                "update was stopped. Try again."
+            ) from None
         if result.returncode:
             raise ValueError(
                 "Could not confirm the editor is closed; addon update was stopped."
@@ -237,8 +230,11 @@ $info=New-Object System.Diagnostics.ProcessStartInfo;
 $info.UseShellExecute=$false; $info.RedirectStandardInput=$true;
 $info.EnvironmentVariables['PYTHONUTF8']='1';
 """
-        + "$info.FileName=" + values[0] + ";\n"
-        + "$info.Arguments=((@( " + ", ".join(values[1:])
+        + "$info.FileName="
+        + values[0]
+        + ";\n"
+        + "$info.Arguments=((@( "
+        + ", ".join(values[1:])
         + " ) | ForEach-Object { JoineryQuote $_ }) -join ' ');\n"
         + "$process=New-Object System.Diagnostics.Process; $process.StartInfo=$info;\n"
         + "[void]$process.Start(); $process.StandardInput.Write($payload); $process.StandardInput.Close();\n"
@@ -315,3 +311,21 @@ def windows_provider_argv(shim: Path, arguments: list[str]) -> list[str]:
             "Unsupported Windows provider shim. Install the native Codex executable or install @openai/codex using npm with Node.js on PATH."
         )
     return [executable, str(cli), *arguments]
+
+
+def _windows_editor_query(powershell: str) -> subprocess.CompletedProcess[str]:
+    """Godot and Joinery processes as JSON; slow on a busy machine, so allow 45s."""
+    return subprocess.run(
+        [
+            powershell,
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            "[Console]::OutputEncoding=[System.Text.UTF8Encoding]::new($false); Get-CimInstance Win32_Process -Filter \"Name LIKE 'godot%' OR Name = 'Joinery.exe'\" | Select-Object ExecutablePath,CommandLine | ConvertTo-Json -Compress",
+        ],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        check=False,
+        timeout=45,
+    )
