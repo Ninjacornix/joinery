@@ -35,23 +35,11 @@ TOOLS = {
     "inkscape": DesktopTool(
         "inkscape", "Inkscape", (".svg", ".svgz"), (".svg", ".svgz")
     ),
-    "aseprite": DesktopTool(
-        "aseprite",
-        "Aseprite",
-        (".aseprite", ".ase", ".png", ".jpg", ".jpeg", ".bmp", ".tga", ".webp", ".gif"),
-        (".aseprite", ".ase"),
-    ),
+    # Audacity is no longer an editing tool, but it still opens sound files by
+    # hand when it is installed. Other programs are added per project with a
+    # [desktop.<id>] entry in joinery.toml.
     "audacity": DesktopTool(
         "audacity", "Audacity", (".aup3", ".aup", *AUDIO), (".aup3", ".aup")
-    ),
-    "reaper": DesktopTool(
-        "reaper", "REAPER", (".rpp", ".mid", ".midi", *AUDIO), (".rpp",)
-    ),
-    "musescore": DesktopTool(
-        "mscore",
-        "MuseScore 4",
-        (".mscz", ".mscx", ".mid", ".midi", ".musicxml", ".mxl"),
-        (".mscz", ".mscx"),
     ),
     "supercollider": DesktopTool(
         "scide", "SuperCollider", (".scd", ".sc"), (".scd", ".sc")
@@ -90,6 +78,16 @@ def project_file(project: Path, relative: str) -> Path:
     return path
 
 
+def this_editor() -> Path | None:
+    """The Joinery editor binary: "Open in Godot" means this editor, not a stock copy."""
+    from joinery.distribution import engine_binary
+
+    try:
+        return engine_binary()
+    except ValueError:
+        return None
+
+
 def launcher(tool: str, settings: dict[str, DesktopOverride]) -> list[str]:
     """Resolve a program without starting it or running version probes."""
     override = settings.get(tool)
@@ -103,6 +101,10 @@ def launcher(tool: str, settings: dict[str, DesktopOverride]) -> list[str]:
             args = ["--args", *override.args] if override.args else []
             return ["/usr/bin/open", "-a", str(app), *args]
         raise ValueError(f"Configured application not found: {override.command}")
+    if tool == "godot":
+        editor = this_editor()
+        if editor is not None:
+            return [str(editor)]
     if spec:
         command = shutil.which(spec.command)
         if command:

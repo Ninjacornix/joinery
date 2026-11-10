@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import json
 import os
 import re
@@ -10,8 +12,11 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from joinery.agents import all_agents, get
 from joinery.api_profiles import list_public
@@ -41,7 +46,11 @@ INSTALL_URLS = {
 def _probe(argv: list[str]) -> tuple[int, str]:
     try:
         result = subprocess.run(
-            launch_argv(argv[0], argv[1:]), capture_output=True, text=True, timeout=5, check=False
+            launch_argv(argv[0], argv[1:]),
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
         )
     except (OSError, ValueError, subprocess.TimeoutExpired):
         return 1, ""
@@ -99,6 +108,14 @@ def status(agent_id: str) -> dict[str, Any]:
         and not connected
     ):
         connected, method = True, "API key configured"
+    check = _verification(agent_id)
+    # A passed test message counts only for the sign-in it was made with.
+    verified = bool(
+        connected
+        and check is not None
+        and check.get("state") == "ok"
+        and check.get("method") == method
+    )
     return {
         "id": agent_id,
         "name": agent.name,
@@ -111,7 +128,300 @@ def status(agent_id: str) -> dict[str, Any]:
         "requires_key_confirmation": method == "API key configured",
         "key_vars": list(KEY_VARS[agent_id]),
         "install_url": INSTALL_URLS[agent_id],
+        "verified": verified,
+        "verification": _public(check),
+        "summary": _summary(
+            agent_id,
+            installed=executable is not None,
+            connected=connected,
+            method=method,
+            verified=verified,
+            reason=support["reason"],
+        ),
     }
+
+
+# --- Readiness wording and the test-message check ----------------------------
+
+#: Short names for status lines ("Claude: signed in (Claude account)").
+SHORT_NAMES = {"claude": "Claude", "codex": "Codex"}
+#: What a verification asks. Tiny, and it needs no tools.
+VERIFY_PROMPT = (
+    "Joinery connection check. Reply with the single word OK and nothing else. "
+    "Do not use any tools."
+)
+VERIFY_TIMEOUT = 30
+#: Starting the bridge (project gateway, provider process) gets its own budget.
+CONNECT_TIMEOUT = 90
+VerifyState = Literal["ok", "quota", "auth", "error", "not-installed", "unsupported"]
+_QUOTA = re.compile(
+    r"quota|rate[ _-]?limit|usage limit|too many requests|\b429\b|credit balance|"
+    r"insufficient[ _]funds|billing",
+    re.IGNORECASE,
+)
+_AUTH = re.compile(
+    r"\b401\b|\b403\b|unauthori[sz]ed|forbidden|not (?:logged|signed) in|"
+    r"log ?in again|sign ?in|authenticat|invalid api key|expired (?:token|session)",
+    re.IGNORECASE,
+)
+
+
+def short_name(agent_id: str) -> str:
+    return SHORT_NAMES.get(agent_id, get(agent_id).name)
+
+
+def _summary(
+    agent_id: str,
+    *,
+    installed: bool,
+    connected: bool,
+    method: str,
+    verified: bool,
+    reason: str,
+) -> str:
+    name = short_name(agent_id)
+    if reason:
+        return f"{name}: {reason}"
+    if not installed:
+        return f"{name}: not installed: {INSTALL_URLS[agent_id]}"
+    if not connected:
+        return f"{name}: installed, not signed in"
+    return f"{name}: signed in ({method})" + (", verified" if verified else "")
+
+
+def checks_path() -> Path:
+    """Where test-message results are kept: states and times, never provider text."""
+    root = os.environ.get("JOINERY_READINESS_CACHE")
+    base = Path(root) if root else Path.home() / ".cache/joinery"
+    return base / "agent-checks.json"
+
+
+def _load_checks() -> dict[str, Any]:
+    try:
+        data = json.loads(checks_path().read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _verification(agent_id: str) -> dict[str, Any] | None:
+    entry = _load_checks().get(agent_id)
+    return entry if isinstance(entry, dict) else None
+
+
+def _public(check: dict[str, Any] | None) -> dict[str, str] | None:
+    if check is None:
+        return None
+    return {key: str(check.get(key, "")) for key in ("state", "message", "checked_at")}
+
+
+def _save_check(agent_id: str, record: dict[str, str]) -> None:
+    path = checks_path()
+    data = _load_checks()
+    data[agent_id] = record
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        descriptor, filename = tempfile.mkstemp(
+            prefix=".agent-checks-", dir=path.parent
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(json.dumps(data, indent=1, sort_keys=True) + "\n")
+        os.replace(filename, path)
+    except OSError:
+        pass
+
+
+@dataclass(frozen=True)
+class TurnResult:
+    """What one test message through the bridge produced.
+
+    `text` is used only to classify the outcome; it is never stored or shown,
+    because a provider may put account details in its messages.
+    """
+
+    connected: bool
+    done: bool
+    ok: bool
+    text: str = ""
+    timed_out: bool = False
+
+
+Turn = Callable[[str, Path, float], TurnResult]
+
+
+def classify(result: TurnResult) -> VerifyState:
+    if result.ok and result.done:
+        return "ok"
+    if _QUOTA.search(result.text):
+        return "quota"
+    if _AUTH.search(result.text):
+        return "auth"
+    return "error"
+
+
+def _message(agent_id: str, state: VerifyState, result: TurnResult | None) -> str:
+    name = short_name(agent_id)
+    if state == "ok":
+        return f"{name}: verified. It answered a test message."
+    if state == "quota":
+        return f"{name}: signed in, but the account is out of quota or rate limited."
+    if state == "auth":
+        return f"{name}: the provider refused the sign-in. Sign in again."
+    if state == "not-installed":
+        return f"{name}: not installed: {INSTALL_URLS[agent_id]}"
+    if result is not None and result.timed_out:
+        return f"{name}: no answer to the test message in time."
+    if result is not None and not result.connected:
+        if "policy hook" in result.text:
+            return f"{name}: the project's policy hook is not set up. Run Joinery project setup."
+        return f"{name}: the chat bridge could not start."
+    return f"{name}: the test message failed."
+
+
+def verify(
+    agent_id: str,
+    project: Path,
+    *,
+    timeout: float = VERIFY_TIMEOUT,
+    turn: Turn | None = None,
+) -> dict[str, Any]:
+    """Send one tiny, tool-free message through the real chat bridge.
+
+    "Connected" only means credentials were found; this tells it apart from an
+    account that can actually answer. The result (ok, quota, auth or error) is
+    recorded so `status` can show a "verified" badge. This makes one small model
+    call, so it runs only when someone asks for it.
+    """
+    current = status(agent_id)
+    result: TurnResult | None = None
+    state: VerifyState
+    if not current["supported"]:
+        state = "unsupported"
+        message = f"{short_name(agent_id)}: {current['reason']}"
+    elif not current["installed"]:
+        state = "not-installed"
+        message = _message(agent_id, state, None)
+    elif not current["connected"]:
+        state = "auth"
+        message = f"{short_name(agent_id)}: installed, not signed in. Sign in first."
+    else:
+        result = (turn or bridge_turn)(agent_id, project.resolve(), timeout)
+        state = classify(result)
+        message = _message(agent_id, state, result)
+    record = {
+        "state": state,
+        "message": message,
+        "method": current["method"],
+        "checked_at": datetime.now(UTC).isoformat(timespec="seconds"),
+    }
+    _save_check(agent_id, record)
+    return {
+        "id": agent_id,
+        "name": current["name"],
+        "state": state,
+        "verified": state == "ok",
+        "message": message,
+        "checked_at": record["checked_at"],
+    }
+
+
+def bridge_turn(agent_id: str, project: Path, timeout: float) -> TurnResult:
+    """Run `joinery chat` (the editor's own bridge) and send one test message."""
+    return asyncio.run(_bridge_turn(agent_id, project, timeout))
+
+
+def chat_command(agent_id: str, project: Path) -> list[str]:
+    """The same `joinery chat` the editor starts for its sidebar."""
+    return [
+        sys.executable,
+        "-c",
+        "import sys; from joinery.cli import main; sys.exit(main())",
+        "chat",
+        "--project",
+        str(project),
+        "--agent",
+        agent_id,
+        "--addon-protocol",
+        "2",
+    ]
+
+
+async def _bridge_turn(agent_id: str, project: Path, timeout: float) -> TurnResult:
+    from joinery.catalog import ROOT
+
+    env = dict(os.environ)
+    env["PYTHONPATH"] = os.pathsep.join(
+        p for p in (str(ROOT), env.get("PYTHONPATH", "")) if p
+    )
+    process = await asyncio.create_subprocess_exec(
+        *chat_command(agent_id, project),
+        cwd=ROOT,
+        env=env,
+        stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+        start_new_session=os.name != "nt",
+        limit=16_000_000,
+    )
+    assert process.stdin is not None and process.stdout is not None
+    texts: list[str] = []
+    connected = False
+
+    async def next_event() -> dict[str, Any] | None:
+        assert process.stdout is not None
+        while line := await process.stdout.readline():
+            try:
+                event = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(event, dict):
+                return event
+        return None
+
+    try:
+        try:
+            async with asyncio.timeout(CONNECT_TIMEOUT):
+                while (event := await next_event()) is not None:
+                    if event.get("kind") != "connection":
+                        continue
+                    if event.get("state") == "connected":
+                        connected = True
+                        break
+                    return TurnResult(
+                        False, False, False, str(event.get("message", ""))
+                    )
+        except TimeoutError:
+            return TurnResult(False, False, False, timed_out=True)
+        if not connected:
+            return TurnResult(False, False, False)
+        prompt = {"kind": "prompt", "text": VERIFY_PROMPT}
+        process.stdin.write((json.dumps(prompt) + "\n").encode())
+        await process.stdin.drain()
+        try:
+            async with asyncio.timeout(timeout):
+                while (event := await next_event()) is not None:
+                    kind = event.get("kind")
+                    if kind in {"message", "message_delta"}:
+                        texts.append(str(event.get("text", "")))
+                    elif kind == "connection" and event.get("state") == "error":
+                        texts.append(str(event.get("message", "")))
+                        break
+                    elif kind == "done":
+                        return TurnResult(
+                            True, True, bool(event.get("ok")), "".join(texts)
+                        )
+        except TimeoutError:
+            return TurnResult(True, False, False, "".join(texts), timed_out=True)
+        return TurnResult(True, False, False, "".join(texts))
+    finally:
+        with contextlib.suppress(OSError, RuntimeError):
+            process.stdin.close()
+        try:
+            await asyncio.wait_for(process.wait(), 10)
+        except TimeoutError:
+            with contextlib.suppress(ProcessLookupError):
+                process.kill()
+            await process.wait()
 
 
 def all_statuses() -> dict[str, Any]:

@@ -1,4 +1,6 @@
 import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -13,9 +15,14 @@ from joinery.catalog import (
 )
 from joinery.cli import check_mcp_config, main
 from joinery.installer import (
+    DEFAULT_WORKER_IMAGE,
+    STATUS_LABELS,
+    WORKER_IMAGES,
+    DockerProbe,
     Selection,
     custom_choices,
     menu_tools,
+    readiness,
     run_menu,
     tool_menu,
     validate_choice,
@@ -60,8 +67,8 @@ def with_planned_tool() -> Catalog:
 
 
 def test_toggles_tools() -> None:
-    result, _ = drive([f"{number('aseprite')} {number('blender')}", ""], ["blender"])
-    assert result.tools == ["aseprite", "godot"]
+    result, _ = drive([f"{number('krita')} {number('blender')}", ""], ["blender"])
+    assert result.tools == ["godot", "krita"]
 
 
 def test_required_tool_cannot_be_removed() -> None:
@@ -288,3 +295,110 @@ def test_missing_choices_file_leaves_project_unchanged(
 def _cli(arguments: list[str], monkeypatch: pytest.MonkeyPatch) -> int:
     monkeypatch.setattr(sys, "argv", ["joinery", *arguments])
     return main()
+
+
+class _FakeDocker:
+    """Answers `docker info` and `docker image inspect` without a daemon."""
+
+    def __init__(self, reachable: bool, images: set[str]) -> None:
+        self.reachable = reachable
+        self.images = images
+        self.calls: list[list[str]] = []
+
+    def __call__(
+        self, argv: list[str], **_: object
+    ) -> subprocess.CompletedProcess[str]:
+        self.calls.append(argv)
+        if argv[:2] == ["docker", "info"]:
+            ok = self.reachable
+        else:
+            ok = self.reachable and argv[-1] in self.images
+        return subprocess.CompletedProcess(argv, 0 if ok else 1, "", "")
+
+
+def _menu(fake: _FakeDocker) -> dict[str, dict[str, object]]:
+    probe = DockerProbe(run=fake)
+    tools = tool_menu(load_catalog(), ProjectTools(), probe)["tools"]
+    assert isinstance(tools, list)
+    return {str(tool["id"]): tool for tool in tools}
+
+
+@pytest.fixture
+def docker_on_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/" + name)
+
+
+def test_every_tool_carries_setup_copy_and_readiness(docker_on_path: None) -> None:
+    tools = _menu(_FakeDocker(True, set(WORKER_IMAGES.values())))
+    for tool in tools.values():
+        assert tool["status"] in STATUS_LABELS
+        assert tool["status_label"] == STATUS_LABELS[str(tool["status"])]
+        assert tool["group"] in {"engine", "3d", "2d", "audio"}
+        assert tool["blurb"], tool["id"]
+        assert tool["get_url"] is None or str(tool["get_url"]).startswith("https://")
+    assert tools["blender"]["blurb"] == "3D models and materials"
+    assert tools["material-maker"]["group"] == "3d"
+
+
+def test_ready_needs_docker_and_its_worker_image(docker_on_path: None) -> None:
+    images = set(WORKER_IMAGES.values()) | {DEFAULT_WORKER_IMAGE}
+    tools = _menu(_FakeDocker(True, images))
+    assert tools["blender"]["status"] == "ready"
+    assert tools["blender"]["status_reason"] == ""
+    assert tools["krita"]["status"] == "ready"
+
+
+def test_missing_worker_image_is_preparing(docker_on_path: None) -> None:
+    tools = _menu(_FakeDocker(True, {"joinery-mcp-worker"}))
+    assert tools["godot"]["status"] == "ready"
+    assert tools["blender"]["status"] == "preparing"
+    assert tools["blender"]["status_label"] == "Downloading…"
+    assert "joinery-blender-worker" in str(tools["blender"]["status_reason"])
+
+
+def test_unreachable_docker_is_named(docker_on_path: None) -> None:
+    fake = _FakeDocker(False, set())
+    tools = _menu(fake)
+    assert tools["blender"]["status"] == "needs_docker"
+    assert "Docker" in str(tools["blender"]["status_reason"])
+    # One reachability question for the whole menu, not one per app.
+    assert sum(argv[:2] == ["docker", "info"] for argv in fake.calls) == 1
+
+
+def test_no_docker_binary_needs_docker(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    fake = _FakeDocker(True, set(WORKER_IMAGES.values()))
+    assert _menu(fake)["godot"]["status"] == "needs_docker"
+    assert fake.calls == []
+
+
+def test_paid_tools_need_a_licence(docker_on_path: None) -> None:
+    # The shipped catalog has no paid app today; the rule still has to hold
+    # for one added later, before Docker is even asked.
+    raw = load_catalog().model_dump(mode="python")
+    for tool in raw["tool"]:
+        if tool["id"] == "krita":
+            tool["paid"] = True
+    krita = next(t for t in Catalog.model_validate(raw).tool if t.id == "krita")
+    fake = _FakeDocker(True, set(WORKER_IMAGES.values()))
+    status, reason = readiness(krita, DockerProbe(run=fake))
+    assert status == "needs_licence"
+    assert "licence" in reason
+    assert fake.calls == []
+
+
+def test_planned_tool_is_unavailable() -> None:
+    planned = next(t for t in with_planned_tool().tool if t.id == "future-synth")
+    status, reason = readiness(planned, DockerProbe(run=_FakeDocker(True, set())))
+    assert status == "unavailable"
+    assert reason
+
+
+def test_chosen_connector_has_no_summary() -> None:
+    tools = _menu(_FakeDocker(False, set()))
+    for tool in tools.values():
+        options = tool["mcp_options"]
+        assert isinstance(options, list)
+        for option in options:
+            if option["state"] == "chosen":
+                assert option["summary"] == ""

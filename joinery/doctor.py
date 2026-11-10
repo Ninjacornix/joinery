@@ -1,158 +1,84 @@
-"""Check that the programs a project's tools need are actually installed.
+"""Check that a project's tools can actually do their work.
 
 `joinery doctor` answers one question honestly: can this project do the work it
-claims to? A project enables tools in its `joinery.toml`, and each of those
-drives a real program. If the program is missing, the MCP will fail at the first
-op, so it is better to say so up front than to discover it mid-transaction.
+claims to? It renders the shared readiness core (`joinery.readiness`), the same
+answer `joinery status`, the addon and every agent's `discover_tools` see.
 
-Runs wherever Joinery itself runs: on the host, which is also where live mode
-watches a tool work. It only looks for programs and reads their versions; it
-never installs anything, since installing is the sandbox image's job, and when
-something is missing it points at that image. The image deliberately carries
-the creative tools rather than Joinery's Python environment, so running the
-MCP servers inside it is a separate step (see ADR 0008).
+Creative tools run in offline Docker workers, so doctor checks them there, never
+on the host PATH: a Mac without Blender, Xvfb or ffmpeg installed is not missing
+anything. The only host program a project needs is the Joinery editor itself,
+which the Godot module checks. Desktop apps are only for "Open in …" and are
+reported as information, never as a failure.
+
+Doctor only looks; it never installs anything. When something is missing, the
+advice is Joinery setup, which builds the workers and installs the pinned tools.
 """
 
 from __future__ import annotations
 
-import shutil
-import subprocess
-from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
-from joinery.catalog import (
-    CONFIG_PATH,
-    Catalog,
-    load_catalog,
-    load_project_tools,
-    selection_ids,
-)
+from joinery import readiness
+from joinery.catalog import CONFIG_PATH
 
-
-@dataclass(frozen=True)
-class Probe:
-    """How to find one program and ask its version."""
-
-    #: Executable name, looked up on PATH.
-    command: str
-    #: Argument that makes it print a version. Empty means do not ask.
-    version_flag: str = "--version"
-    #: Set when the program is not expected in the sandbox image.
-    byo: bool = False
-    note: str = ""
+#: States that mean the project cannot do its work until someone acts.
+PROBLEMS = frozenset({"needs_docker", "needs_image", "needs_licence", "broken"})
 
 
-# Keyed by catalog tool id. This is about the local machine, not policy, so it
-# lives here rather than in policy/preferred_tools.toml.
-PROBES: dict[str, Probe] = {
-    "godot": Probe("godot"),
-    "blender": Probe("blender"),
-    "krita": Probe("krita"),
-    "supercollider": Probe("sclang", version_flag="-v"),
-    "surge-xt": Probe(
-        "surge-xt-cli",
-        version_flag="",
-        byo=True,
-        note="rendered in the sandbox worker; a desktop install is only for opening sources by hand",
-    ),
-    "material-maker": Probe("material-maker", version_flag=""),
-    "gimp": Probe("gimp", version_flag="--version"),
-    "inkscape": Probe("inkscape"),
-    "audacity": Probe("audacity"),
-    "musescore": Probe("mscore"),
-    "reaper": Probe("reaper", version_flag="", byo=True, note="your own licence"),
-    "aseprite": Probe("aseprite", version_flag="", byo=True, note="your own licence"),
-}
-
-# Programs every project needs, whatever tools it enabled.
-CORE: dict[str, Probe] = {
-    "ffmpeg": Probe("ffmpeg"),
-    # Xvfb has no version flag, so finding it on PATH is the whole check.
-    "xvfb": Probe("Xvfb", version_flag=""),
-}
+def _fill(
+    project: Path, data: dict[str, Any], host: readiness.Host | None
+) -> dict[str, Any]:
+    """Run the checks the cache could not answer, one tool at a time."""
+    tools = []
+    for entry in data["tools"]:
+        if entry.get("checking") and not entry.get("custom"):
+            fresh = readiness.status(project, tool=entry["id"], refresh=True, host=host)
+            entry = {**fresh["tools"][0], "selected": entry.get("selected", True)}
+        tools.append(entry)
+    return {**data, "tools": tools, "checking": any(t.get("checking") for t in tools)}
 
 
-@dataclass(frozen=True)
-class Finding:
-    """What we learned about one program."""
+def report(
+    config: Path = CONFIG_PATH,
+    *,
+    workers: bool = True,
+    refresh: bool = False,
+    host: readiness.Host | None = None,
+) -> tuple[str, int]:
+    """Render readiness and an exit code: non-zero when a tool cannot work.
 
-    name: str
-    ok: bool
-    detail: str
-    required: bool
-
-    def line(self) -> str:
-        mark = "ok  " if self.ok else ("MISS" if self.required else "--  ")
-        return f"  [{mark}] {self.name:<16} {self.detail}"
-
-
-def _version(probe: Probe) -> str:
-    path = shutil.which(probe.command)
-    if path is None:
-        return ""
-    if not probe.version_flag:
-        return path
-    try:
-        done = subprocess.run(
-            [path, probe.version_flag],
-            capture_output=True,
-            text=True,
-            timeout=20,
-            check=False,
-        )
-    except (subprocess.SubprocessError, OSError):
-        return path
-    out = (done.stdout or done.stderr).strip().splitlines()
-    return out[0].strip() if out else path
-
-
-def _check(name: str, probe: Probe, required: bool) -> Finding:
-    found = _version(probe)
-    if found:
-        return Finding(name, True, found, required)
-    missing = f"{probe.command} not on PATH"
-    if probe.note:
-        missing += f" ({probe.note})"
-    # A bring-your-own tool is never "missing" in the image's sense.
-    return Finding(name, False, missing, required and not probe.byo)
-
-
-def findings(catalog: Catalog, config: Path = CONFIG_PATH) -> list[Finding]:
-    """Check the core programs plus every tool this project enabled."""
-    results = [_check(name, probe, True) for name, probe in CORE.items()]
-    enabled = selection_ids(catalog, load_project_tools(config))
-    for tool_id in enabled:
-        probe = PROBES.get(tool_id)
-        if probe is None:
-            results.append(
-                Finding(tool_id, False, "no probe defined for this tool", False)
-            )
-            continue
-        results.append(_check(tool_id, probe, True))
-    return results
-
-
-def report(config: Path = CONFIG_PATH) -> tuple[str, int]:
-    """Render the findings and an exit code: non-zero when something required is absent."""
-    catalog = load_catalog()
-    results = findings(catalog, config)
-    lines = ["Joinery doctor: programs this project's tools need"]
-    lines += [f.line() for f in results]
-    missing = [f.name for f in results if f.required and not f.ok]
-    byo = [f.name for f in results if not f.ok and not f.required]
-    if byo:
+    Cached checks are reused; checks the cache cannot answer run now. With
+    `workers=False` the cache alone answers (unknown checks show as checking).
+    With `refresh`, every check runs again.
+    """
+    project = config.parent
+    data = readiness.status(project, refresh=refresh, host=host)
+    if workers and not refresh and data.get("checking"):
+        data = _fill(project, data, host)
+    lines = ["Joinery doctor: can this project's tools do their work?"]
+    tools = [t for t in data["tools"] if not t.get("custom")]
+    if not data["tools"]:
+        lines.append("  No tools are selected for this project.")
+    lines += readiness.lines(data)
+    problems = [t for t in tools if t.get("state") in PROBLEMS]
+    states = {t.get("state") for t in problems}
+    if "needs_docker" in states:
         lines.append(
-            "\nNot found, and not expected in the sandbox image (supply your own): "
-            + ", ".join(byo)
+            "\nStart Docker, then run joinery doctor again. Joinery's creative tools "
+            "run offline in Docker workers, so nothing needs installing on this "
+            "computer."
         )
-    if missing:
+    if states - {"needs_docker"}:
         lines.append(
-            "\nMissing: "
-            + ", ".join(missing)
-            + "\nBuild or enter the sandbox image, which installs them:"
-            "\n  docker build -t joinery-sandbox sandbox/"
-            '\n  docker run --rm -it --network none -v "$PWD":/work joinery-sandbox'
+            "\nTo fix this, run Joinery setup (or joinery bootstrap --project "
+            f"{project}). It builds the offline workers and installs the pinned tools."
         )
-    else:
-        lines.append("\nEverything this project needs is present.")
-    return "\n".join(lines), (1 if missing else 0)
+    if not problems:
+        if data.get("checking"):
+            lines.append("\nSome checks have not run yet. Run joinery doctor again.")
+        elif any(t.get("state") == "downloading" for t in tools):
+            lines.append("\nJoinery setup is still preparing a worker.")
+        else:
+            lines.append("\nEverything this project needs is ready.")
+    return "\n".join(lines), (1 if problems else 0)

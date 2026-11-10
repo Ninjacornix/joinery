@@ -4,14 +4,137 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from joinery.catalog import Catalog, CustomTool, ProjectTools, Tool, selection_ids
 
 DOMAIN_ORDER = {"engine": 0, "3d": 1, "materials": 2, "2d": 3, "audio": 4}
 _ENABLED_LINE = re.compile(r"^enabled\s*=\s*\[.*?\]", re.MULTILINE | re.DOTALL)
+
+#: Setup groups apps under four headings. Materials sit with 3D because that is
+#: where a user looks for them, and four headings read faster than five.
+GROUP_FOR_DOMAIN = {
+    "engine": "engine",
+    "3d": "3d",
+    "materials": "3d",
+    "2d": "2d",
+    "audio": "audio",
+}
+
+#: One plain line under each app's name in setup. UI copy, not policy, so it
+#: lives here rather than in policy/preferred_tools.toml.
+BLURBS = {
+    "godot": "Scenes, scripts and the game itself",
+    "blender": "3D models and materials",
+    "material-maker": "Procedural materials",
+    "krita": "Painting, pixel art and textures",
+    "gimp": "Image editing",
+    "inkscape": "Vector art and icons",
+    "supercollider": "Synthesised sound effects",
+    "surge-xt": "Synth sounds and music",
+}
+
+#: Where to get each app, for the "Needs your licence" row's link.
+GET_URLS = {
+    "godot": "https://godotengine.org/",
+    "blender": "https://www.blender.org/",
+    "material-maker": "https://www.materialmaker.org/",
+    "krita": "https://krita.org/",
+    "gimp": "https://www.gimp.org/",
+    "inkscape": "https://inkscape.org/",
+    "supercollider": "https://supercollider.github.io/",
+    "surge-xt": "https://surge-synthesizer.github.io/",
+}
+
+#: The offline worker image each app runs in. Apps run in Docker workers, so
+#: whether that image is present, not whether the app is on the desktop, is
+#: what makes it ready.
+WORKER_IMAGES = {
+    "godot": "joinery-mcp-worker",
+    "supercollider": "joinery-mcp-worker",
+    "blender": "joinery-blender-worker",
+    "inkscape": "joinery-inkscape-worker",
+}
+DEFAULT_WORKER_IMAGE = "joinery-creative-worker"
+
+#: Readiness states and the words every front end shows for them.
+STATUS_LABELS = {
+    "ready": "Ready",
+    "preparing": "Downloading…",
+    "needs_docker": "Needs Docker",
+    "needs_licence": "Needs your licence",
+    "unavailable": "Not available yet",
+}
+
+
+@dataclass
+class DockerProbe:
+    """Asks Docker once per question and remembers the answer.
+
+    `run` is injectable so tests never touch a real daemon.
+    """
+
+    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run
+    timeout: float = 8.0
+    _reachable: bool | None = field(default=None, init=False)
+    _images: dict[str, bool] = field(default_factory=dict, init=False)
+
+    def _ok(self, argv: list[str]) -> bool:
+        try:
+            done = self.run(
+                argv,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return done.returncode == 0
+
+    def reachable(self) -> bool:
+        if self._reachable is None:
+            self._reachable = shutil.which("docker") is not None and self._ok(
+                ["docker", "info", "--format", "{{.ServerVersion}}"]
+            )
+        return self._reachable
+
+    def has_image(self, image: str) -> bool:
+        if image not in self._images:
+            self._images[image] = self._ok(["docker", "image", "inspect", image])
+        return self._images[image]
+
+
+def readiness(tool: Tool, probe: DockerProbe) -> tuple[str, str]:
+    """`(status, status_reason)` for one app. The reason is empty when ready."""
+    if tool.status != "available":
+        if tool.status == "first-party-planned":
+            return "unavailable", "Joinery's own connector for it is still being built."
+        return "unavailable", "No connector has passed review yet."
+    if tool.paid:
+        return (
+            "needs_licence",
+            f"{tool.name} is paid software. Add your own licence to use it.",
+        )
+    if not probe.reachable():
+        return (
+            "needs_docker",
+            f"Joinery runs {tool.name} in Docker. Install Docker Desktop and start it.",
+        )
+    image = WORKER_IMAGES.get(tool.id, DEFAULT_WORKER_IMAGE)
+    if not probe.has_image(image):
+        return (
+            "preparing",
+            (
+                f"The {tool.name} worker ({image}) is not on this computer yet. "
+                "Joinery builds it during setup."
+            ),
+        )
+    return "ready", ""
 
 
 @dataclass(frozen=True)
@@ -175,16 +298,26 @@ def _mcp_options(tool: Tool, catalog: Catalog) -> list[dict[str, object]]:
     promoted into the preferred catalog; their launch command must be supplied
     explicitly before setup can register them.
     """
+    # The chosen option has no summary: being first in the picker already says
+    # it is the one in use, and "(in use)" only made the picker wider.
     options: list[dict[str, object]] = []
     if tool.builtin_server:
-        options.append({"label": tool.builtin_server, "state": "chosen", "usable": True, "summary": "in use", "reason": "First-party native document adapter"})
+        options.append(
+            {
+                "label": tool.builtin_server,
+                "state": "chosen",
+                "usable": True,
+                "summary": "",
+                "reason": "First-party native document adapter",
+            }
+        )
     if tool.mcp is not None:
         options.append(
             {
                 "label": tool.mcp.server,
                 "state": "chosen",
                 "usable": True,
-                "summary": "in use",
+                "summary": "",
                 "reason": f"{tool.mcp.tier} MCP, pinned to {tool.mcp.ref[:12]}",
             }
         )
@@ -243,17 +376,24 @@ def custom_choices(payload: str, current: Iterable[CustomTool]) -> list[CustomTo
     return list(merged.values())
 
 
-def tool_menu(catalog: Catalog, current: ProjectTools) -> dict[str, object]:
+def tool_menu(
+    catalog: Catalog, current: ProjectTools, probe: DockerProbe | None = None
+) -> dict[str, object]:
     """The tool menu as plain data, for a UI that draws its own widgets.
 
     The Project Manager screen in the fork builds its questionnaire from this,
     so the catalog and its admission rules stay the one source of truth. A UI
     cannot invent a tool, and cannot present an unavailable one as selectable,
     because `available` and `reason` come from the same validation the CLI uses.
+
+    `status` is readiness, not selectability: an app that still needs Docker
+    or its worker image can be chosen now and becomes ready later.
     """
     enabled = set(selection_ids(catalog, current))
+    probe = probe or DockerProbe()
     entries: list[dict[str, object]] = []
     for tool in menu_tools(catalog):
+        status, status_reason = readiness(tool, probe)
         entries.append(
             {
                 "id": tool.id,
@@ -279,6 +419,14 @@ def tool_menu(catalog: Catalog, current: ProjectTools) -> dict[str, object]:
                 "recommended": bool(
                     tool.required or (tool.mcp and tool.mcp.tier == "official")
                 ),
+                # Readiness and plain copy for setup's app rows. Field names
+                # are a contract with the Project Manager and the addon.
+                "status": status,
+                "status_label": STATUS_LABELS[status],
+                "status_reason": status_reason,
+                "get_url": GET_URLS.get(tool.id),
+                "blurb": BLURBS.get(tool.id, ""),
+                "group": GROUP_FOR_DOMAIN[tool.domain],
             }
         )
     return {

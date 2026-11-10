@@ -1,12 +1,29 @@
-"""Doctor reports honestly on what is installed, and never installs anything."""
+"""Doctor renders the shared readiness core, checks tools in their workers, never installs."""
+
+from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from joinery import doctor
-from joinery.catalog import load_catalog
-from joinery.doctor import CORE, PROBES, Probe, findings, report
+from joinery import doctor, readiness
+from joinery.readiness import Image, ProbeResult
+from tests.test_readiness import FakeHost
+
+
+@pytest.fixture(autouse=True)
+def cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    folder = tmp_path / "cache"
+    monkeypatch.setenv("JOINERY_READINESS_CACHE", str(folder))
+    return folder
+
+
+@pytest.fixture
+def host(tmp_path: Path) -> FakeHost:
+    engine = tmp_path / "godot.macos.editor.arm64"
+    engine.write_text("editor")
+    return FakeHost(engine=engine)
 
 
 def project(tmp_path: Path, enabled: str) -> Path:
@@ -15,60 +32,116 @@ def project(tmp_path: Path, enabled: str) -> Path:
     return config
 
 
-def test_every_available_tool_has_a_probe() -> None:
-    # A tool that can be selected must be checkable, or doctor would stay quiet
-    # about a program the project actually needs.
-    for tool in load_catalog().tool:
-        if tool.status == "available":
-            assert tool.id in PROBES, tool.id
-
-
-def test_reports_present_program(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(doctor.shutil, "which", lambda _: "/usr/bin/stub")
-    monkeypatch.setattr(doctor, "PROBES", {"godot": Probe("godot", version_flag="")})
-    results = findings(load_catalog(), project(tmp_path, '"godot"'))
-    assert all(f.ok for f in results), [f.detail for f in results]
-
-
-def test_missing_program_is_flagged_and_exits_nonzero(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_godot_project_is_healthy_without_godot_or_xvfb_on_the_host_path(
+    tmp_path: Path, host: FakeHost, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
-    text, code = report(project(tmp_path, '"godot"'))
+    # The Mac this runs on has no `godot`, `Xvfb` or `ffmpeg` on PATH. Godot runs
+    # as the Joinery editor on the host and in the worker; Xvfb and ffmpeg live
+    # only in workers, so none of them may be reported missing.
+    monkeypatch.setenv("PATH", str(tmp_path / "empty"))
+    text, code = doctor.report(project(tmp_path, '"godot"'), host=host)
+    assert code == 0, text
+    assert "MISS" not in text and "Xvfb" not in text and "xvfb" not in text
+    assert "[ok  ] Godot" in text
+    assert "Everything this project needs is ready." in text
+    # Checks ran in the worker and against the editor binary, not on PATH.
+    assert any(image == "joinery-mcp-worker" for image, _ in host.runs)
+    assert any(image == "host" for image, _ in host.runs)
+
+
+def test_missing_worker_points_at_setup_not_a_docker_build(
+    tmp_path: Path, host: FakeHost
+) -> None:
+    host.images.pop("joinery-creative-worker")
+    text, code = doctor.report(project(tmp_path, '"godot", "krita"'), host=host)
     assert code == 1
-    assert "MISS" in text and "godot" in text
-    # Points at the sandbox rather than offering to install anything.
-    assert "docker build" in text and "--network none" in text
+    assert "Krita" in text and "Joinery setup" in text
+    assert "docker build" not in text and "joinery-sandbox" not in text
 
 
-def test_byo_tool_is_not_a_failure(
+def test_docker_down_says_start_docker(tmp_path: Path, host: FakeHost) -> None:
+    host.docker_reason = "Docker is not running."
+    text, code = doctor.report(project(tmp_path, '"godot"'), host=host)
+    assert code == 1
+    assert "Start Docker" in text and "docker build" not in text
+
+
+def test_missing_desktop_app_is_information_not_a_failure(
+    tmp_path: Path, host: FakeHost
+) -> None:
+    text, code = doctor.report(project(tmp_path, '"godot", "surge-xt"'), host=host)
+    assert code == 0, text
+    assert "Open in" in text and "unavailable" in text
+
+
+def test_missing_editor_binary_is_a_problem(tmp_path: Path, host: FakeHost) -> None:
+    host.engine = None
+    text, code = doctor.report(project(tmp_path, '"godot"'), host=host)
+    assert code == 1
+    assert "Godot" in text
+
+
+def test_removed_tool_is_explained_not_probed(tmp_path: Path, host: FakeHost) -> None:
+    text, code = doctor.report(project(tmp_path, '"godot", "aseprite"'), host=host)
+    assert code == 0, text
+    assert "Aseprite was removed" in text
+    assert not any("aseprite" in " ".join(argv) for _, argv in host.runs)
+
+
+def test_cached_answers_are_reused_and_misses_are_filled(
+    tmp_path: Path, host: FakeHost
+) -> None:
+    host.probes[("godot", "get_project_info")] = ProbeResult(True, True, "{}")
+    config = project(tmp_path, '"godot"')
+    doctor.report(config, host=host)
+    first = len(host.runs)
+    assert first
+    doctor.report(config, host=host)
+    assert len(host.runs) == first  # every answer came from the cache
+    # A rebuilt image has a new id, so its checks run again.
+    host.images["joinery-mcp-worker"] = Image("sha256:rebuilt")
+    doctor.report(config, host=host)
+    assert len(host.runs) > first
+
+
+def test_cache_only_mode_reports_checking_without_running_workers(
+    tmp_path: Path, host: FakeHost
+) -> None:
+    text, code = doctor.report(project(tmp_path, '"godot"'), workers=False, host=host)
+    assert code == 0
+    assert host.runs == []
+    assert "have not run yet" in text
+
+
+def test_doctor_reads_the_shared_core(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # Aseprite and REAPER are user-licensed, so their absence is not a fault.
-    monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
-    monkeypatch.setattr(doctor, "CORE", {})
-    results = findings(load_catalog(), project(tmp_path, '"aseprite", "godot"'))
-    byo = {f.name: f for f in results}
-    assert byo["aseprite"].required is False
-    assert byo["godot"].required is True
+    seen: list[Path] = []
+
+    def status(project: Path, **_: Any) -> dict[str, Any]:
+        seen.append(project)
+        return {
+            "checking": False,
+            "tools": [
+                {
+                    "id": "godot",
+                    "name": "Godot",
+                    "state": "ready",
+                    "summary": "Godot 4.7.2 tools ready (offline worker)",
+                    "features": [],
+                }
+            ],
+            "removed": [],
+        }
+
+    monkeypatch.setattr(readiness, "status", status)
+    config = project(tmp_path, '"godot"')
+    text, code = doctor.report(config)
+    assert code == 0 and seen == [config.parent]
+    assert "[ok  ] Godot" in text
 
 
-def test_core_programs_are_always_checked(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(doctor.shutil, "which", lambda _: None)
-    names = {f.name for f in findings(load_catalog(), project(tmp_path, ""))}
-    assert set(CORE) <= names
-
-
-def test_version_flag_failure_still_reports_the_path(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # A program that refuses --version is still installed, so it counts.
-    monkeypatch.setattr(doctor.shutil, "which", lambda _: "/usr/bin/blender")
-
-    def boom(*_: object, **__: object) -> None:
-        raise OSError("cannot exec")
-
-    monkeypatch.setattr(doctor.subprocess, "run", boom)
-    assert doctor._version(Probe("blender")) == "/usr/bin/blender"
+def test_no_tools_selected(tmp_path: Path, host: FakeHost) -> None:
+    text, code = doctor.report(tmp_path / "joinery.toml", host=host)
+    assert code == 0
+    assert "No tools are selected" in text

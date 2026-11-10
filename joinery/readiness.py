@@ -1,0 +1,912 @@
+"""Tool readiness: the one place that decides whether a tool can do its work.
+
+Every front end reads this: `joinery status`, `joinery doctor`, the addon's
+setup step and `/tools`, and the gateway's `discover_tools`. It lives in the
+shared core, so Claude Code, Codex, Gemini CLI and opencode all see the same
+answer for the same project.
+
+Each tool module (`joinery.tools`) declares its checks as data. This module
+runs them in tiers, cheapest first:
+
+- tier 0 (always live): Docker, worker images, setup progress, installed pins;
+- tiers 1 and 2: a command inside the offline worker (`--network none`);
+- tier 3: a read-only call on the tool's MCP server;
+- deep: only with `deep=True`.
+
+Tiers 1 to 3 are cached in `~/.cache/joinery/readiness.json`, keyed by the
+worker image id (and the installed source tree for MCP probes), so a rebuilt
+image or reinstalled server is checked again. Without `refresh`, a cache miss
+is reported as `checking: true` instead of running the probe inline.
+
+A tool's state is the worst state among its required checks. Features (such as
+Blender's MPFB2 humans) report their own state and never change the tool's.
+The desktop app ("Open in ...") is reported separately and never affects state.
+"""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import contextlib
+import hashlib
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import time
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any, Literal, Protocol
+
+from joinery import tools as tool_modules
+from joinery.catalog import (
+    load_catalog,
+    load_project_tools,
+    removed_notices,
+    selection_ids,
+)
+from joinery.tools.base import (
+    Check,
+    Feature,
+    HostExec,
+    ImageCheck,
+    InstallCheck,
+    McpProbe,
+    ToolModule,
+    WorkerExec,
+)
+
+State = Literal[
+    "ready", "downloading", "needs_docker", "needs_image", "needs_licence", "broken"
+]
+STATES: tuple[State, ...] = (
+    "ready",
+    "downloading",
+    "needs_image",
+    "needs_licence",
+    "broken",
+    "needs_docker",
+)
+#: Worse states rank higher; a tool shows its worst required state.
+RANK: dict[str, int] = {state: rank for rank, state in enumerate(STATES)}
+#: What the user can do about each state.
+ACTIONS: dict[str, str] = {
+    "ready": "",
+    "downloading": "",
+    "needs_docker": "start Docker",
+    "needs_image": "joinery setup",
+    "needs_licence": "add your licence",
+    "broken": "joinery setup",
+}
+#: Tier-3 results expire after a day even if nothing else changed.
+MCP_TTL_SECONDS = 24 * 3600
+SETUP_LABEL = "org.joinery.sandbox-rev"
+
+
+def cache_dir() -> Path:
+    return Path(
+        os.environ.get("JOINERY_READINESS_CACHE", str(Path.home() / ".cache/joinery"))
+    )
+
+
+# --- The boundary to Docker, the host and MCP servers -----------------------
+
+
+@dataclass(frozen=True)
+class Image:
+    id: str
+    created: str = ""
+    revision: str = ""
+
+
+@dataclass(frozen=True)
+class ProbeResult:
+    """What an MCP probe returned. `ran` is False when the server is not configured."""
+
+    ran: bool
+    ok: bool
+    text: str = ""
+
+
+class Host(Protocol):
+    """Everything readiness touches outside Python. Tests supply a fake."""
+
+    def docker(self) -> str:
+        """ "" when Docker answers, otherwise why not."""
+        ...
+
+    def image(self, name: str) -> Image | None: ...
+
+    def run(
+        self, image: str, argv: Sequence[str], entrypoint: str, timeout: int
+    ) -> tuple[int, str]: ...
+
+    def host_program(self, program: str) -> Path | None: ...
+
+    def host_run(
+        self, binary: Path, args: Sequence[str], timeout: int
+    ) -> tuple[int, str]: ...
+
+    def installed(self, tool: str) -> str:
+        """ "" when the pinned MCP source is installed and unchanged, else why not."""
+        ...
+
+    def tree(self, tool: str) -> str: ...
+
+    def setup(self) -> dict[str, Any] | None: ...
+
+    def expected_revision(self) -> str: ...
+
+    def mcp(self, project: Path, probe: McpProbe) -> ProbeResult: ...
+
+    def desktop(self, project: Path | None, key: str) -> tuple[bool, str]: ...
+
+
+def _first_line(text: str) -> str:
+    for line in text.strip().splitlines():
+        if line.strip():
+            return line.strip()[:300]
+    return ""
+
+
+def _alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+class DockerHost:
+    """The real boundary: Docker CLI, the installed MCP cache and the desktop."""
+
+    def docker(self) -> str:
+        if shutil.which("docker") is None:
+            return "Docker is not installed."
+        try:
+            done = subprocess.run(
+                ["docker", "info", "--format", "{{.ServerVersion}}"],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return "Docker is not running."
+        return "" if done.returncode == 0 else "Docker is not running."
+
+    def image(self, name: str) -> Image | None:
+        try:
+            done = subprocess.run(
+                [
+                    "docker",
+                    "image",
+                    "inspect",
+                    "--format",
+                    "{{.Id}}\t{{.Created}}\t{{json .Config.Labels}}",
+                    name,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return None
+        if done.returncode:
+            return None
+        identifier, _, rest = done.stdout.strip().partition("\t")
+        created, _, labels = rest.partition("\t")
+        try:
+            parsed = json.loads(labels) or {}
+        except json.JSONDecodeError:
+            parsed = {}
+        return Image(identifier, created, str(parsed.get(SETUP_LABEL, "")))
+
+    def run(
+        self, image: str, argv: Sequence[str], entrypoint: str, timeout: int
+    ) -> tuple[int, str]:
+        command = [
+            "docker",
+            "run",
+            "--rm",
+            "--platform",
+            "linux/amd64",
+            "--network",
+            "none",
+        ]
+        if entrypoint:
+            command += ["--entrypoint", entrypoint]
+        try:
+            done = subprocess.run(
+                [*command, image, *argv],
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return 124, f"timed out after {timeout} s"
+        except OSError as exc:
+            return 127, str(exc)
+        return done.returncode, done.stdout + "\n" + done.stderr
+
+    def host_program(self, program: str) -> Path | None:
+        if program == "engine_binary":
+            from joinery.distribution import engine_binary
+
+            try:
+                return engine_binary()
+            except ValueError:
+                return None
+        found = shutil.which(program)
+        return Path(found) if found else None
+
+    def host_run(
+        self, binary: Path, args: Sequence[str], timeout: int
+    ) -> tuple[int, str]:
+        try:
+            done = subprocess.run(
+                [str(binary), *args],
+                capture_output=True,
+                text=True,
+                errors="replace",
+                timeout=timeout,
+                check=False,
+            )
+        except subprocess.TimeoutExpired:
+            return 124, f"timed out after {timeout} s"
+        except OSError as exc:
+            return 127, str(exc)
+        return done.returncode, done.stdout + "\n" + done.stderr
+
+    def installed(self, tool: str) -> str:
+        from joinery.server_install import load_installed
+
+        try:
+            load_installed(tool)
+        except (OSError, ValueError, KeyError, AssertionError) as exc:
+            return str(exc) or "not installed"
+        return ""
+
+    def tree(self, tool: str) -> str:
+        from joinery.server_install import installation
+
+        try:
+            data = json.loads((installation(tool) / "server.json").read_text())
+        except (OSError, ValueError, KeyError):
+            return ""
+        return str(data.get("tree_sha256", ""))
+
+    def setup(self) -> dict[str, Any] | None:
+        path = cache_dir() / "setup.json"
+        try:
+            data = json.loads(path.read_text())
+        except (OSError, ValueError):
+            return None
+        if not isinstance(data, dict) or not _alive(int(data.get("pid", 0) or 0)):
+            return None
+        return data
+
+    def expected_revision(self) -> str:
+        # The sandbox revision label lands with the image builds; until then a
+        # present image is taken as current.
+        return os.environ.get("JOINERY_SANDBOX_REV", "")
+
+    def mcp(self, project: Path, probe: McpProbe) -> ProbeResult:
+        try:
+            return asyncio.run(_mcp_probe(project, probe))
+        except RuntimeError as exc:
+            return ProbeResult(True, False, str(exc))
+
+    def desktop(self, project: Path | None, key: str) -> tuple[bool, str]:
+        from joinery.desktop import launcher, overrides
+
+        try:
+            argv = launcher(key, overrides(project) if project else {})
+        except ValueError as exc:
+            return False, str(exc)
+        return True, argv[-1]
+
+
+async def _mcp_probe(project: Path, probe: McpProbe) -> ProbeResult:
+    from joinery.mcp_runtime import MCPConnection
+    from joinery.server_install import configured
+
+    specs, _missing = configured(project)
+    spec = next((s for s in specs if s.name == probe.server), None)
+    if spec is None:
+        # Not configured (not selected, or not installed, which InstallCheck
+        # reports): nothing to probe.
+        return ProbeResult(False, False)
+    connection = MCPConnection(spec, project)
+    arguments = {
+        key: str(project.resolve()) if value == "{project}" else value
+        for key, value in probe.arguments().items()
+    }
+    try:
+        await connection.connect()
+        result = await connection.call(probe.tool, arguments)
+        text = "\n".join(
+            getattr(block, "text", "")
+            for block in result.content
+            if hasattr(block, "text")
+        )
+        return ProbeResult(True, not result.is_error, text)
+    except (OSError, ValueError, RuntimeError, TimeoutError, PermissionError) as exc:
+        return ProbeResult(True, False, str(exc) or type(exc).__name__)
+    finally:
+        await connection.close()
+
+
+# --- Evaluating one tool -----------------------------------------------------
+
+
+@dataclass
+class Outcome:
+    state: State = "ready"
+    detail: str = ""
+    version: str = ""
+    #: False when the check was not run and nothing was cached.
+    known: bool = True
+    #: True when there was nothing to check (an MCP probe without a project).
+    skipped: bool = False
+    #: The check came from an InstallCheck (changes the wording).
+    install: bool = False
+    #: The detail is the check's own user-facing wording, not raw output.
+    explicit: bool = False
+
+
+@dataclass
+class _Context:
+    host: Host
+    project: Path | None
+    selected: set[str]
+    refresh: bool
+    deep: bool
+    cache: dict[str, Any]
+    now: float
+    servers: dict[str, str] = field(default_factory=dict)
+    removed: set[str] = field(default_factory=set)
+    docker_reason: str | None = None
+    images: dict[str, Image | None] = field(default_factory=dict)
+    setup: dict[str, Any] | None = None
+    setup_read: bool = False
+    updates: dict[str, Any] = field(default_factory=dict)
+
+    def docker(self) -> str:
+        if self.docker_reason is None:
+            self.docker_reason = self.host.docker()
+        return self.docker_reason
+
+    def image(self, name: str) -> Image | None:
+        if name not in self.images:
+            self.images[name] = None if self.docker() else self.host.image(name)
+        return self.images[name]
+
+    def downloading(self, image: str) -> bool:
+        if not self.setup_read:
+            self.setup = self.host.setup()
+            self.setup_read = True
+        if not self.setup:
+            return False
+        target = str(self.setup.get("image", ""))
+        return not target or target == image
+
+
+def _key(tool: str, check: Check, *parts: str) -> str:
+    digest = hashlib.sha256(repr(check).encode()).hexdigest()[:16]
+    return "|".join((tool, type(check).__name__, digest, *parts))
+
+
+def _cached(ctx: _Context, key: str, ttl: float | None = None) -> Outcome | None:
+    if ctx.refresh:
+        return None
+    raw = ctx.cache.get(key)
+    if not isinstance(raw, dict):
+        return None
+    if ttl is not None and ctx.now - float(raw.get("at", 0)) > ttl:
+        return None
+    state = raw.get("state")
+    if state not in RANK:
+        return None
+    return Outcome(
+        state,
+        str(raw.get("detail", "")),
+        str(raw.get("version", "")),
+        explicit=bool(raw.get("explicit", False)),
+    )
+
+
+#: What the host boundary returns when a check ran out of time. A timeout (a
+#: slow emulated start, a busy machine) says nothing lasting about the image,
+#: so it is reported but never cached; the next refresh runs the check again.
+TIMED_OUT = 124
+
+
+def _timed_out(code: int, output: str) -> bool:
+    return code == TIMED_OUT and output.startswith("timed out after")
+
+
+def _store_run(
+    ctx: _Context, key: str, code: int, output: str, outcome: Outcome
+) -> Outcome:
+    """Cache a command check's result unless the command timed out."""
+    if _timed_out(code, output) and outcome.state != "ready":
+        ctx.updates.pop(key, None)
+        ctx.removed.add(key)
+        return outcome
+    return _store(ctx, key, outcome)
+
+
+def _store(ctx: _Context, key: str, outcome: Outcome) -> Outcome:
+    ctx.updates[key] = {
+        "state": outcome.state,
+        "detail": outcome.detail,
+        "version": outcome.version,
+        "explicit": outcome.explicit,
+        "at": ctx.now,
+    }
+    return outcome
+
+
+def _match(check: WorkerExec | HostExec, code: int, output: str) -> Outcome:
+    version = ""
+    if check.version:
+        found = re.search(check.version, output)
+        version = found.group(1) if found else ""
+    if code == 0 and re.search(check.expect, output):
+        return Outcome("ready", "", version)
+    if _timed_out(code, output):
+        # Not "missing from the image": the check never got to answer.
+        return Outcome("broken", _first_line(output), version)
+    state: State = getattr(check, "on_failure", "broken")
+    reason = check.failure or _first_line(output) or f"exit code {code}"
+    return Outcome(state, reason, version, explicit=bool(check.failure))
+
+
+def _image_gate(ctx: _Context, image: str) -> Outcome | None:
+    """The state a check on `image` inherits when the image itself is not usable."""
+    if ctx.docker():
+        return Outcome("needs_docker", ctx.docker())
+    if ctx.downloading(image):
+        return Outcome("downloading", image)
+    found = ctx.image(image)
+    if found is None:
+        return Outcome("needs_image", f"{image} is not built")
+    expected = ctx.host.expected_revision()
+    if expected and found.revision and found.revision != expected:
+        return Outcome("needs_image", f"{image} is out of date")
+    return None
+
+
+def _evaluate(ctx: _Context, module: ToolModule, check: Check) -> Outcome:
+    if isinstance(check, ImageCheck):
+        return _image_gate(ctx, check.image) or Outcome()
+    if isinstance(check, InstallCheck):
+        reason = ctx.host.installed(check.tool)
+        if reason:
+            return Outcome("needs_image", reason, install=True)
+        return Outcome(install=True)
+    if isinstance(check, WorkerExec):
+        gate = _image_gate(ctx, check.image)
+        if gate is not None:
+            return gate
+        image = ctx.image(check.image)
+        assert image is not None
+        key = _key(module.id, check, image.id)
+        cached = _cached(ctx, key)
+        if cached is not None:
+            return cached
+        if not ctx.refresh:
+            return Outcome(known=False)
+        code, output = ctx.host.run(
+            check.image, check.argv, check.entrypoint, check.timeout
+        )
+        return _store_run(ctx, key, code, output, _match(check, code, output))
+    if isinstance(check, HostExec):
+        binary = ctx.host.host_program(check.program)
+        if binary is None:
+            return Outcome("broken", check.failure or f"{check.program} not found")
+        try:
+            stat = binary.stat()
+            identity = f"{binary}:{stat.st_mtime_ns}:{stat.st_size}"
+        except OSError:
+            identity = str(binary)
+        key = _key(module.id, check, identity)
+        cached = _cached(ctx, key)
+        if cached is not None:
+            return cached
+        if not ctx.refresh:
+            return Outcome(known=False)
+        code, output = ctx.host.host_run(binary, check.args, check.timeout)
+        return _store_run(ctx, key, code, output, _match(check, code, output))
+    # McpProbe
+    if ctx.project is None or module.id not in ctx.selected:
+        # Nothing to connect to: the tool is not selected for a project.
+        return Outcome(skipped=True)
+    image_id = ""
+    if check.image:
+        gate = _image_gate(ctx, check.image)
+        if gate is not None:
+            return gate
+        found = ctx.image(check.image)
+        image_id = found.id if found else ""
+    key = _key(module.id, check, image_id, _server_tree(ctx, check.server))
+    cached = _cached(ctx, key, MCP_TTL_SECONDS)
+    if cached is not None:
+        return cached
+    if not ctx.refresh:
+        return Outcome(known=False)
+    result = ctx.host.mcp(ctx.project, check)
+    if not result.ran:
+        return Outcome(skipped=True)
+    outcome = _probe_outcome(check, result)
+    if outcome.state != "ready":
+        # A failed call is never cached: the next status asks again.
+        ctx.updates.pop(key, None)
+        ctx.removed.add(key)
+        return outcome
+    return _store(ctx, key, outcome)
+
+
+def _server_tree(ctx: _Context, server: str) -> str:
+    tool = ctx.servers.get(server)
+    return ctx.host.tree(tool) if tool else "first-party"
+
+
+def _probe_outcome(check: McpProbe, result: ProbeResult) -> Outcome:
+    failure = check.failure or f"{check.server}.{check.tool} failed"
+    if not result.ok:
+        return Outcome("broken", _first_line(result.text) or failure)
+    if check.expect and not re.search(check.expect, result.text):
+        return Outcome(
+            "broken", failure + ": " + (_first_line(result.text) or "no result")
+        )
+    if check.capability:
+        try:
+            data = json.loads(result.text)
+        except json.JSONDecodeError:
+            return Outcome("broken", failure + ": unreadable capabilities")
+        entry = next(
+            (t for t in data.get("tools", []) if t.get("id") == check.capability), None
+        )
+        if not data.get("runtime_available"):
+            return Outcome("broken", "the offline worker did not start")
+        if entry is None or not entry.get("application_installed"):
+            return Outcome(
+                "needs_image",
+                check.failure or f"{check.capability} is missing from the worker",
+                explicit=bool(check.failure),
+            )
+    return Outcome("ready")
+
+
+def _worst(outcomes: Iterable[Outcome]) -> Outcome:
+    worst = Outcome()
+    for outcome in outcomes:
+        if RANK[outcome.state] > RANK[worst.state]:
+            worst = outcome
+    return worst
+
+
+def _feature_text(feature: Feature, outcome: Outcome, name: str) -> str:
+    if outcome.state == "ready":
+        return feature.label
+    if outcome.state == "needs_docker":
+        return f"{feature.label}: needs Docker running."
+    if outcome.state == "downloading":
+        return f"{feature.label}: preparing the {outcome.detail} worker…"
+    if outcome.state == "needs_image":
+        text = (feature.needs_install if outcome.install else "") or feature.needs_image
+        return text or f"{feature.label} unavailable: run Joinery setup."
+    prefix = feature.broken or f"{feature.label} failed"
+    return f"{prefix}: {outcome.detail}" if outcome.detail else prefix
+
+
+def _tool_text(module: ToolModule, outcome: Outcome) -> str:
+    name = module.name
+    if outcome.state == "needs_docker":
+        return f"{name} needs Docker running to work offline."
+    if outcome.state == "downloading":
+        return f"{name}: preparing the {outcome.detail} worker…"
+    if outcome.state == "needs_image":
+        # A check that names what is missing says it better than the default.
+        if outcome.explicit:
+            return outcome.detail
+        if outcome.install:
+            return module.needs_install.format(name=name)
+        return module.needs_image.format(name=name)
+    if outcome.state == "needs_licence":
+        return f"{name} needs your own licence."
+    prefix = module.broken.format(name=name)
+    return f"{prefix}: {outcome.detail}" if outcome.detail else prefix
+
+
+def _clean(text: str) -> str:
+    """Collapse the gap an unknown version leaves ("Blender  ready")."""
+    return re.sub(r" {2,}", " ", text).strip()
+
+
+def tool_status(ctx: _Context, module: ToolModule) -> dict[str, Any]:
+    """Run (or recall) every check of one tool and describe the result."""
+    results: list[tuple[Check, Outcome]] = []
+    #: Scopes (a feature id, or "" for the tool itself) whose first failing
+    #: check already decided their state. Later checks in that scope are not
+    #: run: a probe that needs a missing program would only fail again and hide
+    #: the clearer reason (GIMP absent from the worker is "rebuild", not
+    #: "failed to start").
+    decided: set[str] = set()
+    for check in module.checks:
+        if check.tier == "deep" and not ctx.deep:
+            continue
+        if check.feature in decided:
+            results.append((check, Outcome(skipped=True)))
+            continue
+        outcome = _evaluate(ctx, module, check)
+        results.append((check, outcome))
+        if outcome.known and not outcome.skipped and outcome.state != "ready":
+            decided.add(check.feature)
+    required = [o for c, o in results if not c.feature and not o.skipped]
+    overall = _worst(o for o in required if o.known)
+    version = (
+        next((o.version for o in required if o.version), "")
+        or next((o.version for _, o in results if o.version), "")
+        or module.version
+    )
+    checking = any(not o.known for _, o in results)
+    features: list[dict[str, Any]] = []
+    ready_labels: list[str] = []
+    for feature in module.features:
+        own = [o for c, o in results if c.feature == feature.id and not o.skipped]
+        worst = _worst(o for o in own if o.known)
+        feature_checking = any(not o.known for o in own)
+        if worst.state == "ready" and own and not feature_checking:
+            ready_labels.append(feature.label)
+        features.append(
+            {
+                "id": feature.id,
+                "state": worst.state,
+                "checking": feature_checking,
+                "detail": _feature_text(feature, worst, module.name),
+                "action": ACTIONS[worst.state],
+            }
+        )
+    if overall.state == "ready":
+        summary = module.ready_summary.format(name=module.name, version=version)
+        if ready_labels:
+            labels = ", ".join(ready_labels)
+            summary += ". " + labels[:1].upper() + labels[1:] + "."
+        if checking:
+            summary = f"Checking {module.name}… " + summary
+    else:
+        summary = _tool_text(module, overall)
+    image = ctx.images.get(module.worker_image)
+    entry: dict[str, Any] = {
+        "id": module.id,
+        "name": module.name,
+        "state": overall.state,
+        "version": version,
+        "checking": checking,
+        "summary": _clean(summary),
+        "detail": overall.detail,
+        "action": ACTIONS[overall.state],
+        "features": features,
+        "checked_at": datetime.fromtimestamp(ctx.now, UTC).isoformat(
+            timespec="seconds"
+        ),
+        "image_id": image.id if image else "",
+    }
+    if module.desktop:
+        available, where = ctx.host.desktop(ctx.project, module.desktop)
+        entry["desktop"] = {
+            "available": available,
+            "path": where if available else "",
+            "label": (
+                f"Open in {module.name}"
+                if available
+                else f"Desktop {module.name} not found: Open in {module.name} is "
+                "unavailable. Editing still works offline."
+            ),
+        }
+    else:
+        entry["desktop"] = {"available": False, "path": "", "label": ""}
+    return entry
+
+
+# --- The whole report ---------------------------------------------------------
+
+
+def load_cache() -> dict[str, Any]:
+    try:
+        data = json.loads((cache_dir() / "readiness.json").read_text())
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def save_cache(cache: Mapping[str, Any]) -> None:
+    path = cache_dir() / "readiness.json"
+    with contextlib.suppress(OSError):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(f".{os.getpid()}.tmp")
+        temporary.write_text(json.dumps(cache, indent=1, sort_keys=True) + "\n")
+        os.replace(temporary, path)
+
+
+def status(
+    project: Path | None = None,
+    *,
+    tool: str | None = None,
+    catalog: bool = False,
+    refresh: bool = False,
+    deep: bool = False,
+    host: Host | None = None,
+) -> dict[str, Any]:
+    """Readiness for a project's tools (or every catalog tool with `catalog`).
+
+    Without `refresh`, tiers 1 to 3 come from the cache and a miss is reported
+    as `checking`; run again with `refresh` (or `spawn_refresh`) to fill it.
+    """
+    host = host or DockerHost()
+    every = load_catalog()
+    selected: set[str] = set()
+    notices: list[str] = []
+    custom: list[dict[str, Any]] = []
+    if project is not None and (project / "joinery.toml").is_file():
+        chosen = load_project_tools(project / "joinery.toml")
+        selected = set(selection_ids(every, chosen))
+        notices = removed_notices(chosen)
+        custom = [
+            {
+                "id": c.id,
+                "name": c.name,
+                "state": "ready",
+                "custom": True,
+                "checking": False,
+                "summary": f"{c.name}: your own tool; Joinery does not check it.",
+                "features": [],
+            }
+            for c in chosen.custom
+        ]
+    if catalog or project is None:
+        ids = [t.id for t in every.tool]
+    else:
+        ids = [t.id for t in every.tool if t.id in selected]
+    if tool is not None:
+        if tool not in tool_modules.REGISTRY:
+            raise ValueError(f"Unknown tool {tool!r}.")
+        ids = [tool]
+        custom = []
+    cache = load_cache()
+    ctx = _Context(host, project, selected, refresh, deep, cache, time.time())
+    ctx.servers = {t.mcp.server: t.id for t in every.tool if t.mcp is not None}
+    report_tools = [
+        tool_status(ctx, tool_modules.REGISTRY[i])
+        for i in ids
+        if i in tool_modules.REGISTRY
+    ]
+    for entry in report_tools:
+        entry["selected"] = entry["id"] in selected
+    if ctx.updates or ctx.removed & set(cache):
+        merged = load_cache()
+        merged.update(ctx.updates)
+        for key in ctx.removed:
+            merged.pop(key, None)
+        save_cache(merged)
+    docker_reason = ctx.docker_reason
+    return {
+        "docker": "unchecked" if docker_reason is None else (docker_reason or "ok"),
+        "checking": any(t["checking"] for t in report_tools),
+        "tools": [*report_tools, *custom],
+        "removed": notices,
+    }
+
+
+def spawn_refresh(project: Path | None, *, deep: bool = False) -> bool:
+    """Fill the cache in a detached process; False when one is already running."""
+    lock = cache_dir() / "readiness.pid"
+    with contextlib.suppress(OSError, ValueError):
+        if _alive(int(lock.read_text().strip())):
+            return False
+    argv = [sys.executable, "-m", "joinery.readiness", "--refresh", "--quiet"]
+    if project is not None:
+        argv += ["--project", str(project.resolve())]
+    if deep:
+        argv.append("--deep")
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    process = subprocess.Popen(
+        argv,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    lock.write_text(str(process.pid))
+    return True
+
+
+def _release_refresh_lock() -> None:
+    """Called by the background refresh as it ends, so the next one can start.
+
+    Without this, a refresh spawned by a long-running process stays a zombie
+    whose pid still answers, and no later refresh would ever start.
+    """
+    lock = cache_dir() / "readiness.pid"
+    with contextlib.suppress(OSError, ValueError):
+        if int(lock.read_text().strip()) == os.getpid():
+            lock.unlink()
+
+
+def lines(report: Mapping[str, Any]) -> list[str]:
+    """The same report as plain text, one tool per line plus degraded features."""
+    marks = {"ready": "ok  ", "downloading": "... ", "needs_docker": "DOCK"}
+    out = []
+    for entry in report["tools"]:
+        mark = marks.get(entry["state"], "--  " if entry.get("custom") else "FIX ")
+        out.append(f"  [{mark}] {entry['name']:<16} {entry['summary']}")
+        for feature in entry.get("features", []):
+            if feature["state"] != "ready":
+                out.append(f"         {'':<16}   {feature['detail']}")
+        desktop = entry.get("desktop") or {}
+        if desktop.get("label") and not desktop.get("available"):
+            out.append(f"         {'':<16}   {desktop['label']}")
+    out += [f"  {notice}" for notice in report.get("removed", [])]
+    return out
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    """`joinery status` entry point: prints the report as JSON (or text)."""
+    parser = argparse.ArgumentParser(prog="joinery status")
+    parser.add_argument("--project", type=Path)
+    parser.add_argument("--tool")
+    parser.add_argument("--catalog", action="store_true", help="every catalog tool")
+    parser.add_argument("--refresh", action="store_true", help="run every check now")
+    parser.add_argument("--deep", action="store_true", help="include the slow checks")
+    parser.add_argument(
+        "--background",
+        action="store_true",
+        help="answer from the cache and refresh missing checks in the background",
+    )
+    parser.add_argument("--text", action="store_true", help="plain text, not JSON")
+    parser.add_argument("--quiet", action="store_true", help=argparse.SUPPRESS)
+    args = parser.parse_args(argv)
+    project = args.project.resolve() if args.project else None
+    try:
+        report = status(
+            project,
+            tool=args.tool,
+            catalog=args.catalog,
+            refresh=args.refresh,
+            deep=args.deep,
+        )
+    except ValueError as exc:
+        print(json.dumps({"error": str(exc)}))
+        return 2
+    finally:
+        if args.refresh and args.quiet:
+            _release_refresh_lock()
+    if args.background and report["checking"]:
+        report["refreshing"] = spawn_refresh(project, deep=args.deep)
+    if args.quiet:
+        return 0
+    if args.text:
+        print("\n".join(lines(report)))
+    else:
+        print(json.dumps(report, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
