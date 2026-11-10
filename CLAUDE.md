@@ -13,7 +13,7 @@ Joinery = Godot 4.7 + thin patch series + Joinery addon. The Journeyman sidebar 
 ## Product principles
 - The user directs; never create or change content unasked.
 - Edit existing sources; start over only on explicit request.
-- Art bibles are per game project (`<project>/art/bible.md`, from `templates/art_bible.md`). The engine repo has none. No art or audio asset work in a project until its bible is approved by the user.
+- Art bibles are per game project (`<project>/art/bible.md`, from `templates/art_bible.md`). The engine repo has none. No art or audio asset work in a project until its bible is approved by the user. A bible drafted from the user's own answers at project creation counts as approved; any later change to it needs the user's re-approval (`/art` → Approve). Agents never approve.
 - Every change is a transaction: snapshot → before → apply (typed ops first) → validate (art bible, provenance gate, lint, tests) → after → user accept/reject → commit or full restore.
 
 ## Non-negotiables
