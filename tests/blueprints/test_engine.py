@@ -245,10 +245,12 @@ def test_crlf_project_files_keep_their_line_endings(
     fixture_catalogue: FixtureCatalogue, tmp_path: Path
 ) -> None:
     # A Windows checkout with autocrlf holds the project files with CRLF.
+    # Normalise first: on Windows the files may already be CRLF.
     project = _project(tmp_path, "alpha", ("controller",))
     for name in ("project.godot", "joinery.toml"):
         path = project / name
-        path.write_bytes(path.read_bytes().replace(b"\n", b"\r\n"))
+        lf = path.read_bytes().replace(b"\r\n", b"\n")
+        path.write_bytes(lf.replace(b"\n", b"\r\n"))
     before = _snapshot(project)
     add_feature(project, "net")
     assert b"\r\n" in (project / "project.godot").read_bytes()
