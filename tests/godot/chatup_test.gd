@@ -44,7 +44,20 @@ func _run_with_motion() -> void:
 	_check(chat._chips.visible, "The removed chip animates out before the row hides")
 	await create_timer(0.3).timeout
 	_check(not chat._chips.visible, "The chip row hides once the chip is gone")
-	chat._prompt.clear()
+	var input: TextEdit = chat._prompt
+	var two_lines: float = input.custom_minimum_size.y
+	input.text = "one\ntwo\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten"
+	input.text_changed.emit()
+	await process_frame
+	var most: float = input.get_line_height() * 5
+	_check(input.custom_minimum_size.y > two_lines, "The message box grows with its text")
+	_check(input.custom_minimum_size.y <= most + 0.5, "The message box stops growing at five lines")
+	input.clear()
+	await process_frame
+	_check(
+		is_equal_approx(input.custom_minimum_size.y, two_lines),
+		"The message box shrinks back once cleared"
+	)
 	chat._on_submit("Make the hammer taller")
 	chat.set_chat_busy(true)
 	chat.set_chat_state("working", "Opening hammer.blend in Blender")

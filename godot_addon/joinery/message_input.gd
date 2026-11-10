@@ -2,13 +2,14 @@
 extends TextEdit
 ## Multiline chat input: Enter sends, Shift+Enter inserts a line break. It sits inside the
 ## composer box, so its own styleboxes are empty apart from a 2u left inset that puts the caret
-## just before the placeholder. It grows with its text from two lines up to MAX_LINES.
+## just before the placeholder. It grows with its text from two lines up to MAX_LINES, then
+## scrolls, and shrinks back when the text is cleared or replaced (sending clears it).
 
 signal text_submitted(value: String)
 
 const UI_THEME := preload("ui_theme.gd")
 const MIN_LINES := 2
-const MAX_LINES := 8
+const MAX_LINES := 5
 
 var caret_column: int:
 	get:
@@ -23,6 +24,8 @@ func _ready() -> void:
 	wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
 	scroll_fit_content_height = false
 	text_changed.connect(_fit)
+	# text_changed fires only for typing; clear() and setting text fire text_set.
+	text_set.connect(_fit)
 	_restyle()
 
 
