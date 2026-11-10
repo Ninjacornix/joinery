@@ -140,7 +140,8 @@ def write_selection(selection: Selection, config: Path) -> None:
     if _ENABLED_LINE.search(text):
         text = _ENABLED_LINE.sub(line, text, count=1)
     else:
-        text = text.rstrip("\n") + f"\n\n[tools]\n{line}\n"
+        lead = text.rstrip("\n") + "\n\n" if text.strip() else ""
+        text = f"{lead}[tools]\n{line}\n"
     text = text.rstrip("\n") + "\n"
     config.write_text(text + "".join(_custom_block(c) for c in selection.custom))
 

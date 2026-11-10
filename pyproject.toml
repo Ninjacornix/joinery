@@ -1,6 +1,6 @@
 [project]
 name = "joinery"
-version = "0.1.0a1"
+version = "0.2.0"
 description = "Godot-based engine directed through real creative tools. Creation, not generation."
 license = "AGPL-3.0-or-later"
 license-files = ["LICENSE"]

@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from bridge.provider_process import stop_process
+from joinery import __version__
 from joinery.platform_support import launch_argv
 
 CODEX_VERSION = "0.167.0"
@@ -159,7 +160,7 @@ async def handshake(executable: str, directory: Path, mode: str) -> dict[str, An
             "id": 0,
             "method": "initialize",
             "params": {
-                "clientInfo": {"name": "joinery", "version": "0.1.0-alpha.1"},
+                "clientInfo": {"name": "joinery", "version": __version__},
                 "capabilities": {"experimentalApi": True},
             },
         }

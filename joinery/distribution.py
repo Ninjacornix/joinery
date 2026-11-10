@@ -8,6 +8,7 @@ import io
 import json
 import os
 import plistlib
+import re
 import struct
 import subprocess
 import tarfile
@@ -210,6 +211,12 @@ def _archive(output: Path, entries: dict[str, _Entry]) -> None:
             archive.addfile(tar_info, io.BytesIO(data))
 
 
+def bundle_version(version: str = __version__) -> str:
+    """The macOS bundle's short version: release numbers only, as Apple requires."""
+    match = re.match(r"\d+(\.\d+){0,2}", version)
+    return match.group(0) if match else "0"
+
+
 def _launcher(binary: str, *, macos: bool = False) -> bytes:
     root = '"$launcher_dir/../Resources/joinery"' if macos else '"$launcher_dir"'
     executable = (
@@ -282,11 +289,11 @@ def package(
             plistlib.dumps(
                 {
                     "CFBundleName": "Joinery",
-                    "CFBundleDisplayName": "Joinery Alpha",
+                    "CFBundleDisplayName": "Joinery",
                     "CFBundleIdentifier": "org.joinery.editor",
                     "CFBundleExecutable": "Joinery",
                     "CFBundlePackageType": "APPL",
-                    "CFBundleShortVersionString": "0.1.0",
+                    "CFBundleShortVersionString": bundle_version(),
                     "CFBundleVersion": "1",
                     "NSHighResolutionCapable": True,
                     "LSMinimumSystemVersion": "13.0",

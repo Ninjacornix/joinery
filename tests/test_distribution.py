@@ -129,6 +129,7 @@ def test_macos_desktop_bundle_has_working_layout_and_measured_manifest(
         assert "../Resources/joinery" in archive.read(launcher).decode()
         metadata = plistlib.loads(archive.read("Joinery.app/Contents/Info.plist"))
         assert metadata["CFBundleExecutable"] == "Joinery"
+        assert metadata["CFBundleShortVersionString"] == distribution.bundle_version()
         assert archive.read("Joinery.app/Contents/MacOS/Godot") == binary.read_bytes()
     assert (
         output.with_name(output.name + ".sha256")
@@ -222,6 +223,16 @@ def test_release_version_matches_project_metadata() -> None:
         tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
         == __version__
     )
+    addon = (ROOT / "godot_addon/joinery/plugin.cfg").read_text()
+    assert f'version="{__version__}"' in addon
+
+
+@pytest.mark.parametrize(
+    ("version", "short"),
+    [("0.2.0", "0.2.0"), ("0.2.0a1", "0.2.0"), ("1.0rc2", "1.0"), ("dev", "0")],
+)
+def test_bundle_version_keeps_release_numbers_only(version: str, short: str) -> None:
+    assert distribution.bundle_version(version) == short
 
 
 @pytest.mark.skipif(

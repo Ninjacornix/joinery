@@ -124,6 +124,12 @@ def test_write_selection_adds_section(tmp_path: Path) -> None:
     assert '[tools]\nenabled = ["godot"]' in config.read_text()
 
 
+def test_write_selection_starts_a_new_file_without_blank_lines(tmp_path: Path) -> None:
+    config = tmp_path / "joinery.toml"
+    write_selection(Selection(["godot"], []), config)
+    assert config.read_text() == '[tools]\nenabled = ["godot"]\n'
+
+
 def test_custom_tools_round_trip_and_replace(tmp_path: Path) -> None:
     config = tmp_path / "joinery.toml"
     other = CustomTool(
