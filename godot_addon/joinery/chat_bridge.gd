@@ -27,6 +27,9 @@ signal art_approved(sha256: String)
 ## Features the game brief asks for that the game lacks: [{text, command}], offered one at a
 ## time and never acted on unasked.
 signal suggestions(items: Array)
+## Token use as the provider reports it: {model, model_name, context_used, context_window,
+## input_tokens, output_tokens, cached_tokens} (0 = not reported). {} when a new session starts.
+signal usage_received(event: Dictionary)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 const ATTACHMENTS := preload("chat_attachments.gd")
@@ -44,11 +47,16 @@ var _engine := ""
 var _project := ""
 var _error_detail := ""
 var _selection: Dictionary = {"mode": "auto", "model": "", "effort": ""}
+## The model's display name from the latest execution event, for usage events.
+var _model_name := ""
 
 
 func start(agent: String, profile: String, engine: String, project: String) -> void:
 	close()
 	_error_detail = ""
+	_model_name = ""
+	# A new session: its token use starts over.
+	usage_received.emit({})
 	_agent = agent
 	_profile = profile
 	_engine = engine
@@ -178,7 +186,12 @@ func _handle(event: Dictionary) -> void:
 		"progress":
 			status_changed.emit("working", str(event.get("text", "")))
 		"execution":
+			_model_name = str(event.get("name", event.get("model", "")))
 			execution_changed.emit(event)
+		"usage":
+			var usage := event.duplicate()
+			usage["model_name"] = _model_name
+			usage_received.emit(usage)
 		"models":
 			models_received.emit(event.get("models", []))
 		"timing":

@@ -160,6 +160,22 @@ assets. They are saved in `.joinery/attachments/` in your project, which is
 kept out of git and out of Godot's import, and never under `art/`; Joinery
 does not copy them anywhere else.
 
+### Context and token use
+
+Once the agent reports its token use, a small ring appears in the sidebar
+header beside the menu. It fills with how much of the model's context window
+the conversation holds, and turns red from 90%, when the conversation is close
+to the model's limit. Hover over it for the numbers: context used of the
+window, this session's input tokens (with the part read from the provider's
+cache) and output tokens, and the model. Reconnecting starts a new session and
+the count over.
+
+The numbers come from the agent's own reports, after each turn and never by
+polling: Codex's token usage updates, the usage in Claude Code's stream-json
+results, and Gemini CLI or opencode when they send usage over ACP. An agent
+that reports nothing shows no ring; one that reports tokens but not its
+context window shows an empty ring with the counts.
+
 ### Picking a part of a model
 
 In the Tools workspace, a model's parts list shows its objects, materials and

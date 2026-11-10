@@ -52,6 +52,7 @@ SIDEBAR_STATES = (
     "shared-view",
     "attachments",
     "image-sent",
+    "usage",
     "commands",
     "sending",
     "working",

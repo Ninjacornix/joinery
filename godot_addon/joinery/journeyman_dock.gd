@@ -244,6 +244,7 @@ func attach_bridge(bridge: Node) -> void:
 		"art_gate": _on_art_gate,
 		"art_approved": _on_art_approved,
 		"suggestions": _on_suggestions,
+		"usage_received": _header.usage.show_usage,
 	}
 	for signal_name: String in links:
 		if (

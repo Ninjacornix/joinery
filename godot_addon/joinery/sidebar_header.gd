@@ -9,6 +9,9 @@ extends VBoxContainer
 ##
 ## Under the row, one quiet line can name an app that needs something, with its fix and a
 ## "Check again" link ([method show_readiness]).
+##
+## Beside the menu, a small ring shows how full the conversation's context is, with token use
+## on hover ([member usage]); it appears only once the provider reports usage.
 
 signal reconnect_pressed
 signal connect_pressed
@@ -20,9 +23,12 @@ const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
 const INDICATOR := preload("activity_indicator.gd")
+const USAGE_SCRIPT := preload("usage_meter.gd")
 
 ## The header row; the settings page adds its menu button here.
 var row: HBoxContainer
+## The context ring beside the menu (usage_meter.gd), shown once the provider reports usage.
+var usage: USAGE_SCRIPT
 var _dot: Control
 var _indicator: Control
 var _name: Label
@@ -53,6 +59,8 @@ func _init() -> void:
 	_name = UI.label("", "JoineryCaption")
 	_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(_name)
+	usage = USAGE_SCRIPT.new()
+	row.add_child(usage)
 	_build_readiness(inset)
 	# The gap around the banner comes and goes with it, so the idle header stays tight.
 	_banner_gap = MarginContainer.new()

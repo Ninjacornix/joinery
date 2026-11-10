@@ -317,6 +317,39 @@ func _images(light: bool, width: int) -> void:
 	chat.set_chat_busy(true)
 	chat.set_chat_state("working", "Looking at your view")
 	await _shot("image-sent", light, width, chat)
+
+	# The context ring in the header, and its hover card as the tooltip shows it.
+	chat.append_agent_text("The door now matches your sketch.", true)
+	chat.finish_agent_response(true)
+	chat.set_chat_busy(false)
+	var meter: Control = chat.get("_header").get("usage")
+	(
+		meter
+		. call(
+			"show_usage",
+			{
+				"model_name": "GPT-6.1 Sol",
+				"context_used": 61_400,
+				"context_window": 272_000,
+				"input_tokens": 182_000,
+				"output_tokens": 6_300,
+				"cached_tokens": 140_000,
+			}
+		)
+	)
+	await _frames()
+	var card := PanelContainer.new()
+	card.theme_type_variation = "JoineryHoverCard"
+	card.theme = chat.theme
+	card.add_child(meter.call("card"))
+	host.add_child(card)
+	await _frames()
+	card.size = card.get_combined_minimum_size()
+	var corner := meter.get_global_rect()
+	card.global_position = Vector2(
+		maxf(8.0, corner.end.x - card.get_combined_minimum_size().x), corner.end.y + 4.0
+	)
+	await _shot("usage", light, width, chat)
 	host.queue_free()
 	await _frames(2)
 
