@@ -8,6 +8,14 @@ extends SceneTree
 ##   they apply.
 
 const STEP_TITLES := ["What are you making?", "Features and apps", "Brief and art direction"]
+const EXISTING_PROJECT := (
+	"This folder already has a Godot project. Open it from the project list, or pick an "
+	+ "empty folder."
+)
+const NOT_EMPTY := (
+	"This folder isn't empty. Pick an empty folder for a new game, so nothing already in it "
+	+ "gets overwritten."
+)
 ## The dialog flow's addon scripts, loaded only in that flow: the Project Manager run has
 ## no project to load them from.
 const ADDON := "res://addons/joinery/"
@@ -283,13 +291,20 @@ func _wizard(create: Button) -> void:
 		_check(chosen.size() == 1, "Exactly one renderer is chosen by default")
 		advanced.button_pressed = false
 		await process_frame
+	var path_edit: LineEdit
 	for line: Node in dialog.find_children("*", "LineEdit", true, false):
 		if line.get_accessibility_name() == "Project Name:":
 			line.text = "Joinery Setup Check"
 			line.text_changed.emit(line.text)
 		elif line.get_accessibility_name() == "Project Path:":
-			line.text = OS.get_environment("JOINERY_SETUP_CHECK_DIR")
-			line.text_changed.emit(line.text)
+			path_edit = line as LineEdit
+	_check(path_edit != null, "Step 1 has a folder field")
+	if path_edit != null:
+		await _check_folder_refusals(dialog, path_edit)
+		path_edit.text = OS.get_environment("JOINERY_SETUP_CHECK_DIR")
+		path_edit.text_changed.emit(path_edit.text)
+		await process_frame
+		_check(_label_text(dialog, NOT_EMPTY) == null, "An empty folder is fine")
 	await _capture(dialog, "startup-setup-details.png")
 	var next := _primary(dialog)
 	_check(next != null and next.text == "Next", "Step 1 offers Next as its one primary action")
@@ -447,6 +462,45 @@ func _wizard(create: Button) -> void:
 			server.get("args", []) == ["--stdio", "argument with spaces"],
 			"Preserve argument boundaries"
 		)
+
+
+## Step 1 refuses a folder that already holds a game, or any other files, and writes
+## nothing there even when its primary action is pressed anyway.
+func _check_folder_refusals(dialog: ConfirmationDialog, path_edit: LineEdit) -> void:
+	var base := OS.get_environment("JOINERY_SETUP_CHECK_DIR")
+	var game := base + "-existing-game"
+	var settings := '[application]\nconfig/name="Their Game"\nrun/main_scene="res://main.tscn"\n'
+	var files := {
+		game.path_join("project.godot"): settings,
+		game.path_join("scripts/Player.cs"): "public partial class Player {}\n",
+		base + "-not-empty/notes.txt": "keep me\n",
+		base + "-gitignore/.gitignore": "*.tmp\n",
+	}
+	for file_path: String in files:
+		DirAccess.make_dir_recursive_absolute(file_path.get_base_dir())
+		var file := FileAccess.open(file_path, FileAccess.WRITE)
+		file.store_string(files[file_path])
+		file.close()
+	var cases := {
+		game: EXISTING_PROJECT,
+		base + "-not-empty": NOT_EMPTY,
+		base + "-gitignore": NOT_EMPTY,
+	}
+	for folder: String in cases:
+		path_edit.text = folder
+		path_edit.text_changed.emit(path_edit.text)
+		await process_frame
+		_check(_label_text(dialog, cases[folder]) != null, "Say why %s can't be used" % folder)
+		var next := _primary(dialog)
+		_check(next != null and next.disabled, "A folder with files blocks Next: " + folder)
+		if next != null:
+			# Even a forced press must not move on or write anything.
+			next.pressed.emit()
+			await process_frame
+			_check(_label_text(dialog, STEP_TITLES[0]) != null, "A forced press stays on step 1")
+	_check(FileAccess.get_file_as_string(game.path_join("project.godot")) == settings, "Untouched")
+	for name: String in ["joinery.toml", "icon.svg", "export_presets.cfg", ".gitignore"]:
+		_check(not FileAccess.file_exists(game.path_join(name)), "Nothing written: " + name)
 
 
 # --- Project apps dialog and app rail (JOINERY_SETUP_DIALOG_TEST) -----------------------------
