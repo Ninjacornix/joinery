@@ -29,7 +29,7 @@ class Krita(ToolModule):
     requires = ("joinery-krita",)
     desktop = "krita"
     ready_summary = "{name} {version} ready (runs offline in the creative worker)"
-    needs_image = "Krita: the creative worker isn't built yet. Run Joinery setup."
+    needs_image = "Krita: the creative worker isn't built yet. Rebuild the worker."
     broken = "Krita: last check failed"
     checks = (
         ImageCheck(CREATIVE_WORKER),
@@ -43,14 +43,14 @@ class Krita(ToolModule):
             expect=r"joinery-krita",
             version=r"(?:\d+:)?(\d+\.\d+\.\d+)",
             on_failure="needs_image",
-            failure="Krita: the creative worker image is out of date; run Joinery setup to rebuild",
+            failure="Krita: the creative worker image is out of date; rebuild the worker",
         ),
         McpProbe(
             "joinery-paint",
             "document_capabilities",
             capability="krita",
             image=CREATIVE_WORKER,
-            failure="Krita: the creative worker image is out of date; run Joinery setup to rebuild",
+            failure="Krita: the creative worker image is out of date; rebuild the worker",
         ),
     )
 

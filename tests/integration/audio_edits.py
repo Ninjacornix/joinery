@@ -241,10 +241,17 @@ async def main(stage: Path) -> dict[str, Any]:
             error, text = await call(client, "process_audio", arguments)
             assert error, (label, text)
             assert needle in text, (label, text)
+        # A plain re-render would drop the two edits, so it is refused.
+        try:
+            await edit_document(stage, "supercollider", SOURCE, TONE, [RENDER, OGG])
+        except ValueError as refused:
+            assert "process_audio" in str(refused), refused
+        else:
+            raise AssertionError("A re-render dropped the recipe's audio edits.")
         after = {p: sha(p) for p in sorted((stage / "audio").rglob("*")) if p.is_file()}
         assert after == before, "a refused edit changed a file"
         assert sorted(p.name for p in (stage / "recipes").glob("*.toml")) == recipes
-        facts["refused"] = sorted(refusals)
+        facts["refused"] = [*sorted(refusals), "re-render over edits"]
 
     # 4. The edited render and the Ogg replay byte for byte from the recipe.
     replays = [

@@ -7,7 +7,6 @@ import contextlib
 import hashlib
 import json
 import os
-import shutil
 import uuid
 from pathlib import Path
 from typing import Any
@@ -16,7 +15,7 @@ from joinery import tools
 from joinery.catalog import load_catalog, load_project_tools, selection_ids
 from joinery.locking import write_lock
 from joinery.mcp_runtime import validate_arguments
-from joinery.recipe import Recipe, load_recipe, recipe_paths, record
+from joinery.recipe import Recipe, load_recipe, recipe_paths, record, store_preimage
 from joinery.runner import Result, SandboxRunner
 from joinery.tools import blender, inkscape, material_maker
 from joinery.worker_identity import docker_owner_args
@@ -169,19 +168,15 @@ async def edit_document(
         textures = tuple(
             p.relative_to(project).as_posix() for p in sorted(folder.glob("*.png"))
         )
+    _refuse_dropping_audio_edits(project, source, (source, *exports))
     _replacements(project, (source, *exports, *textures))
     identifier = uuid.uuid4().hex
     recipe_dir = project / "recipes"
     recipe_dir.mkdir(exist_ok=True)
-    base = ""
-    if target.is_file():
-        # An immutable preimage makes an incremental edit replayable without
-        # depending on the future version of the very document it modifies.
-        input_path = recipe_dir / "inputs" / (identifier + target.suffix)
-        input_path.parent.mkdir(exist_ok=True)
-        (input_path.parent / ".gdignore").write_text("")
-        shutil.copy2(target, input_path)
-        base = input_path.relative_to(project).as_posix()
+    # An immutable preimage makes an incremental edit replayable without
+    # depending on the future version of the very document it modifies.
+    # Named by content, so edits from the same state share one copy.
+    base = store_preimage(project, target) if target.is_file() else ""
     for output in [source, *exports]:
         confined(project, output).parent.mkdir(parents=True, exist_ok=True)
     script = recipe_dir / (identifier + module.script_ext)
@@ -195,9 +190,18 @@ async def edit_document(
         sources=(base,) if base else (),
         note=note,
     )
+    # Keep the old maps in memory: a failed or refused edit puts them back, so
+    # the next edit still finds every output of the recipe it replaces.
+    kept = {old: (project / old).read_bytes() for old in textures}
     for old in textures:
         (project / old).unlink(missing_ok=True)
-    result = await run_offline(module.replay_argv(recipe.script), project)
+    try:
+        result = await run_offline(module.replay_argv(recipe.script), project)
+    except BaseException:
+        _restore(project, kept)
+        raise
+    if not result.ok:
+        _restore(project, kept)
     if tool == "blender" and result.ok:
         folder = confined(project, texture_dir(source))
         written = tuple(
@@ -213,6 +217,37 @@ async def edit_document(
         # without requiring a Blender install on every game developer's host.
         (target.parent / ".gdignore").write_text("")
     return await _record(project, recipe, recipe_dir / (identifier + ".toml"))
+
+
+def _restore(project: Path, files: dict[str, bytes]) -> None:
+    """Write back files removed before a tool run that did not complete."""
+    for relative, data in files.items():
+        path = project / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+
+
+def _refuse_dropping_audio_edits(
+    project: Path, source: str, outputs: tuple[str, ...]
+) -> None:
+    """Refuse a plain render over a sound whose recipe carries audio edits.
+
+    The new recipe would replace the edited one and silently lose the trims,
+    fades and loudness changes. The sound tools re-apply them instead.
+    """
+    from servers.sound.ops import recipe_edits
+
+    for path in recipe_paths(project):
+        old = load_recipe(path)
+        if not set(old.outputs) & set(outputs):
+            continue
+        script = project / old.script
+        if script.is_file() and recipe_edits(script.read_text()):
+            raise ValueError(
+                f"{source} has audio edits that a new render would drop. "
+                "Use set_surge_parameters to change a Surge XT patch and keep "
+                "them, or process_audio to edit the sound."
+            )
 
 
 def _replacements(project: Path, outputs: tuple[str, ...]) -> list[Path]:

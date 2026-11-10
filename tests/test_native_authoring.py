@@ -415,3 +415,254 @@ def test_blender_textures_are_separate_recorded_outputs(
     assert not (textures / "Removed_Image.png").exists()
     script = (stage / recipe.script).read_text()
     assert "_joinery_export_textures" in script and "art/textures/hammer" in script
+
+
+# --- part selection: export names, typed part edits, scope guard ---------------
+
+
+def test_blender_export_carries_part_names_and_maps() -> None:
+    from joinery.tools import blender
+
+    script = blender.MODULE.script(
+        "art/sources/hammer.blend", "", "pass", ["art/models/hammer.glb"]
+    )
+    assert "export_extras=True" in script
+    assert "joinery_maps" in script and "joinery_name" in script
+    # Names are written after the source is saved, so only the export has them.
+    assert script.index("save_as_mainfile") < script.index("_joinery_name_parts()")
+    assert script.index("_joinery_name_parts()") < script.index("export_scene.gltf")
+
+
+def test_inspection_reports_slots_and_what_each_map_feeds() -> None:
+    from joinery.tools import blender
+
+    assert "'slots'" in blender.INSPECT_BLEND
+    assert "'uses': uses" in blender.PART_WALK
+    for via in ("'BUMP'", "'DISPLACEMENT'", "'NORMAL_MAP'", "SEPARATE_COLOR"):
+        assert via in blender.PART_WALK
+
+
+def test_adjust_map_sets_the_colour_space_before_touching_pixels() -> None:
+    from joinery.tools import blender
+
+    code = blender.adjust_map_code("Steel", "steel_rough", "invert", {})
+    body = code[code.index("def _joinery_adjust_map") :]
+    assert body.index("colorspace_settings.name = space") < body.index(
+        "pixels.foreach_get"
+    )
+    assert body.index("pixels.foreach_set") < body.index("picture.pack()")
+    # The scope guard wraps the operation and only the map may change.
+    assert code.index("_joinery_scope_hashes()") < code.index("_joinery_adjust_map(")
+    assert "set(['image:steel_rough'])" in code
+
+
+def test_bake_writes_a_non_color_image_before_baking() -> None:
+    from joinery.tools import blender
+
+    code = blender.bake_height_code("Steel", "steel_height", 1.0)
+    body = code[code.index("def _joinery_bake_height_to_normal") :]
+    assert body.index("colorspace_settings.name = 'Non-Color'") < body.index(
+        "object.bake("
+    )
+    assert "normal_space='TANGENT'" in body and "ShaderNodeNormalMap" in body
+    assert "set(['image:Steel_normal_baked', 'material:Steel'])" in code
+
+
+def test_scope_guard_lists_only_the_named_parts() -> None:
+    from joinery.tools import blender
+
+    code = blender.guarded("pass", materials=("Steel",), objects=("Head.001",))
+    assert "set(['material:Steel', 'object:Head.001'])" in code
+    assert "outside the selected part. Nothing was saved." in code
+
+
+def part_stage(stage: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
+    from joinery import parts
+
+    (stage / "recipes").mkdir()
+    (stage / "recipes/hammer.toml").write_text(
+        'version = 1\ntool = "blender"\nscript = "recipes/hammer.py"\n'
+        'outputs = ["art/sources/hammer.blend", "art/models/hammer.glb"]\n'
+        'sources = []\nnote = ""\n'
+    )
+    parts.write_targets(
+        stage,
+        [
+            {
+                "id": "res://art/models/hammer.glb#material=Steel&image=steel_rough",
+                "label": "Roughness · Steel",
+                "part_kind": "texture",
+                "source": "res://art/sources/hammer.blend",
+                "owner_source": "art/sources/hammer.blend",
+                "material": "Steel",
+                "image": "steel_rough",
+            }
+        ],
+    )
+    edit = AsyncMock(return_value={"status": "staged", "requires_review": True})
+    monkeypatch.setattr("servers.authoring.edit_document", edit)
+    return edit
+
+
+def call_op(stage: Path, tool: str, arguments: dict[str, object]) -> object:
+    from mcp import Client
+
+    from servers import authoring as server
+
+    async def run() -> object:
+        async with Client(server.make_server(stage, "joinery-blender-ops")) as client:
+            return await client.call_tool(tool, arguments)
+
+    return asyncio.run(run())
+
+
+def test_adjust_map_edits_the_selected_map_and_keeps_the_glb_export(
+    stage: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    edit = part_stage(stage, monkeypatch)
+    result = call_op(
+        stage,
+        "adjust_map",
+        {
+            "source": "art/sources/hammer.blend",
+            "material": "Steel",
+            "image": "steel_rough",
+            "op": "levels",
+            "params": {"in_low": 0.1, "gamma": 1.2},
+        },
+    )
+    assert not result.is_error, result.content[0].text
+    args = edit.await_args.args
+    assert args[1:3] == ("blender", "art/sources/hammer.blend")
+    assert "_joinery_adjust_map('Steel', 'steel_rough', 'levels'" in args[3]
+    assert args[4] == ["art/models/hammer.glb"]
+
+
+@pytest.mark.parametrize(
+    ("arguments", "reason"),
+    [
+        (
+            {"material": "Steel", "image": "steel_base", "op": "invert"},
+            "not part of the selection",
+        ),
+        (
+            {"material": "Wood", "image": "wood_orm", "op": "invert"},
+            "not part of the selection",
+        ),
+        (
+            {"material": "Steel", "image": "steel_rough", "op": "blur"},
+            "Unknown map adjustment",
+        ),
+        (
+            {
+                "material": "Steel",
+                "image": "steel_rough",
+                "op": "invert",
+                "params": {"radius": 2},
+            },
+            "does not take radius",
+        ),
+        (
+            {
+                "material": "Steel",
+                "image": "steel_rough",
+                "op": "gamma",
+                "params": {"gamma": 0},
+            },
+            "above 0",
+        ),
+        (
+            {
+                "material": "Steel",
+                "image": "steel_rough",
+                "op": "tint",
+                "params": {"color": [2, 0, 0]},
+            },
+            "0 to 1",
+        ),
+    ],
+)
+def test_adjust_map_refuses_other_parts_and_unknown_adjustments(
+    stage: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    arguments: dict[str, object],
+    reason: str,
+) -> None:
+    edit = part_stage(stage, monkeypatch)
+    result = call_op(
+        stage, "adjust_map", {"source": "art/sources/hammer.blend", **arguments}
+    )
+    assert result.is_error and reason in result.content[0].text
+    edit.assert_not_awaited()
+
+
+def test_material_value_and_bake_respect_the_selection(
+    stage: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    edit = part_stage(stage, monkeypatch)
+    refused = call_op(
+        stage,
+        "set_material_value",
+        {
+            "source": "art/sources/hammer.blend",
+            "material": "Wood",
+            "socket": "Roughness",
+            "value": 0.4,
+        },
+    )
+    assert refused.is_error and "not part of the selection" in refused.content[0].text
+    refused = call_op(
+        stage,
+        "bake_height_to_normal",
+        {
+            "source": "art/sources/hammer.blend",
+            "material": "Steel",
+            "height_image": "steel_height",
+        },
+    )
+    assert refused.is_error and "'steel_height' is not part" in refused.content[0].text
+    edit.assert_not_awaited()
+    accepted = call_op(
+        stage,
+        "set_material_value",
+        {
+            "source": "art/sources/hammer.blend",
+            "material": "Steel",
+            "socket": "Roughness",
+            "value": 0.4,
+        },
+    )
+    assert not accepted.is_error
+    assert (
+        "_joinery_set_material_value('Steel', 'Roughness', 0.4)"
+        in edit.await_args.args[3]
+    )
+
+
+@pytest.mark.parametrize("fails", ["refused", "raises"])
+def test_a_failed_blender_edit_leaves_the_texture_files_in_place(
+    stage: Path, monkeypatch: pytest.MonkeyPatch, fails: str
+) -> None:
+    textures = stage / "art/textures/hammer"
+    textures.mkdir(parents=True)
+    (textures / "steel_rough.png").write_bytes(b"pixels")
+
+    async def run(_argv: object, _project: Path) -> Result:
+        # The old maps are cleared before Blender runs.
+        assert not (textures / "steel_rough.png").exists()
+        if fails == "raises":
+            raise RuntimeError("This edit also changed material Wood.")
+        return Result(False, "", "This edit also changed material Wood.", 0.01)
+
+    monkeypatch.setattr(authoring, "run_offline", run)
+    with pytest.raises(RuntimeError, match="material Wood"):
+        asyncio.run(
+            authoring.edit_document(
+                stage,
+                "blender",
+                "art/sources/hammer.blend",
+                "pass",
+                ["art/models/hammer.glb"],
+            )
+        )
+    assert (textures / "steel_rough.png").read_bytes() == b"pixels"

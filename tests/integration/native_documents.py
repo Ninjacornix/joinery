@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
+import struct
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from joinery.authoring import edit_document, edit_graph, inspect_document, run_offline
 from joinery.recipe import rebuild_one
@@ -47,6 +50,101 @@ async def _albedo(stage: Path) -> tuple[float, float]:
     return round(float(blend), 2), round(float(png), 2)
 
 
+HAMMER = Path(__file__).resolve().parents[1] / "fixtures/parts/hammer_model.py"
+SOURCE = "art/sources/hammer.blend"
+MODEL = "art/models/hammer.glb"
+
+
+async def _hashes(stage: Path) -> dict[str, str]:
+    """The scope guard's own hashes of every object, material and image."""
+    from joinery.tools.blender import PART_WALK, SCOPE_GUARD
+
+    code = "import bpy, json\n" + PART_WALK + SCOPE_GUARD + "\nprint('JOINERY_HASHES:' + json.dumps(_joinery_scope_hashes()))"
+    got = await run_offline(["blender", "--background", SOURCE, "--python-expr", code], stage, readonly=True)
+    line = next((row for row in got.stdout.splitlines() if row.startswith("JOINERY_HASHES:")), "")
+    assert line, got.output[-1500:]
+    found: dict[str, str] = json.loads(line.removeprefix("JOINERY_HASHES:"))
+    return found
+
+
+async def _spread(stage: Path, png: str) -> float:
+    """How much a PNG's pixels vary: a flat (unbaked) normal map is about 0."""
+    code = f"import bpy\nimage = bpy.data.images.load('/work/{png}')\nimport numpy as np\np = np.empty(len(image.pixels), dtype=np.float32)\nimage.pixels.foreach_get(p)\nprint('JOINERY_SPREAD', float(p.reshape(-1, 4)[:, :3].std()))"
+    got = await run_offline(["blender", "--background", "--factory-startup", "--python-expr", code], stage, readonly=True)
+    line = next((row for row in got.stdout.splitlines() if row.startswith("JOINERY_SPREAD")), "")
+    assert line, got.output[-1500:]
+    return float(line.split()[1])
+
+
+def _glb_material(path: Path, name: str) -> tuple[dict[str, Any], list[str]]:
+    data = path.read_bytes()
+    length = struct.unpack("<I", data[12:16])[0]
+    gltf = json.loads(data[20 : 20 + length])
+    images = [str(image.get("name", "")) for image in gltf.get("images", [])]
+    textures = [images[texture["source"]] for texture in gltf.get("textures", [])]
+    material = next(m for m in gltf["materials"] if m["name"] == name)
+    return material, textures
+
+
+async def _op(stage: Path, tool: str, arguments: dict[str, Any]) -> Any:
+    from mcp import Client
+
+    from servers.authoring import make_server
+
+    async with Client(make_server(stage, "joinery-blender-ops")) as client:
+        return await client.call_tool(tool, {"source": SOURCE, **arguments})
+
+
+async def _parts(stage: Path) -> None:
+    """Typed part edits on the hammer change only the selected part, in pixels."""
+    from joinery import parts
+    from joinery.tools.blender import guarded
+
+    await edit_document(stage, "blender", SOURCE, HAMMER.read_text(), [MODEL])
+    assert "embedded_image_handling=3" in (stage / (MODEL + ".import")).read_text()
+    report = await parts.report(stage, MODEL)
+    rough = report.find({"material": "Steel", "image": "steel_rough"}).target()
+    height = report.find({"material": "Steel", "image": "steel_height"}).target()
+    parts.write_targets(stage, [rough])
+    before = await _hashes(stage)
+    png = stage / "art/textures/hammer/steel_rough.png"
+    png_before = png.read_bytes()
+    result = await _op(stage, "adjust_map", {"material": "Steel", "image": "steel_rough", "op": "invert"})
+    assert not result.is_error, result.content[0].text
+    after = await _hashes(stage)
+    changed = sorted(k for k in before if before[k] != after.get(k))
+    assert changed == ["image:steel_rough"], changed
+    assert png.read_bytes() != png_before, "The exported map must carry the new pixels"
+    steel, textures = _glb_material(stage / MODEL, "Steel")
+    rough_index = steel["pbrMetallicRoughness"]["metallicRoughnessTexture"]["index"]
+    assert textures[rough_index] == "steel_rough", textures
+    # Names outside the selection are refused before Blender starts.
+    refused = await _op(stage, "adjust_map", {"material": "Wood", "image": "wood_orm", "op": "invert"})
+    assert refused.is_error and "not part of the selection" in refused.content[0].text
+    # The scope guard fails an edit that reaches past its part; nothing is saved.
+    sneaky = guarded("bpy.data.materials['Wood'].node_tree.nodes['Principled BSDF'].inputs['Roughness'].default_value = 0.1", images=("steel_rough",))
+    from servers.authoring import _edit
+
+    try:
+        await _edit(stage, SOURCE, sneaky, [MODEL], "Reaches past its part")
+    except RuntimeError as exc:
+        assert "outside the selected part" in str(exc), exc
+    else:
+        raise AssertionError("The scope guard let a change to Wood through")
+    assert await _hashes(stage) == after
+    parts.write_targets(stage, [height])
+    result = await _op(stage, "bake_height_to_normal", {"material": "Steel", "height_image": "steel_height", "strength": 1.0})
+    assert not result.is_error, result.content[0].text
+    baked = await _hashes(stage)
+    changed = sorted(k for k in set(after) | set(baked) if after.get(k) != baked.get(k))
+    assert changed == ["image:Steel_normal_baked", "material:Steel"], changed
+    steel, textures = _glb_material(stage / MODEL, "Steel")
+    assert textures[steel["normalTexture"]["index"]] == "Steel_normal_baked", textures
+    spread = await _spread(stage, "art/textures/hammer/Steel_normal_baked.png")
+    assert spread > 0.01, f"The baked normal map is flat ({spread})"
+    print(f"parts: only steel_rough changed; bake spread {spread:.3f}")
+
+
 async def main(app: str) -> None:
     with tempfile.TemporaryDirectory(prefix="joinery-native-fixture-") as directory:
         project = Path(directory)
@@ -55,7 +153,10 @@ async def main(app: str) -> None:
         (project / "joinery.lock").write_text("version=1\n")
         tx = FileTransaction(project)
         tx.begin("Automated native document fixture")
-        if app == "blender":
+        if app == "blender-parts":
+            await _parts(tx.stage)
+            got = {"recipe": max((tx.stage / "recipes").glob("*.toml"), key=lambda path: path.stat().st_mtime).relative_to(tx.stage).as_posix()}
+        elif app == "blender":
             got = await edit_document(tx.stage, app, "art/sources/fixture.blend", 'bpy.ops.mesh.primitive_cube_add(size=1)\nbpy.context.object.name="Fixture"\n' + _FILL.format(value=0.25), ["art/models/fixture.glb"])
             first = got["recipe"]
             # Pixels written into a new (GENERATED) image are kept in the
@@ -109,5 +210,5 @@ async def main(app: str) -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("app", choices=["blender", "blender-mpfb", "krita", "supercollider", "material-maker"])
+    parser.add_argument("app", choices=["blender", "blender-parts", "blender-mpfb", "krita", "supercollider", "material-maker"])
     asyncio.run(main(parser.parse_args().app))

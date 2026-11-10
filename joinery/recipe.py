@@ -43,6 +43,7 @@ from xml.etree import ElementTree
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from joinery import tools
 from joinery.runner import DEFAULT_TIMEOUT, Result, Runner
 
 RECIPE_DIR = "recipes"
@@ -253,29 +254,12 @@ def fingerprint(
 
 
 def _tool_argv(recipe: Recipe) -> list[str]:
-    """The command that replays a recipe, per tool."""
-    if recipe.tool == "blender":
-        # --factory-startup so a user's preferences cannot change the result.
-        return [
-            "blender",
-            "--background",
-            "--factory-startup",
-            "--python",
-            recipe.script,
-        ]
-    if recipe.tool == "supercollider":
-        return ["sclang", recipe.script]
-    if recipe.tool == "surge-xt":
-        return ["joinery-surge", recipe.script]
-    if recipe.tool == "godot":
-        return ["godot", "--headless", "--script", recipe.script]
-    if recipe.tool == "krita":
-        return ["joinery-krita", recipe.script]
-    if recipe.tool == "aseprite":
-        return ["aseprite", "--batch", "--script", recipe.script]
-    if recipe.tool in {"material-maker", "inkscape"}:
-        return ["python3", recipe.script]
-    raise ValueError(f"no replay command for tool {recipe.tool!r}")
+    """The command that replays a recipe: its tool module's replay command."""
+    try:
+        module = tools.get(recipe.tool)
+    except ValueError:
+        raise ValueError(f"No replay command for tool {recipe.tool!r}.") from None
+    return module.replay_argv(recipe.script)
 
 
 def run_recipe(

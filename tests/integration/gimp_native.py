@@ -12,14 +12,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import shutil
 import sys
 import tempfile
 from pathlib import Path
 
-from joinery import tools
 from joinery.authoring import IMAGE, edit_document, inspect_document, run_offline
-from joinery.recipe import fingerprint, load_recipe, rebuild_one, recipe_paths
+from joinery.recipe import load_recipe, rebuild_one, recipe_paths
 from joinery.runner import SandboxRunner
 from joinery.tools.gimp import failure
 
@@ -72,28 +70,8 @@ async def pixels(stage: Path) -> dict[str, list[list[int]]]:
 
 def replay(stage: Path, path: Path) -> None:
     """Replay one recipe from scratch in a copy and require identical outputs."""
-    runner = SandboxRunner(image=IMAGE)
-    rebuilt = rebuild_one(path, stage, runner)
-    if rebuilt.ok:
-        return
-    if not any("no replay command" in problem for problem in rebuilt.problems):
-        raise AssertionError(rebuilt.problems)
-    # joinery.recipe does not dispatch GIMP yet; replay with the module's own
-    # command, exactly as rebuild_one does once it does.
-    recipe = load_recipe(path)
-    with tempfile.TemporaryDirectory(prefix="joinery-gimp-replay-") as directory:
-        scratch = Path(directory) / "project"
-        shutil.copytree(stage, scratch)
-        for relative in recipe.outputs:
-            (scratch / relative).unlink()
-        got = runner.run(tools.get("gimp").replay_argv(recipe.script), scratch)
-        assert got.ok, failure(got.output)
-        changed = {
-            relative: fingerprint(relative, scratch, runner)
-            for relative in recipe.outputs
-            if fingerprint(relative, scratch, runner) != recipe.expect[relative]
-        }
-        assert not changed, changed
+    rebuilt = rebuild_one(path, stage, SandboxRunner(image=IMAGE))
+    assert rebuilt.ok, [failure(problem) for problem in rebuilt.problems]
 
 
 async def main(stage: Path) -> dict[str, object]:

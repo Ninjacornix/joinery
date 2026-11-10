@@ -21,6 +21,10 @@ FAMILIES = {
         "document_capabilities",
         "operate_document",
         "transform_parts",
+        # Typed part edits (servers/authoring.py).
+        "set_material_value",
+        "adjust_map",
+        "bake_height_to_normal",
     },
     "joinery-paint": {
         "inspect_document",

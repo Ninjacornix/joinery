@@ -8,9 +8,9 @@ replay runs under `timeout` as a last resort.
 
 from __future__ import annotations
 
-import json
 import re
 
+from joinery.tools.audio_chain import sc_text
 from joinery.tools.base import (
     CREATIVE_WORKER,
     MCP_WORKER,
@@ -21,6 +21,8 @@ from joinery.tools.base import (
     ToolModule,
     WorkerExec,
 )
+from joinery.tools.surge_xt import AUDIO_EDIT_CHECK
+from joinery.tools.surge_xt import MODULE as SURGE
 
 #: Seconds a patch may run before the recipe script stops it. An NRT render is
 #: much faster than real time, so this only trips on a patch that never exits.
@@ -47,8 +49,13 @@ TIMEOUT = (
 
 
 def _sc(text: str) -> str:
-    """A SuperCollider string literal."""
-    return json.dumps(text, ensure_ascii=False)
+    """A SuperCollider expression for `text`, of any length.
+
+    sclang reads a literal's characters as themselves, control characters
+    included, and cuts a literal at about 8 KB, so long text is split into
+    pieces and joined (see `audio_chain.sc_text`; `sc_unquote` reads it back).
+    """
+    return sc_text(text)
 
 
 class SuperCollider(ToolModule):
@@ -62,16 +69,18 @@ class SuperCollider(ToolModule):
     binary = "sclang"
     desktop = "supercollider"
     ready_summary = "{name} {version} ready (offline renders)"
-    needs_image = "SuperCollider: worker image missing. Run Joinery setup."
+    needs_image = "SuperCollider: worker image missing. Rebuild the worker."
     broken = "SuperCollider failed its check"
     features = (
         Feature(
             "live-audition",
             "live audition",
-            needs_image="Offline renders ready; live audition not installed. Run Joinery setup.",
-            needs_install="Offline renders ready; live audition not installed. Run Joinery setup.",
+            needs_image="Offline renders ready; live audition not installed. Rebuild the worker.",
+            needs_install="Offline renders ready; live audition not installed. Rebuild the worker.",
             broken="Live audition error",
         ),
+        # The same ffmpeg edits Surge XT's renders get, run after the patch.
+        SURGE.feature("audio-edit"),
     )
     checks = (
         ImageCheck(CREATIVE_WORKER),
@@ -89,6 +98,7 @@ class SuperCollider(ToolModule):
             capability="supercollider",
             image=CREATIVE_WORKER,
         ),
+        AUDIO_EDIT_CHECK,
         ImageCheck(MCP_WORKER, feature="live-audition"),
         InstallCheck("supercollider", feature="live-audition"),
         McpProbe(

@@ -71,6 +71,12 @@ async def nrt() -> None:
         assert ok, output[-2000:]
         again = hashlib.sha256((project / "audio/fixture.wav").read_bytes()).digest()
         assert first == again, "NRT replay must be byte-repeatable"
+        # A control character and a patch past sclang's 8 KB literal limit
+        # reach the native source exactly and still render.
+        long = "// \u0001 marker\n// " + "x" * 9000 + "\n" + score(440)
+        ok, output, _ = await render(project, "long", long)
+        assert ok, output[-2000:]
+        assert (project / "audio/long.scd").read_text() == long
         failing = {
             "runtime": ("(\nnil.fooBar;\n0.exit;\n)\n", RUN_ERROR),
             "parse": ("(\nSinOsc.ar(\n0.exit;\n", PARSE_ERROR),

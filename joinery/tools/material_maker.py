@@ -211,8 +211,8 @@ class MaterialMaker(ToolModule):
     version = _version()
     ready_summary = "{name} {version} ready (offline worker)"
     needs_image = (
-        "Material Maker runs offline in the creative worker. Run Joinery setup "
-        "(Docker required)."
+        "Material Maker runs offline in the creative worker. Rebuild the "
+        "worker (Docker required)."
     )
     broken = "Material Maker failed its check"
     checks = (

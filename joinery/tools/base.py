@@ -166,10 +166,10 @@ class ToolModule:
     ready_summary: str = "{name} {version} ready (offline worker)"
     #: Shown when the required worker image is missing or stale.
     needs_image: str = (
-        "{name} runs in an offline worker that isn't built yet. Run Joinery setup."
+        "{name} runs in an offline worker that isn't built yet. Rebuild the worker."
     )
     #: Shown when a required pinned MCP is not installed.
-    needs_install: str = "{name}: its tools aren't installed yet. Run Joinery setup."
+    needs_install: str = "{name}: its tools aren't installed yet. Rebuild the worker."
     #: Prefix for a failing required check; the reason follows.
     broken: str = "{name} failed its check"
     #: Optional provider of selectable parts inside a source document.
@@ -186,7 +186,7 @@ class ToolModule:
 
     def replay_argv(self, script: str) -> list[str]:
         """The worker command that replays a recipe script."""
-        raise ValueError(f"no replay command for tool {self.id!r}")
+        raise ValueError(f"No replay command for tool {self.id!r}.")
 
     def check_destinations(self, source: str, exports: list[str]) -> None:
         """Refuse a source or export location this tool cannot write."""

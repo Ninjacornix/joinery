@@ -207,7 +207,7 @@ class Gimp(ToolModule):
     ready_summary = (
         "{name} {version} ready: edits .xcf layers and channels offline; exports PNG"
     )
-    needs_image = "GIMP runs in the creative worker, which isn't installed yet. Run Joinery setup."
+    needs_image = "GIMP runs in the creative worker, which isn't installed yet. Rebuild the worker."
     broken = "GIMP failed to start"
     checks = (
         ImageCheck(CREATIVE_WORKER),

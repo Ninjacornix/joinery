@@ -59,7 +59,7 @@ class Inkscape(ToolModule):
     desktop = "inkscape"
     ready_summary = "{name} {version} ready (offline worker)"
     needs_image = (
-        "Inkscape runs in Joinery's offline worker. Run Joinery setup to build it."
+        "Inkscape runs in Joinery's offline worker. Rebuild the worker."
     )
     broken = "Inkscape failed its check"
     features = (

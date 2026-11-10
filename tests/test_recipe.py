@@ -8,8 +8,10 @@ from pathlib import Path
 
 import pytest
 
+from joinery import tools
 from joinery.recipe import (
     Recipe,
+    _tool_argv,
     load_recipe,
     rebuild_one,
     recipe_paths,
@@ -234,6 +236,41 @@ def test_unknown_tool_is_rejected(tmp_path: Path) -> None:
     result = rebuild_one(path, tmp_path, FakeRunner())
     assert not result.ok
     assert any("photoshop" in p for p in result.problems)
+
+
+def test_gimp_recipe_replays_with_the_gimp_module_command() -> None:
+    recipe = Recipe(tool="gimp", script="recipes/x.py", outputs=("art/x.xcf",))
+    argv = _tool_argv(recipe)
+    assert argv == tools.get("gimp").replay_argv("recipes/x.py")
+    assert "gimp-console" in argv
+
+
+def test_supercollider_replay_keeps_the_module_time_bound() -> None:
+    recipe = Recipe(tool="supercollider", script="recipes/a.scd", outputs=("a.wav",))
+    assert _tool_argv(recipe)[:3] == ["timeout", "300", "sclang"]
+
+
+def test_removed_tool_has_no_replay_command() -> None:
+    recipe = Recipe(tool="aseprite", script="recipes/x.lua", outputs=("art/x.png",))
+    with pytest.raises(ValueError, match="No replay command for tool 'aseprite'"):
+        _tool_argv(recipe)
+
+
+def test_gimp_recipe_rebuilds_through_its_module(tmp_path: Path) -> None:
+    put(tmp_path, "recipes/x.py", b"# python-fu")
+    path = write_recipe(
+        tmp_path,
+        "x",
+        'version = 1\ntool = "gimp"\nscript = "recipes/x.py"\n'
+        'outputs = ["art/x.png"]\n',
+    )
+    runner = FakeRunner(writes={"art/x.png": b"baked pixels"})
+    put(tmp_path, "art/x.png", b"baked pixels")
+    record(path, tmp_path, runner)
+    result = rebuild_one(path, tmp_path, runner)
+    assert result.ok, result.problems
+    assert not any("no replay command" in p.lower() for p in result.problems)
+    assert runner.calls[-1] == tools.get("gimp").replay_argv("recipes/x.py")
 
 
 def test_render_must_be_an_image(tmp_path: Path) -> None:

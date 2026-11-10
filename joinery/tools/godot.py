@@ -23,8 +23,8 @@ class Godot(ToolModule):
     binary = "godot"
     desktop = "godot"
     ready_summary = "Godot {version} tools ready (offline worker)"
-    needs_image = "Godot tools: worker missing. Run Joinery setup."
-    needs_install = "Godot tools: not installed. Run Joinery setup."
+    needs_image = "Godot tools: worker missing. Rebuild the worker."
+    needs_install = "Godot tools: not installed. Rebuild the worker."
     broken = "Godot tools: error"
     checks = (
         HostExec(

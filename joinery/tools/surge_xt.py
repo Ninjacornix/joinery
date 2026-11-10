@@ -74,7 +74,7 @@ class SurgeXT(ToolModule):
     binary = "joinery-surge"
     desktop = ""
     ready_summary = "{name} {version} ready: renders offline in the creative worker"
-    needs_image = "Surge XT: the creative worker isn't built yet. Run Joinery setup."
+    needs_image = "Surge XT: the creative worker isn't built yet. Rebuild the worker."
     broken = "Surge XT failed its check"
     features = (
         Feature(
@@ -82,7 +82,7 @@ class SurgeXT(ToolModule):
             "MIDI music (General MIDI and Surge XT)",
             needs_image=(
                 "MIDI music unavailable: FluidSynth or its SoundFont is missing "
-                "from the creative worker. Run Joinery setup to rebuild it."
+                "from the creative worker. Rebuild the worker."
             ),
             broken="MIDI music failed its check",
         ),
@@ -91,7 +91,7 @@ class SurgeXT(ToolModule):
             "audio edits (trim, fade, loudness, loops)",
             needs_image=(
                 "Audio edits unavailable: ffmpeg in the creative worker is "
-                "incomplete. Run Joinery setup to rebuild it."
+                "incomplete. Rebuild the worker."
             ),
             broken="Audio edits failed their check",
         ),

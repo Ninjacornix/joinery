@@ -73,25 +73,15 @@ def test_builtin_server_matches_module_family(tool_id: str) -> None:
     sorted(t for t, m in tools.REGISTRY.items() if m.script_ext or m.authoring),
 )
 def test_module_replay_matches_recipe_replay(tool_id: str) -> None:
-    # Recipe replay still has its own table; both must start the same program.
+    # Recipe replay dispatches through the module, bound and all.
     recipe = Recipe(
         tool=tool_id,
         script="recipes/x" + (tools.get(tool_id).script_ext or ".py"),
         outputs=("art/x",),
     )
-    try:
-        legacy = _tool_argv(recipe)
-    except ValueError:
-        # joinery.recipe has no GIMP branch until it dispatches through the
-        # modules; the module's command is the one replay will use.
-        pytest.xfail(f"joinery.recipe does not replay {tool_id} yet")
     argv = tools.get(tool_id).replay_argv(recipe.script)
-    if argv[0] == "timeout":
-        # A module may bound its replay (SuperCollider does); the program the
-        # bound runs must still be the one recipe replay starts.
-        assert argv[1].isdigit()
-        argv = argv[2:]
-    assert argv == legacy
+    assert _tool_argv(recipe) == argv
+    assert any(recipe.script in part for part in argv)
 
 
 def test_authoring_tables_come_from_the_modules() -> None:

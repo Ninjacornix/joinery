@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from joinery.tools import get
+from joinery.tools.audio_chain import sc_unquote
 from joinery.tools.supercollider import (
     NO_EXIT,
     PARSE_ERROR,
@@ -40,16 +41,40 @@ def test_patch_runs_compiled_inside_try_with_error_hook_and_time_limit() -> None
 
 
 def test_patch_text_is_escaped_as_sclang_strings() -> None:
+    # sclang reads a literal's characters as themselves; only backslash and
+    # quote are escaped (it does not understand JSON's \\n or \\uXXXX).
     code = 'Synthèse "quoted" \\back\n0.exit;'
     script = SC.script("audio/a.scd", "", code, [])
-    assert '"Synthèse \\"quoted\\" \\\\back\\n0.exit;"' in script
+    assert '"Synthèse \\"quoted\\" \\\\back\n0.exit;"' in script
+
+
+def _literals(script: str) -> list[str]:
+    """The patch text as written to the source and as compiled."""
+    write = script.index("file.write(") + len("file.write(")
+    compiled = script.index("patch = ") + len("patch = ")
+    return [
+        sc_unquote(script[write : script.index("); });\n", write)]),
+        sc_unquote(script[compiled : script.index(".compile;", compiled)]),
+    ]
+
+
+def test_control_characters_and_long_patches_round_trip() -> None:
+    # A control character survives as itself, and a patch past sclang's
+    # 8 KB literal limit is split into pieces rather than cut.
+    code = "// \u0001 start\n" + "// " + "x" * 9000 + "\n0.exit;\n"
+    script = SC.script("audio/a.scd", "", code, [])
+    assert "\\u0001" not in script and "\u0001" in script
+    assert _literals(script) == [code, code]
+    assert "].join" in script
+    for line in script.splitlines():
+        assert len(line.encode()) < 8000
 
 
 def test_patch_without_exit_is_refused_by_the_script_without_rendering() -> None:
     script = SC.script("audio/a.scd", "", "(\n1 + 2;\n)\n", [])
     assert NO_EXIT in script and "1.exit" in script
     # The operation log still carries the patch; it is just never run.
-    assert '"(\\n1 + 2;\\n)\\n"' in script
+    assert '"(\n1 + 2;\n)\n"' in script
     assert "compile" not in script and "patch.value" not in script
 
 
