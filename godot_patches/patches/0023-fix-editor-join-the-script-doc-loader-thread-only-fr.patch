@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Tue, 10 Nov 2026 21:30:37 +0100
+Subject: [PATCH] fix(editor): join the script doc loader thread only from the
+ main thread
+
+Meant for upstream: a general race fix in EditorHelp.
+
+_finish_regen_script_doc_thread() ran on worker_thread and joined
+loader_thread, the thread that had just started it. The main thread
+joins loader_thread too, in regenerate_script_doc_cache(), and
+Thread::start() publishes the thread id before it stores the
+std::thread. When the worker's join lost either race, std::thread::join
+threw, and the editor ended in std::terminate (0xC0000409 on Windows).
+It showed on a slow software-rendered Windows runner, about one first
+editor launch of a fresh project in ten.
+
+Now only the main thread joins loader_thread: before restarting it,
+waiting for it ahead of worker_thread (which it starts as its last
+step), and in cleanup_doc().
+---
+ editor/doc/editor_help.cpp | 8 ++++++--
+ 1 file changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/editor/doc/editor_help.cpp b/editor/doc/editor_help.cpp
+index a469a50..f7b9716 100644
+--- a/editor/doc/editor_help.cpp
++++ b/editor/doc/editor_help.cpp
+@@ -3173,14 +3173,17 @@ void EditorHelp::regenerate_script_doc_cache() {
+ 		return;
+ 	}
+ 
+-	_wait_for_thread(worker_thread);
++	// The loader thread starts the worker thread as its last step, so wait for it first.
+ 	_wait_for_thread(loader_thread);
++	_wait_for_thread(worker_thread);
+ 	loader_thread.start(_regen_script_doc_thread, EditorFileSystem::get_singleton()->get_filesystem());
+ }
+ 
+ // Runs on worker_thread since it writes to DocData.
++// The loader thread is only ever joined from the main thread: joining it here as well
++// raced with the main thread, both with its own join and with Thread::start() still
++// storing the new thread, and the failed join ended the editor in std::terminate.
+ void EditorHelp::_finish_regen_script_doc_thread(void *p_udata) {
+-	loader_thread.wait_to_finish();
+ 	_process_postponed_docs();
+ 	_script_docs_loaded.set();
+ 
+@@ -3363,6 +3366,7 @@ void EditorHelp::update_doc() {
+ }
+ 
+ void EditorHelp::cleanup_doc() {
++	_wait_for_thread(loader_thread);
+ 	_wait_for_thread();
+ 	memdelete(doc);
+ 	doc = nullptr;
