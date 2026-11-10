@@ -51,6 +51,19 @@ def test_review_accept_and_revert(game: Path) -> None:
     assert not (game / "new.gd").exists()
 
 
+def test_apps_that_made_a_change_are_kept(game: Path) -> None:
+    tx = FileTransaction(game)
+    tx.begin("Model a hammer")
+    tx.note_tool("blender")
+    tx.note_tool("godot")
+    tx.note_tool("blender")
+    (tx.stage / "hammer.txt").write_text("hammer")
+    tx.review()
+    assert FileTransaction.load(game, tx.id).tools == ["blender", "godot"]
+    tx.accept()
+    assert FileTransaction.load(game, tx.id).tools == ["blender", "godot"]
+
+
 def test_delete_reject_and_conflict(game: Path) -> None:
     tx = FileTransaction(game)
     tx.begin("Delete")

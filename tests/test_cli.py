@@ -188,6 +188,58 @@ def test_feature_reject_changes_nothing(
     assert not (game / "locale").exists()
 
 
+def test_transactions_list_feeds_the_review_tab(
+    game: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Pending and decided changes with when, which app and what changed."""
+    assert main(["feature", "add", "net", "--project", str(game), "--json"]) == 0
+    identifier = out_json(capsys)["transaction_id"]
+    listing = ["transactions", "list", "--project", str(game)]
+    assert main(listing) == 0
+    data = out_json(capsys)
+    (entry,) = data["transactions"]
+    assert entry["id"] == identifier and entry["state"] == "review"
+    assert entry["summary"] and entry["tools"] == ["joinery"]
+    assert entry["created"] > 0 and entry["decided"] == 0
+    assert entry["file_count"] == len(entry["files"]) >= 1
+    assert {"path": "features/net/net.gd", "change": "created"} in entry["files"]
+    assert "art_bible" in data
+    accept = ["transactions", "accept", "--project", str(game), "--id", identifier]
+    assert main(accept) == 0
+    capsys.readouterr()
+    assert main(listing) == 0
+    (entry,) = out_json(capsys)["transactions"]
+    assert entry["state"] == "accepted" and entry["revertible"] is True
+    assert entry["decided"] >= entry["created"]
+
+
+def test_transactions_list_says_how_the_art_bible_was_approved(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from joinery import art_approval
+
+    project = tmp_path / "plain"
+    project.mkdir()
+    (project / "project.godot").write_text("config_version=5\n")
+    listing = ["transactions", "list", "--project", str(project)]
+
+    def bible() -> dict[str, str]:
+        assert main(listing) == 0
+        result: dict[str, str] = out_json(capsys)["art_bible"]
+        return result
+
+    assert bible() == {"state": "missing"}
+    (project / "art").mkdir()
+    (project / "art/bible.md").write_text("# Art bible\n\nPalette: warm wood.\n")
+    assert bible() == {"state": "needs_approval"}
+    assert art_approval.approve_at_creation(project)
+    assert bible() == {"state": "approved", "by": "creation"}
+    (project / "art/bible.md").write_text("# Art bible\n\nPalette: cold steel.\n")
+    assert bible() == {"state": "needs_approval"}
+    art_approval.approve(project, "Ada")
+    assert bible() == {"state": "approved", "by": "you"}
+
+
 def test_feature_add_yes_runs_follow_up(
     game: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

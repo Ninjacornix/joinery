@@ -470,6 +470,7 @@ def stage_change(
     is accepted; a failed edit, or one that changes nothing, is rejected.
     """
     tx = FileTransaction(project)
+    tx.note_tool("joinery")
     tx.begin(summary)
     try:
         edit(tx.stage)

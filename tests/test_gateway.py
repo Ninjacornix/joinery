@@ -471,8 +471,11 @@ def test_part_targets_reach_the_stage_before_a_typed_part_edit(
                 "adjust_map",
                 {"source": "art/sources/hammer.blend"},
             )
+            assert gateway.transaction is not None
+            # The Review tab names the app that made the change.
+            seen.append(gateway.transaction.tools)
         finally:
             await gateway.close()
 
     asyncio.run(run())
-    assert seen == [[target]], "Only part targets, and only this prompt's"
+    assert seen == [[target], ["blender-ops"]], "Only part targets, and only this prompt's"

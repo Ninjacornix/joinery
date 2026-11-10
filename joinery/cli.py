@@ -940,6 +940,10 @@ def main(argv: list[str] | None = None) -> int:
                         args.project.resolve(), args.action, args.id
                     )
                 }
+                if args.action == "list":
+                    from joinery.art_approval import status as bible_status
+
+                    outcome["art_bible"] = bible_status(args.project.resolve())
             print(json.dumps(outcome))
             return 0
         except (OSError, ValueError, RuntimeError) as exc:

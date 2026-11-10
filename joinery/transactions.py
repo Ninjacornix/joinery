@@ -275,6 +275,8 @@ class FileTransaction:
         self.revertible = True
         self.created = 0.0
         self.decided = 0.0
+        #: The apps that made this change ("blender", "joinery"), in first-use order.
+        self.tools: list[str] = []
 
     @property
     def original(self) -> Path:
@@ -304,6 +306,11 @@ class FileTransaction:
             shutil.rmtree(self.directory)
             raise
 
+    def note_tool(self, tool: str) -> None:
+        """Remember that ``tool`` worked on this change; recorded with the journal."""
+        if tool and tool not in self.tools:
+            self.tools.append(tool)
+
     def _record(self, **extra: Any) -> None:
         if "changes" in extra:
             self.changes = list(extra.pop("changes"))
@@ -315,6 +322,8 @@ class FileTransaction:
             "include_dirs": self.include_dirs,
             "created": self.created,
         }
+        if self.tools:
+            data["tools"] = self.tools
         if self.state in PENDING:
             # The full inventory is only needed until the decision.
             data["base"] = self.base
@@ -641,6 +650,9 @@ class FileTransaction:
         transaction.revertible = raw.get("revertible", True) is not False
         transaction.created = float(raw.get("created", 0.0))
         transaction.decided = float(raw.get("decided", 0.0))
+        transaction.tools = [
+            str(tool) for tool in raw.get("tools") or [] if isinstance(tool, str)
+        ]
         # Never accept journal paths outside this project, even after local tampering.
         for path in transaction.base:
             _safe(path)

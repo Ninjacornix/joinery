@@ -296,15 +296,19 @@ def refresh_managed_gates(project: Path) -> None:
         plugin.write_text(_opencode_plugin(str(ROOT)))
 
 
+#: Changed paths listed per transaction; the count says how many there are in all.
+LISTED_FILES = 20
+
+
 def transactions(
     project: Path, action: str, identifier: str = ""
-) -> list[dict[str, str | bool]]:
+) -> list[dict[str, Any]]:
     paths = (
         [project / ".joinery/transactions" / identifier / "journal.json"]
         if identifier
         else sorted((project / ".joinery/transactions").glob("*/journal.json"))
     )
-    result: list[dict[str, str | bool]] = []
+    result: list[dict[str, Any]] = []
     for path in paths:
         tx = FileTransaction.load(project, path.parent.name)
         if action == "recover":
@@ -320,6 +324,23 @@ def transactions(
                 "state": tx.state,
                 "summary": tx.summary,
                 "revertible": tx.revertible,
+                # For the editor's Review tab: when, which apps, and what changed.
+                "created": tx.created,
+                "decided": tx.decided,
+                "tools": tx.tools,
+                "file_count": len(tx.changes),
+                "files": [
+                    {"path": change["path"], "change": _change_kind(change)}
+                    for change in tx.changes[:LISTED_FILES]
+                ],
             }
         )
     return result
+
+
+def _change_kind(change: dict[str, str]) -> str:
+    if not change.get("before"):
+        return "created"
+    if not change.get("after"):
+        return "deleted"
+    return "modified"

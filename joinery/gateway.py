@@ -423,6 +423,13 @@ class ProjectGateway:
         if self.transaction is not None:
             if self.transaction.state != "staging":
                 raise ValueError("Accept or reject the pending transaction first.")
+            if not readonly:
+                # The Review tab names the app that made each change.
+                self.transaction.note_tool(
+                    str(arguments.get("tool") or server.removeprefix("joinery-"))
+                    if tool in NATIVE_OPS
+                    else server.removeprefix("joinery-")
+                )
             staged = self.staged.get(server)
             if staged is None:
                 spec = connection.spec.model_copy(deep=True)

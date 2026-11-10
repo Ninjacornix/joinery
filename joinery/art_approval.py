@@ -34,6 +34,25 @@ def approved(project: Path) -> bool:
         return False
 
 
+def status(project: Path) -> dict[str, str]:
+    """The bible's approval at a glance, for the editor's Review tab.
+
+    ``state`` is "missing" (no bible), "needs_approval" or "approved"; an
+    approved bible also says ``by``: "creation" when it was drafted from the
+    user's answers as the project was made, otherwise "you".
+    """
+    if not (project / "art/bible.md").is_file():
+        return {"state": "missing"}
+    if not approved(project):
+        return {"state": "needs_approval"}
+    try:
+        data = json.loads((project / ".joinery/art-approval.json").read_text())
+    except (OSError, ValueError):
+        data = {}
+    by = "creation" if data.get("approved_by") == AT_CREATION else "you"
+    return {"state": "approved", "by": by}
+
+
 def review(project: Path) -> dict[str, str | bool]:
     """Bind the approval button to precisely the content displayed to the user."""
     content = (project / "art/bible.md").read_bytes()
