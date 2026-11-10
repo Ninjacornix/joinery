@@ -98,6 +98,44 @@ prints each change's state, summary, apps, times, files and the art bible's
 approval as JSON. The tab reads it when it is shown, when you come back to
 the editor and whenever a change is staged or decided; it never polls.
 
+### The Timeline tab
+
+**Timeline**, beside Review in the bottom bar, shows how the project changed
+over time, newest first. (Godot's own **History** dock is the undo history of
+this session; the Timeline is the project's long memory.) Each change you
+accept becomes one entry, and so does each revert: one line with what it did,
+who made it, how many files and when (`Ada Lovelace · 3 files · 2 h ago`).
+Type in **Filter** to keep entries whose message, author or a changed file
+matches. Entries load 50 at a time; **Show older entries** reads the next 50.
+
+Click an entry to see its files. Each opens in place: coloured added and
+removed lines for scenes and scripts, before and after pictures for images,
+and sizes for models, sounds and other binaries (`Model changed · 1.2 MB →
+1.4 MB`). Under it:
+
+- **Restore this file as it was** puts that version back as an ordinary
+  change waiting in the Review tab, so you see it before anything on disk
+  changes. A file the entry deleted comes back as it was just before. The
+  timeline is never rewritten, and Journeyman can't do this for you.
+- **Open file** opens the file as it is now.
+
+The timeline is the project's own git repository. A new project starts one
+when it is made, with a first entry **Start <name>**. An existing project
+never gets git by itself: its Timeline tab offers **Start keeping a
+timeline**, which sets up git in the project folder (with Joinery's restore
+data and Godot's cache ignored) and makes the first entry. Without Git
+installed the tab says so; a project inside a bigger repository is left to
+you.
+
+Only the files of each accepted change go into its entry; your own unsaved
+work and anything you staged stay as they were. Entries are made with your
+git name and email, or "Joinery user" when git has none, never an agent's.
+A scene edit accepted live in the 3D view is on disk only once you save the
+scene, so it joins the timeline when you save it. Switch it all off with
+**Timeline** in Journeyman settings (`[timeline] auto_commit = false` in
+`joinery.toml`). The command line is `joinery timeline list|show|restore
+--project <path> --json` (ADR 0034).
+
 ### Sidebar commands
 
 - `/feature` or `/feature list` says what the game has and what can be added.
