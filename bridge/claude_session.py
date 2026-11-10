@@ -18,6 +18,7 @@ from bridge.protocol import (
     MessageDelta,
     Prompt,
     ToolActivity,
+    Usage,
 )
 from bridge.provider_process import (
     INSTRUCTIONS,
@@ -53,8 +54,79 @@ def user_input(prompt: Prompt) -> bytes:
     return (json.dumps(message) + "\n").encode()
 
 
+def _count(source: dict[str, Any], key: str) -> int:
+    value = source.get(key)
+    return value if isinstance(value, int) and value > 0 else 0
+
+
+class ClaudeUsage:
+    """This session's token use, from Claude Code's stream-json events: the last
+    assistant message's usage is what the context holds; each result adds its turn's
+    usage to the totals and names the model's context window."""
+
+    def __init__(self) -> None:
+        self.model = ""
+        self.context = 0
+        self.window = 0
+        self.input = 0
+        self.output = 0
+        self.cached = 0
+
+    def read(self, event: dict[str, Any]) -> Usage | None:
+        """Take one stream-json event; returns a Usage when a turn's result arrives."""
+        kind = event.get("type")
+        if kind == "system" and event.get("subtype") == "init":
+            self.model = str(event.get("model") or self.model)
+        elif kind == "assistant":
+            message = event.get("message")
+            if isinstance(message, dict):
+                self.model = str(message.get("model") or self.model)
+                usage = message.get("usage")
+                if isinstance(usage, dict):
+                    self.context = sum(
+                        _count(usage, key)
+                        for key in (
+                            "input_tokens",
+                            "cache_creation_input_tokens",
+                            "cache_read_input_tokens",
+                            "output_tokens",
+                        )
+                    )
+        elif kind == "result":
+            usage = event.get("usage")
+            if isinstance(usage, dict):
+                cached = _count(usage, "cache_read_input_tokens")
+                self.input += (
+                    _count(usage, "input_tokens")
+                    + _count(usage, "cache_creation_input_tokens")
+                    + cached
+                )
+                self.output += _count(usage, "output_tokens")
+                self.cached += cached
+            models = event.get("modelUsage")
+            if isinstance(models, dict):
+                entries = {k: v for k, v in models.items() if isinstance(v, dict)}
+                main = entries.get(self.model) or max(
+                    entries.values(),
+                    key=lambda entry: _count(entry, "outputTokens"),
+                    default={},
+                )
+                self.window = _count(main, "contextWindow") or self.window
+            if self.context or self.input or self.output:
+                return Usage(
+                    model=self.model,
+                    context_used=self.context,
+                    context_window=self.window,
+                    input_tokens=self.input,
+                    output_tokens=self.output,
+                    cached_tokens=self.cached,
+                )
+        return None
+
+
 class ClaudeSession:
     def __init__(self) -> None:
+        self.usage = ClaudeUsage()
         self.gateway_socket: Path | None = None
         self.project = Path()
         self.executable = ""
@@ -170,6 +242,8 @@ class ClaudeSession:
                 if event.get("session_id"):
                     self.session_id = str(event["session_id"])
                     self.started = True
+                if isinstance(event, dict) and (usage := self.usage.read(event)):
+                    yield usage
                 kind = event.get("type")
                 if kind == "stream_event":
                     delta = event.get("event", {}).get("delta", {})

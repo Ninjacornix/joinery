@@ -23,6 +23,7 @@ from bridge.protocol import (
     Message,
     MessageDelta,
     Prompt,
+    Usage,
 )
 from bridge.provider_process import stop_process
 from joinery.api_profiles import list_public, runtime
@@ -51,6 +52,30 @@ def require_gate(project: Path) -> None:
         raise ValueError(
             "Codex policy hook is not configured for this Joinery install."
         )
+
+
+def token_usage(data: object, model: str = "") -> Usage | None:
+    """The app server's thread/tokenUsage/updated as a Usage event: the last request's
+    tokens are what the context holds; the totals are the thread's."""
+    if not isinstance(data, dict):
+        return None
+    raw_last, raw_total = data.get("last"), data.get("total")
+    last: dict[str, Any] = raw_last if isinstance(raw_last, dict) else {}
+    total: dict[str, Any] = raw_total if isinstance(raw_total, dict) else {}
+
+    def count(source: dict[str, Any], key: str) -> int:
+        value = source.get(key)
+        return value if isinstance(value, int) and value > 0 else 0
+
+    window = data.get("modelContextWindow")
+    return Usage(
+        model=model,
+        context_used=count(last, "totalTokens"),
+        context_window=window if isinstance(window, int) and window > 0 else 0,
+        input_tokens=count(total, "inputTokens"),
+        output_tokens=count(total, "outputTokens"),
+        cached_tokens=count(total, "cachedInputTokens"),
+    )
 
 
 class CodexSession:
@@ -442,6 +467,10 @@ class CodexSession:
                             server=str(item.get("server", "codex")),
                             tool=str(item.get("tool", "tool")),
                         )
+                elif method == "thread/tokenUsage/updated":
+                    usage = token_usage(params.get("tokenUsage"), prompt.model)
+                    if usage is not None:
+                        yield usage
                 elif method == "item/agentMessage/delta":
                     item = str(params.get("itemId", ""))
                     yield MessageDelta(

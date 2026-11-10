@@ -133,6 +133,23 @@ class Models(_Msg):
     models: list[ModelChoice]
 
 
+class Usage(_Msg):
+    """Token use as the provider reports it; 0 means not reported.
+
+    `context_used` is what the conversation holds now and `context_window` the
+    model's limit. The token counts are this session's totals: `input_tokens`
+    includes the `cached_tokens` read from the provider's cache.
+    """
+
+    kind: Literal["usage"] = "usage"
+    model: str = ""
+    context_used: int = 0
+    context_window: int = 0
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cached_tokens: int = 0
+
+
 class EditorAction(_Msg):
     kind: Literal["editor_action"] = "editor_action"
     request_id: str
@@ -150,6 +167,7 @@ AgentEvent = (
     | EditorAction
     | Execution
     | Models
+    | Usage
     | Done
 )
 

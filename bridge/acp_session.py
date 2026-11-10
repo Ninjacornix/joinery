@@ -19,6 +19,7 @@ from bridge.protocol import (
     Models,
     Prompt,
     ToolActivity,
+    Usage,
 )
 from bridge.provider_process import (
     prompt_text,
@@ -31,6 +32,52 @@ from joinery.api_profiles import list_public, runtime
 from joinery.chat_attachments import encoded
 from joinery.mcp_runtime import PolicyStop, validate_arguments
 from joinery.platform_support import launch_argv
+
+
+def _count(source: dict[str, Any], key: str) -> int:
+    value = source.get(key)
+    return value if isinstance(value, int) and value > 0 else 0
+
+
+class ACPUsage:
+    """Token use from agents that report it over ACP: a `usage_update` session update
+    gives the context (`used` of `size`), and a prompt response's `usage` the turn's
+    tokens, added to the session totals. Agents that report neither show nothing."""
+
+    def __init__(self) -> None:
+        self.model = ""
+        self.used = 0
+        self.size = 0
+        self.input = 0
+        self.output = 0
+        self.cached = 0
+
+    def _event(self) -> Usage:
+        return Usage(
+            model=self.model,
+            context_used=self.used,
+            context_window=self.size,
+            input_tokens=self.input,
+            output_tokens=self.output,
+            cached_tokens=self.cached,
+        )
+
+    def context(self, update: dict[str, Any]) -> Usage | None:
+        self.used = _count(update, "used") or self.used
+        self.size = _count(update, "size") or self.size
+        return self._event() if self.used or self.size else None
+
+    def turn(self, usage: object) -> Usage | None:
+        if not isinstance(usage, dict):
+            return None
+        cached = _count(usage, "cachedReadTokens")
+        self.input += _count(usage, "inputTokens") + cached
+        self.output += _count(usage, "outputTokens") + _count(usage, "thoughtTokens")
+        self.cached += cached
+        if not self.used:
+            # Without a context report, the last turn's total stands in for it.
+            self.used = _count(usage, "totalTokens")
+        return self._event() if self.input or self.output else None
 
 
 class ACPSession:
@@ -52,6 +99,7 @@ class ACPSession:
         #: The agent takes image content blocks (ACP promptCapabilities.image); without it
         #: attached images are listed by path in the prompt text.
         self.image_input = False
+        self.usage = ACPUsage()
 
     async def connect(self, project: Path, profile_id: str = "") -> None:
         executable = (
@@ -410,7 +458,14 @@ class ACPSession:
                     yield ToolActivity(
                         server=self.agent, tool=str(update.get("title", "tool"))
                     )
+                elif (
+                    update.get("sessionUpdate") == "usage_update"
+                    and (usage := self.usage.context(update)) is not None
+                ):
+                    yield usage
             response = await task
+            if (usage := self.usage.turn(response.get("usage"))) is not None:
+                yield usage
             yield Done(ok=response.get("stopReason") == "end_turn")
         finally:
             if not task.done():
