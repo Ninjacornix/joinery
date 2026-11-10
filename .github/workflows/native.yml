@@ -278,6 +278,7 @@ jobs:
             out/build-engine.json
             out/widget-tests.log
             out/native-evidence/
+            out/classic-view/
             out/windows-software-gl/mesa-ci.json
           if-no-files-found: warn
           retention-days: 14

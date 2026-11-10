@@ -167,6 +167,11 @@ def theme_pass(
                     print(f"  {theme} {step} {layout}: {line[6:]}")
             if "classic view: ok" not in output or failed:
                 problems.append(f"{theme} run {step} ({layout}) failed; see {log.name}")
+                if not any(line.startswith("CHECK ") for line in output.splitlines()):
+                    # The editor never reached the checks: show how it ended.
+                    tail = output.strip().splitlines()[-40:]
+                    print(f"  {theme} {step} {layout}: no checks ran; last output:")
+                    print("\n".join("    " + line for line in tail))
             if any(marker in output for marker in ("SCRIPT ERROR", "Parse Error")):
                 problems.append(f"{theme} run {step} ({layout}) has script errors")
             found = [
