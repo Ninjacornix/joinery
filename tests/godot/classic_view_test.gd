@@ -57,6 +57,28 @@ func _shot(name: String, roots: Array, window: Window = null) -> void:
 	_check(_checks.snapshot(screen, target, roots), "Capture " + screen)
 
 
+## Grows the window to the size the editor asks for. The classic layout is
+## stock Godot's: its 3D toolbar and side docks need about 1400 points across,
+## more than a hosted macOS runner's 1024-point screen, so the window would
+## otherwise cut off everything right of the toolbar. The checks judge the
+## layout, not the size of the machine's display.
+func _fit_window(base: Control) -> void:
+	var window := get_tree().root
+	# Growing the window can widen the layout again (more toolbar shows), so
+	# repeat until nothing reaches past it.
+	for _attempt: int in 5:
+		await _frames()
+		var past := Vector2.ZERO
+		for child: Node in base.get_children():
+			if child is Control and (child as Control).visible:
+				var end := (child as Control).get_global_rect().end
+				past = past.max(end - Vector2(window.size))
+		if past.x <= 0.0 and past.y <= 0.0:
+			return
+		window.mode = Window.MODE_WINDOWED
+		window.size += Vector2i(past.max(Vector2.ZERO).ceil()) + Vector2i(2, 2)
+
+
 func _run() -> void:
 	await get_tree().create_timer(3.0).timeout
 	for node: Node in get_tree().root.find_children("*", "EditorPlugin", true, false):
@@ -82,6 +104,7 @@ func _run() -> void:
 		_check(_history_open(base), "Switching back restores Joinery's own docks")
 	EditorInterface.set_main_screen_editor("3D")
 	EditorInterface.get_selection().clear()
+	await _fit_window(base)
 	await _shot("editor", [base])
 	await _settings_page(classic)
 	await _switch_dialog(base, classic)
