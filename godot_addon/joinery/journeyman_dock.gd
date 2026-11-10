@@ -1,6 +1,18 @@
+# gdlint: disable=max-public-methods
 @tool
 extends PanelContainer
-## Journeyman's earlier sidebar layout, with explicit targets and command completion.
+## Journeyman, the sidebar chat. Top to bottom: the header (assistant status, settings menu)
+## and its error banner, the transcript of change cards and replies, the status footer, and the
+## composer. The Review panel is built here but lives in the editor's bottom panel
+## ([method take_review_panel]); decisions are made only there.
+##
+## Sending is optimistic: the request card appears at once in a "sending" state (Stop already
+## in Send's slot) and resolves when the assistant picks it up, or offers Retry. A request
+## lost with the connection turns the header dot red and disables Send, leaving Retry as the
+## one action; once the banner shows Reconnect, the card says only "Not sent" until it is
+## back. While a step is live on the card the footer stays out of the way. A chat bridge added
+## as a child is attached automatically ([method attach_bridge]) for send receipts, notices
+## and transaction ids.
 
 signal setup_requested
 signal focus_toggle_requested
@@ -10,835 +22,326 @@ signal accept_edit_requested
 signal reject_edit_requested
 signal cancel_requested
 signal reconnect_requested
+## "Connect an assistant" in the no-assistant banner.
+signal connect_requested
 signal art_review_requested
 signal review_requested
 signal review_closed
 signal selection_options_changed(selection: Dictionary)
 signal models_refresh_requested
 signal target_opened(path: String)
+## An accepted change was reverted on disk; the editor should rescan and reload its files.
+signal change_reverted(transaction_id: String)
 
-const COMMAND_SCRIPT := preload("res://addons/joinery/command_job.gd")
 const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
-const INPUT_SCRIPT := preload("res://addons/joinery/message_input.gd")
 const HISTORY_SCRIPT := preload("res://addons/joinery/chat_history.gd")
 const SETTINGS_SCRIPT := preload("res://addons/joinery/journeyman_settings.gd")
 const CHIP_SCRIPT := preload("res://addons/joinery/target_chip.gd")
-# Everyday commands first; the rest are for when something does not work.
-const COMMANDS := {
-	"/art": ["Review and approve the art bible", "ui"],
-	"/setup": ["Change project tools and settings", "ui"],
-	"/focus": ["Focus mode", "ui"],
-	"/toolbar": ["Show or hide viewport controls", "ui"],
-	"/help": ["All commands", "ui"],
-	"/tools": ["Check that project tools are connected", "cli"],
-	"/doctor": ["Check which tools are installed", "cli"],
-	"/check": ["Check assets against the project rules", "cli"],
-	"/rebuild": ["Check that assets rebuild from their recipes", "cli"],
-	"/agents": ["List supported agents", "cli"],
-	"/models": ["Refresh the model list", "ui"],
-}
-const TROUBLESHOOTING: Array[String] = [
-	"/tools", "/doctor", "/check", "/rebuild", "/agents", "/models"
-]
+const HEADER_SCRIPT := preload("res://addons/joinery/sidebar_header.gd")
+const FOOTER_SCRIPT := preload("res://addons/joinery/sidebar_footer.gd")
+const COMPOSER_SCRIPT := preload("res://addons/joinery/sidebar_composer.gd")
+const MENU_SCRIPT := preload("res://addons/joinery/command_menu.gd")
+const SLASH_SCRIPT := preload("res://addons/joinery/slash_commands.gd")
+const REVIEW_PATH := "res://addons/joinery/review_panel.gd"
+const REVIEW_WAIT := "Accept or reject the change first"
+## Minimum dock width in multiples of the font size.
+const MIN_EM := 24
 
+## "connected", "connecting", "error" or "none" (no assistant chosen).
+var connection_state := "connecting"
 var _content: VBoxContainer
+var _header: HEADER_SCRIPT
 var _transcript: HISTORY_SCRIPT
 var _settings: SETTINGS_SCRIPT
-var _prompt: INPUT_SCRIPT
+var _footer: FOOTER_SCRIPT
+var _composer: COMPOSER_SCRIPT
+var _prompt: TextEdit
 var _chips: HFlowContainer
-var _command_popup: PanelContainer
-var _command_layer: CanvasLayer
-var _command_list: ItemList
-var _matches: Array[String] = []
-var _target_context: Array[Dictionary] = []
-var _targets: Array[String] = []
-var _busy := false
-var _command_job: RefCounted
-var _running_command := ""
-var _connection: Label
-var _connection_icon: TextureRect
+var _options: MenuButton
+var _send: Button
 var _stop: Button
-var _reconnect: Button
-var _review: VBoxContainer
-var _review_label: Label
-var _review_details: RichTextLabel
-var _review_scroll: ScrollContainer
-var _review_media: VBoxContainer
-var _review_paths: VBoxContainer
-var _details_toggle: Button
-var _details_open := false  # Remembered while the editor runs.
+var _command_layer: CanvasLayer
+var _command_popup: MENU_SCRIPT
+var _matches: Array[String]:
+	get:
+		return _command_popup.matches
+var _slash: SLASH_SCRIPT
+var _review: Control
 var _review_pending := false
+var _details_open := false
+var _target_context: Array[Dictionary] = []
+var _busy := false
 var _agent_name := "Codex"
 var _assistant_open := false
-var _mode: OptionButton
-var _model: OptionButton
-var _effort: OptionButton
-var _model_choices: Array = []
-var _progress: Label
-var _elapsed_label: Label
 var _started_msec := 0
-var _last_elapsed_second := -1
-var _route_label: Label
-var _composer: PanelContainer
-var _composer_style: StyleBoxFlat
-var _send: Button
-var _selection_options: Dictionary = {"mode": "auto", "model": "", "effort": ""}
+var _last_elapsed := -1
+var _progress := ""
+var _outcome := "done"
+var _failure := ""
+var _active_card: Control
+var _bridge: Node
 
 
 func _init() -> void:
 	name = "Journeyman"
-	custom_minimum_size = Vector2(300, 0)
+	child_entered_tree.connect(_on_child_entered)
 
 
 func _ready() -> void:
-	theme = UI_THEME.build(self)
-	var padding := float(get_theme_default_font_size())
-	add_theme_stylebox_override(
-		"panel",
-		UI_THEME.panel(get_theme_color("inset", "Joinery"), Color.TRANSPARENT, padding, 8, 0)
-	)
+	UI_THEME.watch(self)
+	theme_type_variation = "JoineryDock"
+	custom_minimum_size.x = get_theme_default_font_size() * MIN_EM
 	_content = VBoxContainer.new()
+	_content.theme_type_variation = "JoineryRow"
 	add_child(_content)
-	var font_size := get_theme_default_font_size()
-	_content.add_theme_constant_override("separation", maxi(8, int(font_size * 0.6)))
-	custom_minimum_size.x = get_theme_default_font_size() * 24
-	var connection_row := HBoxContainer.new()
-	connection_row.add_theme_constant_override("separation", maxi(6, int(font_size * 0.45)))
-	_content.add_child(connection_row)
-	_connection_icon = TextureRect.new()
-	_connection_icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_connection_icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	_connection_icon.custom_minimum_size = Vector2(font_size, font_size)
-	_connection_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	connection_row.add_child(_connection_icon)
-	_connection = Label.new()
-	_connection.add_theme_color_override("font_color", get_theme_color("secondary", "Joinery"))
-	_connection.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_connection.text = "Connecting…"
-	_connection.add_theme_font_size_override("font_size", int(font_size * 0.85))
-	_connection.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	connection_row.add_child(_connection)
-	_reconnect = Button.new()
-	_reconnect.text = "Reconnect"
-	_reconnect.accessibility_name = "Reconnect your coding agent"
-	_reconnect.hide()
-	_reconnect.pressed.connect(func() -> void: reconnect_requested.emit())
-	connection_row.add_child(_reconnect)
-	_settings = SETTINGS_SCRIPT.attach(self, connection_row, _content)
-	var controls := HBoxContainer.new()
-	controls.add_theme_constant_override("separation", 6)
-	_mode = OptionButton.new()
-	_mode.clip_text = true
-	_mode.fit_to_longest_item = true
-	_mode.custom_minimum_size.x = font_size * 4.5
-	_mode.accessibility_name = "Assistant mode"
-	_mode.tooltip_text = (
-		"Auto adapts to your request. Fast favors short replies. " + "Thorough favors complex work."
-	)
-	for mode_name: String in ["Auto", "Fast", "Thorough"]:
-		_mode.add_item(mode_name)
-	_mode.item_selected.connect(_options_changed)
-	controls.add_child(_mode)
-	_model = OptionButton.new()
-	_model.custom_minimum_size.x = font_size * 5
-	_model.accessibility_name = "Assistant model"
-	_model.tooltip_text = (
-		"Models reported by your connected provider. " + "Automatic follows the chosen mode."
-	)
-	_model.fit_to_longest_item = false
-	_model.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_model.clip_text = true
-	_model.add_item("Auto model")
-	_model.set_item_metadata(0, "")
-	_model.item_selected.connect(_model_changed)
-	_model.hide()  # Shown once the provider reports models to choose from.
-	controls.add_child(_model)
-	_effort = OptionButton.new()
-	_effort.clip_text = true
-	_effort.fit_to_longest_item = false
-	_effort.custom_minimum_size.x = font_size * 7.5
-	_effort.accessibility_name = "Reasoning effort"
-	_effort.tooltip_text = "Supported reasoning levels for the selected model"
-	_effort.add_item("Auto effort")
-	_effort.set_item_metadata(0, "")
-	_effort.hide()
-	_effort.item_selected.connect(_options_changed)
-	controls.add_child(_effort)
-	for picker: OptionButton in [_mode, _model, _effort]:
-		picker.theme_type_variation = "JoineryPicker"
-		picker.add_theme_font_size_override("font_size", int(font_size * 0.85))
-		picker.custom_minimum_size.y = font_size * 2.25
-	_route_label = Label.new()
-	_route_label.text = "Auto adapts to your request"
-	_route_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_route_label.add_theme_font_size_override("font_size", int(font_size * 0.85))
-	_route_label.add_theme_color_override("font_color", get_theme_color("secondary", "Joinery"))
-	_route_label.hide()
-	_content.add_child(_route_label)
+	_header = HEADER_SCRIPT.new()
+	_header.reconnect_pressed.connect(func() -> void: reconnect_requested.emit())
+	_header.connect_pressed.connect(func() -> void: connect_requested.emit())
+	_content.add_child(_header)
 	_transcript = HISTORY_SCRIPT.new()
 	_transcript.accessibility_name = "Conversation"
 	_transcript.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_transcript.example_chosen.connect(_fill_prompt)
+	_transcript.retry_requested.connect(_retry)
+	_transcript.revert_requested.connect(func(id: String) -> void: _slash.revert(id))
 	_content.add_child(_transcript)
-	_review = VBoxContainer.new()
-	_review.theme = theme
-	_review.add_theme_constant_override("separation", maxi(8, int(font_size * 0.6)))
-	_review.hide()
-	_content.add_child(_review)
-	_review_label = Label.new()
-	_review_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_review_label.add_theme_font_size_override("font_size", int(font_size * 1.1))
-	_review.add_child(_review_label)
-	_review_media = VBoxContainer.new()
-	_review_media.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_review_media.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_review_media.accessibility_name = "Preview of the proposed change"
-	_review.add_child(_review_media)
-	_details_toggle = Button.new()
-	_details_toggle.toggle_mode = true
-	_details_toggle.flat = true
-	_details_toggle.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	_details_toggle.accessibility_name = "Show or hide file details"
-	_details_toggle.toggled.connect(_set_details_open)
-	_review.add_child(_details_toggle)
-	_review_scroll = ScrollContainer.new()
-	_review_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_review_scroll.follow_focus = true
-	_review_scroll.accessibility_name = "Changed files and recipes"
-	_review_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_review_scroll.custom_minimum_size.y = get_theme_default_font_size() * 6
-	_review_scroll.hide()
-	_review.add_child(_review_scroll)
-	var review_body := VBoxContainer.new()
-	review_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_review_scroll.add_child(review_body)
-	_review_paths = VBoxContainer.new()
-	review_body.add_child(_review_paths)
-	_review_details = RichTextLabel.new()
-	_review_details.fit_content = true
-	_review_details.scroll_active = false
-	_review_details.selection_enabled = true
-	_review_details.accessibility_name = "File changes"
-	_review_details.hide()
-	review_body.add_child(_review_details)
-	var choices := HBoxContainer.new()
-	choices.add_theme_constant_override("separation", maxi(8, int(font_size * 0.6)))
-	_review.add_child(choices)
-	var accept_button := Button.new()
-	accept_button.text = "Accept changes"
-	accept_button.theme_type_variation = "JoineryPrimaryButton"
-	accept_button.accessibility_name = "Accept reviewed changes"
-	accept_button.tooltip_text = "Keep the changes shown in this review"
-	accept_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	accept_button.pressed.connect(func() -> void: accept_edit_requested.emit())
-	choices.add_child(accept_button)
-	var reject_button := Button.new()
-	reject_button.text = "Reject changes"
-	reject_button.accessibility_name = "Reject reviewed changes"
-	reject_button.tooltip_text = "Discard this proposal and preserve the original"
-	reject_button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	reject_button.pressed.connect(func() -> void: reject_edit_requested.emit())
-	choices.add_child(reject_button)
-	_composer = PanelContainer.new()
-	_composer_style = UI_THEME.panel(
-		get_theme_color("inset", "Joinery"),
-		get_theme_color("border", "Joinery"),
-		font_size * 0.6,
-		10
-	)
-	_composer.add_theme_stylebox_override("panel", _composer_style)
+	_footer = FOOTER_SCRIPT.new()
+	_footer.review_requested.connect(func() -> void: review_requested.emit())
+	_content.add_child(_footer)
+	_composer = COMPOSER_SCRIPT.new()
+	_composer.agent_name = _agent_name
+	_composer.submitted.connect(_on_submit)
+	_composer.stop_pressed.connect(_request_cancel)
 	_content.add_child(_composer)
-	var composer_body := VBoxContainer.new()
-	composer_body.add_theme_constant_override("separation", 6)
-	_composer.add_child(composer_body)
-	_chips = HFlowContainer.new()
-	_chips.hide()
-	composer_body.add_child(_chips)
-	_prompt = INPUT_SCRIPT.new()
-	_prompt.accessibility_name = "Message to your coding agent"
-	_prompt.tooltip_text = "Describe a change. Enter sends; type / for commands."
-	_prompt.custom_minimum_size.y = font_size * 3.5
-	_prompt.placeholder_text = ("Chat with " + _agent_name)
+	_prompt = _composer.prompt
+	_chips = _composer.chips
+	_options = _composer.options
+	_send = _composer.send
+	_stop = _composer.stop
 	_prompt.text_changed.connect(func() -> void: _update_commands(_prompt.text))
-	_prompt.text_submitted.connect(_on_submit)
 	_prompt.gui_input.connect(_on_prompt_input)
-	composer_body.add_child(_prompt)
-	_prompt.focus_entered.connect(_composer_focus.bind(true))
-	_prompt.focus_exited.connect(_composer_focus.bind(false))
-	_send = Button.new()
-	_send.text = "Send"
-	_send.accessibility_name = "Send message"
-	_send.tooltip_text = "Send message (Enter). Shift+Enter adds a line."
-	_send.theme_type_variation = "JoinerySendButton"
-	_send.custom_minimum_size = Vector2(font_size * 2.25, font_size * 2.25)
-	_send.add_theme_font_size_override("font_size", int(font_size * 0.85))
-	if has_theme_icon("ArrowUp", "EditorIcons"):
-		_send.icon = get_theme_icon("ArrowUp", "EditorIcons")
-		_send.text = ""
-	_send.pressed.connect(func() -> void: _on_submit(_prompt.text))
-	var push_right := Control.new()
-	push_right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	controls.add_child(push_right)
-	controls.add_child(_send)
-	composer_body.add_child(controls)
-	var progress_row := HBoxContainer.new()
-	_content.add_child(progress_row)
-	_progress = Label.new()
-	_progress.text = "Ready"
-	_progress.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_progress.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	_progress.add_theme_color_override("font_color", get_theme_color("secondary", "Joinery"))
-	progress_row.add_child(_progress)
-	_elapsed_label = Label.new()
-	_elapsed_label.accessibility_name = "Response time"
-	progress_row.add_child(_elapsed_label)
-	_stop = Button.new()
-	_stop.text = "Stop"
-	_stop.theme_type_variation = "JoineryPicker"
-	_stop.custom_minimum_size.y = font_size * 2.25
-	_stop.add_theme_font_size_override("font_size", int(font_size * 0.85))
-	_stop.accessibility_name = "Stop the current agent response"
-	_stop.hide()
-	_stop.pressed.connect(_request_cancel)
-	controls.add_child(_stop)
+	_options.changed.connect(func(value: Dictionary) -> void: selection_options_changed.emit(value))
 	_command_layer = CanvasLayer.new()
 	_command_layer.layer = 100
 	add_child(_command_layer)
-	_command_popup = PanelContainer.new()
+	_command_popup = MENU_SCRIPT.new()
+	_command_popup.anchor = _composer
 	_command_popup.theme = theme
-	var panel: StyleBoxFlat = UI_THEME.panel(
-		get_theme_color("raised", "Joinery"), get_theme_color("border", "Joinery"), 4, 8
-	)
-	_command_popup.add_theme_stylebox_override("panel", panel)
+	_command_popup.chosen.connect(_on_command_chosen)
 	_command_layer.add_child(_command_popup)
-	_command_list = ItemList.new()
-	_command_list.accessibility_name = "Available slash commands"
-	_command_list.item_clicked.connect(_on_command_clicked)
-	_command_popup.add_child(_command_list)
-	_command_popup.hide()
+	_slash = SLASH_SCRIPT.new()
+	_slash.requested.connect(_on_slash_requested)
+	_slash.started.connect(func(_command: String) -> void: _sync())
+	_slash.finished.connect(_on_slash_finished)
+	_slash.reverted.connect(_on_reverted)
+	add_child(_slash)
+	_review = _make_review()
+	_settings = SETTINGS_SCRIPT.attach(self, _header.row, _content)
+	_show_connection()
 	_settings.apply_all()
 
 
 func _exit_tree() -> void:
-	if _command_job != null:
-		_command_job.cancel()
-		_command_job = null
+	if _slash != null:
+		_slash.cancel()
+
+
+func _notification(what: int) -> void:
+	if (
+		what == NOTIFICATION_PREDELETE
+		and is_instance_valid(_review)
+		and _review.get_parent() == null
+	):
+		_review.free()
+
+
+func _on_theme_rebuilt() -> void:
+	custom_minimum_size.x = get_theme_default_font_size() * MIN_EM
+	if _command_popup != null:
+		_command_popup.theme = theme
 
 
 func _process(_delta: float) -> void:
 	if _busy and _started_msec > 0:
 		var seconds := int((Time.get_ticks_msec() - _started_msec) / 1000.0)
-		if seconds != _last_elapsed_second:
-			_last_elapsed_second = seconds
-			_elapsed_label.text = "%ds" % seconds
-	if _command_popup.visible:
-		_position_commands()
-	if _command_job == null:
-		return
-	var result: Dictionary = _command_job.poll()
-	if result.is_empty():
-		return
-	_command_job = null
-	_busy = false
-	_prompt.editable = true
-	_prompt.placeholder_text = ("Chat with " + _agent_name)
-	var output := str(result["output"])
-	print("[Joinery] ", _running_command, "\n", output)
-	_say("Journeyman", _command_reply(_running_command, int(result["code"]), output))
+		if seconds != _last_elapsed:
+			_last_elapsed = seconds
+			var card := _card()
+			if card != null:
+				card.set_elapsed(seconds)
+	if _command_popup != null and _command_popup.visible:
+		_command_popup.place()
 
 
 func _input(event: InputEvent) -> void:
-	if event is InputEventMouseButton and event.pressed and _command_popup.visible:
-		if not _command_popup.get_global_rect().has_point(event.position):
-			if not _prompt.get_global_rect().has_point(event.position):
-				_command_popup.hide()
+	var click := event as InputEventMouseButton
+	if click == null or not click.pressed or not _command_popup.visible:
+		return
+	var inside_menu := _command_popup.get_global_rect().has_point(click.position)
+	if not inside_menu and not _prompt.get_global_rect().has_point(click.position):
+		_command_popup.close()
+
+
+# --- Bridge ------------------------------------------------------------------------------------
+
+
+## Listen to a chat bridge for send receipts, Joinery notices and transaction ids. The plugin's
+## own wiring of the other bridge signals is unchanged.
+func attach_bridge(bridge: Node) -> void:
+	_bridge = bridge
+	var links := {"sent": _on_sent, "notice": _on_notice, "file_preview": _on_bridge_preview}
+	for signal_name: String in links:
+		if (
+			bridge.has_signal(signal_name)
+			and not bridge.is_connected(signal_name, links[signal_name])
+		):
+			bridge.connect(signal_name, links[signal_name])
+
+
+func _on_child_entered(node: Node) -> void:
+	if node.has_signal("sent") and node.has_signal("file_preview"):
+		attach_bridge(node)
+
+
+func _on_sent() -> void:
+	var card := _card()
+	if card != null:
+		card.set_sent()
+	_sync_send_slot()
+
+
+func _on_notice(text: String, kind: String) -> void:
+	var card := _card()
+	if card != null and card.state == "sending" and kind == "error":
+		# The card says it in place ("Not sent. …") with Retry.
+		_failure = text
+		return
+	_transcript.add_notice(text, kind)
+
+
+func _on_bridge_preview(event: Dictionary) -> void:
+	var card := _card()
+	if card != null and card.transaction_id.is_empty():
+		card.transaction_id = str(event.get("transaction_id", ""))
+
+
+# --- Composer and commands ---------------------------------------------------------------------
 
 
 func _update_commands(text: String) -> void:
-	_matches.clear()
-	_command_list.clear()
-	if not text.begins_with("/") or text.contains(" ") or _busy:
-		_command_popup.hide()
+	if not text.begins_with("/") or text.contains(" ") or text.contains("\n") or _busy:
+		_command_popup.close()
 		return
-	for command: String in COMMANDS:
-		if command.begins_with(text.to_lower()):
-			_matches.append(command)
-			_command_list.add_item("%s   %s" % [command, COMMANDS[command][0]])
-			_command_list.set_item_tooltip(_matches.size() - 1, COMMANDS[command][0])
-	_command_popup.visible = not _matches.is_empty()
-	if not _matches.is_empty():
-		_command_list.select(0)
-		_position_commands()
-
-
-func _position_commands() -> void:
-	var font := _command_list.get_theme_font("font")
-	var row_height := font.get_height(_command_list.get_theme_font_size("font_size"))
-	row_height += _command_list.get_theme_constant("v_separation") + 8
-	var height := minf(row_height * _matches.size() + 16, get_viewport_rect().size.y * 0.4)
-	_command_popup.size = Vector2(_prompt.size.x, height)
-	var prompt_rect := (
-		_composer.get_global_transform_with_canvas() * Rect2(Vector2.ZERO, _composer.size)
-	)
-	_command_popup.size.x = _composer.size.x
-	_command_popup.global_position = Vector2(
-		prompt_rect.position.x, maxf(4, prompt_rect.position.y - _command_popup.size.y - 6)
-	)
+	_command_popup.open_for(text)
 
 
 func _on_prompt_input(event: InputEvent) -> void:
-	if event is InputEventKey and event.shift_pressed:
-		_command_popup.hide()
+	var key := event as InputEventKey
+	if key == null or not key.pressed or not _command_popup.visible:
 		return
-	if not event is InputEventKey or not event.pressed or not _command_popup.visible:
-		return
-	var selected := _command_list.get_selected_items()
-	var index := selected[0] if not selected.is_empty() else 0
-	match event.keycode:
+	match key.keycode:
 		KEY_UP, KEY_DOWN:
-			var direction := -1 if event.keycode == KEY_UP else 1
-			index = posmod(index + direction, _matches.size())
-			_command_list.select(index)
-			_command_list.ensure_current_is_visible()
+			_command_popup.move(-1 if key.keycode == KEY_UP else 1)
 		KEY_TAB:
-			_choose_command(index)
+			_complete(_command_popup.current())
 		KEY_ENTER, KEY_KP_ENTER:
-			_on_submit(_prompt.text)
+			if key.shift_pressed:
+				_command_popup.close()
+				return
+			var typed := _prompt.text.strip_edges()
+			var exact := SLASH_SCRIPT.COMMANDS.has(typed.split(" ")[0].to_lower())
+			_on_submit(typed if exact else _command_popup.current())
 		KEY_ESCAPE:
-			_command_popup.hide()
+			_command_popup.close()
 		_:
 			return
 	_prompt.accept_event()
 
 
-func _on_command_clicked(index: int, _position: Vector2, button: int) -> void:
-	if button == MOUSE_BUTTON_LEFT:
-		_choose_command(index)
-
-
-func _choose_command(index: int) -> void:
-	var command := _matches[index]
-	_command_popup.hide()
+func _complete(command: String) -> void:
+	if command.is_empty():
+		return
+	_command_popup.close()
 	_prompt.text = command + " "
-	_prompt.caret_column = _prompt.text.length()
+	_prompt.set_caret_column(_prompt.text.length())
 	_prompt.grab_focus()
 
 
-func on_selection_changed() -> void:
-	var targets: Array[Dictionary] = []
-	var scene := EditorInterface.get_edited_scene_root()
-	for node: Node in EditorInterface.get_selection().get_selected_nodes():
-		var scene_path := scene.scene_file_path if scene != null else "current-scene"
-		var node_path := str(scene.get_path_to(node)) if scene != null else str(node.get_path())
-		var kind := "Object"
-		var resource := ""
-		if node is AudioStreamPlayer or node is AudioStreamPlayer2D or node is AudioStreamPlayer3D:
-			kind = "Audio"
-			var stream := node.get("stream") as AudioStream
-			if stream != null:
-				resource = stream.resource_path
-		(
-			targets
-			. append(
-				{
-					"id": scene_path + "::" + node_path,
-					"label": str(node.name),
-					"kind": kind,
-					"resource": resource,
-					"source": node.scene_file_path,
-				}
-			)
-		)
-	_set_targets(targets)
+func _on_command_chosen(command: String) -> void:
+	_prompt.clear()
+	_on_submit(command)
 
 
-func set_resource_target(path: String, type: String = "Resource", source: String = "") -> void:
-	if path.is_empty():
-		return
-	var filename := path.split("::")[0].get_file().get_basename()
-	var kind := "Resource"
-	var extension := path.get_extension().to_lower()
-	if type.begins_with("Audio") or extension in ["wav", "ogg", "mp3", "scd"]:
-		kind = "Audio"
-	elif type in ["Object", "PackedScene"] or extension in ["blend", "glb", "gltf", "tscn"]:
-		kind = "Object"
-	elif type.begins_with("Texture") or extension in ["png", "jpg", "kra", "aseprite"]:
-		kind = "Image"
-	_set_targets(
-		[
-			{
-				"id": path,
-				"label": filename.replace("_", " ").capitalize(),
-				"kind": kind,
-				"resource": path,
-				"source": source if not source.is_empty() else path,
-			}
-		]
-	)
-
-
-func target_snapshot() -> Array[Dictionary]:
-	return _target_context.duplicate(true)
-
-
-func _set_targets(targets: Array[Dictionary]) -> void:
-	_target_context = targets.duplicate(true)
-	_targets.clear()
-	for child: Node in _chips.get_children():
-		_chips.remove_child(child)
-		child.queue_free()
-	for target: Dictionary in _target_context:
-		_targets.append(str(target["id"]))
-		_chips.add_child(
-			CHIP_SCRIPT.build(
-				self, target, target_opened.emit, _remove_target.bind(str(target["id"]))
-			)
-		)
-	_chips.visible = not _target_context.is_empty()
-
-
-func _remove_target(id: String) -> void:
-	var remaining: Array[Dictionary] = []
-	for target: Dictionary in _target_context:
-		if str(target["id"]) != id:
-			remaining.append(target)
-	_set_targets(remaining)
+func _fill_prompt(text: String) -> void:
+	_prompt.text = text
+	_prompt.set_caret_column(text.length())
+	_prompt.grab_focus()
 
 
 func _on_submit(text: String) -> void:
 	var entry := text.strip_edges()
 	if entry.is_empty() or _busy or _review_pending:
 		return
-	_command_popup.hide()
+	_command_popup.close()
 	_prompt.clear()
-	_say("You", entry)
-	_assistant_open = false
 	if entry.begins_with("/"):
-		_run_slash(entry)
+		run_command(entry)
 		return
-	var connected := not prompt_submitted.get_connections().is_empty()
-	prompt_submitted.emit(entry, target_snapshot())
-	if not connected:
-		_say("Journeyman", "Open this project through Joinery to start its chat connection.")
-
-
-func set_chat_agent(agent: String) -> void:
-	_agent_name = agent.capitalize()
-	if _prompt != null and not _busy and not _review_pending:
-		_prompt.placeholder_text = "Chat with " + _agent_name
-
-
-func set_chat_state(state: String, detail: String) -> void:
-	if state == "working":
-		_progress.text = detail
-		_progress.tooltip_text = detail
-		return
-	_connection.text = detail
-	_connection.tooltip_text = detail
-	_reconnect.visible = state == "error"
-	var icon := {"connected": "StatusSuccess", "error": "StatusError"}.get(state, "Progress1")
-	_connection_icon.visible = has_theme_icon(icon, "EditorIcons")
-	if _connection_icon.visible:
-		_connection_icon.texture = get_theme_icon(icon, "EditorIcons")
-
-
-func set_chat_busy(busy: bool) -> void:
-	_busy = busy
-	_mode.disabled = busy
-	_model.disabled = busy
-	_effort.disabled = busy
-	if busy:
-		_started_msec = Time.get_ticks_msec()
-		_last_elapsed_second = -1
-		_progress.text = "Preparing your request…"
-	else:
-		_started_msec = 0
-		_progress.text = "Review changes" if _review_pending else "Ready"
-	_prompt.editable = not _review_pending
-	_stop.visible = busy
-	_send.visible = not busy
-	_stop.disabled = false
-	_prompt.placeholder_text = (
-		"Review changes below the viewport"
-		if _review_pending
-		else "%s is responding…" % _agent_name if busy else ("Chat with " + _agent_name)
-	)
-
-
-func _request_cancel() -> void:
-	_progress.text = "Stopping…"
-	_stop.disabled = true
-	cancel_requested.emit()
-
-
-func set_model_options(models: Array) -> void:
-	_model_choices = models.duplicate(true)
-	_model.clear()
-	_model.add_item("Auto model")
-	_model.set_item_metadata(0, "")
-	for item: Dictionary in models:
-		if str(item.get("id", "")).is_empty():
-			continue
-		_model.add_item(str(item.get("name", item["id"])))
-		_model.set_item_metadata(_model.item_count - 1, str(item["id"]))
-	var saved := str(_selection_options.get("model", ""))
-	if (
-		not saved.is_empty()
-		and not models.any(func(item: Dictionary) -> bool: return str(item.get("id", "")) == saved)
-	):
-		_model.add_item("Unavailable: " + saved)
-		_model.set_item_metadata(_model.item_count - 1, saved)
-		_model.set_item_disabled(_model.item_count - 1, true)
-	restore_selection_options(_selection_options)
-	# A provider that exposes no model list leaves nothing to choose.
-	_model.visible = _model.item_count > 1
-	_model.tooltip_text = (
-		"Uses your provider's configured model; no model list is exposed."
-		if _model.item_count == 1
-		else "Choose an available model, or let Auto select one."
-	)
-
-
-func restore_selection_options(selection: Dictionary) -> void:
-	_selection_options = selection.duplicate()
-	var modes: Array[String] = ["auto", "fast", "thorough"]
-	_mode.select(maxi(0, modes.find(str(selection.get("mode", "auto")))))
-	_model.select(0)
-	for index: int in _model.item_count:
-		if _model.get_item_metadata(index) == selection.get("model", ""):
-			_model.select(index)
-	_update_efforts()
-
-
-func _model_changed(_index: int) -> void:
-	_selection_options["effort"] = ""
-	_update_efforts()
-	_options_changed(0)
-
-
-func _update_efforts() -> void:
-	_effort.clear()
-	_effort.add_item("Auto effort")
-	_effort.set_item_metadata(0, "")
-	var model_id := str(_model.get_item_metadata(_model.selected))
-	var found := false
-	for item: Dictionary in _model_choices:
-		if str(item.get("id", "")) != model_id:
-			continue
-		for value: String in item.get("efforts", []):
-			_effort.add_item(value.capitalize() + " effort")
-			_effort.set_item_metadata(_effort.item_count - 1, value)
-			if value == _selection_options.get("effort", ""):
-				_effort.select(_effort.item_count - 1)
-				found = true
-	var saved := str(_selection_options.get("effort", ""))
-	if not saved.is_empty() and not found:
-		_effort.add_item("Unavailable: " + saved)
-		_effort.set_item_metadata(_effort.item_count - 1, saved)
-		_effort.set_item_disabled(_effort.item_count - 1, true)
-		_effort.select(_effort.item_count - 1)
-	_effort.visible = _effort.item_count > 1
-
-
-func _options_changed(_index: int) -> void:
-	_selection_options = {
-		"mode": ["auto", "fast", "thorough"][_mode.selected],
-		"model": str(_model.get_item_metadata(_model.selected)),
-		"effort": str(_effort.get_item_metadata(_effort.selected)),
-	}
-	selection_options_changed.emit(_selection_options.duplicate())
-
-
-func show_execution(event: Dictionary) -> void:
-	var description := (
-		"%s · %s"
-		% [str(event.get("name", "Provider default")), str(event.get("mode", "auto")).capitalize()]
-	)
-	if not str(event.get("effort", "")).is_empty():
-		description += " · " + str(event["effort"])
-	_mode.tooltip_text = description
-	_model.set_item_text(0, "Auto · " + str(event.get("name", "Provider default")))
-	_route_label.text = description
-	_route_label.tooltip_text = description
-	_progress.text = "Thinking…"
-	_elapsed_label.tooltip_text = description
-
-
-func show_timing(event: Dictionary) -> void:
-	_transcript.show_timing(event)
-	_elapsed_label.text = "%.1fs" % (float(event.get("total_ms", 0)) / 1000.0)
-	var detail := "Total: " + _elapsed_label.text
-	if event.get("first_response_ms") != null:
-		detail += "\nFirst response: %.1fs" % (float(event["first_response_ms"]) / 1000.0)
-	for phase: String in event.get("phases_ms", {}):
-		detail += "\n%s: %.1fs" % [phase.capitalize(), float(event["phases_ms"][phase]) / 1000.0]
-	_elapsed_label.tooltip_text += "\n" + detail
-	_progress.text = (
-		"Stopped"
-		if event.get("outcome") == "cancelled"
-		else (
-			"Review changes"
-			if _review_pending
-			else "Ready" if event.get("outcome") == "done" else "Request failed"
-		)
-	)
-
-
-func take_review_panel() -> Control:
-	_content.remove_child(_review)
-	_review.name = "Review"
-	_review.custom_minimum_size.y = get_theme_default_font_size() * 18
-	return _review
-
-
-func _set_details_open(open: bool, remember := true) -> void:
-	if remember:
-		_details_open = open
-	_details_toggle.set_pressed_no_signal(open)
-	_details_toggle.text = ("▾  Hide details" if open else "▸  Show details")
-	_review_scroll.visible = open
-	_review_media.size_flags_stretch_ratio = 1.0 if open else 3.0
-
-
-func show_edit_review(summary: String) -> void:
-	_review_details.hide()
-	_review_media.hide()  # show_file_review fills these in for file changes.
-	_details_toggle.hide()
-	_review_scroll.hide()
-	_review_pending = true
-	_send.disabled = true
-	_review_label.text = "Preview · " + summary
-	_review.show()
-	_prompt.editable = false
-	_prompt.placeholder_text = "Accept or reject changes in the Review panel"
-	review_requested.emit()
-
-
-func show_file_review(summary: String, text_diff: String, media: Array = []) -> void:
-	show_edit_review(summary)
-	_review_scroll.scroll_vertical = 0
-	_review_details.text = text_diff
-	_review_details.visible = not text_diff.is_empty()
-	for child: Node in _review_media.get_children():
-		child.queue_free()
-	for child: Node in _review_paths.get_children():
-		child.queue_free()
-	for item: Dictionary in media:
-		var caption := Label.new()
-		caption.text = str(item.get("path", ""))
-		caption.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-		_review_paths.add_child(caption)
-		var row := HBoxContainer.new()
-		row.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		_review_media.add_child(row)
-		var both := item.has("before") and item.has("after")
-		for side: String in ["before", "after"]:
-			if not item.has(side):
-				continue
-			var column := VBoxContainer.new()
-			column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			column.size_flags_vertical = Control.SIZE_EXPAND_FILL
-			row.add_child(column)
-			if both:
-				var label := Label.new()
-				label.text = side.capitalize()
-				label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-				column.add_child(label)
-			var path := str(item[side])
-			if item.get("media") == "image":
-				var image := Image.load_from_file(path)
-				if image != null:
-					var view := TextureRect.new()
-					view.texture = ImageTexture.create_from_image(image)
-					view.custom_minimum_size = Vector2(100, get_theme_default_font_size() * 6)
-					view.size_flags_vertical = Control.SIZE_EXPAND_FILL
-					view.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-					view.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-					column.add_child(view)
-			else:
-				var player := AudioStreamPlayer.new()
-				player.stream = (
-					AudioStreamWAV.load_from_file(path)
-					if path.ends_with(".wav")
-					else AudioStreamOggVorbis.load_from_file(path)
-				)
-				column.add_child(player)
-				var play := Button.new()
-				play.text = "Play / Stop"
-				play.pressed.connect(
-					func() -> void:
-						if player.playing:
-							player.stop()
-						else:
-							player.play()
-				)
-				column.add_child(play)
-	_review_media.visible = not media.is_empty()
-	_details_toggle.visible = not media.is_empty()
-	_set_details_open(_details_open or media.is_empty(), false)
-
-
-func hide_edit_review(message: String = "") -> void:
-	var was_visible := _review.is_visible_in_tree()
-	_review_details.hide()
-	_review_pending = false
-	_send.disabled = false
-	_review.hide()
-	for child: Node in _review_media.get_children():
-		child.queue_free()
-	for child: Node in _review_paths.get_children():
-		child.queue_free()
-	_prompt.editable = true
-	_prompt.placeholder_text = ("Chat with " + _agent_name)
-	if was_visible:
-		review_closed.emit()
-	if not message.is_empty():
-		finish_agent_response(false)
-		_transcript.add_notice(message)
-
-
-func append_agent_text(text: String, new_message: bool) -> void:
-	_transcript.append_delta(_agent_name, text, new_message or not _assistant_open)
-	_assistant_open = true
-
-
-func show_agent_message(text: String) -> void:
-	finish_agent_response(false)
-	_say(_agent_name, text)
-
-
-func finish_agent_response(_ok: bool) -> void:
-	_transcript.finish_response()
 	_assistant_open = false
+	_send_request(_transcript.add_request(entry, target_snapshot()))
 
 
-func _run_slash(entry: String) -> void:
-	var command := entry.split(" ")[0].to_lower()
-	if not COMMANDS.has(command):
-		var matches: Array[String] = []
-		for candidate: String in COMMANDS:
-			if candidate.begins_with(command):
-				matches.append(candidate)
-		if matches.size() == 1:
-			command = matches[0]
-	if not COMMANDS.has(command):
-		_say("Journeyman", "Unknown command. Type / to see the available commands.")
+func _send_request(card: Control) -> void:
+	_active_card = card
+	_failure = ""
+	if not card.is_connected("failed", _on_card_failed):
+		card.connect("failed", _on_card_failed)
+	card.set_sending()
+	_sync_send_slot()
+	if prompt_submitted.get_connections().is_empty():
+		card.set_failed("Open this project through Joinery to chat.")
 		return
+	prompt_submitted.emit(card.request, card.targets)
+
+
+func _retry(card: Control) -> void:
+	if not _busy and not _review_pending:
+		_send_request(card)
+
+
+## A request that never reached the assistant. When the connection went with it, every
+## indicator says so: the dot turns red and Send rests, while the card's Retry is the action.
+func _on_card_failed(reason: String) -> void:
+	_sync_send_slot()
+	if connection_state == "error" or reason.to_lower().contains("connection"):
+		connection_state = "error"
+		_header.show_state("error", _agent_name, reason, false)
+		_composer.set_connection(connection_state)
+		_transcript.set_examples_enabled(false)
+
+
+## Stop takes Send's slot while the assistant works or a request is on its way to it.
+func _sync_send_slot() -> void:
+	var card := _card()
+	_composer.set_busy(_busy or (card != null and card.state == "sending"))
+
+
+## Run a slash command ("/doctor", "/help", …) without posting it as a message. Unknown
+## commands get a notice.
+func run_command(entry: String) -> void:
+	if entry == "reconnect":
+		reconnect_requested.emit()
+		return
+	var command := entry if entry.begins_with("/") else "/" + entry
+	if not _slash.run(command):
+		_transcript.add_notice("Unknown command. Type / to see commands.", "info")
+
+
+func _on_slash_requested(command: String) -> void:
 	match command:
 		"/help":
-			var everyday := PackedStringArray()
-			var fixes := PackedStringArray()
-			for candidate: String in COMMANDS:
-				var line := "%s — %s" % [candidate, COMMANDS[candidate][0]]
-				(fixes if TROUBLESHOOTING.has(candidate) else everyday).append(line)
-			_say(
-				"Journeyman",
-				(
-					"Available commands:\n"
-					+ "\n".join(everyday)
-					+ "\n\nIf something is not working:\n"
-					+ "\n".join(fixes)
-				)
-			)
+			_prompt.grab_focus()
+			_command_popup.open_for("", true)
 		"/setup":
 			setup_requested.emit()
 		"/art":
@@ -849,112 +352,344 @@ func _run_slash(entry: String) -> void:
 			focus_toggle_requested.emit()
 		"/toolbar":
 			toolbar_toggle_requested.emit()
-		_:
-			_run_cli(command.substr(1))
 
 
-func _run_cli(command: String) -> void:
-	_busy = true
-	_running_command = command
-	_prompt.editable = false
-	_prompt.placeholder_text = "Working…"
-	_command_job = COMMAND_SCRIPT.new()
-	var error: Error = _command_job.start("uv", _args_for(command))
-	if error != OK:
-		_command_job = null
-		_busy = false
-		_prompt.editable = true
-		_say("Journeyman", "Could not start the command.")
+func _on_slash_finished(_command: String, text: String, kind: String) -> void:
+	_sync()
+	_transcript.add_notice(text, kind)
 
 
-func _command_reply(command: String, code: int, output: String) -> String:
-	if command == "tools":
-		var data: Variant
-		for line: String in output.split("\n"):
-			if line.begins_with('{"servers"'):
-				data = JSON.parse_string(line)
-		if data is Dictionary:
-			var connected: Array[String] = []
-			var unavailable: Array[String] = []
-			for server: Dictionary in data.get("servers", []):
-				if server.get("state") == "discovered":
-					connected.append(str(server["name"]))
-				else:
-					unavailable.append(str(server["name"]))
-			return (
-				"Connected: "
-				+ ", ".join(connected)
-				+ (
-					". Unavailable: " + ", ".join(unavailable)
-					if not unavailable.is_empty()
-					else "."
-				)
-			)
-	if code != 0:
-		return "That command could not finish. Details are in Output."
-	if command == "agents":
-		var data: Variant = JSON.parse_string(output)
-		var names: Array[String] = []
-		if data is Dictionary:
-			for agent: Dictionary in data.get("agents", []):
-				names.append(str(agent["name"]))
-		if names.is_empty():
-			return "Could not read the supported agent list. Details are in Output."
-		return "Supported agents: " + ", ".join(names) + "."
-	return (
-		{
-			"doctor": "Your tools are ready.",
-			"check": "Asset checks passed.",
-			"rebuild": "Recipe verification passed.",
-		}
-		. get(command, "Done.")
+func _on_reverted(transaction_id: String, ok: bool, message: String) -> void:
+	var card := _transcript.card_for(transaction_id)
+	if card != null:
+		card.revert_finished(ok, message)
+	if ok:
+		show_status("Change reverted")
+		change_reverted.emit(transaction_id)
+
+
+## Footer and composer follow the state: a running check, a reply, a pending review, or idle.
+func _sync() -> void:
+	var command: String = _slash.running()
+	if not command.is_empty():
+		_footer.set_mode("command", command)
+	elif _busy:
+		# A step live on the card is the one indicator; the footer only covers the rest.
+		var card := _card()
+		var shown: bool = card != null and card.shows_step(_progress)
+		_footer.set_mode("idle" if shown else "busy", _progress)
+	elif _review_pending:
+		_footer.set_mode("review")
+	else:
+		_footer.set_mode("idle")
+	_composer.set_locked(_review_pending or not command.is_empty())
+	_composer.set_placeholder(REVIEW_WAIT if _review_pending else "")
+
+
+func _request_cancel() -> void:
+	var card := _card()
+	if not _busy and card != null and card.state == "sending":
+		# Stopped before the assistant took it: the request stays here, ready to Retry.
+		card.set_failed()
+		cancel_requested.emit()
+		return
+	_progress = "Stopping…"
+	_composer.stopping()
+	_sync()
+	cancel_requested.emit()
+
+
+## A transient footer line ("Focus mode on · /focus to undo") that clears after [param seconds].
+func show_status(text: String, seconds := 3.0) -> void:
+	_footer.show_status(text, seconds)
+
+
+## Apply settings: {mode, text_scale, show_timings, details_open}; missing keys are kept.
+func apply_preferences(prefs: Dictionary) -> void:
+	if prefs.has("mode"):
+		_options.set_mode(str(prefs["mode"]))
+	if prefs.has("text_scale"):
+		_transcript.set_text_scale(float(prefs["text_scale"]))
+	if prefs.has("show_timings"):
+		_transcript.set_show_timings(bool(prefs["show_timings"]))
+	if prefs.has("details_open"):
+		_details_open = bool(prefs["details_open"])
+		_review_call("set_details_open", [_details_open])
+
+
+# --- Targets -----------------------------------------------------------------------------------
+
+
+func on_selection_changed() -> void:
+	if Engine.is_editor_hint():
+		_set_targets(CHIP_SCRIPT.from_selection())
+
+
+func set_resource_target(path: String, type: String = "Resource", source: String = "") -> void:
+	if not path.is_empty():
+		_set_targets([CHIP_SCRIPT.for_resource(path, type, source)])
+
+
+func target_snapshot() -> Array[Dictionary]:
+	return _target_context.duplicate(true)
+
+
+func _set_targets(targets: Array[Dictionary]) -> void:
+	_target_context = targets.duplicate(true)
+	for child: Node in _chips.get_children():
+		_chips.remove_child(child)
+		child.queue_free()
+	for target: Dictionary in _target_context:
+		var id := str(target["id"])
+		var chip := CHIP_SCRIPT.build(self, target, target_opened.emit, _remove_target.bind(id))
+		chip.connect("removed", func() -> void: _sync_chips.call_deferred())
+		_chips.add_child(chip)
+	_sync_chips()
+
+
+## Optimistic: the target leaves the request at once; the chip row hides after it animates out.
+func _remove_target(id: String) -> void:
+	var remaining: Array[Dictionary] = []
+	for target: Dictionary in _target_context:
+		if str(target["id"]) != id:
+			remaining.append(target)
+	_target_context = remaining
+
+
+func _sync_chips() -> void:
+	_chips.visible = not _target_context.is_empty()
+
+
+# --- Assistant state ---------------------------------------------------------------------------
+
+
+func set_chat_agent(agent: String) -> void:
+	_agent_name = agent.capitalize()
+	if _composer != null:
+		_composer.agent_name = _agent_name
+		_composer.set_placeholder(REVIEW_WAIT if _review_pending else "")
+		_header.show_state(connection_state, _agent_name)
+		_transcript.set_examples_enabled(connection_state == "connected")
+
+
+func set_chat_state(state: String, detail: String) -> void:
+	if state == "working":
+		_progress = detail
+		var card := _card()
+		if card != null and _busy:
+			card.add_step(detail)
+		_sync()
+		return
+	connection_state = "none" if state == "error" and _agent_name.is_empty() else state
+	_show_connection(detail if state == "error" else "")
+
+
+## Header, Send and the example prompts all follow [member connection_state]. While the
+## header's banner offers the fix (Reconnect, Connect), unsent cards say only "Not sent".
+func _show_connection(detail := "") -> void:
+	_header.show_state(connection_state, _agent_name, detail)
+	_composer.set_connection(connection_state)
+	_transcript.set_examples_enabled(connection_state == "connected")
+	_transcript.set_retry_allowed(not connection_state in ["error", "none"])
+
+
+func set_chat_busy(busy: bool) -> void:
+	var was_busy := _busy
+	_busy = busy
+	if busy:
+		_started_msec = Time.get_ticks_msec()
+		_last_elapsed = -1
+		_progress = ""
+		_outcome = "done"
+		_command_popup.close()
+	else:
+		_started_msec = 0
+		var card := _card()
+		if card != null and was_busy:
+			if card.state == "sending":
+				card.set_failed(_failure)
+			else:
+				card.finish(_outcome)
+	_sync_send_slot()
+	_sync()
+
+
+func set_model_options(models: Array) -> void:
+	_options.set_models(models)
+
+
+func restore_selection_options(selection: Dictionary) -> void:
+	_options.restore(selection)
+
+
+func show_execution(event: Dictionary) -> void:
+	_options.show_execution(event)
+	_on_sent()
+	_progress = "Thinking…"
+	_sync_send_slot()
+	_sync()
+
+
+func show_timing(event: Dictionary) -> void:
+	var outcome := str(event.get("outcome", ""))
+	_outcome = (
+		"done" if outcome == "done" else "cancelled" if outcome == "cancelled" else "failed"
 	)
+	var placed := _transcript.show_timing(event)
+	if _outcome == "cancelled" and not placed:
+		_transcript.add_decision("Stopped", "stopped", _card())
 
 
-func _args_for(command: String) -> PackedStringArray:
-	var project := ProjectSettings.globalize_path("res://").rstrip("/")
-	var args := PackedStringArray(
-		[
-			"run",
-			"--frozen",
-			"--quiet",
-			"--project",
-			_engine_dir(),
-			"joinery",
-		]
-	)
-	match command:
-		"tools":
-			args.append_array(["mcp", "status", "--project", project, "--probe"])
-		"agents":
-			args.append_array(["agents", "--json"])
-		"doctor", "rebuild":
-			args.append_array([command, "--project", project])
-		"check":
-			args.append_array(["check", "assets", "--project", project])
-		_:
-			args.append(command)
-	return args
+func append_agent_text(text: String, new_message: bool) -> void:
+	_on_sent()
+	_transcript.append_delta(_agent_name, text, new_message or not _assistant_open)
+	_assistant_open = true
 
 
-func _engine_dir() -> String:
-	var from_env := OS.get_environment("JOINERY_HOME")
-	return (
-		from_env
-		if not from_env.is_empty()
-		else ProjectSettings.globalize_path("res://").path_join("..").simplify_path()
-	)
+func show_agent_message(text: String) -> void:
+	var card := _card()
+	if card != null and card.state == "sending" and _bridge != null:
+		# Before the bridge sent the request, anything it says is a delivery failure.
+		_failure = text
+		_transcript.add_notice(text, "error")
+		return
+	_on_sent()
+	finish_agent_response(false)
+	_transcript.add_message(_agent_name, text)
 
 
-func _say(who: String, what: String) -> void:
-	_transcript.add_message(who, what)
+func finish_agent_response(_ok: bool) -> void:
+	_transcript.finish_response()
+	_assistant_open = false
 
 
 func log_system(what: String) -> void:
 	print("[Joinery] ", what)
 
 
-func _composer_focus(focused: bool) -> void:
-	_composer_style.border_color = (
-		get_theme_color("focus", "Joinery") if focused else get_theme_color("border", "Joinery")
-	)
+func _card() -> Control:
+	if is_instance_valid(_active_card):
+		return _active_card
+	return _transcript.current_card() if _transcript != null else null
+
+
+# --- Review ------------------------------------------------------------------------------------
+
+
+## The Review panel for the editor's bottom panel (review_panel.gd).
+func take_review_panel() -> Control:
+	return _review
+
+
+func show_edit_review(summary: String, count := 0) -> void:
+	_review_call("show_scene_review", [summary, count])
+	_open_review([])
+
+
+func show_file_review(
+	summary: String, text_diff: String, media: Array = [], changes: Array = [], transaction_id := ""
+) -> void:
+	_review_call("show_file_review", [summary, text_diff, media, changes])
+	_review_call("set_details_open", [_details_open])
+	_open_review(media)
+	var card := _card()
+	if card != null and not transaction_id.is_empty():
+		card.transaction_id = transaction_id
+
+
+## Close the review. [param kind] is "success", "rejected", "info" or "error"; the message is
+## shown on the request's card, or as a notice when there is none.
+func hide_edit_review(message: String = "", kind := "info") -> void:
+	var was_pending := _review_pending
+	_review_pending = false
+	var decided := _decision_kind(message, kind)
+	if decided == "success" and was_pending and _review.has_method("show_result"):
+		_review.call("show_result", true, message)
+	else:
+		_review_call("clear", [])
+	_sync()
+	if was_pending:
+		review_closed.emit()
+	if message.is_empty():
+		return
+	finish_agent_response(false)
+	_transcript.add_decision(message, decided, _card() if was_pending else null)
+
+
+func set_review_applying(on: bool) -> void:
+	_review_call("set_applying", [on])
+
+
+## The decision failed: the panel shows why and takes the decision again.
+func show_review_error(text: String) -> void:
+	_review_call("show_error", [text])
+	var card := _card()
+	if card != null:
+		card.roll_back()
+
+
+func _open_review(media: Array) -> void:
+	_review_pending = true
+	var card := _card()
+	if card != null:
+		card.set_ready(media)
+	_command_popup.close()
+	_sync()
+	review_requested.emit()
+
+
+func _on_accept() -> void:
+	var card := _card()
+	if card != null and card.awaiting_decision():
+		card.set_outcome("success", "Change accepted", true)
+	accept_edit_requested.emit()
+
+
+func _on_reject() -> void:
+	var card := _card()
+	if card != null and card.awaiting_decision():
+		card.set_outcome("rejected", "Change rejected. Original restored.", true)
+	reject_edit_requested.emit()
+
+
+func _make_review() -> Control:
+	var panel: Control = null
+	if ResourceLoader.exists(REVIEW_PATH):
+		var script := load(REVIEW_PATH) as Script
+		if script != null and script.can_instantiate():
+			panel = script.new() as Control
+	if panel == null:
+		panel = VBoxContainer.new()
+	panel.name = "Review"
+	var links := {
+		"accept_pressed": _on_accept,
+		"reject_pressed": _on_reject,
+		"show_requested": func() -> void: review_requested.emit(),
+	}
+	for signal_name: String in links:
+		if panel.has_signal(signal_name):
+			panel.connect(signal_name, links[signal_name])
+	if panel.has_method("set_details_open"):
+		panel.call("set_details_open", _details_open)
+	return panel
+
+
+func _review_call(method: String, arguments: Array) -> void:
+	if is_instance_valid(_review) and _review.has_method(method):
+		_review.callv(method, arguments)
+
+
+## Kind of a decision message; older callers pass only the message.
+static func _decision_kind(message: String, kind: String) -> String:
+	if kind != "info":
+		return kind
+	var lower := message.to_lower()
+	if lower.contains("accepted"):
+		return "success"
+	if lower.contains("rejected"):
+		return "rejected"
+	return "info"
+
+
+func _engine_dir() -> String:
+	return SLASH_SCRIPT.engine_dir()

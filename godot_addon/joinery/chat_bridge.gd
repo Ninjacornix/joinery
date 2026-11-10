@@ -14,6 +14,11 @@ signal art_review(event: Dictionary)
 signal models_received(models: Array)
 signal execution_changed(event: Dictionary)
 signal timing_received(event: Dictionary)
+## The queued prompt was written to the assistant's host (the optimistic bubble resolves).
+signal sent
+## A line from Joinery itself, not the assistant ("info" or "error"). Without a listener it
+## falls back to message_received.
+signal notice(text: String, kind: String)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 var context_provider: Callable
@@ -36,7 +41,7 @@ func start(agent: String, profile: String, engine: String, project: String) -> v
 	_engine = engine
 	_project = project
 	if agent.is_empty():
-		status_changed.emit("error", "Choose an agent in the Project Manager.")
+		status_changed.emit("error", "No assistant connected.")
 		return
 	var args := PackedStringArray(
 		[
@@ -60,7 +65,7 @@ func start(agent: String, profile: String, engine: String, project: String) -> v
 	_job = COMMAND_SCRIPT.new()
 	if _job.start("uv", args) != OK:
 		_job = null
-		status_changed.emit("error", "Could not start the chat connection.")
+		status_changed.emit("error", "Couldn't start the chat connection.")
 		return
 	status_changed.emit("connecting", "Connecting to " + agent.capitalize() + "…")
 
@@ -81,7 +86,7 @@ func submit(text: String, targets: Array) -> void:
 	if _connected:
 		_send_pending()
 	elif _job == null:
-		message_received.emit("The chat connection could not start.")
+		_notice("Couldn't start the chat connection.", "error")
 		busy_changed.emit(false)
 
 
@@ -89,6 +94,7 @@ func _send_pending() -> void:
 	if not _pending.is_empty() and _job != null:
 		_job.send_line(JSON.stringify(_pending))
 		_pending.clear()
+		sent.emit()
 
 
 func cancel_turn() -> void:
@@ -111,9 +117,9 @@ func _process(_delta: float) -> void:
 		_job = null
 		_connected = false
 		if _error_detail.is_empty():
-			_error_detail = "Chat connection closed. Reconnect to try again."
+			_error_detail = "Lost connection to %s." % _display_name()
 		if not _pending.is_empty():
-			message_received.emit(_error_detail)
+			_notice(_error_detail, "error")
 		_pending.clear()
 		status_changed.emit("error", _error_detail)
 		completed.emit(false)
@@ -126,13 +132,15 @@ func _handle(event: Dictionary) -> void:
 			models_received.emit(event.get("models", []))
 			_connected = event.get("state") == "connected"
 			if not _connected:
-				_error_detail = str(event.get("message", "Disconnected"))
+				_error_detail = str(
+					event.get("message", "Lost connection to %s." % _display_name())
+				)
 			status_changed.emit(
 				str(event.get("state", "error")),
 				(
 					_agent.capitalize() + " connected"
 					if _connected
-					else str(event.get("message", "Disconnected"))
+					else str(event.get("message", "Lost connection to %s." % _display_name()))
 				)
 			)
 			if _connected:
@@ -171,7 +179,18 @@ func refresh_models() -> void:
 	if _job != null and _connected:
 		_job.send_line(JSON.stringify({"kind": "models_request"}))
 	else:
-		message_received.emit("Connect your agent before refreshing its model list.")
+		_notice("Connect your assistant before refreshing its models.", "info")
+
+
+func _notice(text: String, kind: String) -> void:
+	if notice.get_connections().is_empty():
+		message_received.emit(text)
+	else:
+		notice.emit(text, kind)
+
+
+func _display_name() -> String:
+	return _agent.capitalize() if not _agent.is_empty() else "your assistant"
 
 
 func send_editor_result(request_id: String, result: Dictionary) -> void:

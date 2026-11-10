@@ -43,9 +43,13 @@ func _run() -> void:
 		+ " emit({'kind':'message_delta','text':'世界 '+d['targets'][0]['id'],'new_message':True})\n"
 		+ " emit({'kind':'done','ok':True})\n"
 	)
-	_check(backend._job.start(python, PackedStringArray(["-c", code])) == OK,
-		"Start a fixture host")
+	_check(
+		backend._job.start(python, PackedStringArray(["-c", code])) == OK, "Start a fixture host"
+	)
 	var target := [{"id": "Door"}]
+	chat.attach_bridge(backend)
+	var receipts := [0]
+	backend.sent.connect(func() -> void: receipts[0] += 1)
 	backend.submit("hello", target)
 	target[0]["id"] = "Wrong"
 	_check(chat._busy, "Queueing a prompt must show Stop")
@@ -54,15 +58,20 @@ func _run() -> void:
 		await process_frame
 	_check(not chat._busy, "A reply must release the composer")
 	_check(backend._connected, "Connect before sending a queued prompt")
-	_check(chat._transcript.get_parsed_text().contains("Codex  世界 Door"),
-		"Preserve split UTF-8 frames and the submitted target snapshot")
+	_check(receipts[0] == 1, "The bridge reports when the prompt was sent")
+	_check(
+		chat._transcript.get_parsed_text().contains("Codex  世界 Door"),
+		"Preserve split UTF-8 frames and the submitted target snapshot"
+	)
 	backend.submit("error", [])
 	deadline = Time.get_ticks_msec() + 5000
 	while backend._job != null and Time.get_ticks_msec() < deadline:
 		await process_frame
-	_check(chat._connection.text == "Sign in to Codex first.",
-		"A useful connection error must survive host exit")
-	_check(not chat._busy and chat._reconnect.visible, "A failed host must allow recovery")
+	_check(
+		chat._header._banner_text.text == "Sign in to Codex first.",
+		"A useful connection error must survive host exit"
+	)
+	_check(not chat._busy and chat._header._banner.visible, "A failed host must allow recovery")
 	backend.queue_free()
 	chat.queue_free()
 	await process_frame

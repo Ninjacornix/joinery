@@ -1,34 +1,67 @@
 @tool
 extends RefCounted
-## A selected scene object or file shown above the message. Click it to open the
-## asset in its tool's viewer; × removes it from this message.
+## A selected scene object or file shown above the message, as a breadcrumb
+## ("hammer › Head") with its kind icon, replaced by a 16px thumbnail when the editor can
+## render one. Click it to open the asset in its tool; × removes it from this message.
 
-const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
+const UI_THEME := preload("ui_theme.gd")
+const UI := preload("ui_components.gd")
+const STYLE := preload("sidebar_style.gd")
+## Target kind -> icon name.
+const KIND_ICONS := {
+	"Object": "model", "Image": "image", "Audio": "audio", "Scene": "scene", "Material": "material"
+}
+## Breadcrumbs longer than this keep the first and the last two parts.
+const MAX_CRUMBS := 3
 
 
+## Receives an editor thumbnail for a chip; kept alive as chip meta until it arrives.
+class _Thumbnail:
+	extends RefCounted
+	var picture: TextureRect
+
+	func _init(target: TextureRect) -> void:
+		picture = target
+
+	func done(_path: String, _preview: Texture2D, thumbnail: Texture2D, _data: Variant) -> void:
+		if thumbnail != null and is_instance_valid(picture):
+			picture.set_meta("_joinery_glyph", "")
+			picture.set_meta("_joinery_role", "")
+			picture.texture = thumbnail
+			picture.self_modulate = Color.WHITE
+
+
+## The chip for [param target] ({id, label, kind, resource, source, crumbs?, tool?}).
+## [param opened] gets the asset path on click; [param removed] runs as soon as × is pressed
+## (the chip then animates out and emits its own removed signal).
 static func build(
-	host: Control, target: Dictionary, opened: Callable, removed: Callable
+	_host: Control, target: Dictionary, opened: Callable, removed: Callable
 ) -> PanelContainer:
-	var font_size := host.get_theme_default_font_size()
-	var badge := PanelContainer.new()
-	var focus := host.get_theme_color("focus", "Joinery")
-	badge.add_theme_stylebox_override(
-		"panel",
-		UI_THEME.panel(
-			host.get_theme_color("inset", "Joinery").lerp(focus, 0.08),
-			host.get_theme_color("border", "Joinery").lerp(focus, 0.4),
-			4,
-			5
-		)
-	)
-	var context := HBoxContainer.new()
-	context.add_theme_constant_override("separation", 6)
-	context.tooltip_text = "Open %s in its tool" % str(target["label"])
-	context.mouse_filter = Control.MOUSE_FILTER_STOP
-	context.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	var text := " › ".join(crumbs(target))
+	var chip := UI.chip(text, "", true)
+	chip.label.tooltip_text = ""
 	var resource := str(target.get("resource", ""))
 	var path := resource if not resource.is_empty() else str(target.get("source", ""))
-	context.gui_input.connect(
+	var tool := str(target.get("tool", ""))
+	chip.tooltip_text = (
+		("Open in " + tool if not tool.is_empty() else "Open source file")
+		if not path.is_empty()
+		else text
+	)
+	chip.accessibility_name = text
+	chip.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	chip.remove.tooltip_text = "Remove from this message"
+	chip.remove.accessibility_name = "Remove %s from this message" % text
+	chip.remove.pressed.connect(removed)
+	var picture := STYLE.glyph("text_muted")
+	var icon_name := str(KIND_ICONS.get(str(target.get("kind", "")), ""))
+	if not icon_name.is_empty():
+		STYLE.set_glyph(picture, icon_name)
+		var row := chip.get_child(0)
+		row.add_child(picture)
+		row.move_child(picture, 0)
+		_request_thumbnail(chip, picture, path)
+	chip.gui_input.connect(
 		func(event: InputEvent) -> void:
 			var click := event as InputEventMouseButton
 			if (
@@ -39,42 +72,110 @@ static func build(
 			):
 				opened.call(path)
 	)
-	badge.add_child(context)
-	var kind_icon := {"Audio": "AudioStreamPlayer", "Object": "PackedScene", "Image": "Image"}.get(
-		str(target["kind"]), "File"
-	)
-	if host.has_theme_icon(kind_icon, "EditorIcons"):
-		var icon := TextureRect.new()
-		icon.texture = host.get_theme_icon(kind_icon, "EditorIcons")
-		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		icon.custom_minimum_size = Vector2.ONE * font_size
-		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		context.add_child(icon)
-	var label := Label.new()
-	label.text = resource.get_file() if not resource.is_empty() else str(target["label"])
-	var text_size := int(font_size * 0.85)
-	label.add_theme_font_size_override("font_size", text_size)
-	label.add_theme_color_override("font_color", host.get_theme_color("text", "Joinery"))
-	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	var measured := (
-		host
-		. get_theme_default_font()
-		. get_string_size(label.text, HORIZONTAL_ALIGNMENT_LEFT, -1, text_size)
-		. x
-	)
-	# The slack covers the label's own padding, so short names never lose letters.
-	label.custom_minimum_size.x = clampf(measured, 40, font_size * 12) + font_size * 0.6
-	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	context.add_child(label)
-	var clear := Button.new()
-	clear.text = "×"
-	clear.flat = true
-	clear.theme_type_variation = "JoineryIconButton"
-	clear.custom_minimum_size = Vector2.ONE * font_size * 1.5
-	clear.tooltip_text = "Clear selection for this message"
-	clear.accessibility_name = "Clear target " + str(target["label"])
-	clear.pressed.connect(removed)
-	context.add_child(clear)
-	return badge
+	chip.mouse_entered.connect(_hover.bind(chip, true))
+	chip.mouse_exited.connect(_hover.bind(chip, false))
+	return chip
+
+
+## Targets for the nodes selected in the editor, with breadcrumbs from the scene file name
+## down the node path. Editor only.
+static func from_selection() -> Array[Dictionary]:
+	var targets: Array[Dictionary] = []
+	var scene := EditorInterface.get_edited_scene_root()
+	for node: Node in EditorInterface.get_selection().get_selected_nodes():
+		var scene_path := scene.scene_file_path if scene != null else "current-scene"
+		var node_path := str(scene.get_path_to(node)) if scene != null else str(node.get_path())
+		var kind := "Object"
+		var resource := ""
+		if node is AudioStreamPlayer or node is AudioStreamPlayer2D or node is AudioStreamPlayer3D:
+			kind = "Audio"
+			var stream := node.get("stream") as AudioStream
+			if stream != null:
+				resource = stream.resource_path
+		var parts: Array[String] = []
+		if scene != null:
+			var file := scene.scene_file_path.get_file().get_basename()
+			parts.append(file if not file.is_empty() else str(scene.name))
+			if node != scene:
+				for part: String in node_path.split("/"):
+					parts.append(part)
+		else:
+			parts.append(str(node.name))
+		var target := {
+			"id": scene_path + "::" + node_path,
+			"label": str(node.name),
+			"kind": kind,
+			"resource": resource,
+			"source": node.scene_file_path,
+			"crumbs": parts,
+		}
+		targets.append(target)
+	return targets
+
+
+## The target for a file (or a "file::sub-resource" path) of editor type [param type].
+static func for_resource(path: String, type := "Resource", source := "") -> Dictionary:
+	var file := path.split("::")[0]
+	var extension := file.get_extension().to_lower()
+	var kind := "Resource"
+	if type.begins_with("Audio") or extension in ["wav", "ogg", "mp3", "scd"]:
+		kind = "Audio"
+	elif extension in ["tscn", "scn"]:
+		kind = "Scene"
+	elif type in ["Object", "PackedScene"] or extension in ["blend", "glb", "gltf"]:
+		kind = "Object"
+	elif type.begins_with("Texture") or extension in ["png", "jpg", "kra", "aseprite"]:
+		kind = "Image"
+	elif type.contains("Material") or extension in ["ptex", "mmg"]:
+		kind = "Material"
+	return {
+		"id": path,
+		"label": file.get_file().get_basename().replace("_", " ").capitalize(),
+		"kind": kind,
+		"resource": path,
+		"source": source if not source.is_empty() else path,
+	}
+
+
+## Breadcrumb parts: the given "crumbs", or the file name and any sub-resource after "::".
+static func crumbs(target: Dictionary) -> PackedStringArray:
+	var parts := PackedStringArray()
+	for part: Variant in target.get("crumbs", []):
+		if not str(part).is_empty():
+			parts.append(str(part))
+	if parts.is_empty():
+		var resource := str(target.get("resource", ""))
+		if resource.is_empty():
+			parts.append(str(target.get("label", "")))
+		else:
+			var pieces := resource.split("::")
+			parts.append(pieces[0].get_file())
+			if pieces.size() > 1 and not pieces[1].is_empty():
+				parts.append(pieces[1])
+	if parts.size() > MAX_CRUMBS:
+		var short := PackedStringArray([parts[0], "…"])
+		short.append_array(parts.slice(parts.size() - 2))
+		return short
+	return parts
+
+
+static func _hover(chip: PanelContainer, inside: bool) -> void:
+	chip.remove_theme_stylebox_override("panel")
+	if not inside:
+		return
+	var source := chip.get_theme_stylebox("panel", "JoineryChip")
+	if source is StyleBoxFlat:
+		var box := source.duplicate() as StyleBoxFlat
+		box.bg_color = chip.get_theme_color("surface_raised", "Joinery")
+		chip.add_theme_stylebox_override("panel", box)
+
+
+static func _request_thumbnail(chip: Control, picture: TextureRect, path: String) -> void:
+	if path.is_empty() or not Engine.is_editor_hint() or not path.begins_with("res://"):
+		return
+	if not ResourceLoader.exists(path.split("::")[0]):
+		return
+	var receiver := _Thumbnail.new(picture)
+	chip.set_meta("_joinery_thumbnail", receiver)
+	var previewer := EditorInterface.get_resource_previewer()
+	previewer.queue_resource_preview(path.split("::")[0], receiver, "done", null)
