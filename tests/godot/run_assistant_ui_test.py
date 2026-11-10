@@ -7,7 +7,12 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from run_startup_test import isolated_editor, isolated_environment, scratch_folder
+from run_startup_test import (
+    crash,
+    isolated_editor,
+    isolated_environment,
+    scratch_folder,
+)
 
 from joinery.catalog import ROOT
 from joinery.distribution import engine_binary
@@ -46,6 +51,8 @@ def main() -> int:
             )
             text = result.stdout + result.stderr
             print(text, flush=True)
+            if reason := crash(result.returncode, text):
+                print(f"Assistant UI: {reason}.", flush=True)
             if result.returncode or marker not in text or "ERROR:" in text:
                 return 1
         for theme in ("light", "dark"):

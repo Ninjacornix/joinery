@@ -161,7 +161,12 @@ def main() -> int:
     if args.fake_cli is not None:
         return fake_cli(args.fake_cli, rest)
 
-    from run_startup_test import isolated_editor, isolated_environment, scratch_folder
+    from run_startup_test import (
+        crash,
+        isolated_editor,
+        isolated_environment,
+        scratch_folder,
+    )
 
     from joinery.distribution import engine_binary
 
@@ -204,6 +209,8 @@ def main() -> int:
             )
             output = result.stdout + result.stderr
             print(output, flush=True)
+            if reason := crash(result.returncode, output):
+                print(f"Setup dialog: {reason}.", flush=True)
             if result.returncode or marker not in output or "SCRIPT ERROR" in output:
                 return 1
         if args.capture is not None:

@@ -27,7 +27,12 @@ import subprocess
 import sys
 from pathlib import Path
 
-from run_startup_test import isolated_editor, isolated_environment, scratch_folder
+from run_startup_test import (
+    crash,
+    isolated_editor,
+    isolated_environment,
+    scratch_folder,
+)
 
 from joinery.distribution import engine_binary
 
@@ -93,6 +98,10 @@ def run(argv: list[str], env: dict[str, str], log: Path, timeout: int = 240) -> 
             check=False,
         )
         output = result.stdout + result.stderr
+        if reason := crash(result.returncode, output):
+            # The checks print their result before the editor quits; a crash while
+            # quitting must still fail the run.
+            output += f"\nEDITOR CRASH: {reason}."
     except subprocess.TimeoutExpired as exc:
         output = "\n".join(
             value.decode(errors="replace") if isinstance(value, bytes) else value or ""
@@ -164,6 +173,11 @@ def theme_pass(
             for line in output.splitlines():
                 if line.startswith("CHECK "):
                     print(f"  {theme} {step} {layout}: {line[6:]}")
+            problems += [
+                f"{theme} run {step} ({layout}): {line[14:]}"
+                for line in output.splitlines()
+                if line.startswith("EDITOR CRASH")
+            ]
             if "classic view: ok" not in output or failed:
                 problems.append(f"{theme} run {step} ({layout}) failed; see {log.name}")
                 if not any(line.startswith("CHECK ") for line in output.splitlines()):

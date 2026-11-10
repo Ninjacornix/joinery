@@ -117,11 +117,20 @@ func _run() -> void:
 		await _frames()
 		_check(_history_open(base), "History opens")
 	print("classic view: ", "FAILED" if _failed else "ok")
-	# Close as a user would, so the editor saves this layout for the next run. Deferred, so
+	# Close as a user would, so the editor saves this layout for the next run: the close
+	# request goes to the editor, as Editor > Quit or the window's close button sends it.
+	# Never through root.propagate_notification: that marks every node busy while it walks
+	# the tree, so the editor's quit cannot detach the plugins it frees, and the freed
+	# plugins stay listed as children until the engine crashes on them at exit. Deferred, so
 	# nothing of this script is running while the editor takes the plugins down.
 	var tree := get_tree()
 	tree.create_timer(15.0).timeout.connect(tree.quit.bind(1))
-	tree.root.propagate_notification.call_deferred(NOTIFICATION_WM_CLOSE_REQUEST)
+	var editor := tree.root.find_children("*", "EditorNode", false, false)
+	_check(editor.size() == 1, "The editor node is found to close")
+	if editor.is_empty():
+		tree.quit(1)
+		return
+	(editor[0] as Node).notification.call_deferred(NOTIFICATION_WM_CLOSE_REQUEST)
 
 
 ## Where Scene, FileSystem and Inspector sit: the bottom panel in Joinery's layout, the side
@@ -202,6 +211,19 @@ func _check_chrome(base: Control, classic: bool) -> void:
 			if button.is_visible_in_tree() and not button.text.is_empty():
 				labels.append(button.text)
 		_check(("Play" in labels) != classic, "The run bar reads: " + ", ".join(labels))
+		# Both layouts keep Play current scene, Play custom scene and Movie Maker beside Play.
+		var tips: Array[String] = []
+		for node: Node in (bars[0] as Node).find_children("*", "BaseButton", true, false):
+			var control := node as Control
+			if control.is_visible_in_tree():
+				tips.append(control.tooltip_text)
+		for tip: String in [
+			"Play the currently edited scene.", "Play a custom scene.", "Enable Movie Maker mode."
+		]:
+			_check(
+				tips.any(func(text: String) -> bool: return text.begins_with(tip)),
+				"The run bar shows: " + tip
+			)
 
 
 func _check_sidebar(classic: bool) -> void:

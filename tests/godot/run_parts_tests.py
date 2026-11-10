@@ -22,7 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from run_startup_test import scratch_folder
+from run_startup_test import crash, scratch_folder
 
 from joinery import parts
 from joinery.locking import GLB_IMPORT, write_lock
@@ -88,7 +88,8 @@ def godot(binary: Path, project: Path, args: list[str], env: dict[str, str]) -> 
     failed = ("SCRIPT ERROR", "Parse Error", "FAILED")
     if got.returncode != 0 or any(word in output for word in failed):
         print(output[-6000:])
-        raise SystemExit(f"Godot failed ({got.returncode}): {' '.join(args)}")
+        reason = crash(got.returncode, output) or f"exit code {got.returncode}"
+        raise SystemExit(f"Godot failed ({reason}): {' '.join(args)}")
     return output
 
 
@@ -111,6 +112,7 @@ def main() -> int:
         project = make_project(Path(directory))
         env = os.environ.copy()
         env["JOINERY_HOME"] = str(ROOT)
+        env["JOINERY_BACKGROUND"] = "1"  # never take focus (ADR 0032)
         godot(args.godot, project, ["--headless", "--editor", "--import"], env)
         extracted = sorted(p.name for p in (project / "art/models").glob("*.png"))
         assert not extracted, f"Textures were extracted beside the model: {extracted}"

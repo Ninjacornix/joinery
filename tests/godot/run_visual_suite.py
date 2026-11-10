@@ -29,7 +29,12 @@ from functools import partial
 from pathlib import Path
 
 from run_classic_view_test import capture_names, theme_pass
-from run_startup_test import isolated_editor, isolated_environment, scratch_folder
+from run_startup_test import (
+    crash,
+    isolated_editor,
+    isolated_environment,
+    scratch_folder,
+)
 
 from joinery.distribution import engine_binary
 
@@ -235,7 +240,11 @@ def run_godot(
             harness.captures.append(match.group(1))
         elif "SCRIPT ERROR" in line or "Parse Error" in line:
             harness.errors.append(line.strip())
-    if code != 0:
+    # -1 stands for a timeout above, not a signal.
+    reason = crash(code, output) if code != -1 else ""
+    if reason:
+        harness.errors.append(reason)
+    elif code != 0:
         harness.errors.append(f"exit code {code}")
     if marker and marker not in output:
         harness.errors.append(f"missing completion marker: {marker!r}")

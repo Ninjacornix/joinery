@@ -8,7 +8,12 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from run_startup_test import isolated_editor, isolated_environment, scratch_folder
+from run_startup_test import (
+    crash,
+    isolated_editor,
+    isolated_environment,
+    scratch_folder,
+)
 
 from joinery.distribution import engine_binary
 
@@ -60,6 +65,7 @@ def main() -> int:
                 env = isolated_environment(temporary, ROOT, capture)
                 binary = isolated_editor(engine_binary(), temporary)
             env.update(
+                JOINERY_BACKGROUND="1",
                 JOINERY_HOME=str(ROOT),
                 JOINERY_AGENT="codex",
                 JOINERY_EMPTY_SCENE="1" if empty else "0",
@@ -104,6 +110,9 @@ def main() -> int:
                 return 1
             print(result.stdout)
             print(result.stderr)
+            if reason := crash(result.returncode, result.stdout + result.stderr):
+                print(f"Scene edits: {reason}.")
+                return 1
             if (
                 result.returncode
                 or "editor scene edits: ok" not in result.stdout

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import signal
 import stat
 import struct
 import subprocess
@@ -103,6 +104,8 @@ def isolated_environment(directory: Path, root: Path, capture: Path) -> dict[str
             directory / "MCP path with spaces" / "explicitly-selected-mcp.exe"
         ),
         JOINERY_CAPTURE_DIR=str(capture),
+        # The fork keeps windowed test editors from taking focus (ADR 0032).
+        JOINERY_BACKGROUND="1",
         PYTHONUTF8="1",
         # Reuse the harness's locked dependencies without altering any runtime
         # environment or downloading packages during the local API fixture.
@@ -141,6 +144,31 @@ def remove_when_released(path: Path, seconds: float = 30.0) -> None:
             if time.monotonic() > deadline:
                 raise
             time.sleep(0.5)
+
+
+#: What Godot's own crash handler prints before it aborts.
+CRASH_BANNER = "Program crashed with signal"
+
+
+def crash(returncode: int, output: str = "") -> str:
+    """Why an editor run counts as a crash, or "" when the process ended on its own.
+
+    Godot exits with 1 for a failed check, so only a signal (a negative code on
+    POSIX, as subprocess reports it), a Windows exception status (0xC0000000 and
+    up, such as 0xC0000005 for an access violation) or the crash handler's banner
+    counts. A crash while the editor quits comes after the checks have printed
+    their result, so every runner tests the exit as well as its marker.
+    """
+    if returncode < 0:
+        try:
+            return f"the editor crashed ({signal.Signals(-returncode).name})"
+        except ValueError:
+            return f"the editor crashed (signal {-returncode})"
+    if os.name == "nt" and returncode >= 0xC0000000:
+        return f"the editor crashed (0x{returncode:08X})"
+    if CRASH_BANNER in output:
+        return "the editor crashed (see its log)"
+    return ""
 
 
 @contextmanager
@@ -241,9 +269,11 @@ def wizard_pass(root: Path, capture: Path, theme: str) -> list[str]:
             output = result.stdout + result.stderr
             code = result.returncode
         except subprocess.TimeoutExpired:
-            output, code = "", -1
+            output, code = "Timed out.", 1
     (capture / f"wizard-{theme}.log").write_text(output)
     problems: list[str] = []
+    if reason := crash(code, output):
+        problems.append(f"{theme}: {reason} (wizard-{theme}.log)")
     if code != 0 or "visual startup: ok" not in output:
         problems.append(f"{theme}: the wizard walk failed (wizard-{theme}.log)")
     # ui_checks reports clipped text, contrast, overflow and small targets; the
@@ -331,6 +361,9 @@ def setup_flow(root: Path, capture: Path) -> int:
             output = result.stdout + result.stderr
             (capture / "startup-output.log").write_text(output)
             print(output)
+            if reason := crash(result.returncode, output):
+                print(f"Startup harness: {reason}.")
+                return 1
             if (
                 result.returncode
                 or "project setup flow: ok" not in output

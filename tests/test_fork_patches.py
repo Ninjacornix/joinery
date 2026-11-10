@@ -138,6 +138,17 @@ def test_patches_target_only_expected_areas() -> None:
         "0011-fix-windows-treat-broken-output-pipes-as-EOF.patch": {
             "drivers/windows/file_access_windows_pipe.cpp": "docs/adr/0019-windows-process-pipe-eof.md",
         },
+        "0021-test-platform-keep-test-editors-in-the-background.patch": {
+            path: "docs/adr/0032-background-test-editors.md"
+            for path in (
+                "platform/joinery_background.h",
+                "platform/macos/display_server_macos.mm",
+                "platform/macos/godot_application.mm",
+                "platform/macos/godot_window_delegate.mm",
+                "platform/macos/os_macos.mm",
+                "platform/windows/display_server_windows.cpp",
+            )
+        },
     }
     for patch in patches():
         for match in re.findall(r"^\+\+\+ b/(.+)$", patch.read_text(), re.MULTILINE):

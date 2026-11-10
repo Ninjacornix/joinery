@@ -12,6 +12,7 @@ import tempfile
 from pathlib import Path
 
 from run_startup_test import (
+    crash,
     isolated_editor,
     isolated_environment,
     remove_when_released,
@@ -103,6 +104,8 @@ def _run(selected: list[str], temporary: Path) -> int:
         )
         output = result.stdout + result.stderr
         print(output, flush=True)
+        if reason := crash(result.returncode, output):
+            print(f"{marker or ' '.join(argv[-2:])}: {reason}", flush=True)
         if result.returncode or marker not in output or "ERROR:" in output:
             failed.append(marker or " ".join(argv[-2:]))
     if failed:

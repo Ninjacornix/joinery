@@ -1,0 +1,224 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Tue, 10 Nov 2026 19:21:53 +0100
+Subject: [PATCH] test(platform): keep test editors in the background
+
+Joinery-only test support, not intended for upstream.
+
+JOINERY_BACKGROUND=1 keeps a windowed editor from taking focus, so the
+native test runners and captures never pull the user's keyboard and
+mouse away. On macOS the app is an accessory app, never activates, and
+shows windows with orderFrontRegardless instead of making them key; a
+covered window keeps drawing so captures still render. On Windows,
+windows open without activation and never take the foreground. Without
+the variable every path is stock.
+---
+ platform/joinery_background.h               | 19 +++++++++++++++++++
+ platform/macos/display_server_macos.mm      | 13 ++++++++++++-
+ platform/macos/godot_application.mm         |  5 +++++
+ platform/macos/godot_window_delegate.mm     |  5 ++++-
+ platform/macos/os_macos.mm                  |  8 +++++---
+ platform/windows/display_server_windows.cpp | 12 +++++++++---
+ 6 files changed, 54 insertions(+), 8 deletions(-)
+ create mode 100644 platform/joinery_background.h
+
+diff --git a/platform/joinery_background.h b/platform/joinery_background.h
+new file mode 100644
+index 0000000..1ed4d9a
+--- /dev/null
++++ b/platform/joinery_background.h
+@@ -0,0 +1,19 @@
++/**************************************************************************/
++/*  joinery_background.h                                                  */
++/**************************************************************************/
++
++#pragma once
++
++#include <cstdlib>
++#include <cstring>
++
++// Joinery: JOINERY_BACKGROUND=1 keeps a windowed editor from taking focus, so
++// test runs and captures never pull the user's keyboard and mouse away. Its
++// windows still show and draw; they just never activate the app.
++inline bool joinery_background() {
++	static const bool background = [] {
++		const char *value = std::getenv("JOINERY_BACKGROUND");
++		return value != nullptr && std::strcmp(value, "1") == 0;
++	}();
++	return background;
++}
+diff --git a/platform/macos/display_server_macos.mm b/platform/macos/display_server_macos.mm
+index be12fa5..6aafeeb 100644
+--- a/platform/macos/display_server_macos.mm
++++ b/platform/macos/display_server_macos.mm
+@@ -46,6 +46,8 @@
+ #import "native_menu_macos.h"
+ #import "os_macos.h"
+ 
++#include "platform/joinery_background.h"
++
+ #include "core/config/project_settings.h"
+ #include "core/input/input.h"
+ #include "core/io/file_access.h"
+@@ -1731,6 +1733,9 @@ void DisplayServerMacOS::show_window(DisplayServerEnums::WindowID p_id) {
+ 		} else {
+ 			[wd.window_object orderFront:nil];
+ 		}
++	} else if (joinery_background()) {
++		// Joinery: in front, so it draws, but never key.
++		[wd.window_object orderFrontRegardless];
+ 	} else {
+ 		[wd.window_object makeKeyAndOrderFront:nil];
+ 	}
+@@ -2536,6 +2541,8 @@ void DisplayServerMacOS::window_set_flag(DisplayServerEnums::WindowFlags p_flag,
+ 					} else {
+ 						[wd.window_object orderFront:nil];
+ 					}
++				} else if (joinery_background()) {
++					[wd.window_object orderFrontRegardless];
+ 				} else {
+ 					[wd.window_object makeKeyAndOrderFront:nil];
+ 				}
+@@ -2678,7 +2685,9 @@ void DisplayServerMacOS::window_move_to_foreground(DisplayServerEnums::WindowID
+ 	ERR_FAIL_COND(!windows.has(p_window));
+ 	const WindowData &wd = windows[p_window];
+ 
+-	[[NSApplication sharedApplication] activateIgnoringOtherApps:YES];
++	if (!joinery_background()) {
++		[[NSApplication sharedApplication] activateIgnoringOtherApps:YES];
++	}
+ 	if (wd.no_focus || wd.is_popup) {
+ 		if (wd.transient_parent != DisplayServerEnums::INVALID_WINDOW_ID) {
+ 			WindowData &wd_parent = windows[wd.transient_parent];
+@@ -2688,6 +2697,8 @@ void DisplayServerMacOS::window_move_to_foreground(DisplayServerEnums::WindowID
+ 		} else {
+ 			[wd.window_object orderFront:nil];
+ 		}
++	} else if (joinery_background()) {
++		[wd.window_object orderFrontRegardless];
+ 	} else {
+ 		[wd.window_object makeKeyAndOrderFront:nil];
+ 	}
+diff --git a/platform/macos/godot_application.mm b/platform/macos/godot_application.mm
+index 9d30313..2e4fd77 100644
+--- a/platform/macos/godot_application.mm
++++ b/platform/macos/godot_application.mm
+@@ -34,6 +34,8 @@
+ #import "godot_application_delegate.h"
+ #import "os_macos.h"
+ 
++#include "platform/joinery_background.h"
++
+ GodotApplication *GodotApp = nil;
+ 
+ @interface GodotApplication ()
+@@ -57,6 +59,9 @@ GodotApplication *GodotApp = nil;
+ }
+ 
+ - (void)activateApplication {
++	if (joinery_background()) {
++		return; // Joinery: never take focus from the user's app.
++	}
+ 	[NSApp activateIgnoringOtherApps:YES];
+ 	NSString *nsappname = [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleName"];
+ 	const char *bundled_id = getenv("__CFBundleIdentifier");
+diff --git a/platform/macos/godot_window_delegate.mm b/platform/macos/godot_window_delegate.mm
+index 73429c6..21d52c1 100644
+--- a/platform/macos/godot_window_delegate.mm
++++ b/platform/macos/godot_window_delegate.mm
+@@ -35,6 +35,7 @@
+ #import "godot_content_view.h"
+ #import "godot_window.h"
+ 
++#include "platform/joinery_background.h"
+ #include "servers/display/accessibility_server.h"
+ 
+ @implementation GodotWindowDelegate {
+@@ -389,7 +390,9 @@
+ 		return;
+ 	}
+ 	DisplayServerMacOS::WindowData &wd = ds->get_window(window_id);
+-	wd.is_visible = ([wd.window_object occlusionState] & NSWindowOcclusionStateVisible) && [wd.window_object isVisible];
++	// Joinery: a background window keeps drawing when another app covers it.
++	const bool occluded = !joinery_background() && !([wd.window_object occlusionState] & NSWindowOcclusionStateVisible);
++	wd.is_visible = !occluded && [wd.window_object isVisible];
+ }
+ 
+ @end
+diff --git a/platform/macos/os_macos.mm b/platform/macos/os_macos.mm
+index 620666c..15b00d7 100644
+--- a/platform/macos/os_macos.mm
++++ b/platform/macos/os_macos.mm
+@@ -49,6 +49,7 @@
+ #include "core/version_generated.gen.h"
+ #include "drivers/apple/os_log_logger.h"
+ #include "main/main.h"
++#include "platform/joinery_background.h"
+ 
+ #ifdef SDL_ENABLED
+ #include "drivers/sdl/joypad_sdl.h"
+@@ -369,7 +370,7 @@ void OS_MacOS::alert(const String &p_alert, const String &p_title) {
+ 
+ 	id key_window = [[NSApplication sharedApplication] keyWindow];
+ 	[window runModal];
+-	if (key_window) {
++	if (key_window && !joinery_background()) {
+ 		[key_window makeKeyAndOrderFront:nil];
+ 	}
+ }
+@@ -1201,8 +1202,9 @@ OS_MacOS_NSApp::OS_MacOS_NSApp(const char *p_execpath, int p_argc, char **p_argv
+ 	// Implicitly create shared NSApplication instance.
+ 	[GodotApplication sharedApplication];
+ 
+-	// In case we are unbundled, make us a proper UI application.
+-	[NSApp setActivationPolicy:NSApplicationActivationPolicyRegular];
++	// In case we are unbundled, make us a proper UI application. Joinery: an
++	// accessory app in the background, so it never takes focus or the Dock.
++	[NSApp setActivationPolicy:joinery_background() ? NSApplicationActivationPolicyAccessory : NSApplicationActivationPolicyRegular];
+ 
+ 	// Menu bar setup must go between sharedApplication above and
+ 	// finishLaunching below, in order to properly emulate the behavior
+diff --git a/platform/windows/display_server_windows.cpp b/platform/windows/display_server_windows.cpp
+index e821786..9375382 100644
+--- a/platform/windows/display_server_windows.cpp
++++ b/platform/windows/display_server_windows.cpp
+@@ -34,6 +34,8 @@
+ #include "key_mapping_windows.h"
+ #include "native_menu_windows.h"
+ #include "os_windows.h"
++
++#include "platform/joinery_background.h"
+ #include "tts_windows.h"
+ #include "wgl_detect_version.h"
+ #include "winrt_utils.h"
+@@ -1957,8 +1959,10 @@ void DisplayServerWindows::show_window(DisplayServerEnums::WindowID p_id) {
+ 
+ 	if (wd.maximized) {
+ 		ShowWindow(wd.hWnd, SW_SHOWMAXIMIZED);
+-		SetForegroundWindow(wd.hWnd); // Slightly higher priority.
+-		SetFocus(wd.hWnd); // Set keyboard focus.
++		if (!joinery_background()) {
++			SetForegroundWindow(wd.hWnd); // Slightly higher priority.
++			SetFocus(wd.hWnd); // Set keyboard focus.
++		}
+ 	} else if (wd.minimized) {
+ 		ShowWindow(wd.hWnd, SW_SHOWMINIMIZED);
+ 	} else if (wd.no_focus) {
+@@ -1967,6 +1971,8 @@ void DisplayServerWindows::show_window(DisplayServerEnums::WindowID p_id) {
+ 	} else if (wd.is_popup) {
+ 		ShowWindow(wd.hWnd, SW_SHOWNA);
+ 		SetFocus(wd.hWnd); // Set keyboard focus.
++	} else if (joinery_background()) {
++		ShowWindow(wd.hWnd, SW_SHOWNOACTIVATE); // Joinery: never take focus.
+ 	} else {
+ 		ShowWindow(wd.hWnd, SW_SHOW);
+ 		SetForegroundWindow(wd.hWnd); // Slightly higher priority.
+@@ -3102,7 +3108,7 @@ void DisplayServerWindows::window_move_to_foreground(DisplayServerEnums::WindowI
+ 	ERR_FAIL_COND(!windows.has(p_window));
+ 	WindowData &wd = windows[p_window];
+ 
+-	if (!wd.no_focus && !wd.is_popup) {
++	if (!wd.no_focus && !wd.is_popup && !joinery_background()) {
+ 		SetForegroundWindow(wd.hWnd);
+ 	}
+ }
