@@ -8,7 +8,7 @@ import re
 import shutil
 import tomllib
 from collections.abc import Callable
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -232,6 +232,13 @@ def test_bad_unit_is_reported_not_raised(fixture_catalogue: FixtureCatalogue) ->
     assert any("broken/feature.toml" in p for p in problems), problems
     with pytest.raises(ValueError, match="feature.toml"):
         blueprints.list_features()
+
+
+def test_problems_name_files_with_forward_slashes() -> None:
+    # On Windows the unit's path has backslashes; problems read the same everywhere.
+    path = PureWindowsPath(r"C:\catalogue\features\broken\feature.toml")
+    problem = blueprints._describe_error(path, ValueError("Invalid value"))  # type: ignore[arg-type]
+    assert problem == "C:/catalogue/features/broken/feature.toml: Invalid value"
 
 
 def _godot_text_to_id(text: str) -> int:

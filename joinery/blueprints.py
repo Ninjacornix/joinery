@@ -420,8 +420,8 @@ def _describe_error(path: Path, exc: Exception) -> str:
             f"{'.'.join(str(p) for p in error['loc']) or 'file'}: {error['msg']}"
             for error in exc.errors()
         )
-        return f"{path}: {details}"
-    return f"{path}: {exc}"
+        return f"{path.as_posix()}: {details}"
+    return f"{path.as_posix()}: {exc}"
 
 
 def load_blueprint(directory: Path) -> Blueprint:
@@ -1632,28 +1632,29 @@ def _check_files(
         rel_path = path.relative_to(directory)
         if len(rel_path.parts) == 1 and rel_path.name in extras:
             continue
+        shown = rel_path.as_posix()
         suffix = path.suffix.lower()
         if suffix in BANNED_SUFFIXES:
             errors.append(
-                f"{unit_id}: {rel_path} is an asset file; "
+                f"{unit_id}: {shown} is an asset file; "
                 "blueprints and features are code-only greybox"
             )
         elif suffix in BINARY_SUFFIXES:
             errors.append(
-                f"{unit_id}: {rel_path} is a binary or extension; blueprints and "
+                f"{unit_id}: {shown} is a binary or extension; blueprints and "
                 "features never ship third-party code"
             )
         elif "overlay" in rel_path.parts or directory.name == "overlay":
             if suffix not in SHIPPABLE_SUFFIXES:
                 errors.append(
-                    f"{unit_id}: {rel_path} is not a code or text file Godot reads; "
+                    f"{unit_id}: {shown} is not a code or text file Godot reads; "
                     "it would not be copied into a game"
                 )
             elif suffix in (".tscn", ".tres"):
                 media = _EMBEDDED_MEDIA.search(path.read_text(encoding="utf-8", errors="replace"))
                 if media is not None:
                     errors.append(
-                        f"{unit_id}: {rel_path} embeds a {media.group(1)}; "
+                        f"{unit_id}: {shown} embeds a {media.group(1)}; "
                         "blueprints and features are code-only greybox"
                     )
     for rel, source in files.items():
