@@ -309,6 +309,17 @@ func _features(dialog: Window, next: Button) -> bool:
 	_check(next.disabled, "A bad app ID blocks Next")
 	await _scroll_to(dialog, steam)
 	await _shot("setup-2-steam-error", dialog)
+	app_id.text = "4294967296"
+	app_id.text_changed.emit(app_id.text)
+	await _frames(1)
+	_check(_label_visible(dialog, "Too big for a Steam app ID."), "An app ID past 32 bits is named")
+	_check(next.disabled, "A too-big app ID blocks Next")
+	await _scroll_to(dialog, steam)
+	await _shot("setup-2-steam-too-big", dialog)
+	app_id.text = "4294967295"
+	app_id.text_changed.emit(app_id.text)
+	await _frames(1)
+	_check(not next.disabled, "The largest Steam app ID is fine")
 	app_id.text = ""
 	app_id.text_changed.emit(app_id.text)
 	await _frames(1)

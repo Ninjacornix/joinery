@@ -609,7 +609,7 @@ func _check_features(dialog: AcceptDialog) -> void:
 	var steam_switch := steam.get("switch_button") as CheckButton
 	_check(steam_switch.disabled, "Steam can't be added before online play")
 	_check(
-		(steam.get("reason") as Label).text == "Needs Online play first.",
+		(steam.get("reason") as Label).text == "Needs online play first.",
 		"A disabled switch says why"
 	)
 	var switch := online.get("switch_button") as CheckButton
@@ -632,7 +632,7 @@ func _check_features(dialog: AcceptDialog) -> void:
 	_check(plan.call() != null, "The running change keeps its plan")
 	_check(await _until(func() -> bool: return _called(["--yes"])), "Apply applies the change")
 	var status := dialog.get("_status") as Label
-	var done := func() -> bool: return status.visible and status.text == "Added Online play."
+	var done := func() -> bool: return status.visible and status.text == "Added online play."
 	_check(await _until(done), "Applying says what changed")
 	var refreshed := func() -> bool:
 		var row := section.find_child("Feature_online_play", true, false) as Control

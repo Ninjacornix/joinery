@@ -95,6 +95,10 @@ DELETION_ALLOWANCE = {
     # against 4.7.2-stable: the one upstream line it changes is ok_pressed's
     # `if (mode == MODE_NEW) {`, which gains a condition.
     "0017": 175,
+    # The classic-view switch wraps the layout changes of 0001, 0003-0006 and
+    # 0012 in one setting. Every line it removes is one of those Joinery lines,
+    # put back inside `if (EditorSettings::is_joinery_layout())`.
+    "0019": 70,
 }
 
 
@@ -208,3 +212,38 @@ def test_series_applies_to_the_pinned_tag() -> None:
                 f"{patch.name} does not apply after the patches before it: "
                 + applied.stderr.strip()
             )
+
+
+def _series_text() -> str:
+    return "\n".join(p.read_text() for p in patches())
+
+
+def test_one_setting_switches_to_the_classic_layout() -> None:
+    """Classic Godot's layout comes back through one setting, read in one place."""
+    switch = [
+        p for p in patches() if "interface/joinery/editor_layout" in p.read_text()
+    ]
+    assert len(switch) == 1, "exactly one patch adds the editor layout setting"
+    text = switch[0].read_text()
+    assert "not meant for upstream" in text
+    # Restart-if-changed, offered in the Editor menu and the command palette.
+    assert "PROPERTY_USAGE_RESTART_IF_CHANGED" in text
+    assert 'TTRC("Switch to classic Godot view")' in text
+    assert "command_palette->add_command(" in text
+    # Each layout keeps its own dock arrangement.
+    for key in ('"docks_joinery"', '"docks_classic"', '"joinery_view"'):
+        assert key in text, key
+    # Every Joinery dock move is guarded: the stock slots are restored by name.
+    for stock in ("DOCK_SLOT_LEFT_UR", "DOCK_SLOT_LEFT_BR", "DOCK_SLOT_RIGHT_UL"):
+        assert f": EditorDock::{stock}" in text or f"EditorDock::{stock});" in text, (
+            stock
+        )
+
+
+def test_wizard_checks_the_home_path_and_the_steam_app_id() -> None:
+    text = _series_text()
+    # The background load refuses an unsafe home path, as _joinery_uv does.
+    assert "!_joinery_shell_safe(home)" in text
+    # Steam app IDs are unsigned 32-bit.
+    assert "4294967295" in text
+    assert "Too big for a Steam app ID." in text

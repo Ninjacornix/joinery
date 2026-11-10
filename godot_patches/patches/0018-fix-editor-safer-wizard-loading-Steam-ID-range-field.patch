@@ -1,0 +1,90 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Joinery Build <build@joinery.invalid>
+Date: Tue, 10 Nov 2026 12:38:19 +0100
+Subject: [PATCH] fix(editor): safer wizard loading, Steam ID range, fields
+ first
+
+Joinery-only, not meant for upstream: it fixes the new-project wizard
+that an earlier Joinery patch adds.
+
+The background load of starting points, apps and questions now refuses
+a Joinery home path holding quotes, $, ` or \, as running the CLI does,
+instead of handing it to the shell.
+
+The Steam app ID field refuses values above 4294967295, the largest
+Steam app ID, inline with "Too big for a Steam app ID."
+
+Step 1 puts the name, folder and one-sentence pitch above the starting
+point cards, so the Name field is never half hidden under the bottom
+fade at the dialog's default size.
+---
+ editor/project_manager/project_dialog.cpp | 28 ++++++++++++++++++++---
+ 1 file changed, 25 insertions(+), 3 deletions(-)
+
+diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
+index 70bf057..4bb927c 100644
+--- a/editor/project_manager/project_dialog.cpp
++++ b/editor/project_manager/project_dialog.cpp
+@@ -1248,6 +1248,15 @@ void ProjectDialog::_joinery_load_thread_func(void *p_userdata) {
+ 	const String home = self->joinery_home_cache;
+ 	// 0 apps, 1 art questions, 2 starting points, 3 brief questions.
+ 	const auto load = [self, &home](int p_slot, const Vector<String> &p_args) {
++		// The same refusal as _joinery_uv: the home path reaches the shell too.
++		self->joinery_load_output[p_slot] = String();
++		for (const String &arg : p_args) {
++			if (!_joinery_shell_safe(arg) || !_joinery_shell_safe(home)) {
++				self->joinery_load_output[p_slot] = "Refused to pass a value with quotes, $, ` or \\ to the shell: " + (_joinery_shell_safe(home) ? arg : home);
++				self->joinery_load_exit[p_slot] = -1;
++				return;
++			}
++		}
+ 		List<String> args;
+ 		args.push_back("run");
+ 		args.push_back("--project");
+@@ -1256,7 +1265,6 @@ void ProjectDialog::_joinery_load_thread_func(void *p_userdata) {
+ 		for (const String &arg : p_args) {
+ 			args.push_back(arg);
+ 		}
+-		self->joinery_load_output[p_slot] = String();
+ 		int exit_code = -1;
+ 		if (OS::get_singleton()->execute("uv", args, &self->joinery_load_output[p_slot], &exit_code, true) != OK) {
+ 			exit_code = -1;
+@@ -2470,7 +2478,8 @@ bool ProjectDialog::_joinery_steam_id_valid() const {
+ 			return false;
+ 		}
+ 	}
+-	return true;
++	// Steam app IDs are unsigned 32-bit numbers.
++	return text.is_empty() || text.to_int() <= 4294967295LL;
+ }
+ 
+ void ProjectDialog::_joinery_steam_id_changed(const String &p_text) {
+@@ -2483,7 +2492,17 @@ void ProjectDialog::_joinery_steam_id_changed(const String &p_text) {
+ 	for (int i = 0; i < text.length(); i++) {
+ 		digits = digits && is_digit(text[i]);
+ 	}
+-	joinery_steam_error->set_text(valid ? String() : (digits ? TTR("A Steam app ID has at most 10 digits.") : TTR("Use digits only, like 480.")));
++	String why;
++	if (!valid) {
++		if (!digits) {
++			why = TTR("Use digits only, like 480.");
++		} else if (text.length() > 10) {
++			why = TTR("A Steam app ID has at most 10 digits.");
++		} else {
++			why = TTR("Too big for a Steam app ID.");
++		}
++	}
++	joinery_steam_error->set_text(why);
+ 	joinery_steam_error->set_visible(!valid);
+ 	_update_ok_button();
+ }
+@@ -4239,6 +4258,9 @@ ProjectDialog::ProjectDialog() {
+ 		pitch_caption->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
+ 		joinery_pitch_box->add_child(pitch_caption);
+ 	}
++	// The fields come before the starting points, so the name and folder are
++	// in view at the dialog's default size and the cards scroll beneath them.
++	vb->move_child(joinery_start_box, joinery_pitch_box->get_index() + 1);
+ 
+ 	// Renderer selection.
+ 	renderer_container = memnew(VBoxContainer);

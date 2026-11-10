@@ -8,16 +8,18 @@ with the same CLI that `joinery new` uses.
 
 ## The steps
 
-1. **What are you making?** A grid of cards, one per starting point (ADR 0024).
-   Each card shows the starting point's capture (a recorded frame of it
-   running, loaded with `Image.load_from_file`), its name and its one-line
-   pitch. Without a capture yet, the card draws a greybox preview in code from
-   the blueprint's `dimension`, its camera line and its editor `icon`. One card
-   is always chosen, and the cards take keyboard focus and arrow keys. Below
-   the grid: Name, the folder ("Saved in … Change…") and the optional "Your
-   game in one sentence" with the caption "Journeyman reads this before every
-   request." The renderer sits under Advanced and defaults from the starting
-   point: Forward+ for 3D, Compatibility for 2D and UI games.
+1. **What are you making?** Name, the folder ("Saved in … Change…") and the
+   optional "Your game in one sentence" with the caption "Journeyman reads
+   this before every request" come first, so the Name field is never hidden
+   under the bottom fade at the dialog's default size. Below them, a grid of
+   cards, one per starting point (ADR 0024). Each card shows the starting
+   point's capture (a recorded frame of it running, loaded with
+   `Image.load_from_file`), its name and its one-line pitch. Without a capture
+   yet, the card draws a greybox preview in code from the blueprint's
+   `dimension`, its camera line and its editor `icon`. One card is always
+   chosen, and the cards take keyboard focus and arrow keys. The renderer sits
+   under Advanced and defaults from the starting point: Forward+ for 3D,
+   Compatibility for 2D and UI games.
 2. **Features and apps.** One switch per feature from the chosen blueprint's
    `features` array, on by `default`. A feature with `available = false` is
    disabled and shows its `reason`. Switching one on turns on what it
@@ -26,8 +28,10 @@ with the same CLI that `joinery new` uses.
    line. Each row has an "Adds: …" caption from `adds` (file count, autoloads,
    settings).
    With Steam on, the row asks for the Steam app ID inline (digits only, at
-   most 10. An empty field is fine and the ID can be added later. Anything
-   else shows an error under the field and keeps Next disabled). It also says
+   most 10 and at most 4294967295, the largest Steam app ID; a bigger number
+   shows "Too big for a Steam app ID."). An empty field is fine and the ID can
+   be added later. Anything else shows an error under the field and keeps
+   Next disabled. It also says
    that Joinery downloads GodotSteam, pinned and hash-checked, when the project
    is created. When Online play is on too, it asks "Connect players through:"
    Steam or Direct (IP), with Steam as the default.
@@ -102,7 +106,9 @@ project, so the user reads it before the editor opens.
 Arguments reach the CLI through `OS::execute`, which runs a shell on Unix with
 each argument in double quotes. A folder path containing `"`, `$`, a backtick
 or `\` is refused on step 1 with a plain message, and the runner refuses such
-a value again before it reaches the shell.
+a value again before it reaches the shell. The background load of starting
+points, apps and questions refuses a Joinery home path holding those
+characters the same way (patch `0018`).
 
 ## Stock Godot
 
@@ -125,5 +131,6 @@ setup (`joinery/setup_pending`). A finished project opens in stock Godot with
 - `tests/godot/run_startup_test.py` walks the wizard in dark and light with
   `visual_startup_test.gd`. It captures the cards, features with Steam and
   Online play on (app ID field and connect choice), the app ID error,
-  References, and the creating page. It fails on any `ui_checks` finding or
+  References, the "Too big for a Steam app ID." message, and the creating
+  page. It fails on any `ui_checks` finding or
   on more than one primary fill in a capture.

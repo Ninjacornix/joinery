@@ -30,6 +30,7 @@ WIZARD_PAGES = (
     "setup-1-details",
     "setup-2-tools",
     "setup-2-steam-error",
+    "setup-2-steam-too-big",
     "setup-3-art",
     "setup-creating",
 )
