@@ -1,0 +1,708 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Joinery Build <build@joinery.invalid>
+Date: Tue, 10 Nov 2026 12:55:57 +0100
+Subject: [PATCH] feat(editor): switch between Joinery's layout and classic
+ Godot
+
+Joinery-only, not meant for upstream: it guards the layout changes that
+earlier Joinery patches make.
+
+One editor setting, interface/joinery/editor_layout (Joinery or Classic
+Godot), read once at startup, decides the layout. Classic turns every
+layout change off: Scene, FileSystem, Import, History, Inspector,
+Signals and Groups default to their stock slots, the 2D/3D/Script
+buttons return to the title bar, the run bar shows all its buttons, the
+bottom panel keeps its overflow arrows, dock menu and status strip, and
+there is no navigation column for the tool rail. The theme presets are
+not part of the layout and stay as chosen.
+
+Each layout keeps its own dock arrangement in editor_layout.cfg
+(docks_joinery, docks_classic, and joinery_view naming the last one), so
+switching opens the other layout as it was left, or at its default the
+first time. A layout saved by stock Godot still migrates once into
+Joinery's.
+
+Editor > "Switch to classic Godot view" (or "Switch to Joinery view"),
+also in the command palette, asks first and offers Restart or "On next
+start"; the setting is marked restart-if-changed for Editor Settings.
+---
+ editor/docks/dock_tab_container.cpp |   6 +-
+ editor/docks/filesystem_dock.cpp    |   6 +-
+ editor/docks/groups_dock.cpp        |   9 +-
+ editor/docks/history_dock.cpp       |   9 +-
+ editor/docks/import_dock.cpp        |   8 +-
+ editor/docks/inspector_dock.cpp     |   8 +-
+ editor/docks/scene_tree_dock.cpp    |   8 +-
+ editor/docks/signals_dock.cpp       |   9 +-
+ editor/editor_main_screen.cpp       |  18 ++--
+ editor/editor_node.cpp              | 132 +++++++++++++++++++++++-----
+ editor/editor_node.h                |   4 +
+ editor/gui/editor_bottom_panel.cpp  |  20 +++--
+ editor/run/editor_run_bar.cpp       |  31 ++++---
+ editor/settings/editor_settings.cpp |  16 ++++
+ editor/settings/editor_settings.h   |   4 +
+ 15 files changed, 224 insertions(+), 64 deletions(-)
+
+diff --git a/editor/docks/dock_tab_container.cpp b/editor/docks/dock_tab_container.cpp
+index 31dad08..47c5a1f 100644
+--- a/editor/docks/dock_tab_container.cpp
++++ b/editor/docks/dock_tab_container.cpp
+@@ -150,7 +150,7 @@ EditorDockDragHint::EditorDockDragHint() {
+ }
+ 
+ void DockTabContainer::_pre_popup() {
+-	if (dock_slot >= EditorDock::DOCK_SLOT_RIGHT_UL && dock_slot <= EditorDock::DOCK_SLOT_RIGHT_BR) {
++	if (EditorSettings::is_joinery_layout() && dock_slot >= EditorDock::DOCK_SLOT_RIGHT_UL && dock_slot <= EditorDock::DOCK_SLOT_RIGHT_BR) {
+ 		return; // Joinery's assistant column has no docking menu.
+ 	}
+ 	if (get_popup() != dock_context_popup || !get_dock(get_current_tab())) {
+@@ -160,7 +160,7 @@ void DockTabContainer::_pre_popup() {
+ }
+ 
+ void DockTabContainer::_tab_rmb_clicked(int p_tab_idx) {
+-	if (dock_slot >= EditorDock::DOCK_SLOT_RIGHT_UL && dock_slot <= EditorDock::DOCK_SLOT_RIGHT_BR) {
++	if (EditorSettings::is_joinery_layout() && dock_slot >= EditorDock::DOCK_SLOT_RIGHT_UL && dock_slot <= EditorDock::DOCK_SLOT_RIGHT_BR) {
+ 		return;
+ 	}
+ 	EditorDock *hovered_dock = get_dock(p_tab_idx);
+@@ -231,7 +231,7 @@ void DockTabContainer::load_selected_tab(int p_idx) {
+ void DockTabContainer::set_dock_context_popup(DockContextPopup *p_popup) {
+ 	dock_context_popup = p_popup;
+ 	set_popup(dock_context_popup);
+-	if (dock_slot >= EditorDock::DOCK_SLOT_RIGHT_UL && dock_slot <= EditorDock::DOCK_SLOT_RIGHT_BR) {
++	if (EditorSettings::is_joinery_layout() && dock_slot >= EditorDock::DOCK_SLOT_RIGHT_UL && dock_slot <= EditorDock::DOCK_SLOT_RIGHT_BR) {
+ 		set_popup(nullptr);
+ 	}
+ }
+diff --git a/editor/docks/filesystem_dock.cpp b/editor/docks/filesystem_dock.cpp
+index 1900b54..f58c419 100644
+--- a/editor/docks/filesystem_dock.cpp
++++ b/editor/docks/filesystem_dock.cpp
+@@ -4431,12 +4431,14 @@ FileSystemDock::FileSystemDock() {
+ 	// Joinery: the tab reads "Files". The layout key stays "FileSystem", so
+ 	// saved layouts and the layout migration keep finding this dock.
+ 	set_layout_key("FileSystem");
+-	set_title(TTRC("Files"));
++	if (EditorSettings::is_joinery_layout()) {
++		set_title(TTRC("Files"));
++	}
+ 	set_icon_name("Folder");
+ 	set_dock_shortcut(ED_SHORTCUT_AND_COMMAND("docks/open_filesystem", TTRC("Open FileSystem Dock"), KeyModifierMask::ALT | Key::F));
+ 	// Joinery: assets go to the bottom alongside the hierarchy, for the
+ 	// same reason (ADR 0005).
+-	set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
++	set_default_slot(EditorSettings::is_joinery_layout() ? EditorDock::DOCK_SLOT_BOTTOM : EditorDock::DOCK_SLOT_LEFT_BR);
+ 	set_available_layouts(DOCK_LAYOUT_ALL);
+ 
+ 	ProjectSettings::get_singleton()->add_hidden_prefix("file_customization/");
+diff --git a/editor/docks/groups_dock.cpp b/editor/docks/groups_dock.cpp
+index a43b6d6..ed963c8 100644
+--- a/editor/docks/groups_dock.cpp
++++ b/editor/docks/groups_dock.cpp
+@@ -31,6 +31,7 @@
+ #include "groups_dock.h"
+ 
+ #include "editor/settings/editor_command_palette.h"
++#include "editor/settings/editor_settings.h"
+ 
+ void GroupsDock::set_selection(const Vector<Node *> &p_nodes) {
+ 	groups->set_selection(p_nodes);
+@@ -41,8 +42,12 @@ GroupsDock::GroupsDock() {
+ 	set_name(TTRC("Groups"));
+ 	set_icon_name("Groups");
+ 	set_dock_shortcut(ED_SHORTCUT_AND_COMMAND("docks/open_groups", TTRC("Open Groups Dock")));
+-	set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
+-	set_available_layouts(DOCK_LAYOUT_ALL);
++	if (EditorSettings::is_joinery_layout()) {
++		set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
++		set_available_layouts(DOCK_LAYOUT_ALL);
++	} else {
++		set_default_slot(EditorDock::DOCK_SLOT_RIGHT_UL);
++	}
+ 
+ 	groups = memnew(GroupsEditor);
+ 	groups->set_v_size_flags(SIZE_EXPAND_FILL);
+diff --git a/editor/docks/history_dock.cpp b/editor/docks/history_dock.cpp
+index 22e162d..51f7aa8 100644
+--- a/editor/docks/history_dock.cpp
++++ b/editor/docks/history_dock.cpp
+@@ -33,6 +33,7 @@
+ #include "core/io/config_file.h"
+ #include "core/object/callable_mp.h"
+ #include "editor/editor_node.h"
++#include "editor/settings/editor_settings.h"
+ #include "editor/editor_string_names.h"
+ #include "editor/editor_undo_redo_manager.h"
+ #include "editor/settings/editor_command_palette.h"
+@@ -239,8 +240,12 @@ HistoryDock::HistoryDock() {
+ 	set_name(TTRC("History"));
+ 	set_icon_name("History");
+ 	set_dock_shortcut(ED_SHORTCUT_AND_COMMAND("docks/open_history", TTRC("Open History Dock")));
+-	set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
+-	set_available_layouts(DOCK_LAYOUT_ALL);
++	if (EditorSettings::is_joinery_layout()) {
++		set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
++		set_available_layouts(DOCK_LAYOUT_ALL);
++	} else {
++		set_default_slot(EditorDock::DOCK_SLOT_LEFT_BR);
++	}
+ 
+ 	ur_manager = EditorUndoRedoManager::get_singleton();
+ 	ur_manager->connect("history_changed", callable_mp(this, &HistoryDock::on_history_changed));
+diff --git a/editor/docks/import_dock.cpp b/editor/docks/import_dock.cpp
+index 3f235d7..4579b44 100644
+--- a/editor/docks/import_dock.cpp
++++ b/editor/docks/import_dock.cpp
+@@ -752,8 +752,12 @@ ImportDock::ImportDock() {
+ 	set_name(TTRC("Import"));
+ 	set_icon_name("FileAccess");
+ 	set_dock_shortcut(ED_SHORTCUT_AND_COMMAND("docks/open_import", TTRC("Open Import Dock")));
+-	set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
+-	set_available_layouts(DOCK_LAYOUT_ALL);
++	if (EditorSettings::is_joinery_layout()) {
++		set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
++		set_available_layouts(DOCK_LAYOUT_ALL);
++	} else {
++		set_default_slot(EditorDock::DOCK_SLOT_LEFT_UR);
++	}
+ 
+ 	VBoxContainer *main_vb = memnew(VBoxContainer);
+ 	add_child(main_vb);
+diff --git a/editor/docks/inspector_dock.cpp b/editor/docks/inspector_dock.cpp
+index 6afb844..7085d8f 100644
+--- a/editor/docks/inspector_dock.cpp
++++ b/editor/docks/inspector_dock.cpp
+@@ -708,8 +708,12 @@ InspectorDock::InspectorDock(EditorData &p_editor_data) {
+ 	set_name(TTRC("Inspector"));
+ 	set_icon_name("AnimationTrackList");
+ 	set_dock_shortcut(ED_SHORTCUT_AND_COMMAND("docks/open_inspector", TTRC("Open Inspector Dock")));
+-	set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
+-	set_available_layouts(DOCK_LAYOUT_ALL);
++	if (EditorSettings::is_joinery_layout()) {
++		set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
++		set_available_layouts(DOCK_LAYOUT_ALL);
++	} else {
++		set_default_slot(EditorDock::DOCK_SLOT_RIGHT_UL);
++	}
+ 
+ 	VBoxContainer *main_vb = memnew(VBoxContainer);
+ 	add_child(main_vb);
+diff --git a/editor/docks/scene_tree_dock.cpp b/editor/docks/scene_tree_dock.cpp
+index e941945..2a1a7ea 100644
+--- a/editor/docks/scene_tree_dock.cpp
++++ b/editor/docks/scene_tree_dock.cpp
+@@ -5001,8 +5001,12 @@ SceneTreeDock::SceneTreeDock(Node *p_scene_root, EditorSelection *p_editor_selec
+ 	// leaving the full width of the window to the viewport and the
+ 	// Journeyman sidebar (ADR 0005). The bottom slot lays its docks out
+ 	// horizontally, which upstream does not permit by default.
+-	set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
+-	set_available_layouts(DOCK_LAYOUT_ALL);
++	if (EditorSettings::is_joinery_layout()) {
++		set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
++		set_available_layouts(DOCK_LAYOUT_ALL);
++	} else {
++		set_default_slot(EditorDock::DOCK_SLOT_LEFT_UR);
++	}
+ 
+ 	singleton = this;
+ 	editor_data = &p_editor_data;
+diff --git a/editor/docks/signals_dock.cpp b/editor/docks/signals_dock.cpp
+index b88e340..ffffd51 100644
+--- a/editor/docks/signals_dock.cpp
++++ b/editor/docks/signals_dock.cpp
+@@ -31,6 +31,7 @@
+ #include "signals_dock.h"
+ 
+ #include "editor/scene/connections_dialog.h"
++#include "editor/settings/editor_settings.h"
+ #include "editor/settings/editor_command_palette.h"
+ 
+ void SignalsDock::update_lists() {
+@@ -46,8 +47,12 @@ SignalsDock::SignalsDock() {
+ 	set_name(TTRC("Signals"));
+ 	set_icon_name("Signals");
+ 	set_dock_shortcut(ED_SHORTCUT_AND_COMMAND("docks/open_signals", TTRC("Open Signals Dock")));
+-	set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
+-	set_available_layouts(DOCK_LAYOUT_ALL);
++	if (EditorSettings::is_joinery_layout()) {
++		set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
++		set_available_layouts(DOCK_LAYOUT_ALL);
++	} else {
++		set_default_slot(EditorDock::DOCK_SLOT_RIGHT_UL);
++	}
+ 
+ 	connections = memnew(ConnectionsDock);
+ 	connections->set_v_size_flags(SIZE_EXPAND_FILL);
+diff --git a/editor/editor_main_screen.cpp b/editor/editor_main_screen.cpp
+index fdc8bb0..1e19800 100644
+--- a/editor/editor_main_screen.cpp
++++ b/editor/editor_main_screen.cpp
+@@ -67,7 +67,7 @@ void EditorMainScreen::_notification(int p_what) {
+ 				Button *tb = buttons[i];
+ 				EditorPlugin *p_editor = editor_table[i];
+ 				Ref<Texture2D> icon = p_editor->get_plugin_icon();
+-				if (p_editor->get_plugin_name() == "3D") {
++				if (EditorSettings::is_joinery_layout() && p_editor->get_plugin_name() == "3D") {
+ 					icon = get_editor_theme_icon("Godot");
+ 				}
+ 
+@@ -267,11 +267,15 @@ void EditorMainScreen::add_main_plugin(EditorPlugin *p_editor) {
+ 	tb->set_toggle_mode(true);
+ 	tb->set_theme_type_variation("MainScreenButton");
+ 	tb->set_name(p_editor->get_plugin_name());
+-	tb->set_tooltip_text(p_editor->get_plugin_name());
+-	tb->set_accessibility_name(p_editor->get_plugin_name());
+-	tb->set_custom_minimum_size(Size2(44, 44) * EDSCALE);
+-	// Joinery: workspace buttons live in a vertical navigation column.
+-	tb->set_text_alignment(HORIZONTAL_ALIGNMENT_LEFT);
++	if (EditorSettings::is_joinery_layout()) {
++		tb->set_tooltip_text(p_editor->get_plugin_name());
++		tb->set_accessibility_name(p_editor->get_plugin_name());
++		tb->set_custom_minimum_size(Size2(44, 44) * EDSCALE);
++		// Joinery: workspace buttons live in a vertical navigation column.
++		tb->set_text_alignment(HORIZONTAL_ALIGNMENT_LEFT);
++	} else {
++		tb->set_text(p_editor->get_plugin_name());
++	}
+ 
+ 	Ref<Shortcut> shortcut = EditorSettings::get_singleton()->get_shortcut("editor/editor_" + p_editor->get_plugin_name().to_lower());
+ 	if (shortcut.is_valid()) {
+@@ -279,7 +283,7 @@ void EditorMainScreen::add_main_plugin(EditorPlugin *p_editor) {
+ 	}
+ 
+ 	Ref<Texture2D> icon = p_editor->get_plugin_icon();
+-	if (p_editor->get_plugin_name() == "3D") {
++	if (EditorSettings::is_joinery_layout() && p_editor->get_plugin_name() == "3D") {
+ 		icon = get_editor_theme_icon("Godot");
+ 	}
+ 	if (icon.is_null() && has_theme_icon(p_editor->get_plugin_name(), EditorStringName(EditorIcons))) {
+diff --git a/editor/editor_node.cpp b/editor/editor_node.cpp
+index c026039..d018919 100644
+--- a/editor/editor_node.cpp
++++ b/editor/editor_node.cpp
+@@ -1007,8 +1007,10 @@ void EditorNode::_notification(int p_what) {
+ 			// Docks; the debugger still opens itself on Run.
+ 			PackedStringArray bottom_docks;
+ 			bottom_docks.reserve_exact(bottom_panel->get_tab_count());
++			// In Godot's classic layout every bottom dock keeps its stock order and starts open.
++			const bool joinery_layout = EditorSettings::is_joinery_layout();
+ 			for (const char *key : JOINERY_OPEN_BOTTOM_DOCKS) {
+-				for (int i = 0; i < bottom_panel->get_tab_count(); i++) {
++				for (int i = 0; joinery_layout && i < bottom_panel->get_tab_count(); i++) {
+ 					EditorDock *dock = Object::cast_to<EditorDock>(bottom_panel->get_tab_control(i));
+ 					if (dock && dock->get_effective_layout_key() == key) {
+ 						bottom_docks.append(key);
+@@ -1027,7 +1029,7 @@ void EditorNode::_notification(int p_what) {
+ 					continue;
+ 				}
+ 				bottom_docks.append(key);
+-				if (!dock->is_transient()) {
++				if (joinery_layout && !dock->is_transient()) {
+ 					closed_docks.push_back(key);
+ 				}
+ 			}
+@@ -2631,6 +2633,15 @@ void EditorNode::try_autosave() {
+ 	editor_data.save_editor_external_data();
+ }
+ 
++void EditorNode::_joinery_switch_layout(bool p_restart) {
++	EditorSettings::get_singleton()->set_setting("interface/joinery/editor_layout", EditorSettings::is_joinery_layout() ? 1 : 0);
++	EditorSettings::get_singleton()->save();
++	joinery_layout_dialog->hide();
++	if (p_restart) {
++		restart_editor();
++	}
++}
++
+ void EditorNode::restart_editor(bool p_goto_project_manager) {
+ 	_menu_option_confirm(p_goto_project_manager ? PROJECT_QUIT_TO_PROJECT_MANAGER : PROJECT_RELOAD_CURRENT_PROJECT, false);
+ }
+@@ -3949,6 +3960,9 @@ void EditorNode::_menu_option_confirm(int p_option, bool p_confirmed) {
+ 		case EDITOR_COMMAND_PALETTE: {
+ 			command_palette->open_popup();
+ 		} break;
++		case EDITOR_SWITCH_LAYOUT: {
++			joinery_layout_dialog->popup_centered();
++		} break;
+ 		case HELP_DOCS: {
+ 			OS::get_singleton()->shell_open(GODOT_VERSION_DOCS_URL "/");
+ 		} break;
+@@ -6313,6 +6327,8 @@ void EditorNode::_save_editor_layout() {
+ 	config->load(EditorPaths::get_singleton()->get_project_settings_dir().path_join("editor_layout.cfg"));
+ 
+ 	editor_dock_manager->save_docks_to_config(config, "docks");
++	// Joinery: a copy for this layout alone, which switching back restores.
++	editor_dock_manager->save_docks_to_config(config, EditorSettings::is_joinery_layout() ? "docks_joinery" : "docks_classic");
+ 	_save_open_scenes_to_config(config);
+ 	_save_central_editor_layout_to_config(config);
+ 	_save_window_settings_to_config(config, "EditorWindow");
+@@ -6372,10 +6388,28 @@ void EditorNode::_load_editor_layout() {
+ 		}
+ 	} else {
+ 		ep.step(TTR("Loading docks..."), 1, true);
++		// Joinery: each layout keeps its own dock arrangement. When the saved
++		// one belongs to the other layout, use this layout's last arrangement,
++		// or its default the first time.
++		const bool joinery_layout = EditorSettings::is_joinery_layout();
++		const String view = joinery_layout ? "joinery" : "classic";
++		String saved_view = config->get_value(EDITOR_NODE_CONFIG_SECTION, "joinery_view", "");
++		if (saved_view.is_empty() && config->has_section_key(EDITOR_NODE_CONFIG_SECTION, "joinery_shell_layout")) {
++			saved_view = "joinery";
++		}
++		const bool switched = !saved_view.is_empty() && saved_view != view;
++		const String docks_section = switched ? "docks_" + view : "docks";
++		if (switched && !config->has_section(docks_section)) {
++			editor_dock_manager->load_docks_from_config(default_layout, "docks", true);
++		} else if (switched) {
++			editor_dock_manager->load_docks_from_config(config, docks_section, true);
++		}
+ 		// Joinery: migrate existing projects once, retaining unrelated docks,
+ 		// closed panels, scene tabs and floating-window choices. Later manual
+ 		// layout changes remain the user's own.
+-		if (int(config->get_value(EDITOR_NODE_CONFIG_SECTION, "joinery_shell_layout", 0)) < 1) {
++		if (switched || !joinery_layout) {
++			// Loaded above, or Godot's classic layout, which needs no migration.
++		} else if (int(config->get_value(EDITOR_NODE_CONFIG_SECTION, "joinery_shell_layout", 0)) < 1) {
+ 			PackedStringArray utilities = { "Scene", "FileSystem", "Import", "History", "Inspector", "Signals", "Groups" };
+ 			PackedStringArray bottom;
+ 			for (int slot = 1; slot <= EditorDock::DOCK_SLOT_MAX; slot++) {
+@@ -6398,7 +6432,7 @@ void EditorNode::_load_editor_layout() {
+ 		// Joinery: layout 2 opens only Scene, Files, Inspector and Output, in
+ 		// that order, and closes the other utility docks once. A dock the user
+ 		// moved elsewhere stays where they put it.
+-		if (int(config->get_value(EDITOR_NODE_CONFIG_SECTION, "joinery_shell_layout", 0)) < 2) {
++		if (!switched && joinery_layout && int(config->get_value(EDITOR_NODE_CONFIG_SECTION, "joinery_shell_layout", 0)) < 2) {
+ 			PackedStringArray bottom = String(config->get_value("docks", "dock_9", "")).split(",", false);
+ 			PackedStringArray ordered;
+ 			for (const char *key : JOINERY_OPEN_BOTTOM_DOCKS) {
+@@ -6419,7 +6453,9 @@ void EditorNode::_load_editor_layout() {
+ 			}
+ 			config->set_value("docks", "dock_closed", closed);
+ 		}
+-		editor_dock_manager->load_docks_from_config(config, "docks", true);
++		if (!switched) {
++			editor_dock_manager->load_docks_from_config(config, "docks", true);
++		}
+ 
+ 		ep.step(TTR("Reopening scenes..."), 2, true);
+ 		_load_open_scenes_from_config(config);
+@@ -6436,7 +6472,10 @@ void EditorNode::_load_editor_layout() {
+ }
+ 
+ void EditorNode::_save_central_editor_layout_to_config(Ref<ConfigFile> p_config_file) {
+-	p_config_file->set_value(EDITOR_NODE_CONFIG_SECTION, "joinery_shell_layout", 2);
++	if (EditorSettings::is_joinery_layout()) {
++		p_config_file->set_value(EDITOR_NODE_CONFIG_SECTION, "joinery_shell_layout", 2);
++	}
++	p_config_file->set_value(EDITOR_NODE_CONFIG_SECTION, "joinery_view", EditorSettings::is_joinery_layout() ? "joinery" : "classic");
+ 	// Bottom panel.
+ 
+ 	bottom_panel->save_layout_to_config(p_config_file, EDITOR_NODE_CONFIG_SECTION);
+@@ -8199,6 +8238,7 @@ void EditorNode::_build_settings_menu() {
+ 		editor_layouts->connect(SceneStringName(id_pressed), callable_mp(this, &EditorNode::_layout_menu_option));
+ 	}
+ 	settings_menu->add_submenu_node_item(TTRC("Editor Layout"), editor_layouts);
++	settings_menu->add_item(EditorSettings::is_joinery_layout() ? TTRC("Switch to classic Godot view") : TTRC("Switch to Joinery view"), EDITOR_SWITCH_LAYOUT);
+ 	settings_menu->add_separator();
+ 
+ 	settings_menu->add_shortcut(ED_GET_SHORTCUT("editor/take_screenshot"), EDITOR_TAKE_SCREENSHOT);
+@@ -9160,18 +9200,29 @@ EditorNode::EditorNode() {
+ 
+ 	// Joinery: workspace navigation uses the cleared left column. Keep the
+ 	// actual buttons and their shortcuts so plugins register here unchanged.
+-	VBoxContainer *navigation = memnew(VBoxContainer);
+-	navigation->set_name("JoineryNavigation");
+-	navigation->set_custom_minimum_size(Size2(48, 0) * EDSCALE);
+-	workspace_shell->add_child(navigation);
+-	workspace_shell->move_child(navigation, 0);
+-	VBoxContainer *main_editor_button_hb = memnew(VBoxContainer);
+-	main_editor_button_hb->set_mouse_filter(Control::MOUSE_FILTER_STOP);
+-	main_editor_button_hb->set_name("EditorMainScreenButtons");
+-	// Native editors remain routable through Godot; the visible rail contains apps only.
+-	main_editor_button_hb->hide();
+-	editor_main_screen->set_button_container(main_editor_button_hb);
+-	navigation->add_child(main_editor_button_hb);
++	// In Godot's classic layout the buttons stay centered in the title bar.
++	const bool joinery_layout = EditorSettings::is_joinery_layout();
++	if (joinery_layout) {
++		VBoxContainer *navigation = memnew(VBoxContainer);
++		navigation->set_name("JoineryNavigation");
++		navigation->set_custom_minimum_size(Size2(48, 0) * EDSCALE);
++		workspace_shell->add_child(navigation);
++		workspace_shell->move_child(navigation, 0);
++		VBoxContainer *main_editor_button_hb = memnew(VBoxContainer);
++		main_editor_button_hb->set_mouse_filter(Control::MOUSE_FILTER_STOP);
++		main_editor_button_hb->set_name("EditorMainScreenButtons");
++		// Native editors remain routable through Godot; the visible rail contains apps only.
++		main_editor_button_hb->hide();
++		editor_main_screen->set_button_container(main_editor_button_hb);
++		navigation->add_child(main_editor_button_hb);
++	} else {
++		HBoxContainer *main_editor_button_hb = memnew(HBoxContainer);
++		main_editor_button_hb->set_mouse_filter(Control::MOUSE_FILTER_STOP);
++		main_editor_button_hb->set_name("EditorMainScreenButtons");
++		editor_main_screen->set_button_container(main_editor_button_hb);
++		title_bar->add_child(main_editor_button_hb);
++		title_bar->set_center_control(main_editor_button_hb);
++	}
+ 
+ 	// Spacer to center 2D / 3D / Script buttons.
+ 	right_spacer = memnew(Control);
+@@ -9183,8 +9234,10 @@ EditorNode::EditorNode() {
+ 	project_run_bar->set_mouse_filter(Control::MOUSE_FILTER_STOP);
+ 	title_bar->add_child(project_run_bar);
+ 	// Run controls take the former centered workspace-selector position.
+-	title_bar->move_child(project_run_bar, right_spacer->get_index());
+-	title_bar->set_center_control(project_run_bar);
++	if (joinery_layout) {
++		title_bar->move_child(project_run_bar, right_spacer->get_index());
++		title_bar->set_center_control(project_run_bar);
++	}
+ 	project_run_bar->connect("play_pressed", callable_mp(this, &EditorNode::_project_run_started));
+ 	project_run_bar->connect("stop_pressed", callable_mp(this, &EditorNode::_project_run_stopped));
+ 
+@@ -9334,9 +9387,21 @@ EditorNode::EditorNode() {
+ 	}
+ 	// Joinery: native utility panels now default to the bottom. The READY
+ 	// notification records their full bottom order after every dock exists.
+-	default_layout->set_value(docks_section, "dock_3", String());
+-	default_layout->set_value(docks_section, "dock_4", String());
+-	default_layout->set_value(docks_section, "dock_5", String());
++	if (joinery_layout) {
++		default_layout->set_value(docks_section, "dock_3", String());
++		default_layout->set_value(docks_section, "dock_4", String());
++		default_layout->set_value(docks_section, "dock_5", String());
++	} else {
++		// Godot's classic layout: its stock default, Scene and Import top left,
++		// FileSystem and History below them, Inspector, Signals and Groups on
++		// the right.
++		const String scene_key = SceneTreeDock::get_singleton()->get_effective_layout_key();
++		const String filesystem_key = filesystem_dock->get_effective_layout_key();
++		default_layout->set_value(docks_section, "dock_3", vformat("%s,%s", scene_key, ImportDock::get_singleton()->get_effective_layout_key()));
++		default_layout->set_value(docks_section, "dock_4", vformat("%s,%s", filesystem_key, history_dock->get_effective_layout_key()));
++		default_layout->set_value(docks_section, "dock_5", vformat("%s,%s,%s", InspectorDock::get_singleton()->get_effective_layout_key(), SignalsDock::get_singleton()->get_effective_layout_key(), GroupsDock::get_singleton()->get_effective_layout_key()));
++		default_layout->set_value(docks_section, "dock_9", String());
++	}
+ 
+ 	int hsplits[] = { 0, dock_hsize, -dock_hsize, 0 };
+ 	for (int i = 0; i < (int)std_size(hsplits); i++) {
+@@ -9699,6 +9764,27 @@ EditorNode::EditorNode() {
+ 	open_project_settings->set_ok_button_text(TTRC("Open Project Settings"));
+ 	open_project_settings->connect(SceneStringName(confirmed), callable_mp(this, &EditorNode::_menu_option).bind(PROJECT_OPEN_SETTINGS));
+ 
++	// Joinery: Editor > Switch to classic Godot view (or back), also in the
++	// command palette. The layout is built at startup, so the switch restarts
++	// the editor, or applies on the next start.
++	{
++		const bool joinery_layout = EditorSettings::is_joinery_layout();
++		const String switch_title = joinery_layout ? TTR("Switch to classic Godot view") : TTR("Switch to Joinery view");
++		joinery_layout_dialog = memnew(ConfirmationDialog);
++		joinery_layout_dialog->set_title(switch_title);
++		joinery_layout_dialog->set_text(joinery_layout
++						? TTR("Godot's own docks, menus and toolbars, with Journeyman as a dock you can close. The editor restarts to switch, and asks about unsaved scenes first.")
++						: TTR("Joinery's layout, with the tool rail and the Journeyman sidebar. The editor restarts to switch, and asks about unsaved scenes first."));
++		joinery_layout_dialog->get_label()->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
++		joinery_layout_dialog->set_min_size(Size2(420, 0) * EDSCALE);
++		joinery_layout_dialog->set_ok_button_text(TTR("Restart"));
++		joinery_layout_dialog->add_button(TTR("On next start"), false, "later");
++		gui_base->add_child(joinery_layout_dialog);
++		joinery_layout_dialog->connect(SceneStringName(confirmed), callable_mp(this, &EditorNode::_joinery_switch_layout).bind(true));
++		joinery_layout_dialog->connect("custom_action", callable_mp(this, &EditorNode::_joinery_switch_layout).bind(false).unbind(1));
++		command_palette->add_command(switch_title, "editor/joinery_switch_layout", callable_mp(this, &EditorNode::_menu_option).bind(EDITOR_SWITCH_LAYOUT));
++	}
++
+ 	for (int i = 0; i < _init_callbacks.size(); i++) {
+ 		_init_callbacks[i]();
+ 	}
+diff --git a/editor/editor_node.h b/editor/editor_node.h
+index f683e13..01db129 100644
+--- a/editor/editor_node.h
++++ b/editor/editor_node.h
+@@ -186,6 +186,7 @@ public:
+ 		// Editor menu.
+ 		EDITOR_OPEN_SETTINGS,
+ 		EDITOR_COMMAND_PALETTE,
++		EDITOR_SWITCH_LAYOUT, // Joinery: between Joinery's layout and Godot's classic one.
+ 		EDITOR_TAKE_SCREENSHOT,
+ 		EDITOR_TOGGLE_FULLSCREEN,
+ 		EDITOR_OPEN_DATA_FOLDER,
+@@ -380,6 +381,9 @@ private:
+ 	ConfirmationDialog *import_confirmation = nullptr;
+ 	ConfirmationDialog *pick_main_scene = nullptr;
+ 	ConfirmationDialog *open_project_settings = nullptr;
++	// Joinery: confirms switching between Joinery's layout and Godot's classic one.
++	ConfirmationDialog *joinery_layout_dialog = nullptr;
++	void _joinery_switch_layout(bool p_restart);
+ 	Button *select_current_scene_button = nullptr;
+ 	AcceptDialog *accept = nullptr;
+ 	AcceptDialog *save_accept = nullptr;
+diff --git a/editor/gui/editor_bottom_panel.cpp b/editor/gui/editor_bottom_panel.cpp
+index 3d3bea3..61be681 100644
+--- a/editor/gui/editor_bottom_panel.cpp
++++ b/editor/gui/editor_bottom_panel.cpp
+@@ -53,7 +53,9 @@ void EditorBottomPanel::_notification(int p_what) {
+ 	switch (p_what) {
+ 		case NOTIFICATION_POSTINITIALIZE: {
+ 			// Signals of the base classes are only known once construction is done.
+-			connect("pre_popup_pressed", callable_mp(this, &EditorBottomPanel::_joinery_fill_docks_menu));
++			if (EditorSettings::is_joinery_layout()) {
++				connect("pre_popup_pressed", callable_mp(this, &EditorBottomPanel::_joinery_fill_docks_menu));
++			}
+ 		} break;
+ 
+ 		case NOTIFICATION_READY: {
+@@ -104,7 +106,13 @@ void EditorBottomPanel::_repaint() {
+ 
+ 	// Joinery: the ⋮ menu stays available while the panel is collapsed, so
+ 	// a closed dock can always be opened from here.
+-	if (get_popup() != joinery_docks_menu) {
++	if (!EditorSettings::is_joinery_layout()) {
++		if (panel_collapsed && get_popup()) {
++			set_popup(nullptr);
++		} else if (!panel_collapsed && !get_popup()) {
++			set_popup(dock_context_popup);
++		}
++	} else if (get_popup() != joinery_docks_menu) {
+ 		set_popup(joinery_docks_menu);
+ 	}
+ 	if (!panel_collapsed && (previous_tab != -1)) {
+@@ -245,7 +253,7 @@ void EditorBottomPanel::_update_center_split_offset() {
+ 	// the height; every other dock opens at 25% at least.
+ 	int offset = get_bottom_panel_offset();
+ 	EditorDock *current = Object::cast_to<EditorDock>(get_current_tab_control());
+-	if (current) {
++	if (current && EditorSettings::is_joinery_layout()) {
+ 		const String key = current->get_effective_layout_key();
+ 		const float share = (key == "Output" || key == "Review") ? 0.35 : 0.25;
+ 		offset = MIN(offset, -int(center_split->get_size().y * share));
+@@ -347,7 +355,9 @@ EditorBottomPanel::EditorBottomPanel() :
+ 	no_arrow.instantiate();
+ 	no_arrow->set_size(Size2());
+ 	for (const StringName &arrow : { SNAME("increment"), SNAME("increment_highlight"), SNAME("decrement"), SNAME("decrement_highlight") }) {
+-		add_theme_icon_override(arrow, no_arrow);
++		if (EditorSettings::is_joinery_layout()) {
++			add_theme_icon_override(arrow, no_arrow);
++		}
+ 	}
+ 
+ 	bottom_hbox = memnew(HBoxContainer);
+@@ -391,7 +401,7 @@ EditorBottomPanel::EditorBottomPanel() :
+ 	pin_button->set_tooltip_text(TTRC("Pin Bottom Panel Switching"));
+ 	pin_button->connect(SceneStringName(toggled), callable_mp(this, &EditorBottomPanel::_pin_button_toggled));
+ 	// Joinery keeps the bottom strip for engine tabs, without version/status chrome.
+-	bottom_hbox->hide();
++	bottom_hbox->set_visible(!EditorSettings::is_joinery_layout());
+ 
+ 	callable_mp(this, &EditorBottomPanel::_repaint).call_deferred();
+ }
+diff --git a/editor/run/editor_run_bar.cpp b/editor/run/editor_run_bar.cpp
+index 190b3aa..ccd6147 100644
+--- a/editor/run/editor_run_bar.cpp
++++ b/editor/run/editor_run_bar.cpp
+@@ -125,12 +125,13 @@ void EditorRunBar::_reset_play_buttons() {
+ 	play_button->set_pressed(false);
+ 	play_button->set_button_icon(get_editor_theme_icon(SNAME("MainPlay")));
+ 	play_button->set_tooltip_text(TTRC("Run the project's main scene."));
+-	play_button->set_text(TTRC("Play"));
+-
+ 	// Joinery: Pause and Stop only mean something while the game runs.
+-	const bool playing = is_playing();
+-	pause_button->set_visible(playing);
+-	stop_button->set_visible(playing);
++	if (EditorSettings::is_joinery_layout()) {
++		play_button->set_text(TTRC("Play"));
++		const bool playing = is_playing();
++		pause_button->set_visible(playing);
++		stop_button->set_visible(playing);
++	}
+ 
+ 	play_scene_button->set_pressed(false);
+ 	play_scene_button->set_button_icon(get_editor_theme_icon(SNAME("PlayScene")));
+@@ -167,7 +168,7 @@ void EditorRunBar::_update_play_buttons() {
+ 		active_button->set_pressed(true);
+ 		active_button->set_button_icon(get_editor_theme_icon(SNAME("Reload")));
+ 	}
+-	if (active_button == play_button) {
++	if (active_button == play_button && EditorSettings::is_joinery_layout()) {
+ 		play_button->set_text(TTRC("Restart"));
+ 	}
+ }
+@@ -639,8 +640,12 @@ EditorRunBar::EditorRunBar() {
+ 	main_hbox->add_child(play_button);
+ 	// Joinery: Play is the run bar's one primary action, "▶ Play" in the
+ 	// accent style shared with the Journeyman sidebar.
+-	play_button->set_theme_type_variation("JoineryPrimaryButton");
+-	play_button->set_text(TTRC("Play"));
++	if (EditorSettings::is_joinery_layout()) {
++		play_button->set_theme_type_variation("JoineryPrimaryButton");
++		play_button->set_text(TTRC("Play"));
++	} else {
++		play_button->set_theme_type_variation("RunBarButton");
++	}
+ 	play_button->set_toggle_mode(true);
+ 	play_button->set_focus_mode(Control::FOCUS_ACCESSIBILITY);
+ 	ED_SHORTCUT_AND_COMMAND("editor/run_project", TTRC("Run Project"), Key::F5);
+@@ -753,8 +758,10 @@ EditorRunBar::EditorRunBar() {
+ 	// Joinery: one way to run the game from the bar. Running the current or a
+ 	// custom scene keeps its shortcut (see shortcut_input), and Movie Maker
+ 	// stays in Project Settings > Editor > Movie Writer.
+-	play_scene_button->hide();
+-	play_custom_scene_button->hide();
+-	write_movie_panel->hide();
+-	set_process_shortcut_input(true);
++	if (EditorSettings::is_joinery_layout()) {
++		play_scene_button->hide();
++		play_custom_scene_button->hide();
++		write_movie_panel->hide();
++		set_process_shortcut_input(true);
++	}
+ }
+diff --git a/editor/settings/editor_settings.cpp b/editor/settings/editor_settings.cpp
+index 025969d..f1edeb2 100644
+--- a/editor/settings/editor_settings.cpp
++++ b/editor/settings/editor_settings.cpp
+@@ -600,6 +600,11 @@ void EditorSettings::_load_defaults(Ref<ConfigFile> p_extra_config) {
+ 	EDITOR_SETTING_BASIC(Variant::INT, PROPERTY_HINT_ENUM, "interface/inspector/default_color_picker_shape", (int32_t)ColorPicker::SHAPE_OKHSL_CIRCLE, "HSV Rectangle,HSV Rectangle Wheel,VHS Circle,OKHSL Circle,OK HS Rectangle:5,OK HL Rectangle") // `SHAPE_NONE` is 4.
+ 	EDITOR_SETTING_BASIC(Variant::BOOL, PROPERTY_HINT_NONE, "interface/inspector/color_picker_show_intensity", true, "");
+ 
++	// Joinery: the one switch between Joinery's layout and Godot's classic
++	// one. Classic turns every Joinery layout change off, so the docks, menus,
++	// run bar and bottom panel are stock again.
++	EDITOR_SETTING_USAGE(Variant::INT, PROPERTY_HINT_ENUM, "interface/joinery/editor_layout", 0, "Joinery,Classic Godot", PROPERTY_USAGE_DEFAULT | PROPERTY_USAGE_RESTART_IF_CHANGED | PROPERTY_USAGE_EDITOR_BASIC_SETTING)
++
+ 	// Theme
+ 	EDITOR_SETTING_BASIC(Variant::BOOL, PROPERTY_HINT_ENUM, "interface/theme/follow_system_theme", false, "")
+ 	EDITOR_SETTING_BASIC(Variant::STRING, PROPERTY_HINT_ENUM, "interface/theme/style", "Modern", "Modern,Classic")
+@@ -1356,6 +1361,17 @@ EditorSettings *EditorSettings::get_singleton() {
+ 	return singleton.ptr();
+ }
+ 
++bool EditorSettings::is_joinery_layout() {
++	static int layout = -1;
++	if (layout < 0) {
++		if (singleton.is_null() || !singleton->has_setting("interface/joinery/editor_layout")) {
++			return true; // Not loaded yet: ask again later rather than remember a guess.
++		}
++		layout = int(singleton->get_setting("interface/joinery/editor_layout"));
++	}
++	return layout == 0;
++}
++
+ String EditorSettings::get_existing_settings_path() {
+ 	const String config_dir = EditorPaths::get_singleton()->get_config_dir();
+ 	int minor = GODOT_VERSION_MINOR;
+diff --git a/editor/settings/editor_settings.h b/editor/settings/editor_settings.h
+index 2cf12c5..adac4fc 100644
+--- a/editor/settings/editor_settings.h
++++ b/editor/settings/editor_settings.h
+@@ -142,6 +142,10 @@ public:
+ 	};
+ 
+ 	static EditorSettings *get_singleton();
++	// Joinery: true for Joinery's editor layout, false for Godot's classic
++	// one (interface/joinery/editor_layout). Read once per session, because
++	// the layout is built at startup; a change applies after a restart.
++	static bool is_joinery_layout();
+ 	static String get_existing_settings_path();
+ 	static String get_newest_settings_path();
+ 

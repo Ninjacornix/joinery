@@ -39,6 +39,9 @@ const DISCLOSURE_INK := 4.75 / 16.0
 const BUTTON_STATES := ["normal", "hover", "pressed", "hover_pressed", "disabled", "focus"]
 const COMPACT_TIP := "Keep the current assets and drop older restore data"
 const COMPACT_ASK := "Compact history? Older changes can no longer be reverted."
+## The fork's editor setting for the editor layout, by index: Joinery's, or Godot's classic one.
+const LAYOUT_SETTING := "interface/joinery/editor_layout"
+const LAYOUTS := ["Joinery", "Classic Godot"]
 
 var dock: Control
 var _body: VBoxContainer
@@ -49,6 +52,9 @@ var _theme_note: Control
 var _accent_picker: OptionButton
 var _text_picker: OptionButton
 var _motion_switch: CheckButton
+var _layout_picker: OptionButton
+## "Applies after restart" with Restart, shown while the chosen layout is not the running one.
+var _layout_note: Control
 var _mode_picker: OptionButton
 var _timings_switch: CheckButton
 var _details_switch: CheckButton
@@ -270,6 +276,91 @@ func _build_appearance() -> void:
 				_failed()
 	)
 	section.body.add_child(UI.setting_row("Reduce motion", _motion_switch))
+	_build_layout(section)
+
+
+## Editor layout: Joinery's or Godot's classic one. Saved in the editor settings, for this user;
+## the editor builds its layout at startup, so a change applies after a restart. Hidden when
+## no editor is running; on stock Godot it reads Classic Godot and cannot change.
+func _build_layout(section: UI.Section) -> void:
+	var settings := _editor_settings()
+	if settings == null:
+		return
+	_layout_picker = UI.picker(LAYOUTS)
+	_flush_picker(_layout_picker)
+	_layout_picker.accessibility_name = "Editor layout"
+	_layout_picker.tooltip_text = "Joinery's layout, or Godot's own docks, menus and toolbars"
+	var forked := settings.has_setting(LAYOUT_SETTING)
+	_layout_picker.select(_saved_layout(settings) if forked else 1)
+	_layout_picker.disabled = not forked
+	_layout_picker.item_selected.connect(_choose_layout)
+	section.body.add_child(UI.setting_row("Layout", _layout_picker))
+	if not forked:
+		section.body.add_child(
+			_inset(UI.label("Joinery's layout needs the Joinery editor.", "JoineryCaption", true))
+		)
+		return
+	var row := HBoxContainer.new()
+	row.theme_type_variation = "JoineryRow"
+	var note := UI.label("Applies after restart", "JoineryCaption", true)
+	note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(note)
+	var restart := UI.secondary("Restart")
+	restart.accessibility_name = "Restart the editor to change the layout"
+	restart.tooltip_text = "Saves open scenes, then restarts the editor"
+	restart.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	restart.pressed.connect(_restart_editor)
+	row.add_child(restart)
+	_layout_note = _inset(row)
+	section.body.add_child(_layout_note)
+	_sync_layout_note()
+
+
+func _choose_layout(index: int) -> void:
+	var settings := _editor_settings()
+	if settings == null:
+		return
+	settings.set_setting(LAYOUT_SETTING, index)
+	_sync_layout_note()
+	if _layout_note != null and _layout_note.visible:
+		UI_MOTION.fade_in(_layout_note)
+
+
+## Show the restart note while the saved layout differs from the one the editor is running.
+func _sync_layout_note() -> void:
+	var settings := _editor_settings()
+	if _layout_note == null or settings == null:
+		return
+	_layout_note.visible = _saved_layout(settings) != _running_layout()
+
+
+static func _saved_layout(settings: EditorSettings) -> int:
+	return clampi(int(settings.get_setting(LAYOUT_SETTING)), 0, LAYOUTS.size() - 1)
+
+
+## 0 while the editor runs Joinery's layout (the fork built its navigation column), else 1.
+static func _running_layout() -> int:
+	var editor := _editor()
+	var base: Control = editor.call("get_base_control") if editor != null else null
+	return 0 if base != null and base.find_child("JoineryNavigation", true, false) != null else 1
+
+
+func _restart_editor() -> void:
+	var editor := _editor()
+	if editor != null:
+		editor.call("restart_editor", true)
+
+
+## The editor's EditorInterface, or null when this page runs outside the editor.
+static func _editor() -> Object:
+	if not Engine.is_editor_hint() or not Engine.has_singleton("EditorInterface"):
+		return null
+	return Engine.get_singleton("EditorInterface")
+
+
+static func _editor_settings() -> EditorSettings:
+	var editor := _editor()
+	return editor.call("get_editor_settings") as EditorSettings if editor != null else null
 
 
 func _build_replies() -> void:
@@ -547,6 +638,10 @@ func _sync_prefs() -> void:
 	var reduced: bool = prefs["reduce_motion"] == "on"
 	if _motion_switch.button_pressed != reduced:
 		_motion_switch.set_pressed_no_signal(reduced)
+	var settings := _editor_settings()
+	if _layout_picker != null and settings != null and settings.has_setting(LAYOUT_SETTING):
+		_layout_picker.select(_saved_layout(settings))
+		_sync_layout_note()
 
 
 func _failed() -> void:

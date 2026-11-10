@@ -1,6 +1,7 @@
 @tool
 extends RefCounted
-## Viewport controls have their own preference, independent of Focus mode. Also keeps the
+## Viewport controls have their own preference, independent of Focus mode, in Joinery's layout
+## (Godot's classic layout always shows them). Also keeps the
 ## FileSystem tree scrolled to its first row when the Files panel opens, and explains the
 ## Output tab's status mark (the engine's error or warning icon) in the tab's tooltip.
 
@@ -16,12 +17,16 @@ var _output: Control
 var _output_bar: TabBar
 
 
-func apply(base: Control, settings: EditorSettings) -> void:
+## [param joinery_layout] is false in Godot's classic layout, which always shows the viewport
+## toolbar and scene tabs as Godot does; the saved preference applies to Joinery's layout only.
+func apply(base: Control, settings: EditorSettings, joinery_layout := true) -> void:
 	_shown = (
 		bool(settings.get_setting(TOOLBAR_SETTING))
 		if settings.has_setting(TOOLBAR_SETTING)
 		else false
 	)
+	if not joinery_layout:
+		_shown = true
 	for node: Node in base.find_children("*", "MarginContainer", true, false):
 		var control := node as Control
 		if (
@@ -42,6 +47,12 @@ func apply(base: Control, settings: EditorSettings) -> void:
 		if not _output.tree_entered.is_connected(_watch_output_tab):
 			_output.tree_entered.connect(_watch_output_tab)
 		_watch_output_tab()
+
+
+## True when [param base] (the editor's base control) runs Joinery's layout. Godot's classic
+## layout and stock Godot have no navigation column.
+static func is_joinery_layout(base: Control) -> bool:
+	return base != null and base.find_child("JoineryNavigation", true, false) != null
 
 
 ## Show the file tree from its first row ("Favorites") whenever [param dock] (the FileSystem

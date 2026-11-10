@@ -63,6 +63,8 @@ var _deciding := false
 ## The 2D or 3D view the user had last, for the Godot rail button.
 var _last_view := "3D"
 var _connect_dialog: AcceptDialog
+## False in Godot's classic layout (the fork's interface/joinery/editor_layout) and on stock Godot.
+var _joinery_layout := false
 
 
 func _enter_tree() -> void:
@@ -80,11 +82,11 @@ func _enter_tree() -> void:
 	get_editor_interface().get_resource_filesystem().resources_reimported.connect(
 		_workspace.resources_reimported
 	)
+	_joinery_layout = SHELL_SCRIPT.is_joinery_layout(get_editor_interface().get_base_control())
 	_dock = DOCK_SCRIPT.new()
 	_dock.name = "Journeyman"
-	# Right column, lower slot. The upper slot already holds Inspector, Signals
-	# and Groups, and adding a fourth tab there scrolls it out of sight behind
-	# overflow arrows, which is no use for the surface you work from.
+	_dock.min_em = DOCK_SCRIPT.MIN_EM if _joinery_layout else DOCK_SCRIPT.SHARED_MIN_EM
+	# Right column, lower slot: alone in Joinery's layout, below the Inspector in the classic one.
 	add_control_to_dock(DOCK_SLOT_RIGHT_BL, _dock)
 	_review_panel = _dock.take_review_panel()
 	_review_panel.name = "Review"
@@ -112,13 +114,13 @@ func _enter_tree() -> void:
 	_focus = FOCUS_SCRIPT.new()
 	_shell = SHELL_SCRIPT.new()
 
-	# Menu entries, so the features are reachable without the dock.
-	# Also reachable as /setup and /focus in the sidebar. These stay for
-	# discoverability: a slash command you have not been told about is hidden.
+	# Menu entries, so the features are reachable without the dock (also /setup and /focus in
+	# the sidebar): a slash command you have not been told about is hidden.
 	add_tool_menu_item("Joinery: New project…", _on_new_project)
 	add_tool_menu_item("Joinery: Project setup…", _on_project_setup)
 	add_tool_menu_item("Joinery: Hide or show panels", _on_toggle_focus)
-	add_tool_menu_item("Joinery: Toggle viewport toolbar", _on_toggle_toolbar)
+	if _joinery_layout:
+		add_tool_menu_item("Joinery: Toggle viewport toolbar", _on_toggle_toolbar)
 
 	_dock.setup_requested.connect(_on_project_setup)
 	_dock.focus_toggle_requested.connect(_on_toggle_focus)
@@ -142,7 +144,7 @@ func _restore_focus() -> void:
 	OS.unset_environment("JOINERY_STARTUP_PROMPT")
 	var settings := get_editor_interface().get_editor_settings()
 	_connect_chat(settings)
-	_shell.apply(get_editor_interface().get_base_control(), settings)
+	_shell.apply(get_editor_interface().get_base_control(), settings, _joinery_layout)
 	_shell.watch_file_tree(get_editor_interface().get_file_system_dock())
 	# The saved layout has been applied by now; put the Review tab back in front.
 	_set_review_tab(_review_open)
@@ -160,7 +162,9 @@ func _restore_focus() -> void:
 		_rail.set_toolbar_shown(_shell.is_shown())
 		_workspace.refresh()
 	main_screen_changed.connect(_on_main_screen_changed)
-	if settings.has_setting(FOCUS_SETTING) and bool(settings.get_setting(FOCUS_SETTING)):
+	# Godot's classic layout opens as Godot arranges it; Focus mode stays one command away.
+	var focus := settings.has_setting(FOCUS_SETTING) and bool(settings.get_setting(FOCUS_SETTING))
+	if _joinery_layout and focus:
 		if _focus.apply(get_editor_interface().get_base_control(), _review_panel):
 			_focus.show_review(_review_open)
 	_offer_setup_if_pending()
@@ -273,7 +277,8 @@ func _exit_tree() -> void:
 	remove_tool_menu_item("Joinery: New project…")
 	remove_tool_menu_item("Joinery: Project setup…")
 	remove_tool_menu_item("Joinery: Hide or show panels")
-	remove_tool_menu_item("Joinery: Toggle viewport toolbar")
+	if _joinery_layout:
+		remove_tool_menu_item("Joinery: Toggle viewport toolbar")
 	if _shell != null:
 		_shell.restore()
 	if _rail != null:
@@ -472,6 +477,9 @@ func _on_toggle_focus() -> void:
 
 
 func _on_toggle_toolbar() -> void:
+	if not _joinery_layout:
+		_status("The classic Godot view always shows the viewport tools")
+		return
 	var shown: bool = _shell.toggle(get_editor_interface().get_editor_settings())
 	if _rail != null:
 		_rail.set_toolbar_shown(shown)
@@ -512,8 +520,7 @@ func _on_creator_changed(tool: String) -> void:
 
 
 func _raise_dock() -> void:
-	## Select the Journeyman tab, so the sidebar is the panel you land on rather
-	## than something you have to go hunting for behind other docks.
+	## Select the Journeyman tab, so the sidebar is the panel you land on.
 	var wrapper := _dock.get_parent() as Control
 	if wrapper != null:
 		if wrapper.is_class("EditorDock"):
@@ -524,7 +531,8 @@ func _raise_dock() -> void:
 		return
 	_sidebar_tabs = tabs
 	_sidebar_tabs_were_visible = tabs.tabs_visible
-	tabs.tabs_visible = false
+	# In Godot's classic layout the sidebar is an ordinary dock, with a tab to close or move it.
+	tabs.tabs_visible = not _joinery_layout and _sidebar_tabs_were_visible
 	for index: int in tabs.get_tab_count():
 		if tabs.get_tab_control(index) == wrapper:
 			tabs.current_tab = index
