@@ -170,7 +170,7 @@ def test_godot_without_its_worker_image_is_runtime_missing(
     assert images == ["joinery-mcp-worker"]
     assert found["godot"]["state"] == "runtime-missing"
     assert (
-        found["godot"]["summary"] == "Godot tools: worker missing. Run Joinery setup."
+        found["godot"]["summary"] == "Godot tools: worker missing. Rebuild the worker."
     )
     assert "godot" not in FakeConnection.started
     # The registry has no worker; it is ready as soon as it connects.
@@ -250,7 +250,7 @@ def test_describe_wording() -> None:
     ) == ("Project registry: error: boom")
     assert server_install.describe(
         {"name": "godot", "state": "not-installed", "detail": "no recorded source hash"}
-    ).startswith("Godot tools: not installed. Run Joinery setup.")
+    ).startswith("Godot tools: not installed. Rebuild the worker.")
 
 
 # --- "Open in Godot" is this editor -----------------------------------------------

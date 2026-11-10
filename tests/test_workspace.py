@@ -14,6 +14,13 @@ from joinery.workspace import index, open_asset, watch_stamp
 from tests.test_recipe import FakeRunner
 
 
+@pytest.fixture(autouse=True)
+def private_readiness_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    folder = tmp_path / "readiness-cache"
+    monkeypatch.setenv("JOINERY_READINESS_CACHE", str(folder))
+    return folder
+
+
 @pytest.fixture
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     (tmp_path / "art").mkdir()
@@ -333,3 +340,50 @@ def test_removed_desktop_apps_are_offered_only_when_installed(
     )
     sound = next(a for a in index(project)["assets"] if a["path"] == "audio/creak.wav")
     assert "audacity" not in {o["tool"] for o in sound["open_options"]}
+
+
+def test_tools_carry_readiness_from_the_cache_without_asking_docker(
+    project: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    from joinery import readiness
+    from tests.test_readiness import FakeHost
+
+    engine = tmp_path / "godot.macos.editor.arm64"
+    engine.write_text("editor")
+    host = FakeHost(engine=engine, docker_reason="Docker is not running.")
+    # Nothing known yet: rows carry no readiness rather than a guess.
+    tools = {t["id"]: t for t in index(project)["tools"]}
+    assert "status" not in tools["blender"]
+    readiness.status(project, refresh=True, host=host)
+
+    def refuse(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("the workspace never asks Docker")
+
+    monkeypatch.setattr(readiness.subprocess, "run", refuse)
+    monkeypatch.setattr(readiness.subprocess, "Popen", refuse)
+    monkeypatch.setattr(readiness, "DockerHost", refuse)
+    tools = {t["id"]: t for t in index(project)["tools"]}
+    assert tools["blender"]["status"] == "needs_docker"
+    assert tools["blender"]["status_label"] == "Needs Docker"
+    assert "Docker" in tools["blender"]["status_reason"]
+    assert tools["blender"]["action"] == {"id": "start_docker", "label": "Start Docker"}
+    assert tools["blender"]["checked_at"]
+
+
+def test_material_maker_image_inputs_are_not_folded_as_parts(project: Path) -> None:
+    (project / "art/materials").mkdir()
+    (project / "art/photos").mkdir()
+    (project / "art/photos/bark.png").write_bytes(b"photo")
+    (project / "art/materials/bark.ptex").write_text("{}")
+    recipe(
+        project,
+        "material-maker",
+        ["art/materials/bark_albedo.png"],
+        "recipes/bark.json",
+        sources=["art/materials/bark.ptex", "art/photos/bark.png"],
+    )
+    assets = {a["path"]: a for a in index(project)["assets"]}
+    owner = assets["art/materials/bark.ptex"]
+    assert owner["parts"] == ["art/materials/bark_albedo.png"]
+    # The photo the graph reads is an input, not something the graph made.
+    assert assets["art/photos/bark.png"]["part_of"] == ""

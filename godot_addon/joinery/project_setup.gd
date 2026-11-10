@@ -1,19 +1,20 @@
 @tool
 extends AcceptDialog
-## "Project apps": which real apps make this project, for a project that is already open.
-##
-## The list comes from `joinery tools --json`, so the catalog stays the single source of
-## truth, and Save goes through `joinery setup`, which validates every choice, so this screen
-## can never enable an app the catalog refuses. Both run through command_job.gd and never
-## block the editor. Rows share the Project Manager's "Choose your apps" design: one row per
-## app (checkbox with the name, blurb, readiness as plain text), grouped, with how Joinery
-## connects to each app under one collapsed "Advanced" section.
+## "Project apps": which real apps make this project, how ready each one is, and its game
+## features (project_features.gd). The list comes from `joinery tools --json` (the catalog is
+## the one source of truth) and Save goes through `joinery setup`, which validates every
+## choice. Readiness comes from `joinery status --catalog --background --json` (ADR 0030),
+## asked again while it is still checking. Each row: checkbox and name, blurb, dot and wording
+## with at most one action (Start Docker, Rebuild, Check again, Get it), and the reason below.
+## Connections sit under one collapsed "Advanced" section. Every command is a command_job.gd
+## job, so the editor never blocks.
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 const INDICATOR := preload("activity_indicator.gd")
 const UI_THEME := preload("ui_theme.gd")
 const UI_COMPONENTS := preload("ui_components.gd")
 const UI_MOTION := preload("ui_motion.gd")
+const FEATURES := preload("project_features.gd")
 const GROUPS := ["engine", "3d", "2d", "audio", "other"]
 const GROUP_TITLES := {
 	"engine": "Engine", "3d": "3D", "2d": "2D", "audio": "Audio", "other": "Other apps"
@@ -28,22 +29,22 @@ const DOMAIN_WORDS := {
 	"2d": "2D art",
 	"audio": "sound and music",
 }
-## Readiness from `status` (P7 and addendum S names): caption, dot state, disables the row.
-const STATUS := {
-	"ready": ["Ready", "ready", false],
-	"installed": ["Ready", "ready", false],
-	"preparing": ["Downloading…", "working", false],
-	"needs_docker": ["Needs Docker", "off", false],
-	"needs_licence": ["Needs your licence", "off", false],
-	"licence": ["Needs your licence", "off", false],
-	"missing": ["Not found", "off", false],
-	"unavailable": ["Not available yet", "off", true],
-}
 const RULE_ZERO := "Joinery makes assets with real apps, never AI generators."
+const DOCKER_HOWTO := "Open Docker Desktop and wait until it says it's running, then check again."
+## Seconds between readiness questions while something is still being checked or built.
+const POLL_SECONDS := 2.0
 ## Size of the dialog: width in multiples of the body font, capped by these screen fractions.
-const WIDTH_EM := 48
+const WIDTH_EM := 52
 const WIDTH_SCREEN := 0.9
 const HEIGHT_SCREEN := 0.8
+
+## The command that runs the Joinery CLI, followed by its leading arguments. Empty: the
+## engine checkout's `uv run … joinery`. Tests point it at a fixture.
+var cli_prefix := PackedStringArray()
+## What "Start Docker" runs besides showing how (empty: only the how-to).
+var start_docker_argv := PackedStringArray(
+	["open", "-a", "Docker"] if OS.get_name() == "macOS" else []
+)
 
 var _body: Body
 var _notice: Label
@@ -58,9 +59,14 @@ var _details_text: Label
 var _save_indicator: Control
 var _rows: Array[Row] = []
 var _advanced: UI_COMPONENTS.Section
+var _features: FEATURES
 var _catalog_job: RefCounted
 var _save_job: RefCounted
+var _status_job: RefCounted
+var _rebuild_job: RefCounted
+var _check_jobs: Dictionary = {}
 var _loaded := false
+var _poll_in := -1.0
 
 
 ## The dialog's content root: the watched theme root. A rebuild is copied to the dialog so its
@@ -73,17 +79,23 @@ class Body:
 		rebuilt.emit()
 
 
-## One app: checkbox with its name, blurb and readiness; its connection field lives under
-## the list's Advanced section.
+## One app: checkbox with its name, blurb, readiness and its one action; the reason (and the
+## Docker how-to) on the line below. Its connection field lives under the Advanced section.
 class Row:
-	extends HBoxContainer
+	extends VBoxContainer
 	var tool_id := ""
 	var tool: Dictionary = {}
 	var required := false
 	var available := true
 	## Id of a custom connector this project already saved for the app, if any.
 	var saved_custom := ""
+	var line: HBoxContainer
 	var check: CheckBox
+	var state: UI_COMPONENTS.Readiness
+	var below: HBoxContainer
+	var indent: Control
+	var reason: Label
+	var howto: PanelContainer
 	var picker: OptionButton
 	var note: Label
 	var connector: Control
@@ -154,7 +166,7 @@ func _ready() -> void:
 	gutter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(gutter)
 	_list = VBoxContainer.new()
-	_list.theme_type_variation = "JoineryStack"
+	_list.theme_type_variation = "JoinerySections"
 	gutter.add_child(_list)
 	_loading = HBoxContainer.new()
 	_loading.theme_type_variation = "JoineryRow"
@@ -178,19 +190,11 @@ func _ready() -> void:
 
 
 func _build_banner() -> void:
-	_banner = PanelContainer.new()
-	_banner.theme_type_variation = "JoineryBanner"
+	_banner = UI_COMPONENTS.notice("", "Retry")
 	_banner.hide()
 	_body.add_child(_banner)
-	var row := HBoxContainer.new()
-	row.theme_type_variation = "JoineryRow"
-	_banner.add_child(row)
-	_banner_text = UI_COMPONENTS.label("", "", true)
-	_banner_text.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	row.add_child(_banner_text)
-	var retry := UI_COMPONENTS.secondary("Retry")
-	retry.pressed.connect(_load_catalog)
-	row.add_child(retry)
+	_banner_text = _banner.find_child("Text", true, false)
+	(_banner.find_child("Action", true, false) as Button).pressed.connect(_load_catalog)
 
 
 func _style_buttons() -> void:
@@ -211,8 +215,8 @@ func _style_buttons() -> void:
 			_save_indicator.offset_left = _save_indicator.offset_right
 	)
 	var cancel := add_cancel_button("Cancel")
-	cancel.theme_type_variation = "JoineryQuietButton"
 	cancel.pressed.connect(_cancel_jobs)
+	UI_COMPONENTS.dialog_footer(self)
 
 
 # --- Opening ---------------------------------------------------------------------------------
@@ -247,7 +251,14 @@ func _open(notice: String) -> void:
 	_load_catalog()
 	var screen := get_tree().root.get_visible_rect().size
 	var width := mini(UI_THEME.font_size(_body, "body") * WIDTH_EM, roundi(screen.x * WIDTH_SCREEN))
-	popup_centered(Vector2i(width, roundi(screen.y * HEIGHT_SCREEN)))
+	var target := Vector2i(width, roundi(screen.y * HEIGHT_SCREEN))
+	popup_centered(target)
+	# Wrapped text is measured at zero width on the first layout, which stretches the dialog
+	# past the screen; once it has its width, return to the intended size.
+	await get_tree().process_frame
+	if visible:
+		size = Vector2i(target.x, maxi(target.y, ceili(get_contents_minimum_size().y)))
+		move_to_center()
 
 
 # --- Catalog ---------------------------------------------------------------------------------
@@ -262,22 +273,18 @@ func _load_catalog() -> void:
 		_list.remove_child(child)
 		child.queue_free()
 	_rows.clear()
+	_features = null
 	_loading.show()
 	(_loading.get_child(0) as Control).set("running", true)
 	_update_save()
-	_catalog_job = COMMAND_SCRIPT.new()
-	var args := _cli(["tools", "--json", "--project", _project()])
-	if _catalog_job.start("uv", args) != OK:
-		_catalog_job = null
-		_catalog_failed("uv isn't available")
+	_catalog_job = _start(["tools", "--json", "--project", _project()])
+	if _catalog_job == null:
+		_catalog_failed("Joinery's command line isn't available")
 
 
 func _catalog_done(result: Dictionary) -> void:
 	_catalog_job = null
-	var json := JSON.new()
-	var data: Variant = null
-	if int(result.get("code", 1)) == 0 and json.parse(str(result.get("output", ""))) == OK:
-		data = json.data
+	var data: Variant = _json(result)
 	if not data is Dictionary or not data.get("tools") is Array:
 		var reason := _first_line(
 			str(result.get("error", "")) + "\n" + str(result.get("output", ""))
@@ -289,6 +296,8 @@ func _catalog_done(result: Dictionary) -> void:
 	_build_rows(data)
 	_loaded = true
 	_update_save()
+	_query_status()
+	_features.reload()
 
 
 func _catalog_failed(reason: String) -> void:
@@ -326,6 +335,15 @@ func _build_rows(data: Dictionary) -> void:
 			var row := _row(tool, saved)
 			section.body.add_child(row)
 			_rows.append(row)
+	_features = FEATURES.new()
+	_features.cli_prefix = cli_prefix
+	_features.project = _project()
+	_features.applied.connect(
+		func(message: String) -> void:
+			_show_status(message, false)
+			UI_MOTION.pulse(_status)
+	)
+	_list.add_child(_features)
 	_advanced = UI_COMPONENTS.section("Advanced", true)
 	_advanced.header.tooltip_text = "Choose how Joinery connects to each app."
 	_advanced.body.theme_type_variation = "JoineryStack"
@@ -337,7 +355,7 @@ func _build_rows(data: Dictionary) -> void:
 
 
 ## Every blurb starts at one x: each name column is as wide as the widest name, so the
-## list reads as two columns instead of a ragged middle edge.
+## list reads as two columns instead of a ragged middle edge. Reasons start there too.
 func _align_names() -> void:
 	var widest := 0.0
 	for row: Row in _rows:
@@ -345,6 +363,7 @@ func _align_names() -> void:
 		widest = maxf(widest, row.check.get_combined_minimum_size().x)
 	for row: Row in _rows:
 		row.check.custom_minimum_size.x = widest
+		row.indent.custom_minimum_size.x = widest
 
 
 func _group_of(tool: Dictionary) -> String:
@@ -368,39 +387,22 @@ func _blurb_of(tool: Dictionary) -> String:
 	return text.left(1).to_upper() + text.substr(1)
 
 
-## Readiness for the chip: {text, dot, disables, reason}, or {} when the catalog says nothing.
-func _status_of(tool: Dictionary) -> Dictionary:
-	var key := str(tool.get("status", ""))
-	if not STATUS.has(key):
-		key = ""
-		if not tool.get("available", true):
-			key = "unavailable"
-		elif tool.get("paid", false):
-			key = "needs_licence"
-	if key.is_empty():
-		return {}
-	var spec: Array = STATUS[key]
-	return {
-		"key": key,
-		"text": spec[0],
-		"dot": spec[1],
-		"disables": spec[2],
-		"reason": str(tool.get("status_reason", "")),
-	}
-
-
 func _row(tool: Dictionary, saved: Array[String]) -> Row:
 	var row := Row.new()
-	row.theme_type_variation = "JoineryRow"
+	row.name = "App_" + str(tool.get("id", "")).replace("-", "_")
+	row.theme_type_variation = "JoineryFlush"
 	row.tool = tool
 	row.tool_id = str(tool.get("id", ""))
 	row.required = bool(tool.get("required", false))
-	var status := _status_of(tool)
-	row.available = bool(tool.get("available", true)) and not status.get("disables", false)
+	# Readiness never blocks choosing an app: only the catalog can refuse one.
+	row.available = bool(tool.get("available", true))
 	var display := str(tool.get("name", row.tool_id))
-	# One row, one control tall: the checkbox carries the name, the blurb follows in
-	# secondary text, readiness is plain text at the trailing edge.
-	UI_COMPONENTS.bind_height(row, "md", false)
+	# One line, one control tall: the checkbox carries the name, the blurb follows in
+	# secondary text, readiness and its one action sit at the trailing edge.
+	row.line = HBoxContainer.new()
+	row.line.theme_type_variation = "JoineryRow"
+	UI_COMPONENTS.bind_height(row.line, "md", false)
+	row.add_child(row.line)
 	row.check = CheckBox.new()
 	row.check.text = display
 	row.check.focus_mode = Control.FOCUS_ALL
@@ -408,62 +410,207 @@ func _row(tool: Dictionary, saved: Array[String]) -> Row:
 	row.check.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	UI_COMPONENTS.bind_height(row.check, "md", false)
 	row.check.toggled.connect(func(_on: bool) -> void: _clear_row_errors(row))
-	row.add_child(row.check)
+	row.line.add_child(row.check)
 	var blurb := UI_COMPONENTS.label(_blurb_of(tool), "JoineryCaption")
 	blurb.tooltip_text = blurb.text
 	blurb.mouse_filter = Control.MOUSE_FILTER_PASS
 	blurb.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	blurb.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	row.add_child(blurb)
-	if row.required:
-		# Locked on, drawn exactly like a chosen app (an enabled, checked box that ignores
-		# the pointer); the caption at the trailing edge, where readiness sits, says why.
-		var always := UI_COMPONENTS.label("Always included", "JoineryCaption")
-		always.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
-		always.clip_text = false
-		always.size_flags_horizontal = Control.SIZE_SHRINK_END
-		always.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		row.add_child(always)
-		row.check.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		row.check.toggled.connect(
-			func(on: bool) -> void:
-				if not on:
-					row.check.set_pressed_no_signal(true)
-		)
-	else:
-		_add_status(row, tool, status)
+	row.line.add_child(blurb)
+	row.state = UI_COMPONENTS.readiness()
+	row.state.action.pressed.connect(_on_action.bind(row))
+	row.line.add_child(row.state)
+	# The reason (and the Docker how-to) line up with the blurb.
+	row.below = HBoxContainer.new()
+	row.below.theme_type_variation = "JoineryRow"
+	row.below.hide()
+	row.add_child(row.below)
+	row.indent = Control.new()
+	row.indent.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.below.add_child(row.indent)
+	var words := VBoxContainer.new()
+	words.theme_type_variation = "JoineryTight"
+	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.below.add_child(words)
+	row.reason = UI_COMPONENTS.label("", "JoineryCaption", true)
+	row.reason.name = "Reason"
+	words.add_child(row.reason)
+	row.howto = _howto(row)
+	words.add_child(row.howto)
 	_add_connector(row, saved)
 	var on := bool(tool.get("enabled", false)) or row.required or not row.saved_custom.is_empty()
 	row.check.button_pressed = on and (row.available or row.is_custom() or row.required)
 	_sync_row(row, false)
 	if row.required:
-		row.check.tooltip_text = "Every project uses Godot."
-		row.check.focus_mode = Control.FOCUS_NONE
+		UI_COMPONENTS.lock_check(row.check, "Every project uses Godot.")
 	elif not row.available:
-		row.check.tooltip_text = str(status.get("reason", "Not available yet."))
+		row.check.tooltip_text = str(tool.get("status_reason", "Not available yet."))
+	_apply_readiness(row, tool)
 	return row
 
 
-func _add_status(parent: Control, tool: Dictionary, status: Dictionary) -> void:
-	if status.is_empty():
+## The Docker how-to under a row, with Check again: shown by "Start Docker".
+func _howto(row: Row) -> PanelContainer:
+	var panel := UI_COMPONENTS.notice(DOCKER_HOWTO, "Check again", "JoineryCard")
+	panel.name = "HowTo"
+	panel.hide()
+	(panel.find_child("Action", true, false) as Button).pressed.connect(_check_again.bind(row))
+	return panel
+
+
+# --- Readiness -------------------------------------------------------------------------------
+
+
+## Show one readiness entry (from `joinery status` or the menu) on its row.
+func _apply_readiness(row: Row, entry: Dictionary) -> void:
+	var key := str(entry.get("status", ""))
+	var previous := str(row.state.entry.get("status", ""))
+	row.state.set_entry(entry)
+	if not row.state.visible:
 		return
-	# Plain secondary text with a state dot; nothing that looks pressable.
-	var state := HBoxContainer.new()
-	state.theme_type_variation = "JoineryRowTight"
-	state.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	state.add_child(UI_COMPONENTS.status_dot(str(status["dot"])))
-	var text := UI_COMPONENTS.label(str(status["text"]), "JoineryCaption")
-	var reason := str(status.get("reason", ""))
-	text.tooltip_text = reason if not reason.is_empty() else text.text
-	text.mouse_filter = Control.MOUSE_FILTER_PASS
-	state.add_child(text)
-	parent.add_child(state)
-	var url: Variant = tool.get("get_url")
-	if status["key"] == "missing" and url is String and not (url as String).is_empty():
-		var link := UI_COMPONENTS.link("Get it")
-		link.tooltip_text = url
-		link.pressed.connect(func() -> void: OS.shell_open(str(url)))
-		parent.add_child(link)
+	var get_it := str(entry.get("get_url", row.tool.get("get_url", "")))
+	if not (row.required or row.available) or (key == "needs_licence" and get_it.is_empty()):
+		row.state.action.set_action(null)
+	var reason := str(entry.get("status_reason", ""))
+	if key == "ready" and not entry.get("checking", false):
+		reason = _feature_gap(entry)
+	row.reason.text = reason
+	row.reason.visible = not reason.is_empty()
+	row.howto.visible = row.howto.visible and key == "needs_docker"
+	row.below.visible = row.reason.visible or row.howto.visible
+	if key == "ready" and previous not in ["", "ready"] and row.is_inside_tree():
+		UI_MOTION.pulse(row.state)
+
+
+## A ready app that can't do everything says what is missing (Surge XT without its SoundFont).
+func _feature_gap(entry: Dictionary) -> String:
+	for feature: Variant in entry.get("features", []):
+		if feature is Dictionary and str(feature.get("status", "ready")) != "ready":
+			if not bool(feature.get("checking", false)):
+				return str(feature.get("detail", ""))
+	return ""
+
+
+func _query_status() -> void:
+	if _status_job != null:
+		return
+	_poll_in = -1.0
+	_status_job = _start(["status", "--catalog", "--background", "--json", "--project", _project()])
+
+
+func _status_done(result: Dictionary) -> void:
+	_status_job = null
+	var data: Variant = _json(result)
+	if not data is Dictionary:
+		# Keep what the menu said; ask again later.
+		_poll_in = POLL_SECONDS * 5.0
+		return
+	var entries := {}
+	for entry: Variant in data.get("tools", []):
+		if entry is Dictionary:
+			entries[str(entry.get("id", ""))] = entry
+	var waiting := bool(data.get("checking", false)) or _rebuild_job != null
+	for row: Row in _rows:
+		if entries.has(row.tool_id) and not _check_jobs.has(row.tool_id):
+			_apply_readiness(row, entries[row.tool_id])
+		waiting = waiting or str(row.state.entry.get("status", "")) == "preparing"
+	_poll_in = POLL_SECONDS if waiting else -1.0
+
+
+func _on_action(row: Row) -> void:
+	match row.state.action.action_id:
+		"start_docker":
+			_start_docker(row)
+		"rebuild":
+			_rebuild(row)
+		"check_again":
+			_check_again(row)
+		"get":
+			var url := str(row.state.entry.get("get_url", row.tool.get("get_url", "")))
+			if not url.is_empty():
+				OS.shell_open(url)
+
+
+func _start_docker(row: Row) -> void:
+	if not start_docker_argv.is_empty():
+		OS.create_process(start_docker_argv[0], start_docker_argv.slice(1))
+	row.howto.show()
+	row.below.show()
+	UI_MOTION.reveal(row.below)
+	(row.howto.find_child("Action", true, false) as Control).grab_focus()
+
+
+func _check_again(row: Row) -> void:
+	if _check_jobs.has(row.tool_id):
+		return
+	var job := _start(
+		["status", "--tool", row.tool_id, "--refresh", "--json", "--project", _project()]
+	)
+	if job == null:
+		return
+	_check_jobs[row.tool_id] = job
+	row.state.set_busy(true, "Checking…")
+
+
+func _check_done(tool_id: String, result: Dictionary) -> void:
+	_check_jobs.erase(tool_id)
+	var row := _find_row(tool_id)
+	if row == null:
+		return
+	row.state.set_busy(false)
+	var data: Variant = _json(result)
+	var entry: Dictionary = {}
+	if data is Dictionary:
+		for item: Variant in data.get("tools", []):
+			if item is Dictionary and str(item.get("id", "")) == tool_id:
+				entry = item
+	if entry.is_empty():
+		_apply_readiness(row, row.state.entry)
+		row.reason.text = "Joinery couldn't check %s just now." % row.check.text
+		row.reason.show()
+		row.below.show()
+		return
+	_apply_readiness(row, entry)
+
+
+## Rebuild the offline workers (`joinery bootstrap`): readiness says Downloading… meanwhile.
+func _rebuild(row: Row) -> void:
+	if _rebuild_job != null:
+		return
+	_rebuild_job = _start(["bootstrap", "--project", _project()])
+	if _rebuild_job == null:
+		return
+	for other: Row in _rows:
+		if other.state.action.action_id == "rebuild":
+			other.state.set_busy(true)
+	row.reason.text = "Rebuilding the offline workers. This can take a few minutes."
+	row.reason.show()
+	row.below.show()
+	_poll_in = POLL_SECONDS
+
+
+func _rebuild_done(result: Dictionary) -> void:
+	_rebuild_job = null
+	for row: Row in _rows:
+		row.state.set_busy(false)
+		_apply_readiness(row, row.state.entry)
+	if int(result.get("code", 1)) != 0:
+		var reason := _first_line(
+			str(result.get("error", "")) + "\n" + str(result.get("output", ""))
+		)
+		var why := reason if not reason.is_empty() else "no reason given"
+		_show_status("Rebuild didn't finish: " + why, true)
+	_query_status()
+
+
+func _find_row(tool_id: String) -> Row:
+	for row: Row in _rows:
+		if row.tool_id == tool_id:
+			return row
+	return null
+
+
+# --- Connections -----------------------------------------------------------------------------
 
 
 ## The app's connection as a field (app name above the picker), shown under Advanced.
@@ -588,7 +735,8 @@ func _sync_row(row: Row, by_user: bool) -> void:
 	row.note.visible = not note.is_empty()
 	row.command.visible = custom
 	row.arguments.visible = custom
-	row.check.disabled = not row.required and not custom and not row.available
+	if not row.required:
+		row.check.disabled = not custom and not row.available
 	if row.required:
 		row.check.button_pressed = true
 	elif custom and by_user:
@@ -632,15 +780,14 @@ func _on_save() -> void:
 		_show_status("Check the connection under Advanced.", true)
 		return
 	tools.sort()
-	var args := _cli(["setup", "--project", _project(), "--tools", ",".join(tools)])
+	var args := ["setup", "--project", _project(), "--tools", ",".join(tools)]
 	if not customs.is_empty():
-		args.append_array(PackedStringArray(["--custom-mcps", JSON.stringify(customs)]))
+		args.append_array(["--custom-mcps", JSON.stringify(customs)])
 	_details.hide()
 	_show_status("", false)
-	_save_job = COMMAND_SCRIPT.new()
-	if _save_job.start("uv", args) != OK:
-		_save_job = null
-		_save_failed("uv isn't available", "")
+	_save_job = _start(args)
+	if _save_job == null:
+		_save_failed("Joinery's command line isn't available", "")
 		return
 	_set_saving(true)
 
@@ -722,23 +869,45 @@ func _show_status(text: String, error: bool) -> void:
 # --- Jobs and helpers ------------------------------------------------------------------------
 
 
-func _process(_delta: float) -> void:
-	if _catalog_job != null:
-		var result: Dictionary = _catalog_job.poll()
+func _process(delta: float) -> void:
+	_catalog_job = _poll(_catalog_job, _catalog_done)
+	_save_job = _poll(_save_job, _save_done)
+	_status_job = _poll(_status_job, _status_done)
+	_rebuild_job = _poll(_rebuild_job, _rebuild_done)
+	for tool_id: String in _check_jobs.keys():
+		var result: Dictionary = (_check_jobs[tool_id] as RefCounted).call("poll")
 		if not result.is_empty():
-			_catalog_done(result)
-	if _save_job != null:
-		var saved: Dictionary = _save_job.poll()
-		if not saved.is_empty():
-			_save_done(saved)
+			_check_done(tool_id, result)
+	if _poll_in >= 0.0 and _status_job == null and visible:
+		_poll_in -= delta
+		if _poll_in < 0.0:
+			_query_status()
+
+
+## Poll [param job]; when it has finished, call [param done] with its result and return null
+## (unless [param done] started a new job in the same slot), else return the job.
+func _poll(job: RefCounted, done: Callable) -> RefCounted:
+	if job == null:
+		return null
+	var result: Dictionary = job.call("poll")
+	if result.is_empty():
+		return job
+	done.call(result)
+	return null
 
 
 func _cancel_jobs() -> void:
-	for job: RefCounted in [_catalog_job, _save_job]:
+	var jobs: Array = [_catalog_job, _save_job, _status_job]
+	jobs.append_array(_check_jobs.values())
+	for job: Variant in jobs:
 		if job != null:
-			job.call("cancel")
+			(job as RefCounted).call("cancel")
+	# A rebuild carries on: stopping it halfway helps nobody.
 	_catalog_job = null
 	_save_job = null
+	_status_job = null
+	_check_jobs.clear()
+	_poll_in = -1.0
 	_set_saving(false)
 
 
@@ -750,14 +919,31 @@ func _project() -> String:
 	return ProjectSettings.globalize_path("res://").rstrip("/")
 
 
-func _cli(arguments: Array) -> PackedStringArray:
-	var engine := OS.get_environment("JOINERY_HOME")
-	if engine.is_empty():
-		engine = ProjectSettings.globalize_path("res://").path_join("..").simplify_path()
-	var args := PackedStringArray(["run", "--frozen", "--quiet", "--project", engine, "joinery"])
+## Start the Joinery CLI with [param arguments] as a job; null when it can't start.
+func _start(arguments: Array) -> RefCounted:
+	var program := "uv"
+	var args := PackedStringArray()
+	if cli_prefix.is_empty():
+		var engine := OS.get_environment("JOINERY_HOME")
+		if engine.is_empty():
+			engine = ProjectSettings.globalize_path("res://").path_join("..").simplify_path()
+		args = PackedStringArray(["run", "--frozen", "--quiet", "--project", engine, "joinery"])
+	else:
+		program = cli_prefix[0]
+		args = cli_prefix.slice(1)
 	for argument: Variant in arguments:
 		args.append(str(argument))
-	return args
+	var job: RefCounted = COMMAND_SCRIPT.new()
+	if job.call("start", program, args) != OK:
+		return null
+	return job
+
+
+static func _json(result: Dictionary) -> Variant:
+	var json := JSON.new()
+	if json.parse(str(result.get("output", ""))) != OK:
+		return null
+	return json.data
 
 
 ## The first line worth showing from CLI output, without "setup:"-style prefixes.

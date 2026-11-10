@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 import re
-import shutil
-import subprocess
-from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from collections.abc import Callable, Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
+from joinery import readiness
 from joinery.catalog import Catalog, CustomTool, ProjectTools, Tool, selection_ids
 
 DOMAIN_ORDER = {"engine": 0, "3d": 1, "materials": 2, "2d": 3, "audio": 4}
@@ -50,91 +50,51 @@ GET_URLS = {
     "surge-xt": "https://surge-synthesizer.github.io/",
 }
 
-#: The offline worker image each app runs in. Apps run in Docker workers, so
-#: whether that image is present, not whether the app is on the desktop, is
-#: what makes it ready.
-WORKER_IMAGES = {
-    "godot": "joinery-mcp-worker",
-    "supercollider": "joinery-mcp-worker",
-    "blender": "joinery-blender-worker",
-    "inkscape": "joinery-inkscape-worker",
-}
-DEFAULT_WORKER_IMAGE = "joinery-creative-worker"
-
-#: Readiness states and the words every front end shows for them.
-STATUS_LABELS = {
-    "ready": "Ready",
-    "preparing": "Downloading…",
-    "needs_docker": "Needs Docker",
-    "needs_licence": "Needs your licence",
-    "unavailable": "Not available yet",
-}
+#: Readiness states and the words every front end shows for them. The one
+#: source is joinery.readiness; these names stay for existing importers.
+STATUS_LABELS = readiness.STATUS_LABELS
 
 
-@dataclass
-class DockerProbe:
-    """Asks Docker once per question and remembers the answer.
+def _status(tool: Tool, entry: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Readiness fields for one app's row, from the shared readiness report.
 
-    `run` is injectable so tests never touch a real daemon.
+    The catalog decides two things readiness cannot: an app with no reviewed
+    connector is not available, and a paid app needs the user's licence.
     """
-
-    run: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run
-    timeout: float = 8.0
-    _reachable: bool | None = field(default=None, init=False)
-    _images: dict[str, bool] = field(default_factory=dict, init=False)
-
-    def _ok(self, argv: list[str]) -> bool:
-        try:
-            done = self.run(
-                argv,
-                capture_output=True,
-                text=True,
-                timeout=self.timeout,
-                check=False,
-            )
-        except (OSError, subprocess.SubprocessError):
-            return False
-        return done.returncode == 0
-
-    def reachable(self) -> bool:
-        if self._reachable is None:
-            self._reachable = shutil.which("docker") is not None and self._ok(
-                ["docker", "info", "--format", "{{.ServerVersion}}"]
-            )
-        return self._reachable
-
-    def has_image(self, image: str) -> bool:
-        if image not in self._images:
-            self._images[image] = self._ok(["docker", "image", "inspect", image])
-        return self._images[image]
-
-
-def readiness(tool: Tool, probe: DockerProbe) -> tuple[str, str]:
-    """`(status, status_reason)` for one app. The reason is empty when ready."""
     if tool.status != "available":
-        if tool.status == "first-party-planned":
-            return "unavailable", "Joinery's own connector for it is still being built."
-        return "unavailable", "No connector has passed review yet."
+        reason = (
+            "Joinery's own connector for it is still being built."
+            if tool.status == "first-party-planned"
+            else "No connector has passed review yet."
+        )
+        return {"status": "unavailable", "status_reason": reason, "action": None}
     if tool.paid:
-        return (
-            "needs_licence",
-            f"{tool.name} is paid software. Add your own licence to use it.",
-        )
-    if not probe.reachable():
-        return (
-            "needs_docker",
-            f"Joinery runs {tool.name} in Docker. Install Docker Desktop and start it.",
-        )
-    image = WORKER_IMAGES.get(tool.id, DEFAULT_WORKER_IMAGE)
-    if not probe.has_image(image):
-        return (
-            "preparing",
-            (
-                f"The {tool.name} worker ({image}) is not on this computer yet. "
-                "Joinery builds it during setup."
-            ),
-        )
-    return "ready", ""
+        return {
+            "status": "needs_licence",
+            "status_reason": f"{tool.name} is paid software. Add your own licence to use it.",
+            "action": readiness.action("get"),
+        }
+    if entry is None:
+        # No readiness module answers for it: say nothing rather than guess.
+        return {"status": "ready", "status_reason": "", "action": None, "checking": True}
+    return {
+        "status": str(entry.get("status", "ready")),
+        "status_reason": str(entry.get("status_reason", "")),
+        "action": entry.get("action"),
+        "checking": bool(entry.get("checking", False)),
+        "checked_at": str(entry.get("checked_at", "")),
+        "summary": str(entry.get("summary", "")),
+        "features": [
+            {
+                "id": f.get("id"),
+                "label": f.get("label", ""),
+                "status": f.get("status", ""),
+                "detail": f.get("detail", ""),
+            }
+            for f in entry.get("features", [])
+            if isinstance(f, Mapping)
+        ],
+    }
 
 
 @dataclass(frozen=True)
@@ -377,7 +337,12 @@ def custom_choices(payload: str, current: Iterable[CustomTool]) -> list[CustomTo
 
 
 def tool_menu(
-    catalog: Catalog, current: ProjectTools, probe: DockerProbe | None = None
+    catalog: Catalog,
+    current: ProjectTools,
+    report: Mapping[str, Any] | None = None,
+    *,
+    project: Path | None = None,
+    host: readiness.Host | None = None,
 ) -> dict[str, object]:
     """The tool menu as plain data, for a UI that draws its own widgets.
 
@@ -387,13 +352,22 @@ def tool_menu(
     because `available` and `reason` come from the same validation the CLI uses.
 
     `status` is readiness, not selectability: an app that still needs Docker
-    or its worker image can be chosen now and becomes ready later.
+    or its worker image can be chosen now and becomes ready later. It comes
+    from `joinery.readiness` (the snapshot while fresh, with a background
+    refresh for what the cache lacks), the same answer `joinery status` gives.
     """
     enabled = set(selection_ids(catalog, current))
-    probe = probe or DockerProbe()
+    if report is None:
+        report = readiness.current(project, catalog=True, host=host)
+    known = {
+        str(entry.get("id")): entry
+        for entry in report.get("tools", [])
+        if isinstance(entry, Mapping)
+    }
     entries: list[dict[str, object]] = []
     for tool in menu_tools(catalog):
-        status, status_reason = readiness(tool, probe)
+        state = _status(tool, known.get(tool.id))
+        status = str(state["status"])
         entries.append(
             {
                 "id": tool.id,
@@ -421,9 +395,8 @@ def tool_menu(
                 ),
                 # Readiness and plain copy for setup's app rows. Field names
                 # are a contract with the Project Manager and the addon.
-                "status": status,
-                "status_label": STATUS_LABELS[status],
-                "status_reason": status_reason,
+                **state,
+                "status_label": STATUS_LABELS.get(status, ""),
                 "get_url": GET_URLS.get(tool.id),
                 "blurb": BLURBS.get(tool.id, ""),
                 "group": GROUP_FOR_DOMAIN[tool.domain],
@@ -431,6 +404,9 @@ def tool_menu(
         )
     return {
         "tools": entries,
+        "docker": report.get("docker", "unchecked"),
+        "checking": any(bool(e.get("checking")) for e in entries),
+        "checked_at": report.get("checked_at", ""),
         "enabled": sorted(enabled),
         "custom": [
             {"id": c.id, "name": c.name, "domain": c.domain} for c in current.custom

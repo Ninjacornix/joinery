@@ -1,17 +1,28 @@
 extends SceneTree
-## Run with the fork's --project-manager --script and a temporary output directory.
-## Walks the agent connect screen, the API form and the three-step new-project wizard
-## (Name your game, Choose your apps, Look and sound), then creates a fixture project.
+## Two flows, chosen by the runner:
+## - with the fork's --project-manager --script (tests/godot/run_startup_test.py): the agent
+##   connect screen, the API form and the new-project wizard, then a fixture project;
+## - with JOINERY_SETUP_DIALOG_TEST=1 inside a project (tests/godot/run_setup_tests.py): the
+##   editor's Project apps dialog and the app rail against a fixture Joinery CLI, checking
+##   readiness rows, Check again as a job that never blocks, and features planned before
+##   they apply.
 
-const STEP_TITLES := ["Name your game", "Choose your apps", "Look and sound"]
+const STEP_TITLES := ["What are you making?", "Features and apps", "Brief and art direction"]
+## The dialog flow's addon scripts, loaded only in that flow: the Project Manager run has
+## no project to load them from.
+const ADDON := "res://addons/joinery/"
 
 var _failed := false
+var _calls_path := ""
 
 
 func _initialize() -> void:
 	# Joinery screens animate in a graphical run; the flow checks end states.
 	Engine.set_meta("joinery_motion_enabled", false)
-	_run.call_deferred()
+	if OS.get_environment("JOINERY_SETUP_DIALOG_TEST") == "1":
+		_run_dialog.call_deferred()
+	else:
+		_run.call_deferred()
 
 
 func _check(condition: bool, message: String) -> void:
@@ -23,6 +34,14 @@ func _check(condition: bool, message: String) -> void:
 func _button(parent: Node, text: String) -> Button:
 	for node: Node in parent.find_children("*", "Button", true, false):
 		if node.text == text:
+			return node as Button
+	return null
+
+
+## The visible button reading [param text], when several share it across steps.
+func _shown_button(parent: Node, text: String) -> Button:
+	for node: Node in parent.find_children("*", "Button", true, false):
+		if node.text == text and (node as Button).is_visible_in_tree():
 			return node as Button
 	return null
 
@@ -232,9 +251,17 @@ func _wizard(create: Button) -> void:
 		return
 	_check(dialog.title == "New project", "The wizard window is titled in sentence case")
 	_check(_label_text(dialog, "Step 1 of 3") != null, "Step 1 says where it is")
-	_check(_label_text(dialog, STEP_TITLES[0]) != null, "Step 1 is Name your game")
+	_check(_label_text(dialog, STEP_TITLES[0]) != null, "Step 1 asks what you are making")
 	_check(not dialog.get_ok_button().is_visible_in_tree(), "The wizard brings its own footer")
 	var initial_rect := Rect2i(dialog.position, dialog.size)
+	# Next waits for the starting points; the first card (blank) is chosen by default.
+	var cards_ready := func() -> bool:
+		for node: Node in dialog.find_children("*", "Button", true, false):
+			if (node as Button).theme_type_variation == &"JoineryCard":
+				if (node as Button).is_visible_in_tree():
+					return true
+		return false
+	_check(await _until(cards_ready, 60.0), "Step 1 shows the starting points as cards")
 	# The renderer sits behind a collapsed Advanced disclosure.
 	var forward := _button(dialog, "Forward+")
 	var advanced := _button(dialog, "Advanced")
@@ -270,10 +297,22 @@ func _wizard(create: Button) -> void:
 		return
 	next.pressed.emit()
 	await create_timer(0.2).timeout
-	_check(_label_text(dialog, STEP_TITLES[1]) != null, "Step 2 is Choose your apps")
+	_check(_label_text(dialog, STEP_TITLES[1]) != null, "Step 2 is Features and apps")
 	_check(
 		Rect2i(dialog.position, dialog.size) == initial_rect, "Apps must keep the window rectangle"
 	)
+	# The apps sit behind one summary line once the list loads; its Change… opens the rows.
+	var apps_change := func() -> Button:
+		for node: Node in dialog.find_children("*", "Button", true, false):
+			if node.get_accessibility_name() == "Change the apps" and node.is_visible_in_tree():
+				return node
+		return null
+	await _until(func() -> bool: return apps_change.call() != null, 60.0)
+	var change: Button = apps_change.call()
+	_check(change != null and change.is_visible_in_tree(), "Step 2 sums up the apps with Change…")
+	if change != null:
+		change.button_pressed = true
+		await process_frame
 	# The app list loads on a worker thread; wait for its rows.
 	var picker: OptionButton
 	var alternative := -1
@@ -338,10 +377,10 @@ func _wizard(create: Button) -> void:
 	await _capture(dialog, "startup-setup-tools.png")
 	next.pressed.emit()
 	await create_timer(0.2).timeout
-	_check(_label_text(dialog, STEP_TITLES[2]) != null, "Step 3 is Look and sound")
+	_check(_label_text(dialog, STEP_TITLES[2]) != null, "Step 3 is Brief and art direction")
 	_check(
 		Rect2i(dialog.position, dialog.size) == initial_rect,
-		"Look and sound must keep the window rectangle"
+		"Step 3 must keep the window rectangle"
 	)
 	var first_field: Control
 	for field: Node in dialog.find_children("*", "TextEdit", true, false):
@@ -349,7 +388,7 @@ func _wizard(create: Button) -> void:
 			first_field = field
 			(field as TextEdit).text = "Test answer retained when navigating back."
 			break
-	_check(first_field != null, "Look and sound asks at least one question")
+	_check(first_field != null, "Step 3 asks at least one question")
 	_check(next.text == "Create project", "The last step offers Create project")
 	await _capture(dialog, "startup-setup-art.png")
 	var back := _button(dialog, "Back")
@@ -373,12 +412,12 @@ func _wizard(create: Button) -> void:
 	_check(_label_text(dialog, "Setting up your project…") != null, "Creating shows its steps")
 	var project := OS.get_environment("JOINERY_SETUP_CHECK_DIR")
 	deadline = Time.get_ticks_msec() + 120000
-	var failed := func() -> bool: return next.text == "Retry" and next.is_visible_in_tree()
-	while (
-		not FileAccess.file_exists(project.path_join("project.godot"))
-		and not failed.call()
-		and Time.get_ticks_msec() < deadline
-	):
+	var failed := func() -> bool: return _shown_button(dialog, "Try again") != null
+	# project.godot is written before the steps run: wait for the end of the run instead.
+	var finished := func() -> bool:
+		var open := _shown_button(dialog, "Open project")
+		return not dialog.visible or failed.call() or open != null
+	while not finished.call() and Time.get_ticks_msec() < deadline:
 		await create_timer(0.2).timeout
 	if failed.call():
 		var details := ""
@@ -408,3 +447,278 @@ func _wizard(create: Button) -> void:
 			server.get("args", []) == ["--stdio", "argument with spaces"],
 			"Preserve argument boundaries"
 		)
+
+
+# --- Project apps dialog and app rail (JOINERY_SETUP_DIALOG_TEST) -----------------------------
+
+
+func _run_dialog() -> void:
+	var state := OS.get_environment("JOINERY_SETUP_STATE")
+	_calls_path = state.path_join("calls.jsonl")
+	Engine.set_meta("joinery_ui_config", state.path_join("journeyman.cfg"))
+	Engine.remove_meta("joinery_ui_prefs")
+	var theme_script: GDScript = load(ADDON + "ui_theme.gd")
+	theme_script.call("set_pref", "theme", "dark")
+	var prefix := PackedStringArray(JSON.parse_string(OS.get_environment("JOINERY_FAKE_CLI")))
+	var dialog: AcceptDialog = (load(ADDON + "project_setup.gd") as GDScript).new()
+	dialog.set("cli_prefix", prefix)
+	dialog.set("start_docker_argv", PackedStringArray())
+	root.add_child(dialog)
+	# The window settles to its requested size over the first frames; open the dialog after.
+	var settled := func() -> bool:
+		return DisplayServer.get_name() == "headless" or root.get_visible_rect().size.y <= 900
+	await _until(settled, 3.0)
+	dialog.call("open_for_current_project")
+	await _check_rows(dialog)
+	if not _failed:
+		await _captures(dialog, "setup-apps")
+		await _check_actions(dialog)
+		await _check_features(dialog)
+		await _captures(dialog, "setup-features", dialog.find_child("Features", true, false))
+	dialog.hide()
+	if not _failed:
+		await _check_rail(prefix)
+	theme_script.call("set_pref", "theme", "match")
+	print("project setup dialog: ", "FAILED" if _failed else "ok")
+	quit(1 if _failed else 0)
+
+
+## Wait up to [param seconds] for [param ready] to return true, drawing frames meanwhile.
+func _until(ready: Callable, seconds := 20.0) -> bool:
+	var deadline := Time.get_ticks_msec() + int(seconds * 1000.0)
+	while not ready.call() and Time.get_ticks_msec() < deadline:
+		await process_frame
+	return ready.call()
+
+
+## Every CLI call the fixture saw, as argument arrays.
+func _calls() -> Array:
+	var calls: Array = []
+	for line: String in FileAccess.get_file_as_string(_calls_path).split("\n", false):
+		calls.append(JSON.parse_string(line))
+	return calls
+
+
+func _called(words: Array) -> bool:
+	for call: Variant in _calls():
+		var hit := true
+		for word: Variant in words:
+			hit = hit and (call as Array).has(word)
+		if hit:
+			return true
+	return false
+
+
+func _row(dialog: Node, tool_id: String) -> Control:
+	return dialog.find_child("App_" + tool_id.replace("-", "_"), true, false) as Control
+
+
+## Readiness on a row: [wording, dot state, action label or "" when hidden, reason].
+func _readiness(row: Control) -> Array:
+	var badge: Control = row.get("state")
+	var action: Button = badge.get("action")
+	var reason: Label = row.get("reason")
+	return [
+		(badge.get("wording") as Label).text,
+		str((badge.get("dot") as Control).get("state")) if badge.visible else "",
+		action.text if action.visible else "",
+		reason.text if reason.is_visible_in_tree() else "",
+	]
+
+
+func _check_rows(dialog: AcceptDialog) -> void:
+	var loaded := func() -> bool: return _row(dialog, "krita") != null
+	_check(await _until(loaded), "The app rows load from joinery tools")
+	if _failed:
+		return
+	var asked_twice := func() -> bool:
+		var count := 0
+		for call: Variant in _calls():
+			count += int((call as Array).has("--background"))
+		return count >= 2 and _readiness(_row(dialog, "surge-xt"))[0] == "Ready"
+	_check(await _until(asked_twice), "Readiness is asked again while it is still checking")
+	var expected := {
+		"godot": ["Downloading…", "working", ""],
+		"blender": ["Ready", "ready", ""],
+		"krita": ["Needs Docker", "attention", "Start Docker"],
+		"inkscape": ["Not available yet", "off", "Rebuild"],
+		"gimp": ["Not available yet", "off", "Check again"],
+		"surge-xt": ["Ready", "ready", ""],
+	}
+	for id: String in expected:
+		var shown := _readiness(_row(dialog, id))
+		_check(shown.slice(0, 3) == expected[id], "%s shows %s, not %s" % [id, expected[id], shown])
+	_check(
+		"Docker" in str(_readiness(_row(dialog, "krita"))[3]), "Needs Docker says why under the row"
+	)
+	_check(
+		"MIDI" in str(_readiness(_row(dialog, "surge-xt"))[3]),
+		"A ready Surge XT still says which of its features is missing"
+	)
+	for id: String in ["aseprite", "reaper", "musescore", "audacity"]:
+		_check(_row(dialog, id) == null, "No row for the scrapped app " + id)
+
+
+func _check_actions(dialog: AcceptDialog) -> void:
+	# Check again runs as a job: the editor keeps drawing frames while the CLI works.
+	var gimp := _row(dialog, "gimp")
+	var action: Button = (gimp.get("state") as Control).get("action")
+	action.pressed.emit()
+	_check(_readiness(gimp)[0] == "Checking…", "Check again says it is checking at once")
+	var frames := 0
+	var longest := 0
+	var last := Time.get_ticks_msec()
+	while _readiness(gimp)[0] != "Ready" and frames < 100000:
+		await process_frame
+		frames += 1
+		var now := Time.get_ticks_msec()
+		longest = maxi(longest, now - last)
+		last = now
+	_check(_called(["status", "--tool", "gimp", "--refresh"]), "Check again asks joinery status")
+	_check(frames > 10, "The editor draws frames while Check again runs (%d)" % frames)
+	_check(longest < 250, "No frame waits on the CLI (longest %d ms)" % longest)
+	_check(_readiness(gimp).slice(0, 3) == ["Ready", "ready", ""], "Checked again: GIMP is ready")
+	# Start Docker shows how, with Check again beside it.
+	var krita := _row(dialog, "krita")
+	((krita.get("state") as Control).get("action") as Button).pressed.emit()
+	var howto: Control = krita.get("howto")
+	_check(howto.is_visible_in_tree(), "Start Docker shows how to start it")
+	var again := howto.find_child("Action", true, false) as Button
+	_check(again != null and again.text == "Check again", "The how-to offers Check again")
+	# Rebuild runs joinery bootstrap as a job.
+	var inkscape := _row(dialog, "inkscape")
+	((inkscape.get("state") as Control).get("action") as Button).pressed.emit()
+	_check(await _until(func() -> bool: return _called(["bootstrap"])), "Rebuild runs bootstrap")
+	var settled := func() -> bool: return dialog.get("_rebuild_job") == null
+	_check(await _until(settled), "The rebuild job finishes")
+
+
+func _check_features(dialog: AcceptDialog) -> void:
+	var section := dialog.find_child("Features", true, false) as Control
+	var shown := func() -> bool: return section != null and section.is_visible_in_tree()
+	_check(await _until(shown), "Game features are listed")
+	if _failed:
+		return
+	var online := section.find_child("Feature_online_play", true, false) as Control
+	var steam := section.find_child("Feature_steam", true, false) as Control
+	var saves := section.find_child("Feature_save_load", true, false) as Control
+	_check(online != null and steam != null and saves != null, "One switch per feature")
+	if _failed:
+		return
+	_check((saves.get("switch_button") as CheckButton).button_pressed, "Applied features are on")
+	var steam_switch := steam.get("switch_button") as CheckButton
+	_check(steam_switch.disabled, "Steam can't be added before online play")
+	_check(
+		(steam.get("reason") as Label).text == "Needs Online play first.",
+		"A disabled switch says why"
+	)
+	var switch := online.get("switch_button") as CheckButton
+	switch.button_pressed = true
+	var plan := func() -> Control: return section.find_child("FeaturePlan", true, false) as Control
+	var planned := func() -> bool:
+		var panel: Control = plan.call()
+		return panel != null and not (panel.get("apply") as Button).disabled
+	_check(await _until(planned), "Turning a feature on shows its plan first")
+	_check(_called(["feature", "add", "online-play", "--plan"]), "The plan comes from --plan")
+	_check(not _called(["--yes"]), "Nothing is applied before Apply")
+	var texts := _label_texts(plan.call())
+	_check("Changes 10 files:" in texts, "The plan says how many files change")
+	_check("and 2 more" in texts, "A long plan ends with how many more")
+	await _captures(dialog, "setup-plan", plan.call())
+	((plan.call() as Control).get("apply") as Button).pressed.emit()
+	var saves_switch := saves.get("switch_button") as CheckButton
+	saves_switch.button_pressed = false
+	_check(saves_switch.button_pressed, "Another switch waits while a change applies")
+	_check(plan.call() != null, "The running change keeps its plan")
+	_check(await _until(func() -> bool: return _called(["--yes"])), "Apply applies the change")
+	var status := dialog.get("_status") as Label
+	var done := func() -> bool: return status.visible and status.text == "Added Online play."
+	_check(await _until(done), "Applying says what changed")
+	var refreshed := func() -> bool:
+		var row := section.find_child("Feature_online_play", true, false) as Control
+		return row != null and (row.get("switch_button") as CheckButton).button_pressed
+	_check(await _until(refreshed), "The applied feature stays on")
+
+
+func _label_texts(node: Node) -> Array[String]:
+	var texts: Array[String] = []
+	if node == null:
+		return texts
+	for label: Node in node.find_children("*", "Label", true, false):
+		texts.append((label as Label).text)
+	return texts
+
+
+func _check_rail(prefix: PackedStringArray) -> void:
+	var host := PanelContainer.new()
+	host.position = Vector2(16, 16)
+	host.size = Vector2(64, 560)
+	root.add_child(host)
+	var rail: VBoxContainer = (load(ADDON + "tool_rail.gd") as GDScript).new()
+	rail.set("cli_prefix", prefix)
+	rail.set("start_docker_argv", PackedStringArray())
+	host.add_child(rail)
+	var tools: Array = []
+	for id: String in ["godot", "blender", "krita", "surge-xt"]:
+		tools.append({"id": id, "name": id.capitalize(), "domain": "3d", "enabled": true})
+	rail.call("update_tools", tools, [])
+	var known := func() -> bool: return (rail.get("_readiness") as Dictionary).has("krita")
+	_check(await _until(known), "The rail reads joinery status")
+	_check(_called(["status", "--catalog", "--background"]), "The rail asks status, not tools")
+	var item := (rail.get("_items") as Dictionary).get("krita") as Control
+	var dot: Control = item.get("dot")
+	_check(dot.visible, "An app that needs something shows a mark on the rail")
+	var krita_button: Button = (rail.get("_buttons") as Dictionary)["krita"]
+	_check(krita_button.tooltip_text.contains("Needs Docker"), "The tooltip names its readiness")
+	rail.call("_show_card", "krita")
+	_check(krita_button.tooltip_text.is_empty(), "No tooltip over an open card")
+	var card := rail.find_child("ReadinessCard", true, false) as Control
+	_check(card != null and card.visible, "Hover or focus shows the readiness card")
+	if card == null:
+		return
+	var sentence := card.find_child("Sentence", true, false) as Label
+	_check("Docker" in sentence.text, "The card says what the app needs")
+	var action := card.find_child("Action", true, false) as Button
+	_check(action.visible and action.text == "Start Docker", "The card offers the one action")
+	var again := card.find_child("CheckAgain", true, false) as Button
+	_check(again != null and again.visible, "The card offers Check again")
+	var stamp := card.find_child("LastChecked", true, false) as Label
+	_check(stamp.text.begins_with("Last checked "), "The card says when it was last checked")
+	await _captures(null, "rail-card")
+	host.queue_free()
+
+
+## Save "<name>-dark.png" and "<name>-light.png" of the whole window when capturing, with
+## [param show] scrolled into view.
+func _captures(dialog: AcceptDialog, name: String, show: Control = null) -> void:
+	if DisplayServer.get_name() == "headless" or OS.get_environment("JOINERY_CAPTURE_DIR") == "":
+		return
+	var theme_script: GDScript = load(ADDON + "ui_theme.gd")
+	if show != null:
+		var scroll := show.get_parent()
+		while scroll != null and not scroll is ScrollContainer:
+			scroll = scroll.get_parent()
+		for _frame: int in 3:
+			await process_frame
+		if scroll != null:
+			# Bring the bottom of [param show] to the bottom of the list.
+			var box := scroll as ScrollContainer
+			var bottom := show.get_global_rect().end.y - box.get_global_rect().end.y
+			box.scroll_vertical = int(box.scroll_vertical + maxf(bottom, 0.0))
+	for mode: String in ["dark", "light"]:
+		theme_script.call("set_pref", "theme", mode)
+		# The editor paints windows in its own theme; stand in for it with Joinery's surfaces.
+		var context: Node = dialog if dialog != null else root.get_child(0)
+		RenderingServer.set_default_clear_color(theme_script.call("color", context, "surface"))
+		if dialog != null:
+			dialog.remove_theme_stylebox_override("panel")
+			var panel := dialog.get_theme_stylebox("panel").duplicate()
+			if panel is StyleBoxFlat:
+				(panel as StyleBoxFlat).bg_color = theme_script.call("color", context, "surface")
+			dialog.add_theme_stylebox_override("panel", panel)
+		for _frame: int in 6:
+			await process_frame
+		await _capture(root, "%s-%s.png" % [name, mode])
+	theme_script.call("set_pref", "theme", "dark")
+	for _frame: int in 3:
+		await process_frame

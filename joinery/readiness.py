@@ -18,9 +18,19 @@ worker image id (and the installed source tree for MCP probes), so a rebuilt
 image or reinstalled server is checked again. Without `refresh`, a cache miss
 is reported as `checking: true` instead of running the probe inline.
 
+Every report is also kept as a snapshot (`status.json`). `current()` answers
+from it while it is fresh, so screens that poll never start Docker, and
+`cached_tools()` reads it without asking anything at all (the asset workspace,
+which refreshes every two seconds).
+
 A tool's state is the worst state among its required checks. Features (such as
 Blender's MPFB2 humans) report their own state and never change the tool's.
 The desktop app ("Open in ...") is reported separately and never affects state.
+
+Screens show the states from `SURFACE` (ready, preparing, needs_docker,
+needs_licence, unavailable) with `STATUS_LABELS`, the plain `summary`
+sentence, at most one `action` ({id, label}: start_docker, rebuild,
+check_again, get) and `checked_at`. ADR 0030 records the rules.
 """
 
 from __future__ import annotations
@@ -73,18 +83,56 @@ STATES: tuple[State, ...] = (
 )
 #: Worse states rank higher; a tool shows its worst required state.
 RANK: dict[str, int] = {state: rank for rank, state in enumerate(STATES)}
-#: What the user can do about each state.
-ACTIONS: dict[str, str] = {
-    "ready": "",
-    "downloading": "",
-    "needs_docker": "start Docker",
-    "needs_image": "joinery setup",
-    "needs_licence": "add your licence",
-    "broken": "joinery setup",
+#: The state every screen shows for each internal state (design addendum S).
+SURFACE: dict[str, str] = {
+    "ready": "ready",
+    "downloading": "preparing",
+    "needs_docker": "needs_docker",
+    "needs_image": "unavailable",
+    "needs_licence": "needs_licence",
+    "broken": "unavailable",
+}
+#: The words for each screen state, the same everywhere.
+STATUS_LABELS: dict[str, str] = {
+    "ready": "Ready",
+    "preparing": "Downloading…",
+    "needs_docker": "Needs Docker",
+    "needs_licence": "Needs your licence",
+    "unavailable": "Not available yet",
+}
+#: The one thing a person can do about an internal state, as an action id.
+ACTION_FOR_STATE: dict[str, str] = {
+    "needs_docker": "start_docker",
+    "needs_image": "rebuild",
+    "needs_licence": "get",
+    "broken": "check_again",
+}
+#: Button text for each action id.
+ACTION_LABELS: dict[str, str] = {
+    "start_docker": "Start Docker",
+    "rebuild": "Rebuild",
+    "check_again": "Check again",
+    "get": "Get it",
 }
 #: Tier-3 results expire after a day even if nothing else changed.
 MCP_TTL_SECONDS = 24 * 3600
+#: How long a whole report stands before `current()` asks Docker again.
+SNAPSHOT_TTL_SECONDS = 30.0
 SETUP_LABEL = "org.joinery.sandbox-rev"
+#: Where the worker images are built from; their revision is a hash of it.
+SANDBOX_DIR = Path(__file__).resolve().parents[1] / "sandbox"
+
+
+def action(action_id: str | None) -> dict[str, str] | None:
+    """`{id, label}` for an action id, or None when there is nothing to do."""
+    if not action_id:
+        return None
+    return {"id": action_id, "label": ACTION_LABELS[action_id]}
+
+
+def action_for(state: str) -> dict[str, str] | None:
+    """The action for an internal state (None for ready and preparing)."""
+    return action(ACTION_FOR_STATE.get(state))
 
 
 def cache_dir() -> Path:
@@ -165,6 +213,49 @@ def _alive(pid: int) -> bool:
     except OSError:
         return False
     return True
+
+
+def sandbox_revision(root: Path | None = None) -> str:
+    """A short hash of everything the worker images are built from.
+
+    Setup stamps each image with it (`SETUP_LABEL`); an image whose stamp
+    differs was built from older sources and needs a rebuild.
+    """
+    root = root or SANDBOX_DIR
+    digest = hashlib.sha256()
+    files: list[Path] = []
+    try:
+        files = sorted(
+            p
+            for p in root.rglob("*")
+            if p.is_file() and "__pycache__" not in p.parts and p.name != ".DS_Store"
+        )
+        for path in files:
+            digest.update(path.relative_to(root).as_posix().encode() + b"\0")
+            digest.update(path.read_bytes())
+    except OSError:
+        return ""
+    return digest.hexdigest()[:16] if files else ""
+
+
+def mark_setup(phase: str, image: str = "") -> None:
+    """Record that setup is building `image` now, so readiness says preparing."""
+    path = cache_dir() / "setup.json"
+    record = {"phase": phase, "image": image, "started": time.time(), "pid": os.getpid()}
+    with contextlib.suppress(OSError):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(f".{os.getpid()}.tmp")
+        temporary.write_text(json.dumps(record) + "\n")
+        os.replace(temporary, path)
+
+
+def clear_setup() -> None:
+    """Setup is over (finished or failed): nothing is preparing any more."""
+    path = cache_dir() / "setup.json"
+    with contextlib.suppress(OSError, ValueError, TypeError):
+        data = json.loads(path.read_text())
+        if int(data.get("pid", 0) or 0) == os.getpid():
+            path.unlink()
 
 
 class DockerHost:
@@ -300,9 +391,8 @@ class DockerHost:
         return data
 
     def expected_revision(self) -> str:
-        # The sandbox revision label lands with the image builds; until then a
-        # present image is taken as current.
-        return os.environ.get("JOINERY_SANDBOX_REV", "")
+        # Images built before the label existed carry none and count as current.
+        return os.environ.get("JOINERY_SANDBOX_REV") or sandbox_revision()
 
     def mcp(self, project: Path, probe: McpProbe) -> ProbeResult:
         try:
@@ -384,6 +474,8 @@ class _Context:
     setup: dict[str, Any] | None = None
     setup_read: bool = False
     updates: dict[str, Any] = field(default_factory=dict)
+    #: Run only the checks the cache cannot answer (a background refresh).
+    fill: bool = False
 
     def docker(self) -> str:
         if self.docker_reason is None:
@@ -509,7 +601,7 @@ def _evaluate(ctx: _Context, module: ToolModule, check: Check) -> Outcome:
         cached = _cached(ctx, key)
         if cached is not None:
             return cached
-        if not ctx.refresh:
+        if not (ctx.refresh or ctx.fill):
             return Outcome(known=False)
         code, output = ctx.host.run(
             check.image, check.argv, check.entrypoint, check.timeout
@@ -528,7 +620,7 @@ def _evaluate(ctx: _Context, module: ToolModule, check: Check) -> Outcome:
         cached = _cached(ctx, key)
         if cached is not None:
             return cached
-        if not ctx.refresh:
+        if not (ctx.refresh or ctx.fill):
             return Outcome(known=False)
         code, output = ctx.host.host_run(binary, check.args, check.timeout)
         return _store_run(ctx, key, code, output, _match(check, code, output))
@@ -547,7 +639,7 @@ def _evaluate(ctx: _Context, module: ToolModule, check: Check) -> Outcome:
     cached = _cached(ctx, key, MCP_TTL_SECONDS)
     if cached is not None:
         return cached
-    if not ctx.refresh:
+    if not (ctx.refresh or ctx.fill):
         return Outcome(known=False)
     result = ctx.host.mcp(ctx.project, check)
     if not result.ran:
@@ -593,6 +685,33 @@ def _probe_outcome(check: McpProbe, result: ProbeResult) -> Outcome:
     return Outcome("ready")
 
 
+def mcp_probes(server: str, tool_ids: Iterable[str] | None = None) -> list[McpProbe]:
+    """The tool modules' read-only probes for one MCP server, required ones first.
+
+    `tool_ids` limits them to the project's tools: a shared server (joinery-paint
+    serves Krita, GIMP and Inkscape) is only asked about the tools in use.
+    """
+    wanted = set(tool_ids) if tool_ids is not None else None
+    found: list[McpProbe] = []
+    for module in tool_modules.REGISTRY.values():
+        if wanted is not None and module.id not in wanted:
+            continue
+        for check in module.checks:
+            if (
+                isinstance(check, McpProbe)
+                and check.server == server
+                and check not in found
+            ):
+                found.append(check)
+    return sorted(found, key=lambda check: bool(check.feature))
+
+
+def judge_probe(check: McpProbe, ok: bool, text: str) -> tuple[str, str]:
+    """(state, detail) for one probe answer, by the same rules as `status`."""
+    outcome = _probe_outcome(check, ProbeResult(True, ok, text))
+    return outcome.state, outcome.detail
+
+
 def _worst(outcomes: Iterable[Outcome]) -> Outcome:
     worst = Outcome()
     for outcome in outcomes:
@@ -607,7 +726,7 @@ def _feature_text(feature: Feature, outcome: Outcome, name: str) -> str:
     if outcome.state == "needs_docker":
         return f"{feature.label}: needs Docker running."
     if outcome.state == "downloading":
-        return f"{feature.label}: preparing the {outcome.detail} worker…"
+        return f"{feature.label}: setting up the offline worker…"
     if outcome.state == "needs_image":
         text = (feature.needs_install if outcome.install else "") or feature.needs_image
         return text or f"{feature.label} unavailable: run Joinery setup."
@@ -618,9 +737,14 @@ def _feature_text(feature: Feature, outcome: Outcome, name: str) -> str:
 def _tool_text(module: ToolModule, outcome: Outcome) -> str:
     name = module.name
     if outcome.state == "needs_docker":
-        return f"{name} needs Docker running to work offline."
+        if "not installed" in outcome.detail:
+            return (
+                f"{name} runs offline in Docker, which isn't installed yet. "
+                "Install Docker Desktop, then check again."
+            )
+        return f"{name} runs offline in Docker. Start Docker Desktop, then check again."
     if outcome.state == "downloading":
-        return f"{name}: preparing the {outcome.detail} worker…"
+        return f"{name}: setting up the offline worker…"
     if outcome.state == "needs_image":
         # A check that names what is missing says it better than the default.
         if outcome.explicit:
@@ -677,10 +801,12 @@ def tool_status(ctx: _Context, module: ToolModule) -> dict[str, Any]:
         features.append(
             {
                 "id": feature.id,
+                "label": feature.label,
                 "state": worst.state,
+                "status": SURFACE[worst.state],
                 "checking": feature_checking,
                 "detail": _feature_text(feature, worst, module.name),
-                "action": ACTIONS[worst.state],
+                "action": action_for(worst.state),
             }
         )
     if overall.state == "ready":
@@ -693,6 +819,7 @@ def tool_status(ctx: _Context, module: ToolModule) -> dict[str, Any]:
     else:
         summary = _tool_text(module, overall)
     image = ctx.images.get(module.worker_image)
+    surface = SURFACE[overall.state]
     entry: dict[str, Any] = {
         "id": module.id,
         "name": module.name,
@@ -701,11 +828,13 @@ def tool_status(ctx: _Context, module: ToolModule) -> dict[str, Any]:
         "checking": checking,
         "summary": _clean(summary),
         "detail": overall.detail,
-        "action": ACTIONS[overall.state],
+        # What every screen shows: the state, its words, why, and what to do.
+        "status": surface,
+        "status_label": STATUS_LABELS[surface],
+        "status_reason": "" if overall.state == "ready" else _clean(summary),
+        "action": action_for(overall.state),
         "features": features,
-        "checked_at": datetime.fromtimestamp(ctx.now, UTC).isoformat(
-            timespec="seconds"
-        ),
+        "checked_at": _stamp(ctx.now),
         "image_id": image.id if image else "",
     }
     if module.desktop:
@@ -745,21 +874,23 @@ def save_cache(cache: Mapping[str, Any]) -> None:
         os.replace(temporary, path)
 
 
-def status(
-    project: Path | None = None,
-    *,
-    tool: str | None = None,
-    catalog: bool = False,
-    refresh: bool = False,
-    deep: bool = False,
-    host: Host | None = None,
-) -> dict[str, Any]:
-    """Readiness for a project's tools (or every catalog tool with `catalog`).
+def _stamp(moment: float) -> str:
+    return datetime.fromtimestamp(moment, UTC).isoformat(timespec="seconds")
 
-    Without `refresh`, tiers 1 to 3 come from the cache and a miss is reported
-    as `checking`; run again with `refresh` (or `spawn_refresh`) to fill it.
-    """
-    host = host or DockerHost()
+
+@dataclass
+class _Scope:
+    """Which tools a report covers, and what the project chose."""
+
+    ids: list[str]
+    selected: set[str]
+    notices: list[str]
+    custom: list[dict[str, Any]]
+
+
+def _scope(
+    project: Path | None, *, tool: str | None, catalog: bool, now: float
+) -> _Scope:
     every = load_catalog()
     selected: set[str] = set()
     notices: list[str] = []
@@ -776,6 +907,11 @@ def status(
                 "custom": True,
                 "checking": False,
                 "summary": f"{c.name}: your own tool; Joinery does not check it.",
+                "status": "ready",
+                "status_label": STATUS_LABELS["ready"],
+                "status_reason": "",
+                "action": None,
+                "checked_at": _stamp(now),
                 "features": [],
             }
             for c in chosen.custom
@@ -789,16 +925,35 @@ def status(
             raise ValueError(f"Unknown tool {tool!r}.")
         ids = [tool]
         custom = []
+    return _Scope([i for i in ids if i in tool_modules.REGISTRY], selected, notices, custom)
+
+
+def status(
+    project: Path | None = None,
+    *,
+    tool: str | None = None,
+    catalog: bool = False,
+    refresh: bool = False,
+    fill: bool = False,
+    deep: bool = False,
+    host: Host | None = None,
+) -> dict[str, Any]:
+    """Readiness for a project's tools (or every catalog tool with `catalog`).
+
+    Without `refresh`, tiers 1 to 3 come from the cache and a miss is reported
+    as `checking`; run again with `refresh` (or `spawn_refresh`) to fill it.
+    With `fill`, only the checks the cache cannot answer run now.
+    """
+    host = host or DockerHost()
+    now = time.time()
+    scope = _scope(project, tool=tool, catalog=catalog, now=now)
+    every = load_catalog()
     cache = load_cache()
-    ctx = _Context(host, project, selected, refresh, deep, cache, time.time())
+    ctx = _Context(host, project, scope.selected, refresh, deep, cache, now, fill=fill)
     ctx.servers = {t.mcp.server: t.id for t in every.tool if t.mcp is not None}
-    report_tools = [
-        tool_status(ctx, tool_modules.REGISTRY[i])
-        for i in ids
-        if i in tool_modules.REGISTRY
-    ]
+    report_tools = [tool_status(ctx, tool_modules.REGISTRY[i]) for i in scope.ids]
     for entry in report_tools:
-        entry["selected"] = entry["id"] in selected
+        entry["selected"] = entry["id"] in scope.selected
     if ctx.updates or ctx.removed & set(cache):
         merged = load_cache()
         merged.update(ctx.updates)
@@ -806,23 +961,162 @@ def status(
             merged.pop(key, None)
         save_cache(merged)
     docker_reason = ctx.docker_reason
+    docker = "unchecked" if docker_reason is None else (docker_reason or "ok")
+    _save_snapshot(report_tools, docker, now)
     return {
-        "docker": "unchecked" if docker_reason is None else (docker_reason or "ok"),
+        "docker": docker,
         "checking": any(t["checking"] for t in report_tools),
-        "tools": [*report_tools, *custom],
-        "removed": notices,
+        "checked_at": _stamp(now),
+        "tools": [*report_tools, *scope.custom],
+        "removed": scope.notices,
     }
 
 
-def spawn_refresh(project: Path | None, *, deep: bool = False) -> bool:
-    """Fill the cache in a detached process; False when one is already running."""
+# --- The snapshot every polling screen reads -------------------------------------
+
+
+def load_snapshot() -> dict[str, Any]:
+    """The last report of every tool: {"docker", "at", "tools": {id: entry}}."""
+    try:
+        data = json.loads((cache_dir() / "status.json").read_text())
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(data, dict) or not isinstance(data.get("tools"), dict):
+        return {}
+    return data
+
+
+def _save_snapshot(entries: Sequence[Mapping[str, Any]], docker: str, now: float) -> None:
+    if not entries:
+        return
+    snapshot = load_snapshot() or {"tools": {}}
+    for entry in entries:
+        kept = {key: value for key, value in entry.items() if key != "selected"}
+        snapshot["tools"][str(entry["id"])] = {**kept, "at": now}
+    snapshot["docker"] = docker
+    snapshot["at"] = now
+    path = cache_dir() / "status.json"
+    with contextlib.suppress(OSError):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(f".{os.getpid()}.tmp")
+        temporary.write_text(json.dumps(snapshot, indent=1, sort_keys=True) + "\n")
+        os.replace(temporary, path)
+
+
+def cached_tools() -> dict[str, dict[str, Any]]:
+    """Each tool's last known entry, by id, without asking Docker or anything else.
+
+    For screens that refresh often (the asset workspace). An entry keeps its
+    own `checked_at`, so an old answer never looks new.
+    """
+    tools = load_snapshot().get("tools", {})
+    return {
+        str(key): dict(value) for key, value in tools.items() if isinstance(value, dict)
+    }
+
+
+def _snapshot_report(
+    scope: _Scope, max_age: float, now: float, host: Host
+) -> dict[str, Any] | None:
+    """The report from the snapshot, or None when any part is missing or stale."""
+    snapshot = load_snapshot()
+    known = snapshot.get("tools", {})
+    entries = []
+    for tool_id in scope.ids:
+        entry = known.get(tool_id)
+        if not isinstance(entry, dict) or "status" not in entry:
+            return None
+        if now - float(entry.get("at", 0)) > max_age:
+            return None
+        # While setup builds a worker, the answer changes by the minute.
+        if entry.get("state") == "downloading":
+            return None
+        entries.append({**entry, "selected": tool_id in scope.selected})
+    if host.setup():
+        return None
+    return {
+        "docker": str(snapshot.get("docker", "unchecked")),
+        "checking": any(e.get("checking") for e in entries),
+        "checked_at": _stamp(min((float(e["at"]) for e in entries), default=now)),
+        "cached": True,
+        "tools": [*entries, *scope.custom],
+        "removed": scope.notices,
+    }
+
+
+def current(
+    project: Path | None = None,
+    *,
+    tool: str | None = None,
+    catalog: bool = False,
+    host: Host | None = None,
+    max_age: float = SNAPSHOT_TTL_SECONDS,
+    background: bool = True,
+) -> dict[str, Any]:
+    """Readiness for screens that ask often: the snapshot while it is fresh.
+
+    Within `max_age` seconds nothing outside Python runs. Otherwise the cheap
+    checks run now (`status`) and, with `background`, the checks the cache
+    cannot answer run in a detached process (`refreshing: true`).
+    """
+    host = host or DockerHost()
+    now = time.time()
+    scope = _scope(project, tool=tool, catalog=catalog, now=now)
+    report = _snapshot_report(scope, max_age, now, host)
+    if report is None:
+        report = status(project, tool=tool, catalog=catalog, host=host)
+    if background and report["checking"]:
+        report["refreshing"] = spawn_refresh(project, catalog=catalog)
+    return report
+
+
+def agents() -> dict[str, dict[str, Any]]:
+    """Each agent's connection in the same report: summary and verified flag.
+
+    Slow (each agent's own status command runs), so only on request.
+    """
+    from joinery import connection
+    from joinery.agents import all_agents
+
+    found: dict[str, dict[str, Any]] = {}
+    for agent in all_agents():
+        try:
+            data = connection.status(agent.id)
+        except (OSError, ValueError, KeyError) as exc:
+            found[agent.id] = {"summary": f"{agent.name}: {exc}", "verified": False}
+            continue
+        found[agent.id] = {
+            "name": data.get("name", agent.name),
+            "installed": bool(data.get("installed")),
+            "connected": bool(data.get("connected")),
+            "verified": bool(data.get("verified")),
+            "summary": str(data.get("summary", "")),
+        }
+    return found
+
+
+def spawn_refresh(
+    project: Path | None,
+    *,
+    deep: bool = False,
+    full: bool = False,
+    catalog: bool = False,
+) -> bool:
+    """Fill the cache in a detached process; False when one is already running.
+
+    By default only the checks the cache cannot answer run (`--fill`); `full`
+    runs every check again.
+    """
     lock = cache_dir() / "readiness.pid"
     with contextlib.suppress(OSError, ValueError):
         if _alive(int(lock.read_text().strip())):
             return False
-    argv = [sys.executable, "-m", "joinery.readiness", "--refresh", "--quiet"]
+    mode = "--refresh" if full else "--fill"
+    argv = [sys.executable, "-m", "joinery.readiness", mode, "--quiet"]
     if project is not None:
         argv += ["--project", str(project.resolve())]
+    if catalog:
+        argv.append("--catalog")
     if deep:
         argv.append("--deep")
     lock.parent.mkdir(parents=True, exist_ok=True)
@@ -873,32 +1167,47 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--tool")
     parser.add_argument("--catalog", action="store_true", help="every catalog tool")
     parser.add_argument("--refresh", action="store_true", help="run every check now")
+    parser.add_argument(
+        "--fill", action="store_true", help="run only the checks the cache lacks"
+    )
     parser.add_argument("--deep", action="store_true", help="include the slow checks")
     parser.add_argument(
         "--background",
         action="store_true",
         help="answer from the cache and refresh missing checks in the background",
     )
+    parser.add_argument(
+        "--agents", action="store_true", help="add each agent's connection"
+    )
+    parser.add_argument("--json", action="store_true", help="JSON (the default)")
     parser.add_argument("--text", action="store_true", help="plain text, not JSON")
     parser.add_argument("--quiet", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
     project = args.project.resolve() if args.project else None
     try:
-        report = status(
-            project,
-            tool=args.tool,
-            catalog=args.catalog,
-            refresh=args.refresh,
-            deep=args.deep,
-        )
+        if args.background and not (args.refresh or args.fill or args.deep):
+            report = current(project, tool=args.tool, catalog=args.catalog)
+        else:
+            report = status(
+                project,
+                tool=args.tool,
+                catalog=args.catalog,
+                refresh=args.refresh,
+                fill=args.fill,
+                deep=args.deep,
+            )
+            if args.background and report["checking"]:
+                report["refreshing"] = spawn_refresh(
+                    project, deep=args.deep, catalog=args.catalog
+                )
     except ValueError as exc:
         print(json.dumps({"error": str(exc)}))
         return 2
     finally:
-        if args.refresh and args.quiet:
+        if (args.refresh or args.fill) and args.quiet:
             _release_refresh_lock()
-    if args.background and report["checking"]:
-        report["refreshing"] = spawn_refresh(project, deep=args.deep)
+    if args.agents:
+        report["agents"] = agents()
     if args.quiet:
         return 0
     if args.text:

@@ -7,8 +7,10 @@ extends VBoxContainer
 ## One monochrome icon family (icons/tools/*.svg, drawn in-house on a 20 px grid), tinted
 ## text, and accent on the selected item. The selected item also gets an accent bar on the
 ## rail's left edge and a raised pill behind its icon. Each app shows its readiness from
-## `joinery tools --json` (field `status`; a missing field shows nothing): a dot only when the
-## app needs something, and a pulse when it becomes ready.
+## `joinery status --catalog --background --json`, the one readiness source (ADR 0030): a dot
+## only when the app needs something, and one pulse when it becomes ready. Hovering or focusing
+## an app shows a card with the plain sentence, its one action, Check again and when it was
+## last checked. Every command runs as a job, off the UI thread.
 
 signal tool_selected(tool: String)
 signal toolbar_requested
@@ -19,37 +21,36 @@ const UI_MOTION := preload("ui_motion.gd")
 const COMMAND_SCRIPT := preload("command_job.gd")
 ## The id of the "All assets" item: the workspace's unfiltered view.
 const ALL_ASSETS := ""
-## Rail glyphs are drawn on a 20 px grid, scaled by ui_theme.unit().
-const ICON_SIZE := 20
-## Readiness wording, the same as the setup screens and the /tools reply. "installed",
-## "licence" and "missing" are the older names of the same states.
+## Readiness words, the same as ui_components.READINESS (kept here for callers that read them).
 const STATUS_TEXT := {
 	"ready": "Ready",
-	"installed": "Ready",
 	"preparing": "Downloading…",
 	"needs_docker": "Needs Docker",
 	"needs_licence": "Needs your licence",
-	"licence": "Needs your licence",
-	"missing": "Not installed",
 	"unavailable": "Not available yet",
 }
-## Dot state per readiness, as in project setup and the asset list. Two marks, one meaning
-## each: a filled accent dot while the app is getting ready, a hollow ring while it can't be
-## used yet. The button's tooltip names the state ("Blender · Needs Docker") and why. Ready
-## (and an unknown status) shows no mark, so the rail stays quiet until an app needs something.
-const STATUS_DOT := {
-	"preparing": "working",
-	"needs_docker": "off",
-	"needs_licence": "off",
-	"licence": "off",
-	"missing": "off",
-	"unavailable": "off",
-}
+## Wording and dot per readiness come from ui_components.READINESS, the same as project setup:
+## an accent dot while the app is getting ready, a red dot when it needs you, a hollow ring
+## while it can't be used yet. Ready (and an unknown status) shows no mark, so the rail stays
+## quiet until an app needs something.
+const DOCKER_HOWTO := "Open Docker Desktop and wait until it says it's running, then check again."
 ## Fallback glyph (ui_theme icon) by catalog domain, for apps without their own icon.
 const DOMAIN_ICONS := {"3d": "model", "2d": "image", "audio": "audio", "materials": "material"}
 ## Seconds between readiness checks while an app is still preparing, and otherwise.
 const PREPARING_INTERVAL := 5.0
 const IDLE_INTERVAL := 60.0
+## Seconds the card stays after the pointer and focus leave both the app and the card.
+const CARD_GRACE := 0.3
+## The card's text width in multiples of the body font.
+const CARD_EM := 22
+
+## The command that runs the Joinery CLI and its leading arguments. Empty: the engine
+## checkout's `uv run … joinery`. Tests point it at a fixture.
+var cli_prefix := PackedStringArray()
+## What "Start Docker" runs besides showing how (empty: only the how-to).
+var start_docker_argv := PackedStringArray(
+	["open", "-a", "Docker"] if OS.get_name() == "macOS" else []
+)
 
 var _buttons: Dictionary = {}
 var _items: Dictionary = {}
@@ -60,7 +61,24 @@ var _selected := "godot"
 var _signature: Array = []
 var _readiness: Dictionary = {}
 var _job: RefCounted
+var _action_job: RefCounted
+var _action_tool := ""
 var _since_check := 0.0
+var _card: Card
+var _card_layer: Control
+var _card_tool := ""
+var _card_idle := 0.0
+
+
+## The readiness card beside an app: name, the plain sentence, the one action, Check again
+## and when it was last checked.
+class Card:
+	extends PanelContainer
+	var heading: Label
+	var sentence: Label
+	var action: Button
+	var again: Button
+	var checked: Label
 
 
 ## One rail entry: a flat square icon button with the selection pill and accent bar drawn
@@ -151,39 +169,58 @@ func _ready() -> void:
 	_toolbar = _item(toggle, {"editor": "Ruler"}, false)
 	toggle.pressed.connect(func() -> void: toolbar_requested.emit())
 	add_child(_toolbar)
+	_build_card()
 	_refresh_readiness()
 
 
 func _exit_tree() -> void:
-	if _job != null:
-		_job.cancel()
-		_job = null
+	for job: RefCounted in [_job, _action_job]:
+		if job != null:
+			job.call("cancel")
+	_job = null
+	_action_job = null
 
 
 func _process(delta: float) -> void:
 	_since_check += delta
+	_track_card(delta)
+	if _action_job != null:
+		var done: Dictionary = _action_job.call("poll")
+		if not done.is_empty():
+			_action_done(done)
 	if _job == null:
-		var preparing := false
+		var waiting := _action_job != null
 		for entry: Dictionary in _readiness.values():
-			preparing = preparing or entry.get("status") == "preparing"
-		if _since_check >= (PREPARING_INTERVAL if preparing else IDLE_INTERVAL):
+			waiting = waiting or entry.get("status") == "preparing" or entry.get("checking", false)
+		if _since_check >= (PREPARING_INTERVAL if waiting else IDLE_INTERVAL):
 			_refresh_readiness()
 		return
-	var result: Dictionary = _job.poll()
+	var result: Dictionary = _job.call("poll")
 	if result.is_empty():
 		return
 	_job = null
 	_since_check = 0.0
-	var payload: Variant = JSON.parse_string(str(result["output"]))
-	if int(result["code"]) != 0 or not payload is Dictionary:
+	var readiness := _parse(result)
+	if readiness.is_empty():
 		return  # Keep the last known readiness; the rail still works without it.
+	var merged := _readiness.duplicate()
+	merged.merge(readiness, true)
+	_apply_readiness(merged)
+
+
+## Readiness entries by app id from a `joinery status` reply; {} when it is unreadable.
+static func _parse(result: Dictionary) -> Dictionary:
+	var json := JSON.new()
+	if int(result.get("code", 1)) != 0 or json.parse(str(result.get("output", ""))) != OK:
+		return {}
+	var payload: Variant = json.data
+	if not payload is Dictionary:
+		return {}
 	var readiness := {}
 	for tool: Variant in payload.get("tools", []):
 		if tool is Dictionary and tool.has("id") and tool.get("status") is String:
-			readiness[str(tool["id"])] = {
-				"status": str(tool["status"]), "reason": str(tool.get("status_reason", ""))
-			}
-	_apply_readiness(readiness)
+			readiness[str(tool["id"])] = tool
+	return readiness
 
 
 ## Rebuild the app list from the workspace catalog: every enabled app, and any app that
@@ -255,6 +292,8 @@ func _add_tool(id: String, title: String, source: Dictionary) -> void:
 	button.button_group = _group
 	button.set_meta("title", title)
 	button.pressed.connect(func() -> void: tool_selected.emit(id))
+	button.mouse_entered.connect(_show_card.bind(id))
+	button.focus_entered.connect(_show_card.bind(id))
 	var item := _item(button, source, true)
 	_tools.add_child(item)
 	_buttons[id] = button
@@ -293,7 +332,8 @@ func _item(button: Button, source: Dictionary, marker: bool) -> RailItem:
 func _style(item: RailItem) -> void:
 	var side := float(UI_THEME.control_h(self, "lg"))
 	item.button.custom_minimum_size = Vector2(side, side)
-	var icon_size := roundi(ICON_SIZE * UI_THEME.unit(self))
+	# Rail glyphs are drawn on a 20 px grid: the ICON.md token.
+	var icon_size := UI_THEME.icon_px(self, "md")
 	item.button.add_theme_constant_override("icon_max_width", icon_size)
 	item.set_meta("icons", [_render(item.source, "text"), _render(item.source, "accent")])
 	_sync(item, true)
@@ -370,26 +410,217 @@ func _refresh_readiness() -> void:
 	if _job != null:
 		return
 	_since_check = 0.0
-	var engine_dir := OS.get_environment("JOINERY_HOME")
-	if engine_dir.is_empty():
-		engine_dir = ProjectSettings.globalize_path("res://").path_join("..").simplify_path()
-	var arguments := PackedStringArray(
-		[
-			"run",
-			"--frozen",
-			"--quiet",
-			"--project",
-			engine_dir,
-			"joinery",
-			"tools",
-			"--json",
-			"--project",
-			ProjectSettings.globalize_path("res://"),
-		]
+	_job = _start(["status", "--catalog", "--background", "--json", "--project", _project()])
+
+
+func _project() -> String:
+	return ProjectSettings.globalize_path("res://").rstrip("/")
+
+
+## Start the Joinery CLI with [param arguments] as a job; null when it can't start.
+func _start(arguments: Array) -> RefCounted:
+	var program := "uv"
+	var args := PackedStringArray()
+	if cli_prefix.is_empty():
+		var engine_dir := OS.get_environment("JOINERY_HOME")
+		if engine_dir.is_empty():
+			engine_dir = ProjectSettings.globalize_path("res://").path_join("..").simplify_path()
+		args = PackedStringArray(["run", "--frozen", "--quiet", "--project", engine_dir, "joinery"])
+	else:
+		program = cli_prefix[0]
+		args = cli_prefix.slice(1)
+	for argument: Variant in arguments:
+		args.append(str(argument))
+	var job: RefCounted = COMMAND_SCRIPT.new()
+	return job if job.call("start", program, args) == OK else null
+
+
+# --- The readiness card ----------------------------------------------------------------------
+
+
+func _build_card() -> void:
+	# A plain, top-level layer: the rail's column never lays the card out.
+	_card_layer = Control.new()
+	_card_layer.top_level = true
+	_card_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_card_layer)
+	_card = Card.new()
+	_card.name = "ReadinessCard"
+	_card.theme_type_variation = "JoineryHoverCard"
+	_card.hide()
+	_card_layer.add_child(_card)
+	var stack := VBoxContainer.new()
+	stack.theme_type_variation = "JoineryTight"
+	_card.add_child(stack)
+	_card.heading = UI_COMPONENTS.label("", "", true)
+	stack.add_child(_card.heading)
+	_card.sentence = UI_COMPONENTS.label("", "JoineryCaption", true)
+	_card.sentence.name = "Sentence"
+	stack.add_child(_card.sentence)
+	var buttons := HBoxContainer.new()
+	buttons.theme_type_variation = "JoineryRow"
+	stack.add_child(buttons)
+	_card.action = UI_COMPONENTS.status_action()
+	# The card is a view of its own: its one action is the primary one.
+	_card.action.theme_type_variation = "JoineryPrimaryButton"
+	_card.action.name = "Action"
+	_card.action.pressed.connect(_on_card_action)
+	buttons.add_child(_card.action)
+	_card.again = UI_COMPONENTS.quiet("Check again")
+	_card.again.name = "CheckAgain"
+	_card.again.pressed.connect(_check_again)
+	buttons.add_child(_card.again)
+	var gap := Control.new()
+	gap.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	gap.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	buttons.add_child(gap)
+	_card.checked = UI_COMPONENTS.label("", "JoineryFaint")
+	_card.checked.name = "LastChecked"
+	_card.checked.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	buttons.add_child(_card.checked)
+	_card.theme_changed.connect(
+		func() -> void:
+			if _card.visible:
+				_place_card.call_deferred()
 	)
-	_job = COMMAND_SCRIPT.new()
-	if _job.start("uv", arguments) != OK:
-		_job = null
+
+
+## Show the card beside [param id]'s rail item (hover or focus).
+func _show_card(id: String) -> void:
+	if not _readiness.has(id) or not _items.has(id):
+		return
+	if _card_tool != id:
+		_hide_card_now()
+	_card_tool = id
+	_card_idle = 0.0
+	_fill_card()
+	var item: RailItem = _items[id]
+	item.button.tooltip_text = ""
+	_place_card()
+	if not _card.visible:
+		UI_MOTION.enter(_card, item)
+	# Wrapped text knows its height only once it has its width: settle again next frame.
+	_place_card.call_deferred()
+
+
+## Fit the card to its text and put it beside its app, inside the window.
+func _place_card() -> void:
+	var item: RailItem = _items.get(_card_tool)
+	if item == null or not is_instance_valid(_card):
+		return
+	var width := UI_THEME.font_size(_card, "body") * CARD_EM
+	_card.sentence.custom_minimum_size.x = width
+	_card.heading.custom_minimum_size.x = width
+	_card.reset_size()
+	var gap := float(UI_THEME.space(self, 2))
+	var at := item.get_global_rect().position + Vector2(item.size.x + gap, 0.0)
+	var limit := get_viewport_rect().size - _card.size
+	_card.global_position = Vector2(minf(at.x, limit.x), clampf(at.y, 0.0, maxf(limit.y, 0.0)))
+
+
+func _fill_card() -> void:
+	var entry: Dictionary = _readiness.get(_card_tool, {})
+	var item: RailItem = _items.get(_card_tool)
+	var title := str(item.button.get_meta("title", _card_tool)) if item != null else _card_tool
+	var status := str(entry.get("status", ""))
+	var words: Array = UI_COMPONENTS.READINESS.get(status, ["Checking…"])
+	_card.heading.text = "%s · %s" % [title, words[0]]
+	var sentence := str(entry.get("status_reason", ""))
+	if sentence.is_empty():
+		sentence = str(entry.get("summary", ""))
+	if _action_job != null and _action_tool == _card_tool:
+		sentence = str(_card.get_meta("busy_text", sentence))
+	elif _card.has_meta("howto") and status == "needs_docker":
+		sentence = DOCKER_HOWTO
+	_card.sentence.text = sentence
+	var action: Variant = entry.get("action")
+	if action is Dictionary and str((action as Dictionary).get("id", "")) in ["check_again", "get"]:
+		action = null  # Check again has its own button; licences are bought in setup.
+	_card.action.set_action(action)
+	var busy := _action_job != null
+	_card.action.disabled = busy
+	_card.again.disabled = busy
+	_card.checked.text = UI_COMPONENTS.last_checked(str(entry.get("checked_at", "")))
+	if _card.visible:
+		_place_card.call_deferred()
+
+
+## Keep the card while the pointer or focus is on its app or on the card; else hide it.
+func _track_card(delta: float) -> void:
+	if _card == null or not _card.visible:
+		return
+	var item: RailItem = _items.get(_card_tool)
+	var focus := get_viewport().gui_get_focus_owner()
+	var inside := (
+		item != null and (item.button.is_hovered() or item.button.has_focus())
+		or _card.get_global_rect().has_point(_card.get_global_mouse_position())
+		or (focus != null and _card.is_ancestor_of(focus))
+	)
+	_card_idle = 0.0 if inside else _card_idle + delta
+	if _card_idle >= CARD_GRACE:
+		_card.remove_meta("howto")
+		_restore_tip()
+		UI_MOTION.exit(_card, item)
+
+
+## Another app's card replaces this one at once.
+func _hide_card_now() -> void:
+	if _card != null and _card.visible:
+		_restore_tip()
+		_card.hide()
+
+
+func _restore_tip() -> void:
+	var item: RailItem = _items.get(_card_tool)
+	if item != null:
+		item.button.tooltip_text = str(item.button.get_meta("tip", item.button.tooltip_text))
+
+
+func _on_card_action() -> void:
+	match _card.action.action_id:
+		"start_docker":
+			if not start_docker_argv.is_empty():
+				OS.create_process(start_docker_argv[0], start_docker_argv.slice(1))
+			_card.set_meta("howto", true)
+			_fill_card()
+			_card.again.grab_focus()
+		"rebuild":
+			_run_action(
+				["bootstrap", "--project", _project()],
+				"Rebuilding the offline workers. This can take a few minutes."
+			)
+
+
+func _check_again() -> void:
+	_run_action(
+		["status", "--tool", _card_tool, "--refresh", "--json", "--project", _project()],
+		"Checking…"
+	)
+
+
+func _run_action(arguments: Array, busy_text: String) -> void:
+	if _action_job != null:
+		return
+	_action_job = _start(arguments)
+	if _action_job == null:
+		return
+	_action_tool = _card_tool
+	_card.set_meta("busy_text", busy_text)
+	_card.remove_meta("howto")
+	_fill_card()
+
+
+func _action_done(result: Dictionary) -> void:
+	_action_job = null
+	var readiness := _parse(result)
+	if not readiness.is_empty():
+		var merged := _readiness.duplicate()
+		merged.merge(readiness, true)
+		_apply_readiness(merged)
+	if _card.visible:
+		_fill_card()
+	# A rebuild changes every worker: ask about all of them now.
+	_since_check = IDLE_INTERVAL
 
 
 func _apply_readiness(readiness: Dictionary) -> void:
@@ -400,23 +631,26 @@ func _apply_readiness(readiness: Dictionary) -> void:
 		var title := str(item.button.get_meta("title", item.button.accessibility_name))
 		var entry: Dictionary = readiness.get(id, {})
 		var status := str(entry.get("status", ""))
-		var wording := str(STATUS_TEXT.get(status, ""))
+		var wording := str((UI_COMPONENTS.READINESS.get(status, [""]) as Array)[0])
+		var reason := str(entry.get("status_reason", ""))
+		var ready := status == "ready"
 		var tip := title if wording.is_empty() else "%s · %s" % [title, wording]
-		var reason := str(entry.get("reason", ""))
-		var ready := status in ["ready", "installed"]
-		if not reason.is_empty() and not ready:
-			tip += "\n" + reason
-		item.button.tooltip_text = tip
-		item.button.accessibility_description = wording
+		item.button.set_meta("tip", tip)
+		# While its card is open the card explains the app; a tooltip would only cover it.
+		var carded := _card != null and _card.visible and _card_tool == id
+		item.button.tooltip_text = "" if carded else tip
+		item.button.accessibility_description = (
+			wording if ready or reason.is_empty() else "%s. %s" % [wording, reason]
+		)
 		var dot := item.dot as UI_COMPONENTS.StatusDot
-		dot.visible = STATUS_DOT.has(status)
+		var was_shown := dot.visible
+		dot.visible = UI_COMPONENTS.READINESS.has(status) and status != "ready"
 		if dot.visible:
-			dot.state = STATUS_DOT[status]
+			dot.state = str(UI_COMPONENTS.READINESS[status][1])
 		var was := str((previous.get(id, {}) as Dictionary).get("status", ""))
-		if (
-			ready
-			and not was.is_empty()
-			and not was in ["ready", "installed"]
-			and item.is_inside_tree()
-		):
+		if ready and not was.is_empty() and was != "ready" and item.is_inside_tree():
+			# Turned Ready: the glyph pulses once and the badge fades.
 			UI_MOTION.pulse(item)
+			if was_shown:
+				dot.show()
+				UI_MOTION.exit(dot)

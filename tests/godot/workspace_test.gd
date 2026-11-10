@@ -3,13 +3,23 @@ extends SceneTree
 ## godot --path testbed --script ../tests/godot/workspace_test.gd
 ## Set JOINERY_WORKSPACE_INDEX to a `joinery workspace` JSON report.
 ## Optional JOINERY_WORKSPACE_CAPTURE saves the real viewer for visual QA.
+##
+## With JOINERY_PARTS_INDEX instead (tests/godot/run_parts_tests.py, a project holding the
+## hammer fixture), it checks the parts list of a model: JOINERY_PARTS_THEME (dark or light)
+## and JOINERY_PARTS_CAPTURE save a screenshot of it.
+
+const CHIP := preload("res://addons/joinery/target_chip.gd")
+const WORKSPACE := preload("res://addons/joinery/tool_workspace.gd")
 
 var _workspace: VBoxContainer
 var _failed := false
 
 
 func _initialize() -> void:
-	_run.call_deferred()
+	if not OS.get_environment("JOINERY_PARTS_INDEX").is_empty():
+		_run_parts.call_deferred()
+	else:
+		_run.call_deferred()
 
 
 func _check(condition: bool, message: String) -> void:
@@ -20,7 +30,7 @@ func _check(condition: bool, message: String) -> void:
 
 func _run() -> void:
 	root.size = Vector2i(1280, 800)
-	_workspace = load("res://addons/joinery/tool_workspace.gd").new() as VBoxContainer
+	_workspace = WORKSPACE.new()
 	root.add_child(_workspace)
 	_workspace.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	await process_frame
@@ -222,3 +232,90 @@ func _check_states(payload: Dictionary) -> void:
 	_workspace._load_error = ""
 	_workspace._apply_data({"tools": payload["tools"], "assets": [], "issues": []})
 	_check(_workspace._empty.text.begins_with("No assets yet."), _workspace._empty.text)
+
+
+## The parts list of the hammer: groups and counts from the real `joinery parts` command
+## (served from its cache), picking a map, the map beside the model, and a click on the model.
+func _run_parts() -> void:
+	var theme := OS.get_environment("JOINERY_PARTS_THEME")
+	if not theme.is_empty():
+		var config := OS.get_user_data_dir().path_join("parts-test-ui.cfg")
+		var file := ConfigFile.new()
+		file.set_value("appearance", "theme", theme)
+		file.save(config)
+		Engine.set_meta("joinery_ui_config", config)
+	root.size = Vector2i(1280, 800)
+	var backdrop := Panel.new()
+	root.add_child(backdrop)
+	backdrop.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_workspace = WORKSPACE.new()
+	root.add_child(_workspace)
+	_workspace.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	await process_frame
+	var background := load("res://addons/joinery/ui_theme.gd").color(_workspace, "surface") as Color
+	var box := StyleBoxFlat.new()
+	box.bg_color = background
+	backdrop.add_theme_stylebox_override("panel", box)
+	var index: Dictionary = JSON.parse_string(
+		FileAccess.get_file_as_string(OS.get_environment("JOINERY_PARTS_INDEX"))
+	)
+	_workspace._apply_data(index)
+	_workspace.select_resource("res://art/models/hammer.glb")
+	var panel: VBoxContainer = _workspace._parts_panel
+	_check(panel.visible, "A Blender model lists its parts")
+	var deadline := Time.get_ticks_msec() + 60000
+	while panel._job != null and Time.get_ticks_msec() < deadline:
+		await process_frame
+	_check(panel._error.is_empty(), "joinery parts failed: " + panel._error)
+	var counts: Dictionary = panel.group_counts()
+	_check(int(counts.get("object", 0)) == 2, "2 objects: %s" % [counts])
+	_check(int(counts.get("material", 0)) == 2, "2 materials: %s" % [counts])
+	_check(int(counts.get("texture", 0)) == 5, "5 textures: %s" % [counts])
+	_check(int(counts.get("shape_key", 0)) == 1, "Shape key Dent: %s" % [counts])
+	var picked: Array[Dictionary] = []
+	_workspace.part_selected.connect(func(target: Dictionary) -> void: picked.append(target))
+	var rough: TreeItem = null
+	for heading: TreeItem in panel.tree.get_root().get_children():
+		for item: TreeItem in heading.get_children():
+			if (item.get_metadata(0) as Dictionary).get("image") == "steel_rough":
+				rough = item
+	_check(rough != null, "The roughness map of Steel is listed")
+	if rough != null:
+		_check(rough.get_text(0) == "Roughness · Steel", rough.get_text(0))
+		panel.tree.set_selected(rough, 0)
+	_check(picked.size() == 1, "Selecting a map emits one part")
+	if not picked.is_empty():
+		var target := picked[0]
+		_check(target["label"] == "Roughness · Steel", target["label"])
+		_check(target["part_kind"] == "texture" and target["image"] == "steel_rough", "Map part")
+		var chip := CHIP.build(
+			_workspace, target, func(_p: String) -> void: pass, func() -> void: pass
+		)
+		var texts: Array[String] = []
+		for label: Node in chip.find_children("*", "Label", true, false):
+			texts.append((label as Label).text)
+		_check(texts.has("Roughness · Steel"), "Chip text: %s" % [texts])
+		_check(chip.tooltip_text.contains("Used by Handle, Head.001"), chip.tooltip_text)
+		chip.free()
+	_check(panel.map_view.visible, "A picked map shows beside the model")
+	_check(panel._map_picture.texture != null, "The map preview has the exported pixels")
+	var viewer: SubViewportContainer = _workspace._preview.get_child(0)
+	await process_frame
+	await process_frame
+	var hit: Dictionary = viewer.pick_at(viewer.size / 2.0)
+	_check(not hit.is_empty(), "A click in the middle of the model hits a part")
+	if not hit.is_empty():
+		panel._on_model_clicked(hit)
+		var last: Dictionary = picked[-1]
+		_check(last["object"] == hit["object"], "A model click keeps the object it hit")
+		_check(str(last["label"]).ends_with(" · " + str(hit["object"])), last["label"])
+	panel.tree.set_selected(rough, 0)
+	await create_timer(0.4).timeout
+	var capture := OS.get_environment("JOINERY_PARTS_CAPTURE")
+	if not capture.is_empty():
+		await RenderingServer.frame_post_draw
+		root.get_texture().get_image().save_png(capture)
+	print("workspace parts: ", "FAILED" if _failed else "ok")
+	_workspace.queue_free()
+	await process_frame
+	quit(1 if _failed else 0)

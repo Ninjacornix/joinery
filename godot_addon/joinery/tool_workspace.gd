@@ -9,12 +9,15 @@ signal creator_changed(tool: String)
 signal asset_selected(asset: Dictionary)
 ## The user asked to set up apps (an app needed to open an asset is missing).
 signal setup_requested
+## The user picked a part of the shown model (list or model click): a target_chip.for_part.
+signal part_selected(target: Dictionary)
 
 const COMMAND_SCRIPT := preload("res://addons/joinery/command_job.gd")
 const AUDIO_SCRIPT := preload("res://addons/joinery/audio_preview.gd")
 const MODEL_SCRIPT := preload("res://addons/joinery/model_preview.gd")
 const LIST_SCRIPT := preload("res://addons/joinery/asset_list.gd")
 const INDICATOR_SCRIPT := preload("res://addons/joinery/activity_indicator.gd")
+const PARTS_SCRIPT := preload("res://addons/joinery/parts_panel.gd")
 const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
 const UI_COMPONENTS := preload("res://addons/joinery/ui_components.gd")
 const UI_MOTION := preload("res://addons/joinery/ui_motion.gd")
@@ -72,6 +75,7 @@ var _unavailable_label: Label
 var _setup_link: Button
 var _parts: HFlowContainer
 var _preview: VBoxContainer
+var _parts_panel: PARTS_SCRIPT
 var _status: Label
 var _audio: AudioStreamPlayer
 var _audio_panel: AUDIO_SCRIPT
@@ -208,10 +212,19 @@ func _build_body(split: HSplitContainer) -> void:
 	_parts = HFlowContainer.new()
 	_parts.hide()
 	body.add_child(_parts)
+	var stage := HBoxContainer.new()
+	stage.theme_type_variation = "JoineryRow"
+	stage.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.add_child(stage)
+	_parts_panel = PARTS_SCRIPT.new()
+	_parts_panel.part_selected.connect(part_selected.emit)
+	stage.add_child(_parts_panel.map_view)
 	_preview = VBoxContainer.new()
 	_preview.theme_type_variation = "JoineryTight"
 	_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body.add_child(_preview)
+	_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	stage.add_child(_preview)
+	body.add_child(_parts_panel)
 	_status = UI_COMPONENTS.label("", "JoineryError", true)
 	_status.hide()
 	body.add_child(_status)
@@ -295,13 +308,13 @@ func _process(delta: float) -> void:
 		_finish_open(result)
 		return
 	if int(result["code"]) != 0:
-		var reason := _first_line(str(result["error"]) if result.get("error") else "")
+		var reason := PARTS_SCRIPT.first_line(str(result["error"]) if result.get("error") else "")
 		if reason.is_empty():
-			reason = _first_line(str(result["output"]))
+			reason = PARTS_SCRIPT.first_line(str(result["output"]))
 		_load_error = reason if not reason.is_empty() else "The workspace command failed."
 		_update_list_state()
 		return
-	var payload: Variant = JSON.parse_string(str(result["output"]))
+	var payload: Variant = PARTS_SCRIPT.parse_json(str(result["output"]))
 	if not payload is Dictionary:
 		_load_error = "The workspace command did not return asset data."
 		_update_list_state()
@@ -643,6 +656,7 @@ func _show_asset(asset: Dictionary, notify: bool) -> void:
 	_update_open()
 	_show_preview("res://" + path, _preview_import_changed)
 	_preview_import_changed = false
+	_parts_panel.show_for(owner, _kind_of(owner) == "model")
 	if notify:
 		asset_selected.emit(_current.duplicate(true))
 
@@ -803,9 +817,9 @@ func _finish_open(result: Dictionary) -> void:
 		invalidate()
 		return
 	_update_open()
-	var reason := _first_line(str(result.get("error", "")))
+	var reason := PARTS_SCRIPT.first_line(str(result.get("error", "")))
 	if reason.is_empty():
-		reason = _first_line(str(result.get("output", "")))
+		reason = PARTS_SCRIPT.first_line(str(result.get("output", "")))
 	_status.text = "Couldn't open %s. %s" % [app, reason]
 	_status.show()
 
@@ -815,13 +829,6 @@ func _end_opened(app: String) -> void:
 		_opened = ""
 		if is_inside_tree():
 			_update_open()
-
-
-static func _first_line(text: String) -> String:
-	for line: String in text.split("\n"):
-		if not line.strip_edges().is_empty():
-			return line.strip_edges()
-	return ""
 
 
 func _clear_preview() -> void:
@@ -852,7 +859,7 @@ func _show_preview(path: String, reimported: bool = false) -> void:
 		return
 	path = _preview_path(path)
 	var extension := path.get_extension().to_lower()
-	var image := _load_image(path)
+	var image := PARTS_SCRIPT.load_image(path)
 	if image != null:
 		_show_image(image)
 		return
@@ -894,23 +901,6 @@ func _show_no_preview(extension: String) -> void:
 	_unavailable.hide()
 	var lines := _missing_text(app, extension, false)
 	_empty_state(lines[0], lines[1], _setup_button())
-
-
-## The image at [param path] (also the merged layer of a Krita or OpenRaster file), or null.
-static func _load_image(path: String) -> Image:
-	var extension := path.get_extension().to_lower()
-	if extension in IMAGES:
-		var image := Image.load_from_file(ProjectSettings.globalize_path(path))
-		return image if image != null and not image.is_empty() else null
-	if extension not in ["kra", "ora"]:
-		return null
-	var archive := ZIPReader.new()
-	if archive.open(ProjectSettings.globalize_path(path)) != OK:
-		return null
-	var layered := Image.new()
-	var error := layered.load_png_from_buffer(archive.read_file("mergedimage.png"))
-	archive.close()
-	return layered if error == OK else null
 
 
 ## A centred empty state in the preview: the asset kind's icon, a [param title], an optional
@@ -998,3 +988,11 @@ func _show_scene(scene: PackedScene) -> void:
 	var viewer: MODEL_SCRIPT = MODEL_SCRIPT.new()
 	_preview.add_child(viewer)
 	viewer.show_scene(scene)
+	_parts_panel.attach(viewer)
+
+
+## Draw the eye to the selected asset: its row and its preview pulse once.
+func flash_selected() -> void:
+	for index: int in _assets.get_selected_items():
+		UI_THEME.flash(_assets._rows[index])
+	UI_THEME.flash(_preview)

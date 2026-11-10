@@ -1,11 +1,12 @@
 import json
-import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from joinery import readiness
 from joinery.catalog import (
     Catalog,
     CustomTool,
@@ -15,20 +16,17 @@ from joinery.catalog import (
 )
 from joinery.cli import check_mcp_config, main
 from joinery.installer import (
-    DEFAULT_WORKER_IMAGE,
     STATUS_LABELS,
-    WORKER_IMAGES,
-    DockerProbe,
     Selection,
     custom_choices,
     menu_tools,
-    readiness,
     run_menu,
     tool_menu,
     validate_choice,
     write_mcp_config,
     write_selection,
 )
+from tests.test_readiness import CREATIVE_WORKER, FakeHost
 
 SDXL = CustomTool(
     id="sdxl", name="SDXL", domain="2d", server="sdxl", command="sdxl-mcp"
@@ -297,39 +295,27 @@ def _cli(arguments: list[str], monkeypatch: pytest.MonkeyPatch) -> int:
     return main()
 
 
-class _FakeDocker:
-    """Answers `docker info` and `docker image inspect` without a daemon."""
-
-    def __init__(self, reachable: bool, images: set[str]) -> None:
-        self.reachable = reachable
-        self.images = images
-        self.calls: list[list[str]] = []
-
-    def __call__(
-        self, argv: list[str], **_: object
-    ) -> subprocess.CompletedProcess[str]:
-        self.calls.append(argv)
-        if argv[:2] == ["docker", "info"]:
-            ok = self.reachable
-        else:
-            ok = self.reachable and argv[-1] in self.images
-        return subprocess.CompletedProcess(argv, 0 if ok else 1, "", "")
+@pytest.fixture(autouse=True)
+def no_real_docker(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> FakeHost:
+    """Every menu in these tests reads a fake host and a private cache."""
+    monkeypatch.setenv("JOINERY_READINESS_CACHE", str(tmp_path / "readiness-cache"))
+    engine = tmp_path / "godot.macos.editor.arm64"
+    engine.write_text("editor")
+    host = FakeHost(engine=engine)
+    monkeypatch.setattr(readiness, "DockerHost", lambda: host)
+    monkeypatch.setattr(readiness, "spawn_refresh", lambda *_a, **_k: False)
+    return host
 
 
-def _menu(fake: _FakeDocker) -> dict[str, dict[str, object]]:
-    probe = DockerProbe(run=fake)
-    tools = tool_menu(load_catalog(), ProjectTools(), probe)["tools"]
+def _menu(host: FakeHost, catalog: Catalog | None = None) -> dict[str, dict[str, Any]]:
+    tools = tool_menu(catalog or load_catalog(), ProjectTools(), host=host)["tools"]
     assert isinstance(tools, list)
     return {str(tool["id"]): tool for tool in tools}
 
 
-@pytest.fixture
-def docker_on_path(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/" + name)
-
-
-def test_every_tool_carries_setup_copy_and_readiness(docker_on_path: None) -> None:
-    tools = _menu(_FakeDocker(True, set(WORKER_IMAGES.values())))
+def test_every_tool_carries_setup_copy_and_readiness(no_real_docker: FakeHost) -> None:
+    readiness.status(catalog=True, refresh=True, host=no_real_docker)
+    tools = _menu(no_real_docker)
     for tool in tools.values():
         assert tool["status"] in STATUS_LABELS
         assert tool["status_label"] == STATUS_LABELS[str(tool["status"])]
@@ -340,62 +326,106 @@ def test_every_tool_carries_setup_copy_and_readiness(docker_on_path: None) -> No
     assert tools["material-maker"]["group"] == "3d"
 
 
-def test_ready_needs_docker_and_its_worker_image(docker_on_path: None) -> None:
-    images = set(WORKER_IMAGES.values()) | {DEFAULT_WORKER_IMAGE}
-    tools = _menu(_FakeDocker(True, images))
+def test_menu_has_one_action_and_a_checked_time(no_real_docker: FakeHost) -> None:
+    readiness.status(catalog=True, refresh=True, host=no_real_docker)
+    tools = _menu(no_real_docker)
     assert tools["blender"]["status"] == "ready"
     assert tools["blender"]["status_reason"] == ""
+    assert tools["blender"]["action"] is None
+    assert str(tools["blender"]["checked_at"]).endswith("+00:00")
+    assert "summary" in tools["blender"] and "features" in tools["blender"]
+    no_real_docker.docker_reason = "Docker is not running."
+    tools = _menu(no_real_docker)
+    # A fresh snapshot still answers: nothing asked Docker again.
+    assert tools["blender"]["status"] == "ready"
+
+
+def test_missing_worker_image_offers_a_rebuild(no_real_docker: FakeHost) -> None:
+    del no_real_docker.images[CREATIVE_WORKER]
+    tools = _menu(no_real_docker)
+    assert tools["krita"]["status"] == "unavailable"
+    assert tools["krita"]["action"] == {"id": "rebuild", "label": "Rebuild"}
+    assert tools["krita"]["status_reason"]
+
+
+def test_setup_building_a_worker_is_preparing(no_real_docker: FakeHost) -> None:
+    no_real_docker.setup_data = {"phase": "build", "image": CREATIVE_WORKER, "pid": 1}
+    tools = _menu(no_real_docker)
+    assert tools["krita"]["status"] == "preparing"
+    assert tools["krita"]["status_label"] == "Downloading…"
+    assert tools["krita"]["action"] is None
+
+
+def test_unreachable_docker_is_named(no_real_docker: FakeHost) -> None:
+    no_real_docker.docker_reason = "Docker is not running."
+    tools = _menu(no_real_docker)
+    assert tools["blender"]["status"] == "needs_docker"
+    assert "Docker" in str(tools["blender"]["status_reason"])
+    assert tools["blender"]["action"] == {"id": "start_docker", "label": "Start Docker"}
+
+
+def test_no_docker_subprocess_while_the_snapshot_is_fresh(
+    no_real_docker: FakeHost, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # The real host this time: a fresh snapshot must answer without any process.
+    monkeypatch.setattr(readiness, "DockerHost", readiness.DockerHost)
+    readiness.status(catalog=True, refresh=True, host=no_real_docker)
+    started: list[object] = []
+
+    def refuse(*args: object, **kwargs: object) -> None:
+        started.append(args)
+        raise AssertionError("no subprocess while the cache is fresh")
+
+    monkeypatch.setattr(subprocess, "run", refuse)
+    monkeypatch.setattr(subprocess, "Popen", refuse)
+    monkeypatch.setattr(readiness.subprocess, "run", refuse)
+    monkeypatch.setattr(readiness.subprocess, "Popen", refuse)
+    tools = _menu_live()
+    assert started == []
     assert tools["krita"]["status"] == "ready"
 
 
-def test_missing_worker_image_is_preparing(docker_on_path: None) -> None:
-    tools = _menu(_FakeDocker(True, {"joinery-mcp-worker"}))
-    assert tools["godot"]["status"] == "ready"
-    assert tools["blender"]["status"] == "preparing"
-    assert tools["blender"]["status_label"] == "Downloading…"
-    assert "joinery-blender-worker" in str(tools["blender"]["status_reason"])
+def _menu_live() -> dict[str, dict[str, Any]]:
+    tools = tool_menu(load_catalog(), ProjectTools())["tools"]
+    assert isinstance(tools, list)
+    return {str(tool["id"]): tool for tool in tools}
 
 
-def test_unreachable_docker_is_named(docker_on_path: None) -> None:
-    fake = _FakeDocker(False, set())
-    tools = _menu(fake)
-    assert tools["blender"]["status"] == "needs_docker"
-    assert "Docker" in str(tools["blender"]["status_reason"])
-    # One reachability question for the whole menu, not one per app.
-    assert sum(argv[:2] == ["docker", "info"] for argv in fake.calls) == 1
+def test_stale_snapshot_asks_again_and_refreshes_in_the_background(
+    no_real_docker: FakeHost, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    spawned: list[object] = []
+    monkeypatch.setattr(
+        readiness, "spawn_refresh", lambda *a, **k: spawned.append(a) or True
+    )
+    # Nothing cached yet: the cheap checks run now, the rest in the background.
+    tools = _menu(no_real_docker)
+    assert tools["krita"]["checking"] is True
+    assert spawned
 
 
-def test_no_docker_binary_needs_docker(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(shutil, "which", lambda name: None)
-    fake = _FakeDocker(True, set(WORKER_IMAGES.values()))
-    assert _menu(fake)["godot"]["status"] == "needs_docker"
-    assert fake.calls == []
-
-
-def test_paid_tools_need_a_licence(docker_on_path: None) -> None:
+def test_paid_tools_need_a_licence(no_real_docker: FakeHost) -> None:
     # The shipped catalog has no paid app today; the rule still has to hold
-    # for one added later, before Docker is even asked.
+    # for one added later.
     raw = load_catalog().model_dump(mode="python")
     for tool in raw["tool"]:
         if tool["id"] == "krita":
             tool["paid"] = True
-    krita = next(t for t in Catalog.model_validate(raw).tool if t.id == "krita")
-    fake = _FakeDocker(True, set(WORKER_IMAGES.values()))
-    status, reason = readiness(krita, DockerProbe(run=fake))
-    assert status == "needs_licence"
-    assert "licence" in reason
-    assert fake.calls == []
+    tools = _menu(no_real_docker, Catalog.model_validate(raw))
+    assert tools["krita"]["status"] == "needs_licence"
+    assert "licence" in str(tools["krita"]["status_reason"])
+    assert tools["krita"]["action"] == {"id": "get", "label": "Get it"}
 
 
-def test_planned_tool_is_unavailable() -> None:
-    planned = next(t for t in with_planned_tool().tool if t.id == "future-synth")
-    status, reason = readiness(planned, DockerProbe(run=_FakeDocker(True, set())))
-    assert status == "unavailable"
-    assert reason
+def test_planned_tool_is_unavailable(no_real_docker: FakeHost) -> None:
+    tools = _menu(no_real_docker, with_planned_tool())
+    assert tools["future-synth"]["status"] == "unavailable"
+    assert tools["future-synth"]["status_reason"]
+    assert tools["future-synth"]["action"] is None
 
 
-def test_chosen_connector_has_no_summary() -> None:
-    tools = _menu(_FakeDocker(False, set()))
+def test_chosen_connector_has_no_summary(no_real_docker: FakeHost) -> None:
+    tools = _menu(no_real_docker)
     for tool in tools.values():
         options = tool["mcp_options"]
         assert isinstance(options, list)

@@ -15,13 +15,13 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from joinery import tools
+from joinery import readiness, tools
 from joinery.catalog import ROOT, load_catalog, load_project_tools, selection_ids
 from joinery.deps import check_deps
 from joinery.mcp_runtime import MCPConnection, Readiness, ServerSpec
 from joinery.platform_support import npm_argv, private_file
 from joinery.policy import command_violation, load_denylist
-from joinery.tools.base import WorkerExec
+from joinery.tools.base import McpProbe, WorkerExec
 
 
 class ReinstallRequired(ValueError):
@@ -397,9 +397,9 @@ def describe(item: dict[str, Any], *, offline: bool = False) -> str:
         where = ", offline worker" if offline else ""
         return f"{label} ready ({count} operations{where})"
     if state == "runtime-missing":
-        return f"{label}: worker missing. Run Joinery setup."
+        return f"{label}: worker missing. Rebuild the worker."
     if state == "not-installed":
-        return f"{label}: not installed. Run Joinery setup." + (
+        return f"{label}: not installed. Rebuild the worker." + (
             f" ({detail})" if detail and "not installed" not in detail else ""
         )
     if state == "error":
@@ -478,15 +478,51 @@ async def _worker_run(check: WorkerExec) -> tuple[int, str]:
     return process.returncode or 0, output.decode(errors="replace")
 
 
-#: The read-only call that proves each upstream server can see its documents.
-PROBES: dict[str, tuple[str, dict[str, Any]]] = {
-    "godot": ("get_project_info", {"projectPath": "{project}"}),
-    "blender": ("get_blendfile_summary_datablocks", {}),
-    "inkscape": ("inkscape_system", {"operation": "diagnostics"}),
-}
+def _project_tools(project: Path) -> list[str] | None:
+    """The project's selected tool ids, or None when it has no readable selection."""
+    try:
+        return selection_ids(load_catalog(), load_project_tools(project / "joinery.toml"))
+    except (OSError, ValueError):
+        return None
+
+
+def _arguments(probe: McpProbe, project: Path) -> dict[str, Any]:
+    return {
+        key: str(project.resolve()) if value == "{project}" else value
+        for key, value in probe.arguments().items()
+    }
+
+
+async def _run_probes(
+    connection: MCPConnection, probes: list[McpProbe], project: Path
+) -> tuple[str, str]:
+    """Ask each read-only probe the tool modules declare for this server.
+
+    Returns ("", "") when every answer holds, else (readiness state, reason) for
+    the first one that does not, judged by the same rules as `joinery status`.
+    """
+    for probe in probes:
+        answer = await connection.probe(probe.tool, _arguments(probe, project))
+        text = "\n".join(
+            str(getattr(block, "text", ""))
+            for block in answer.content
+            if hasattr(block, "text")
+        )
+        state, detail = readiness.judge_probe(probe, not answer.is_error, text)
+        if state != "ready":
+            return state, detail
+    return "", ""
 
 
 async def inspect_servers(project: Path, probe: bool = False) -> list[dict[str, Any]]:
+    """Connect to each of the project's MCP servers; with `probe`, prove each works.
+
+    The proof is the read-only probe each tool module declares for its server
+    (joinery.tools, the same checks `joinery status` runs): Godot's project
+    info, Blender's datablocks, joinery-paint and joinery-materialmaker document
+    capabilities, claude-collider's server status. A worker version check runs
+    too for host-run servers whose writes happen in a worker.
+    """
     specs, missing = configured(project)
     result = [
         {**item.model_dump(), "summary": describe(item.model_dump())}
@@ -495,6 +531,7 @@ async def inspect_servers(project: Path, probe: bool = False) -> list[dict[str, 
     servers = {
         t.mcp.server: t.id for t in load_catalog().tool if t.mcp is not None
     }
+    chosen = _project_tools(project)
     for spec in specs:
         image, version_check = _write_worker(spec, servers)
         offline = bool(image) or spec.command == "docker"
@@ -512,24 +549,17 @@ async def inspect_servers(project: Path, probe: bool = False) -> list[dict[str, 
         connection = MCPConnection(spec, project)
         try:
             await connection.connect()
-            if probe and spec.name in PROBES:
-                tool, arguments = PROBES[spec.name]
-                answer = await connection.probe(
-                    tool,
-                    {
-                        key: str(project.resolve()) if value == "{project}" else value
-                        for key, value in arguments.items()
-                    },
+            failed, reason = "", ""
+            if probe:
+                failed, reason = await _run_probes(
+                    connection, readiness.mcp_probes(spec.name, chosen), project
                 )
-                if answer.is_error:
-                    text = " ".join(
-                        getattr(block, "text", "") for block in answer.content
-                    ).strip()
-                    raise RuntimeError(
-                        f"{spec.name}.{tool} failed: {text[:300] or 'no detail'}"
-                    )
             item = connection.readiness.model_dump()
-            if probe and version_check is not None:
+            if failed:
+                item["inspected"] = False
+                item["state"] = "runtime-missing" if failed == "needs_image" else "error"
+                item["detail"] = reason
+            elif probe and version_check is not None:
                 code, output = await _worker_run(version_check)
                 if code or not re.search(version_check.expect, output):
                     item["state"] = (

@@ -11,6 +11,7 @@ from typing import Any
 
 from pydantic import TypeAdapter
 
+from joinery import readiness
 from joinery.catalog import load_catalog, load_project_tools, selection_ids
 from joinery.desktop import TOOLS, launch, launcher, overrides, project_file
 from joinery.lockfile import AssetEntry, asset_files
@@ -120,16 +121,18 @@ def _fold(
     The owner is the first recipe output or source that is a native document of the
     recipe's tool (a .blend for Blender, a .ptex for Material Maker) and is itself an
     asset. Other native documents stay separate assets; everything else the recipe
-    produced becomes a part. Every asset stays in the index, so parts still open and
+    produced becomes a part. Sources that are not native documents (image inputs)
+    are never parts. Every asset stays in the index, so parts still open and
     preview on their own.
     """
     by_path = {asset.path: asset for asset in assets}
     for recipe in recipes.values():
         spec = TOOLS.get(recipe.tool)
         native = spec.native if spec else ()
-        members = [
-            p for p in dict.fromkeys((*recipe.outputs, *recipe.sources)) if p in by_path
-        ]
+        # A source that is not a native document (an image a Material Maker graph
+        # reads) is an input, not something the recipe made: it stays its own asset.
+        sources = [p for p in recipe.sources if Path(p).suffix.lower() in native]
+        members = [p for p in dict.fromkeys((*recipe.outputs, *sources)) if p in by_path]
         owners = [p for p in members if Path(p).suffix.lower() in native]
         if not owners:
             continue
@@ -152,6 +155,17 @@ def _fold(
                 or DOMAIN_KINDS.get(domains.get(asset.tool, ""))
                 or "other"
             )
+
+
+def _readiness(entry: Mapping[str, Any] | None) -> dict[str, Any]:
+    """The readiness fields of a tool row, or none when nothing is known yet."""
+    if entry is None or "status" not in entry:
+        return {}
+    return {
+        key: entry[key]
+        for key in ("status", "status_label", "status_reason", "action", "checked_at")
+        if key in entry
+    }
 
 
 def index(project: Path) -> dict[str, Any]:
@@ -282,6 +296,9 @@ def index(project: Path) -> dict[str, Any]:
         asset.open_options.sort(key=lambda option: (option.tool != tool, option.name))
         assets.append(asset)
     _fold(assets, recipes, domains)
+    # Readiness comes from the last report only: this index is rebuilt every few
+    # seconds, and asking Docker each time would stall the workspace.
+    known = readiness.cached_tools()
     return {
         "tools": [
             {
@@ -291,6 +308,7 @@ def index(project: Path) -> dict[str, Any]:
                 "enabled": tool in enabled,
                 "available": programs[tool][0],
                 "reason": programs[tool][1],
+                **_readiness(known.get(tool)),
             }
             for tool, name in names.items()
             if tool in TOOLS or tool in settings
