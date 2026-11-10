@@ -7,6 +7,7 @@ import contextlib
 import getpass
 import json
 import os
+import re
 import sys
 import threading
 import uuid
@@ -26,6 +27,7 @@ from bridge.protocol import (
     ToolActivity,
 )
 from bridge.specialists import Specialists
+from joinery import bible_lint, blueprints, brief
 from joinery.art_approval import approve, review
 from joinery.editor_ops import validate_edit
 from joinery.gateway import ProjectGateway
@@ -35,6 +37,53 @@ from joinery.timing import TurnTiming
 
 def emit(event: dict[str, Any]) -> None:
     print(json.dumps(event), flush=True)
+
+
+_FEATURE_OFFER = re.compile(r"\s*Add (?:it|them) with (/feature add [a-z0-9-]+)\?")
+
+
+def game_suggestions(project: Path) -> dict[str, Any]:
+    """Features the game brief asks for that the game doesn't have yet, as one-line offers.
+
+    Only offers: the sidebar shows them one at a time and runs nothing until the user
+    chooses, and then only the plan (`/feature add <id>`), never the change itself.
+    """
+    try:
+        lines = brief.consistency(project, blueprints.project_game(project))
+    except (OSError, ValueError):
+        lines = []
+    items: list[dict[str, str]] = []
+    for line in lines:
+        found = _FEATURE_OFFER.search(line)
+        if found is None:
+            continue
+        text = line[: found.start()].strip()
+        items.append({"text": text, "command": found.group(1)})
+    return {"kind": "suggestions", "items": items}
+
+
+def art_review_event(project: Path) -> dict[str, Any]:
+    """The art direction for the review dialog: the bible's exact bytes and hash, plus
+    its format version, reference board and the one-line suggestions from the lint."""
+    event: dict[str, Any] = dict(review(project))
+    try:
+        report = bible_lint.summary(project)
+    except (OSError, ValueError):
+        report = {}
+    event["version"] = int(report.get("version", 0) or 0)
+    event["references"] = [
+        {
+            "id": str(row.get("id", "")),
+            "reference": str(row.get("reference", "")),
+            "kind": str(row.get("kind", "")),
+            "take": str(row.get("take", "")),
+            "avoid": str(row.get("avoid", "")),
+            "file": str(row.get("file", "")) if row.get("file_exists") else "",
+        }
+        for row in report.get("references", [])
+    ]
+    event["suggestions"] = [str(line) for line in report.get("suggestions", [])]
+    return event
 
 
 class ThreadInput:
@@ -206,6 +255,7 @@ async def serve(project: Path, agent_id: str, profile_id: str = "") -> int:
                 selection=Selection.model_validate(data.get("selection", {})),
             )
             gateway.editor_context = prompt.editor_context
+            gateway.target_context = prompt.target_context
             gateway.request_summary = prompt.text
             gateway.progress("Thinking through your request…")
             async for event in bridge.send(prompt):
@@ -306,6 +356,7 @@ async def serve(project: Path, agent_id: str, profile_id: str = "") -> int:
                 "elapsed_ms": connection_timing.report("connected")["total_ms"],
             }
         )
+        emit(game_suggestions(project))
         while line := await reader.readline():
             try:
                 data = json.loads(line)
@@ -322,11 +373,11 @@ async def serve(project: Path, agent_id: str, profile_id: str = "") -> int:
                     )
                     emit(decision)
                     if "art_review" in decision:
-                        emit(decision["art_review"])
+                        emit(art_review_event(project))
                 elif data.get("kind") == "rollback_decision":
                     emit(gateway.rollback_decision(str(data.get("transaction_id", ""))))
                 elif data.get("kind") == "art_review":
-                    emit(review(project))
+                    emit(art_review_event(project))
                 elif data.get("kind") == "models_request":
                     if active is not None and not active.done():
                         raise ValueError(
@@ -349,11 +400,8 @@ async def serve(project: Path, agent_id: str, profile_id: str = "") -> int:
                             "Review the art direction before approving it."
                         )
                     approve(project, getpass.getuser(), expected_sha256)
-                    emit(
-                        Message(
-                            text="This version of the project art direction is approved."
-                        ).model_dump()
-                    )
+                    # The sidebar resumes a request the art gate held.
+                    emit({"kind": "art_approved", "sha256": expected_sha256})
                 elif data.get("kind") == "live_decision":
                     gateway.live_edit_pending = False
                 elif data.get("kind") == "editor_result":

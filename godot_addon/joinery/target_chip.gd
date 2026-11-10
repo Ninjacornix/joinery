@@ -11,6 +11,25 @@ const STYLE := preload("sidebar_style.gd")
 const KIND_ICONS := {
 	"Object": "model", "Image": "image", "Audio": "audio", "Scene": "scene", "Material": "material"
 }
+## Part kind -> target kind, which picks the chip icon.
+const PART_KINDS := {
+	"object": "Object",
+	"material": "Material",
+	"texture": "Image",
+	"bone": "Object",
+	"shape_key": "Object",
+}
+## How each map role reads (the same words as `joinery parts`).
+const ROLE_NAMES := {
+	"base_color": "Base colour",
+	"roughness": "Roughness",
+	"metallic": "Metallic",
+	"normal": "Normal",
+	"height": "Height",
+	"emission": "Emission",
+	"alpha": "Alpha",
+	"ao": "Ambient occlusion",
+}
 ## Breadcrumbs longer than this keep the first and the last two parts.
 const MAX_CRUMBS := 3
 
@@ -37,16 +56,21 @@ class _Thumbnail:
 static func build(
 	_host: Control, target: Dictionary, opened: Callable, removed: Callable
 ) -> PanelContainer:
-	var text := " › ".join(crumbs(target))
+	var is_part := not str(target.get("part_kind", "")).is_empty()
+	var text := str(target.get("label", "")) if is_part else " › ".join(crumbs(target))
 	var chip := UI.chip(text, "", true)
 	chip.label.tooltip_text = ""
-	var resource := str(target.get("resource", ""))
+	var resource := str(target.get("resource", "")).split("#")[0]
 	var path := resource if not resource.is_empty() else str(target.get("source", ""))
 	var tool := str(target.get("tool", ""))
 	chip.tooltip_text = (
-		("Open in " + tool if not tool.is_empty() else "Open source file")
-		if not path.is_empty()
-		else text
+		str(target.get("tooltip", part_tooltip(target)))
+		if is_part
+		else (
+			("Open in " + tool if not tool.is_empty() else "Open source file")
+			if not path.is_empty()
+			else text
+		)
 	)
 	chip.accessibility_name = text
 	chip.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
@@ -135,6 +159,85 @@ static func for_resource(path: String, type := "Resource", source := "") -> Dict
 		"resource": path,
 		"source": source if not source.is_empty() else path,
 	}
+
+
+## The target for a part of a model ({part_kind, resource, object, material, image, role,
+## roles, used_by, owner, owner_source, ...} from `joinery parts` or a viewport pick), with a
+## leaf-first label: "Roughness · Steel" (a map, picked in the parts list), "Roughness · Head"
+## (picked on Head), "Steel · Head", "Head · Hammer". The tooltip has the breadcrumb, which
+## objects share the material, and where the part is edited.
+static func for_part(part: Dictionary) -> Dictionary:
+	var target := {}
+	for key: Variant in part:
+		target[str(key)] = str(part[key])
+	var kind := str(target.get("part_kind", "object"))
+	target["kind"] = PART_KINDS.get(kind, "Object")
+	target["label"] = part_label(target)
+	target["tooltip"] = part_tooltip(target)
+	if str(target.get("id", "")).is_empty():
+		target["id"] = str(target.get("resource", "")) + "#" + target["label"]
+	if not str(target.get("owner", "")).is_empty():
+		target["tool"] = str(target["owner"]).capitalize()
+	return target
+
+
+## "Hammer" for res://art/models/hammer.glb.
+static func _model_name(target: Dictionary) -> String:
+	var file := str(target.get("resource", "")).split("#")[0].get_file().get_basename()
+	return file.replace("_", " ").replace("-", " ").capitalize()
+
+
+## "Roughness", "Roughness and metallic" (a packed map), or the image name.
+static func _map_name(target: Dictionary) -> String:
+	var names := PackedStringArray()
+	var roles := str(target.get("roles", "")).split(",", false)
+	if roles.is_empty() and not str(target.get("role", "")).is_empty():
+		roles = PackedStringArray([str(target["role"])])
+	for role: String in roles:
+		var name := str(ROLE_NAMES.get(role, role.replace("_", " ").capitalize()))
+		if not names.has(name):
+			names.append(name if names.is_empty() else name.to_lower())
+	return " and ".join(names) if not names.is_empty() else str(target.get("image", ""))
+
+
+static func part_label(target: Dictionary) -> String:
+	var kind := str(target.get("part_kind", ""))
+	var object_name := str(target.get("object", ""))
+	var material := str(target.get("material", ""))
+	var context := object_name if not object_name.is_empty() else _model_name(target)
+	match kind:
+		"texture":
+			return (
+				"%s · %s"
+				% [_map_name(target), object_name if not object_name.is_empty() else material]
+			)
+		"material":
+			return "%s · %s" % [material, context]
+		"bone":
+			return "%s · %s" % [target.get("bone", ""), context]
+		"shape_key":
+			return "%s · %s" % [target.get("shape_key", ""), context]
+	return "%s · %s" % [object_name, _model_name(target)]
+
+
+static func part_tooltip(target: Dictionary) -> String:
+	var path := PackedStringArray([_model_name(target)])
+	for key: String in ["object", "material"]:
+		if not str(target.get(key, "")).is_empty():
+			path.append(str(target[key]))
+	if str(target.get("part_kind", "")) == "texture":
+		path.append(_map_name(target))
+	for key: String in ["bone", "shape_key"]:
+		if not str(target.get(key, "")).is_empty():
+			path.append(str(target[key]))
+	var lines := PackedStringArray([" › ".join(path)])
+	var users := str(target.get("used_by", "")).split(",", false)
+	if users.size() > 1:
+		lines.append("Used by " + ", ".join(users))
+	var owner := str(target.get("owner", ""))
+	if not owner.is_empty():
+		lines.append("In %s: %s" % [owner.capitalize(), target.get("owner_source", "")])
+	return "\n".join(lines)
 
 
 ## Breadcrumb parts: the given "crumbs", or the file name and any sub-resource after "::".

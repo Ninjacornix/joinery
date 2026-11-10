@@ -133,6 +133,28 @@ def test_persistent_stream_and_selection(game: Path) -> None:
     asyncio.run(run())
 
 
+def test_instructions_read_the_game_brief(game: Path) -> None:
+    async def run() -> None:
+        session = CodexSession()
+        try:
+            await session.connect(game)
+        finally:
+            await session.close()
+        requests = [
+            json.loads(line)
+            for line in (game / "requests.jsonl").read_text().splitlines()
+        ]
+        start = next(r for r in requests if r.get("method") == "thread/start")
+        text = start["params"]["developerInstructions"]
+        assert "Read game_brief and game_setup with art_direction" in text
+        assert "game_setup.extension_points" in text
+        assert "suggest /feature add, never apply it" in text
+        assert "Approve these rules" in text
+        assert "Reject" not in text
+
+    asyncio.run(run())
+
+
 def test_unreviewed_extra_hook_is_not_trusted(game: Path) -> None:
     (game / "extra_hook").touch()
 
@@ -226,6 +248,8 @@ def test_cli_stdio_conversation_and_eof_cleanup(
 
         try:
             assert (await read())["state"] == "connected"
+            # Then the brief's feature offers (none: this project has no brief).
+            assert await read() == {"kind": "suggestions", "items": []}
             process.stdin.write(b"{invalid json}\n")
             await process.stdin.drain()
             assert (await read())["kind"] == "message"

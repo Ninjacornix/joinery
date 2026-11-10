@@ -1,0 +1,278 @@
+{
+ "objects": [
+  {
+   "name": "Handle",
+   "type": "MESH",
+   "parent": null,
+   "position": [
+    0.0,
+    0.0,
+    0.30000001192092896
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "vertices": 32,
+   "modifiers": [],
+   "vertex_groups": 0,
+   "shape_keys": [],
+   "slots": [
+    {
+     "index": 0,
+     "material": "Wood",
+     "faces": 17
+    },
+    {
+     "index": 1,
+     "material": "Steel",
+     "faces": 1
+    }
+   ]
+  },
+  {
+   "name": "Head.001",
+   "type": "MESH",
+   "parent": null,
+   "position": [
+    0.0,
+    0.0,
+    0.6399999856948853
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "vertices": 8,
+   "modifiers": [],
+   "vertex_groups": 0,
+   "shape_keys": [
+    "Basis",
+    "Dent"
+   ],
+   "slots": [
+    {
+     "index": 0,
+     "material": "Steel",
+     "faces": 6
+    }
+   ]
+  }
+ ],
+ "materials": [
+  {
+   "name": "Steel",
+   "users": [
+    "Handle",
+    "Head.001"
+   ],
+   "images": [
+    {
+     "node": "Base Color Map",
+     "label": "Base Color Map",
+     "image": "steel_base",
+     "uses": [
+      {
+       "shader": "Principled BSDF",
+       "socket": "Base Color",
+       "role": "base_color",
+       "channel": "",
+       "via": []
+      }
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "colorspace": "sRGB",
+     "packed": true,
+     "source": "FILE",
+     "file": "steel_base.png"
+    },
+    {
+     "node": "Roughness Map",
+     "label": "Roughness Map",
+     "image": "steel_rough",
+     "uses": [
+      {
+       "shader": "Principled BSDF",
+       "socket": "Roughness",
+       "role": "roughness",
+       "channel": "",
+       "via": []
+      }
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "colorspace": "Non-Color",
+     "packed": true,
+     "source": "FILE",
+     "file": "steel_rough.png"
+    },
+    {
+     "node": "Height Map",
+     "label": "Height Map",
+     "image": "steel_height",
+     "uses": [
+      {
+       "shader": "Principled BSDF",
+       "socket": "Normal",
+       "role": "height",
+       "channel": "",
+       "via": [
+        "BUMP"
+       ]
+      },
+      {
+       "shader": "Material Output",
+       "socket": "Displacement",
+       "role": "height",
+       "channel": "",
+       "via": [
+        "DISPLACEMENT"
+       ]
+      }
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "colorspace": "Non-Color",
+     "packed": true,
+     "source": "FILE",
+     "file": "steel_height.png"
+    }
+   ]
+  },
+  {
+   "name": "Wood",
+   "users": [
+    "Handle"
+   ],
+   "images": [
+    {
+     "node": "Wood Base",
+     "label": "Wood Base",
+     "image": "wood_base",
+     "uses": [
+      {
+       "shader": "Principled BSDF",
+       "socket": "Base Color",
+       "role": "base_color",
+       "channel": "",
+       "via": []
+      }
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "colorspace": "sRGB",
+     "packed": true,
+     "source": "FILE",
+     "file": "wood_base.png"
+    },
+    {
+     "node": "Wood ORM",
+     "label": "Wood ORM",
+     "image": "wood_orm",
+     "uses": [
+      {
+       "shader": "Principled BSDF",
+       "socket": "Roughness",
+       "role": "roughness",
+       "channel": "Green",
+       "via": [
+        "SEPARATE_COLOR"
+       ]
+      },
+      {
+       "shader": "Principled BSDF",
+       "socket": "Metallic",
+       "role": "metallic",
+       "channel": "Blue",
+       "via": [
+        "SEPARATE_COLOR"
+       ]
+      }
+     ],
+     "size": [
+      32,
+      32
+     ],
+     "colorspace": "Non-Color",
+     "packed": true,
+     "source": "FILE",
+     "file": "wood_orm.png"
+    }
+   ]
+  }
+ ],
+ "images": [
+  {
+   "name": "steel_base",
+   "size": [
+    32,
+    32
+   ],
+   "colorspace": "sRGB",
+   "file": "steel_base.png",
+   "users": 1
+  },
+  {
+   "name": "steel_height",
+   "size": [
+    32,
+    32
+   ],
+   "colorspace": "Non-Color",
+   "file": "steel_height.png",
+   "users": 1
+  },
+  {
+   "name": "steel_rough",
+   "size": [
+    32,
+    32
+   ],
+   "colorspace": "Non-Color",
+   "file": "steel_rough.png",
+   "users": 1
+  },
+  {
+   "name": "wood_base",
+   "size": [
+    32,
+    32
+   ],
+   "colorspace": "sRGB",
+   "file": "wood_base.png",
+   "users": 1
+  },
+  {
+   "name": "wood_orm",
+   "size": [
+    32,
+    32
+   ],
+   "colorspace": "Non-Color",
+   "file": "wood_orm.png",
+   "users": 1
+  }
+ ],
+ "actions": []
+}

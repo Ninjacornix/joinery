@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from bridge.instructions import GAME_GUIDE, REVIEW_GUIDE
 from bridge.protocol import Prompt
 from joinery.agents import get
 from joinery.catalog import ROOT
@@ -27,12 +28,13 @@ INSTRUCTIONS = (
     "Raw project files are read-only in this agent process. The gateway owns mutations and user review. "
     "Keep unsaved live scenes separate from saved files and game_* runtime calls. "
     "Inspect existing sources before editing; preserve named parts. No creative asset work before user-approved art direction. "
-    "To approve art direction the user types /art and clicks Approve this version; accepting a saved draft alone is not approval. "
-    "Never claim staged changes are accepted or saved. The user accepts or rejects in the Review panel below the viewport. "
+    + REVIEW_GUIDE
+    + " Never claim staged changes are accepted or saved. "
     "Use focused tool searches, cache discovered schemas within the session, and write compact native scripts. "
     "Document operators automatically export, import and record provenance; final validation and visual review happen at turn completion. "
     "Avoid repeating those checks after every call. If the user asks to place an asset in their scene, create the scene instance too. "
-    "Never generate assets or fetch assets. Operate actual tools. A Rule Zero STOP halts the turn."
+    "Never generate assets or fetch assets. Operate actual tools. A Rule Zero STOP halts the turn. "
+    + GAME_GUIDE
 )
 
 
