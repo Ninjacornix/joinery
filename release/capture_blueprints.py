@@ -141,8 +141,11 @@ def _shown(args: Sequence[str], tmp: Path, godot: Path) -> str:
     shown: list[str] = []
     for arg in args:
         if arg == str(godot):
-            arg = str(godot.relative_to(ROOT)) if godot.is_relative_to(ROOT) else godot.name
-        shown.append(arg.replace(str(tmp), "<tmp>"))
+            arg = godot.relative_to(ROOT).as_posix() if godot.is_relative_to(ROOT) else godot.name
+        elif str(tmp) in arg:
+            # Paths under the temporary folder read the same on every system.
+            arg = arg.replace(str(tmp), "<tmp>").replace(os.sep, "/")
+        shown.append(arg)
     return " ".join(shown)
 
 

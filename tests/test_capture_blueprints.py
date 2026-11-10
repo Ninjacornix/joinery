@@ -96,3 +96,13 @@ def test_recorded_command_hides_the_temporary_folder(tmp_path: Path) -> None:
     godot = ROOT / "godot_patches/godot-src/bin/godot.macos.editor.arm64"
     shown = script._shown([str(godot), "--path", str(tmp_path / "game")], tmp_path, godot)
     assert shown == "godot_patches/godot-src/bin/godot.macos.editor.arm64 --path <tmp>/game"
+
+
+def test_recorded_command_uses_forward_slashes_on_windows(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = _script()
+    monkeypatch.setattr(script.os, "sep", "\\")
+    godot = ROOT / "godot_patches/godot-src/bin/godot.windows.editor.x86_64.exe"
+    shown = script._shown([str(godot), "--path", str(tmp_path) + "\\game"], tmp_path, godot)
+    assert shown == "godot_patches/godot-src/bin/godot.windows.editor.x86_64.exe --path <tmp>/game"
