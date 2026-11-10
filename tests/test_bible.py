@@ -37,18 +37,43 @@ def test_every_question_has_a_token_in_the_template() -> None:
         assert token in template, question["key"]
 
 
-def test_every_question_belongs_to_a_page() -> None:
-    # A question in no group would never be shown by the paginated UI.
+def test_every_asked_question_belongs_to_a_page() -> None:
+    # A question in an unknown group would never be shown by the paged UI.
+    # An empty group is deliberate: the bible keeps the field, setup skips it.
     group_keys = {key for key, _ in GROUPS}
-    for question in QUESTIONS:
+    asked = [q for q in QUESTIONS if q["group"]]
+    for question in asked:
         assert question["group"] in group_keys, question["key"]
     paged = sum(len(page["questions"]) for page in grouped())
-    assert paged == len(QUESTIONS)
+    assert paged == len(asked)
 
 
-def test_pages_are_small_enough_to_read() -> None:
-    for page in grouped():
-        assert 1 <= len(page["questions"]) <= 3, page["key"]
+def test_setup_asks_one_short_look_and_sound_page() -> None:
+    pages = grouped()
+    assert [page["label"] for page in pages] == ["Look and sound"]
+    questions = pages[0]["questions"]
+    assert isinstance(questions, list)
+    assert [q["key"] for q in questions] == [
+        "vision",
+        "look",
+        "palette",
+        "sound",
+        "bans",
+    ]
+    assert [q["label"] for q in questions][-1] == "Never"
+    assert all(str(q["placeholder"]).startswith("e.g. ") for q in questions)
+
+
+def test_references_stay_in_the_bible_but_are_not_asked() -> None:
+    keys = {str(q["key"]) for q in QUESTIONS}
+    asked = {str(q["key"]) for page in grouped() for q in page["questions"]}  # type: ignore[attr-defined]
+    assert "references" in keys
+    assert "references" not in asked
+
+
+def test_vision_hint_is_only_about_the_feel() -> None:
+    vision = next(q for q in QUESTIONS if q["key"] == "vision")
+    assert "never" not in str(vision["hint"]).lower()
 
 
 def test_answers_reach_the_output() -> None:

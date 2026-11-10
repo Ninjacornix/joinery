@@ -1,0 +1,73 @@
+# Low-poly 3D: flat or gradient-atlas colour, few triangles, readable shapes.
+# Fills technical sections only. Vision, references, look, palette, sound and
+# bans are always the user's.
+id = "lowpoly-3d"
+name = "Low-poly 3D"
+
+[sections]
+camera = """
+- Projection: perspective, FOV 70° (horizontal at 16:9), near 0.05 m, far 400 m.
+- Third-person orbit: 4.5 m behind the player, 1.6 m above the feet, default pitch −15°, pitch limits −60° to +40°.
+- Player sits on the lower third, centred horizontally; keep 10 % headroom above the head.
+- Motion: follow lag 0.12 s, no lag on rotation from mouse; landing dip 0.08 m; shake at most 0.15 m for 0.25 s (scaled by the screen shake setting).
+- Safe area: 90 % of the screen for HUD; 16:9 and 16:10 supported, 21:9 adds width only.
+"""
+models = """
+- Units: metres, +Y up in Godot (Blender +Z up, exported with +Y up). Player height 1.8 m; door 2.1 × 1.0 m; step 0.25 m; jump reach 1.2 m.
+- Triangle budgets: hero character ≤ 3 000, NPC ≤ 1 500, small prop ≤ 300, large prop ≤ 800, level chunk (10 × 10 m) ≤ 6 000.
+- Bones: ≤ 40 deform bones per character (Rigify, deform bones only on export).
+- Pivots: characters and props bottom-centre; doors at the hinge; pickups at their centre.
+- Scale applied, rotation applied, no negative scale; one material slot per colour group.
+- Naming: `Part_Material_Variant` (e.g. `Crate_Wood_Dark`); files lower_snake_case.
+"""
+materials = """
+- One shared palette texture (gradient atlas, 256 × 256) per area; faces pick colours by UV, so most models need no unique texture.
+- Roughness 0.6–1.0; metallic only on real metal (and named so); no pure black or white base colour.
+- Texel density: 128 px/m ± 50 % where a unique texture is used.
+"""
+animation = """
+- Feel: snappy, 4 on a 1 (floaty) to 5 (snappy) scale.
+- Frame rate: authored at 30 fps, played at 60 with interpolation.
+- Anticipation 2–4 frames, overshoot 10 %, holds 3 frames on key poses.
+
+| Action | Anticipation | Action | Recovery | Notes |
+|---|---|---|---|---|
+| Jump | 3 f crouch | 6 f rise | 4 f land squash | squash 10 % on landing |
+| Attack | 4 f wind-up | 3 f swing | 8 f return | hit frame is the last swing frame |
+| Pick up | 2 f reach | 4 f grab | 4 f settle | |
+"""
+vfx = """
+- Technique: GPUParticles3D with flat-shaded quads and low-poly meshes; no textures unless made in Krita.
+- Colours: accents only; never fully white; additive blending only for sparks.
+- Lifetimes 0.2–1.0 s; at most 64 particles per effect and 512 on screen.
+- No more than 3 flashes per second; full-screen flashes off when reduced motion is on.
+"""
+ui = """
+- Style: flat panels, 2 px outlines, 8 px corner radius at 1080p.
+- Text: 24 px body, 32 px headings, never below 18 px at 1080p.
+- Focus: 3 px accent outline on the focused control; every menu works with keyboard or pad alone.
+- Motion: 120 ms ease-out for panels, 80 ms for buttons; nothing moves when reduced motion is on.
+"""
+accessibility = """
+- Text at least 18 px at 1080p; contrast at least 4.5:1 for UI text.
+- Danger and safe colours stay apart for protan, deutan and tritan vision; never colour alone (add shape or icon).
+- Remappable controls; subtitles for any spoken line; screen shake slider and reduced motion toggle.
+- No more than 3 flashes per second.
+"""
+
+[rules.models.max_triangles]
+"art/characters" = 3000
+"art/props" = 800
+"art/environment" = 6000
+
+[rules.models.max_bones]
+"art/characters" = 40
+
+[rules.models.texel_density]
+"art" = { px_per_m = 128, tolerance = 0.5 }
+
+[rules.materials]
+roughness = [0.6, 1.0]
+
+[rules.textures.max_size]
+"art" = 1024

@@ -12,81 +12,89 @@ engine. The template carries `{{token}}` placeholders; a human filling it in by
 hand sees them as placeholders, and anything left unanswered becomes a neutral
 marker so a literal token never survives into a project.
 
-Nothing here invents taste. An unanswered question is recorded as unanswered,
-and the technical numbers the template proposes stay as the template's
-suggestions, for the user to adjust.
+Nothing here invents taste. An unanswered question is recorded as unanswered:
+required sections with the marker approval refuses, open sections with the
+marker Journeyman reads as "suggest this when it matters" (`bible_schema`). A
+blueprint's bible preset may fill technical sections (camera numbers, budgets,
+UI sizes), each marked as a suggestion, and never vision, references, look,
+palette, sound or bans (`bible_presets`). The checked-rules block is the
+default merged with the preset's rules.
 """
 
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
+from joinery.bible_presets import fill
 from joinery.catalog import ROOT
 
 TEMPLATE = ROOT / "templates" / "art_bible.md"
 BIBLE_PATH = Path("art") / "bible.md"
 ANSWERS_FILE = ".joinery-bible-answers.json"
+#: Key in the answers file naming the bible preset, consumed with the answers.
+PRESET_KEY = "_preset"
 
-#: The interview, grouped into short pages. Six questions on one screen is a
-#: wall nobody reads, so they come in themed pairs and the UI paginates by
-#: group. Grouping lives here, not in the dialog, so it can be re-cut without
+#: The interview as pages. Setup asks five short, optional questions on one
+#: page; grouping lives here, not in the dialog, so it can be re-cut without
 #: rebuilding the engine.
-GROUPS: tuple[tuple[str, str], ...] = (
-    ("feel", "What this game feels like"),
-    ("look", "How it looks"),
-    ("sound", "How it sounds, and what to never do"),
-)
+GROUPS: tuple[tuple[str, str], ...] = (("look_and_sound", "Look and sound"),)
 
-#: The questions the interview asks, in order. `multiline` is a hint for the UI.
+#: Every answer the bible template takes, in order. `group` is the page that
+#: asks it; an empty group means the bible keeps the field but setup does not
+#: ask (Journeyman fills it in later). `multiline` and `placeholder` are hints
+#: for the UI. `bans` keeps its key because the bible schema and rules read
+#: that section by that name; the UI calls it "Never".
 QUESTIONS: tuple[dict[str, object], ...] = (
     {
         "key": "vision",
-        "group": "feel",
-        "label": "Vision",
-        "hint": "What the game feels like, and what it must never feel like.",
+        "group": "look_and_sound",
+        "label": "What should it feel like?",
+        "hint": "What the game feels like.",
+        "placeholder": "e.g. cosy, hand-made, a little spooky",
         "multiline": True,
     },
     {
         "key": "references",
-        "group": "feel",
+        "group": "",
         "label": "References",
         "hint": "Games, films or places whose look you mean, and what to take from each.",
+        "placeholder": "",
         "multiline": True,
     },
     {
         "key": "look",
-        "group": "look",
-        "label": "Overall look",
-        "hint": "low-poly, stylised PBR, toon, pixel art, something else.",
+        "group": "look_and_sound",
+        "label": "Look",
+        "hint": "Low-poly, stylised PBR, toon, pixel art, something else.",
+        "placeholder": "e.g. low-poly, flat colours",
         "multiline": False,
     },
     {
         "key": "palette",
-        "group": "look",
+        "group": "look_and_sound",
         "label": "Palette",
         "hint": "In your words, or hex values if you have them.",
+        "placeholder": "e.g. warm earth tones, one bright accent",
         "multiline": False,
     },
     {
         "key": "sound",
-        "group": "sound",
+        "group": "look_and_sound",
         "label": "Sound",
-        "hint": "acoustic-ish, synthetic, lo-fi; and how SFX should feel.",
+        "hint": "Acoustic, synthetic, lo-fi; and how effects should feel.",
+        "placeholder": "e.g. soft synths, wooden foley",
         "multiline": False,
     },
     {
         "key": "bans",
-        "group": "sound",
+        "group": "look_and_sound",
         "label": "Never",
         "hint": "Hard bans. Anything here is refused rather than argued about.",
-        "multiline": True,
+        "placeholder": "e.g. gore, neon, photo-real faces",
+        "multiline": False,
     },
 )
-
-_TOKEN = re.compile(r"\{\{(\w+)\}\}")
-_UNANSWERED = "_Not set yet. Journeyman will ask before it matters._"
 
 
 def questions() -> list[dict[str, object]]:
@@ -107,19 +115,16 @@ def grouped() -> list[dict[str, object]]:
     return pages
 
 
-def render(answers: dict[str, str], template: Path = TEMPLATE) -> str:
-    """Fill the template from the answers, leaving no token behind."""
-    text = template.read_text()
-
-    def substitute(match: re.Match[str]) -> str:
-        key = match.group(1)
-        value = (answers.get(key) or "").strip()
-        return value if value else _UNANSWERED
-
-    return _TOKEN.sub(substitute, text)
+def render(
+    answers: dict[str, str], template: Path = TEMPLATE, preset: str | None = None
+) -> str:
+    """Fill the template from the answers and preset, leaving no token behind."""
+    return fill(template.read_text(), answers, preset)
 
 
-def write_bible(project: Path, answers: dict[str, str]) -> Path:
+def write_bible(
+    project: Path, answers: dict[str, str], preset: str | None = None
+) -> Path:
     """Write `<project>/art/bible.md`. Refuses to overwrite an existing bible."""
     destination = project / BIBLE_PATH
     if destination.exists():
@@ -127,17 +132,19 @@ def write_bible(project: Path, answers: dict[str, str]) -> Path:
             f"{destination} already exists; changing a bible is a reviewed edit, "
             "not something project setup should overwrite"
         )
+    text = render(answers, preset=preset)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(render(answers))
+    destination.write_text(text)
     return destination
 
 
-def write_from_answers_file(project: Path) -> Path | None:
+def write_from_answers_file(project: Path, preset: str | None = None) -> Path | None:
     """Read the answers a front end dropped in the project, then remove them.
 
     The Project Manager cannot pass multi-line text as command arguments
     comfortably, so it writes a small JSON file beside the project and this
-    consumes it. Returns None when there is nothing to do.
+    consumes it. The file may name a preset under `_preset`; an explicit
+    `preset` argument wins. Returns None when there is nothing to do.
     """
     source = project / ANSWERS_FILE
     if not source.is_file():
@@ -148,5 +155,16 @@ def write_from_answers_file(project: Path) -> Path | None:
         raise ValueError(f"{source}: not valid JSON: {exc}") from exc
     finally:
         source.unlink(missing_ok=True)
-    answers = {str(k): str(v) for k, v in raw.items() if isinstance(raw, dict)}
-    return write_bible(project, answers)
+    if not isinstance(raw, dict):
+        # A ValueError like the JSON error above: both are a bad answers file.
+        raise ValueError(f"{source}: answers must be a JSON object")  # noqa: TRY004
+    # Only text and numbers are answers: `null` must stay unanswered rather than
+    # become the word "None" and pass for a set section.
+    answers = {
+        str(k): str(v)
+        for k, v in raw.items()
+        if isinstance(v, str | int | float) and not isinstance(v, bool)
+    }
+    chosen = preset or answers.pop(PRESET_KEY, "") or None
+    answers.pop(PRESET_KEY, None)
+    return write_bible(project, answers, chosen)

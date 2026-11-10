@@ -1,0 +1,57 @@
+# Pixel 2D: low base resolution, integer scaling, limited colours per sprite.
+# Fills technical sections only.
+id = "pixel-2d"
+name = "Pixel 2D"
+
+[sections]
+camera = """
+- Projection: 2D, base resolution 320 × 180, integer-scaled to the window (×4 at 1280 × 720, ×6 at 1920 × 1080).
+- Follows the player with 24 px look-ahead in the running direction; vertical dead zone 16 px.
+- Camera snaps to whole pixels; smoothing 0.1 s; shake at most 3 px for 0.2 s (scaled by the screen shake setting).
+- Safe area: 8 px border at base resolution for HUD.
+"""
+animation = """
+- Feel: snappy, 5 on a 1 (floaty) to 5 (snappy) scale.
+- Frame rate: sprites animated on 2s (12 fps); movement simulated at 60 fps.
+- Holds: 2 frames on contact poses; squash and stretch by whole pixels only.
+
+| Action | Anticipation | Action | Recovery | Notes |
+|---|---|---|---|---|
+| Jump | 1 f crouch | 3 f rise | 2 f land squash | stretch 1 px at take-off |
+| Run | — | 6 f cycle | — | dust puff every 3rd frame |
+| Hurt | — | 2 f flash | 4 f knock-back | flash is a palette swap, not white |
+"""
+vfx = """
+- Technique: sprite flipbooks drawn in Krita or GIMP, or CPUParticles2D with 1-pixel squares.
+- Colours from the sprite palette only; no blending modes other than normal.
+- Lifetimes 0.1–0.6 s; at most 32 particles per effect.
+- No more than 3 flashes per second; hit flashes use a palette swap.
+"""
+sprites = """
+- Base resolution 320 × 180; characters 16 × 24 px; tiles 16 × 16 px.
+- Pixel scale: integer only; nearest filtering (no smoothing).
+- At most 32 colours per sprite sheet; 1 px dark outline on characters and pickups, none on background tiles.
+- No sub-pixel rotation or scaling; rotation in 90° steps only.
+- Sheets need not be powers of two.
+"""
+ui = """
+- Style: pixel panels with 1 px borders at base resolution; 9-slice from Krita or GIMP.
+- Text: a pixel font at 8 px base (32 px at 1280 × 720 ×4), drawn as a glyph sheet in Krita and imported by Godot as an image font, or one you import yourself; never smaller than 18 px on screen at 1080p.
+- Focus: blinking 1 px cursor plus inverted colours; every menu works with keyboard or pad alone.
+- Motion: steps of whole pixels, 100 ms; nothing moves when reduced motion is on.
+"""
+accessibility = """
+- On-screen text at least 18 px at 1080p; UI text contrast at least 4.5:1.
+- Hazards differ in shape as well as colour (spikes are triangles, coins round).
+- Remappable controls; screen shake slider; reduced motion toggle.
+- No more than 3 flashes per second.
+"""
+
+[rules.textures]
+power_of_two = false
+
+[rules.textures.max_size]
+"art" = 1024
+
+[rules.sprites.max_colours]
+"art/sprites" = 32

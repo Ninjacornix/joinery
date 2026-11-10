@@ -1,0 +1,9 @@
+# No starting point: every open section stays open, and the checked rules are
+# the default block. Choose this for a blank project, or to decide everything
+# yourself.
+id = "none"
+name = "None"
+
+[sections]
+
+[rules]

@@ -1,0 +1,69 @@
+# Stylised PBR 3D: physically based materials with hand-shaped forms and a
+# controlled palette. Fills technical sections only.
+id = "stylised-pbr-3d"
+name = "Stylised PBR 3D"
+
+[sections]
+camera = """
+- Projection: perspective, FOV 75° (horizontal at 16:9), near 0.05 m, far 300 m.
+- First person: eye height 1.65 m, head bob off by default (setting), pitch limits −85° to +85°.
+- Crosshair at the exact centre; interactables readable from 2.5 m.
+- Motion: no camera lag; landing dip 0.05 m; shake at most 0.08 m for 0.2 s (scaled by the screen shake setting).
+- Safe area: 90 % of the screen for HUD; 16:9 and 16:10 supported.
+"""
+models = """
+- Units: metres, +Y up in Godot. Player height 1.8 m (eyes 1.65 m); door 2.1 × 1.0 m; corridor at least 1.6 m wide; ceiling at least 2.6 m.
+- Triangle budgets: hero character ≤ 15 000, NPC ≤ 8 000, small prop ≤ 1 500, large prop ≤ 3 000, room ≤ 20 000.
+- Bones: ≤ 80 deform bones per character.
+- Pivots: characters and props bottom-centre; doors at the hinge; switches at their wall contact.
+- Scale and rotation applied; bevels instead of hard 90° edges on anything larger than 0.3 m.
+- Naming: `Part_Material_Variant` (e.g. `Door_Metal_Rusty`); files lower_snake_case.
+"""
+materials = """
+- Built in Material Maker or Blender shader nodes, baked to textures at 512 px/m ± 20 %.
+- Roughness 0.3–0.95 (nothing mirror-like); metallic 0 or 1, only on real metal, named so.
+- Albedo between luminance 0.03 and 0.92: no pure black or white; dirt and wear in roughness first, colour second.
+- Textures power of two, at most 2048 px; suffixes `_albedo`, `_normal`, `_orm`.
+"""
+animation = """
+- Feel: grounded, 3 on a 1 (floaty) to 5 (snappy) scale.
+- Frame rate: 30 fps authored, played at 60 with interpolation.
+- Doors and switches ease in and out; door swing 0.6 s; switch throw 0.15 s with a 2-frame hold at the end.
+
+| Action | Anticipation | Action | Recovery | Notes |
+|---|---|---|---|---|
+| Use switch | 2 f | 4 f | 6 f | light changes on the last action frame |
+| Door open | 3 f unlatch | 0.6 s swing | 4 f settle | overshoot 3° then settle |
+"""
+vfx = """
+- Technique: GPUParticles3D and simple shaders; flipbooks only when painted in Krita.
+- Dust, sparks and steam only; colours from the palette's accents and shadow tint.
+- Lifetimes 0.3–2.0 s; at most 128 particles per effect and 1 024 on screen.
+- No more than 3 flashes per second.
+"""
+ui = """
+- Style: diegetic where possible (labels on objects), flat HUD otherwise; 1 px lines at 1080p, 4 px corner radius.
+- Text: 22 px body, 30 px headings, never below 18 px at 1080p.
+- Focus: accent outline and a 4 % scale-up; every menu works with keyboard or pad alone.
+- Motion: 150 ms ease-in-out; nothing moves when reduced motion is on.
+"""
+accessibility = """
+- Text at least 18 px at 1080p; UI text contrast at least 4.5:1.
+- Interactable highlight works without colour (outline plus prompt text).
+- Remappable controls; subtitles; head bob off by default; FOV slider 60–100°.
+- No more than 3 flashes per second.
+"""
+
+[rules.models.max_triangles]
+"art/characters" = 15000
+"art/props" = 3000
+"art/environment" = 20000
+
+[rules.models.max_bones]
+"art/characters" = 80
+
+[rules.models.texel_density]
+"art" = { px_per_m = 512, tolerance = 0.2 }
+
+[rules.materials]
+roughness = [0.3, 0.95]

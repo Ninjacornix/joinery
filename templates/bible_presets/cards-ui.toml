@@ -1,0 +1,50 @@
+# Cards and UI: a game that is mostly interface. Readable text, strong focus
+# states, calm motion. Fills technical sections only.
+id = "cards-ui"
+name = "Cards and UI"
+
+[sections]
+camera = """
+- Projection: 2D, 1920 × 1080 base, `canvas_items` stretch keeping aspect; no camera motion.
+- The board sits in the centre 80 % of the screen; scores and turn order on the top edge.
+- Safe area: 5 % border; 16:9, 16:10 and 4:3 supported (4:3 adds height only).
+"""
+animation = """
+- Feel: calm and clear, 3 on a 1 (floaty) to 5 (snappy) scale.
+- Card flip 0.25 s (scale X to 0 and back, ease-in-out); matched pair fades 0.3 s; mismatch waits 0.8 s, then flips back.
+- Never more than one thing moving where the player is looking.
+
+| Action | Anticipation | Action | Recovery | Notes |
+|---|---|---|---|---|
+| Flip | — | 0.25 s | — | sound on the half-way point |
+| Match | 0.1 s hold | 0.3 s fade | — | stars pop with 8 % overshoot |
+| Mismatch | 0.8 s hold | 0.25 s flip back | — | input ignored meanwhile |
+"""
+vfx = """
+- Technique: tweens and simple canvas shaders; small star bursts with CPUParticles2D.
+- Colours: accent only; at most 24 particles per burst.
+- No more than 3 flashes per second; bursts off when reduced motion is on.
+"""
+ui = """
+- Style: flat cards with 16 px radius, 2 px border, soft shadow (StyleBoxFlat).
+- Text: 28 px body, 40 px headings, card glyphs 64 px; never below 20 px at 1080p.
+- Focus: 4 px accent outline plus a 5 % scale-up; full play with keyboard, pad or mouse.
+- Motion: 180 ms ease-in-out; nothing moves when reduced motion is on.
+"""
+accessibility = """
+- Text at least 20 px at 1080p; UI text contrast at least 4.5:1.
+- Card symbols differ by shape, never by colour alone.
+- Every action reachable by focus navigation; no time limits by default.
+- Remappable controls; reduced motion toggle; no more than 3 flashes per second.
+"""
+
+[rules.textures]
+power_of_two = false
+
+[rules.textures.max_size]
+"art" = 2048
+"art/ui" = 1024
+"art/cards" = 1024
+
+[rules.accessibility]
+min_text_px = 20

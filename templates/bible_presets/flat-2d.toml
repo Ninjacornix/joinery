@@ -1,0 +1,51 @@
+# Flat 2D: clean shapes, soft edges, smooth scaling. Fills technical sections only.
+id = "flat-2d"
+name = "Flat 2D"
+
+[sections]
+camera = """
+- Projection: 2D top-down, 1280 × 720 base, scaled with `canvas_items` stretch, keeping aspect.
+- Follows the player with smoothing 0.15 s; limits at the arena bounds.
+- Shake at most 8 px for 0.25 s (scaled by the screen shake setting).
+- Safe area: 5 % border for HUD; 16:9 and 16:10 supported.
+"""
+animation = """
+- Feel: responsive, 4 on a 1 (floaty) to 5 (snappy) scale.
+- Frame rate: 60 fps tweens and AnimationPlayer; sprite frames at 12 fps where used.
+- Anticipation 3 frames, overshoot 8 %, ease-out-back for pops.
+
+| Action | Anticipation | Action | Recovery | Notes |
+|---|---|---|---|---|
+| Attack | 3 f wind-up | 4 f arc | 6 f return | arc is the hit window |
+| Dash | 1 f squash | 8 f move | 4 f slide | trail of 3 ghosts |
+| Enemy hit | — | 3 f flash | 6 f knock-back | flash is the accent colour |
+"""
+vfx = """
+- Technique: Polygon2D shapes, CPUParticles2D with flat circles, simple canvas shaders.
+- Colours: palette accents only; soft edges allowed.
+- Lifetimes 0.15–0.8 s; at most 48 particles per effect and 400 on screen.
+- No more than 3 flashes per second.
+"""
+sprites = """
+- Drawn in Krita at 2× the on-screen size, exported at 1×; linear filtering.
+- Characters about 48 px tall on screen at 1280 × 720; 2 px outlines in the shadow tint.
+- Rotation and scaling allowed (not pixel art).
+"""
+ui = """
+- Style: flat, rounded panels (12 px radius at 1080p), no gradients.
+- Text: 24 px body, 36 px headings, never below 18 px at 1080p.
+- Focus: accent outline 3 px; every menu works with keyboard or pad alone.
+- Motion: 140 ms ease-out; nothing moves when reduced motion is on.
+"""
+accessibility = """
+- Text at least 18 px at 1080p; UI text contrast at least 4.5:1.
+- Player, enemies and pickups differ in shape as well as colour.
+- Remappable controls; screen shake slider; reduced motion toggle.
+- No more than 3 flashes per second.
+"""
+
+[rules.textures]
+power_of_two = false
+
+[rules.textures.max_size]
+"art" = 2048
