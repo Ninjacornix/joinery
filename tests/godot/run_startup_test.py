@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 import struct
 import subprocess
 import sys
@@ -15,6 +16,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from typing import Any
 
 from joinery.distribution import engine_binary
 
@@ -121,9 +123,17 @@ def remove_when_released(path: Path, seconds: float = 30.0) -> None:
     a host that never exits still fails the run after `seconds`.
     """
     deadline = time.monotonic() + seconds
+
+    def writable(function: Any, name: str, error: BaseException) -> None:
+        # Git marks pack files read-only; Windows will not delete those as they are.
+        if not isinstance(error, PermissionError) or not os.path.lexists(name):
+            raise error
+        os.chmod(name, stat.S_IWRITE | stat.S_IREAD)
+        function(name)
+
     while True:
         try:
-            shutil.rmtree(path)
+            shutil.rmtree(path, onexc=writable)
             return
         except FileNotFoundError:
             return
