@@ -692,6 +692,12 @@ func _check_rail(prefix: PackedStringArray) -> void:
 	var stamp := card.find_child("LastChecked", true, false) as Label
 	_check(stamp.text.begins_with("Last checked "), "The card says when it was last checked")
 	await _captures(null, "rail-card")
+	rail.call("_show_card", "blender")
+	await process_frame
+	_check(
+		not again.visible and not stamp.visible,
+		"A ready app's card has no Check again and no check time"
+	)
 	host.queue_free()
 
 

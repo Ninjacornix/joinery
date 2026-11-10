@@ -573,6 +573,11 @@ func _fill_card() -> void:
 	_card.action.disabled = busy
 	_card.again.disabled = busy
 	_card.checked.text = UI_COMPONENTS.last_checked(str(entry.get("checked_at", "")))
+	# A ready app needs nothing: no Check again, no check time, just its name and what it does.
+	var ready := status == "ready" and not busy
+	_card.again.visible = not ready
+	_card.checked.visible = not ready
+	(_card.again.get_parent() as Control).visible = not ready or _card.action.visible
 	if _card.visible:
 		_place_card.call_deferred()
 
