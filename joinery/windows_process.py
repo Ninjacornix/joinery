@@ -46,6 +46,8 @@ class WindowsProcessTree:
         self.kernel.WaitForSingleObject.restype = wintypes.DWORD
         self.kernel.CloseHandle.argtypes = [wintypes.HANDLE]
         self.kernel.CloseHandle.restype = wintypes.BOOL
+        self.kernel.TerminateProcess.argtypes = [wintypes.HANDLE, wintypes.UINT]
+        self.kernel.TerminateProcess.restype = wintypes.BOOL
         self.handles: list[int] = []
         snapshot = self.kernel.CreateToolhelp32Snapshot(0x00000002, 0)
         if snapshot == ctypes.c_void_p(-1).value:
@@ -66,7 +68,11 @@ class WindowsProcessTree:
             } - owned:
                 owned.update(descendants)
             for pid in owned:
-                handle = self.kernel.OpenProcess(0x00100000, False, pid)  # SYNCHRONIZE
+                # SYNCHRONIZE | PROCESS_TERMINATE, or SYNCHRONIZE alone when terminating
+                # is refused, so a child that ignores taskkill can still be stopped.
+                handle = self.kernel.OpenProcess(0x00100001, False, pid)
+                if not handle and self.native.get_last_error() == 5:  # Access denied
+                    handle = self.kernel.OpenProcess(0x00100000, False, pid)
                 if handle:
                     self.handles.append(int(handle))
                 elif self.native.get_last_error() != 87:  # Already exited / invalid PID
@@ -78,14 +84,29 @@ class WindowsProcessTree:
             self.kernel.CloseHandle(snapshot)
 
     def wait(self, timeout: float) -> None:
+        """Wait for every process; stop any still running at the deadline.
+
+        taskkill only asks; a busy child can outlive the wait. Those are
+        terminated, then given a short wait to release their files.
+        """
+        if self._wait_all(timeout):
+            return
+        for handle in self.handles:
+            if self.kernel.WaitForSingleObject(handle, 0) == 0x00000102:
+                self.kernel.TerminateProcess(handle, 1)
+        if not self._wait_all(5.0):
+            raise TimeoutError("A cancelled provider descendant has not exited.")
+
+    def _wait_all(self, timeout: float) -> bool:
         deadline = time.monotonic() + timeout
         for handle in self.handles:
             milliseconds = max(0, int((deadline - time.monotonic()) * 1000))
             result = self.kernel.WaitForSingleObject(handle, milliseconds)
             if result == 0x00000102:  # WAIT_TIMEOUT
-                raise TimeoutError("A cancelled provider descendant has not exited.")
+                return False
             if result != 0:
                 raise self.native.WinError(self.native.get_last_error())
+        return True
 
     def close(self) -> None:
         for handle in self.handles:
