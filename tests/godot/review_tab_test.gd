@@ -2,7 +2,8 @@ extends SceneTree
 ## The bottom panel's Review tab, headless: loading and empty states, pending rows with Accept
 ## and Discard, the change on screen opening its full review, files on demand for the others,
 ## decided rows newest first with Revert only where it still works, the art bible row, and the
-## count for the tab's badge.
+## count for the tab's badge, and the change the agent just finished, shown as "Preparing your
+## review…" from the moment its turn ends until its review is ready.
 
 const TAB := preload("res://addons/joinery/review_tab.gd")
 const PANEL := preload("res://addons/joinery/review_panel.gd")
@@ -14,6 +15,15 @@ var _counts: Array[int] = []
 var _decisions: Array = []
 var _reverts: Array[String] = []
 var _art := 0
+
+
+## The chat's signals the tab follows (chat_bridge.gd).
+class FakeChat:
+	extends Node
+	signal review_preparing(event: Dictionary)
+	signal file_preview(event: Dictionary)
+	signal completed(ok: bool)
+	signal file_decision(event: Dictionary)
 
 
 func _initialize() -> void:
@@ -67,6 +77,8 @@ func _run() -> void:
 	await _check_revert(tab)
 	await _check_bible(tab)
 	await _check_live(tab, panel)
+	await _check_preparing(tab)
+	await _check_discard_warning(tab)
 	_host.queue_free()
 	Engine.remove_meta("joinery_ui_config")
 	Engine.remove_meta("joinery_ui_prefs")
@@ -321,6 +333,61 @@ func _check_live(tab: TAB, panel: PANEL) -> void:
 	for left: Node in _rows(tab._waiting_body):
 		waiting.append(str(left.get_meta("transaction_id")))
 	_check(waiting == ["p1", "p2"], "Still waiting, back in the order made: %s" % [waiting])
+
+
+func _check_preparing(tab: TAB) -> void:
+	var chat := FakeChat.new()
+	_host.add_child(chat)
+	tab.follow(chat)
+	tab.clear_live()
+	tab.apply_listing({"transactions": []})
+	await _frames()
+	_check(tab._waiting_empty.visible, "Nothing waits before the agent finishes")
+	chat.review_preparing.emit({"transaction_id": "p3", "summary": "Texture the ashtray"})
+	await _frames()
+	_check(not tab._waiting_empty.visible, "The finished change shows at once, not 'Nothing waits'")
+	var row := _rows(tab._waiting_body)[0]
+	_check(str(row.get_meta("transaction_id")) == "p3", "The change being checked comes first")
+	_check(_label_text(_find(row, "Working")).contains("Preparing your review"), "It says so")
+	_check(_find(row, "Accept") == null, "Nothing to accept before the review exists")
+	_check(tab.waiting_count() == 0, "It doesn't count as waiting yet")
+	# The history already says "review" while the before and after render.
+	var listing := {"transactions": [_tx("p3", "review", "Texture the ashtray", 0.0, 0.0, true)]}
+	tab.apply_listing(listing)
+	await _frames()
+	_check(_find(_rows(tab._waiting_body)[0], "Accept") == null, "Still preparing, still no Accept")
+	(_find(_rows(tab._waiting_body)[0], "Open") as Button).pressed.emit()
+	await _frames()
+	_check(not tab.showing_detail, "There is no review to open yet")
+	chat.file_preview.emit({"transaction_id": "p3", "summary": "Texture the ashtray"})
+	await _frames()
+	row = _rows(tab._waiting_body)[0]
+	_check(_find(row, "Accept") != null, "The review is ready: Accept on the row")
+	_check(tab.waiting_count() == 1, "Now it waits for the user")
+	chat.completed.emit(true)
+	await _frames()
+	_check(_rows(tab._waiting_body).size() == 1, "The turn ending keeps a ready review")
+	tab.clear_live()
+	chat.review_preparing.emit({"transaction_id": "p4", "summary": "Nothing came of it"})
+	chat.completed.emit(false)
+	await _frames()
+	var ids: Array[String] = []
+	for left: Node in _rows(tab._waiting_body):
+		ids.append(str(left.get_meta("transaction_id")))
+	_check(not ids.has("p4"), "A change whose checks failed leaves the list: %s" % [ids])
+	chat.queue_free()
+
+
+func _check_discard_warning(tab: TAB) -> void:
+	var warning := "room.tscn still uses art/models/ashtray.glb, which only the discarded change"
+	var output := JSON.stringify({"transaction_id": "p3", "state": "rejected", "warning": warning})
+	tab._on_decided({"code": 0, "output": output}, "p3", false)
+	tab.apply_listing(
+		{"transactions": [_tx("p3", "rejected", "Texture the ashtray", 0.0, 1.0, true)]}
+	)
+	await _frames()
+	var error := _find(_rows(tab._decided_body)[0], "Error") as Label
+	_check(error != null and error.text.contains("still uses"), "A discard says what it leaves")
 
 
 func _label_text(node: Node) -> String:

@@ -9,6 +9,9 @@ signal message_delta(text: String, new_message: bool)
 signal completed(ok: bool)
 signal editor_action(event: Dictionary)
 signal file_preview(event: Dictionary)
+## The agent finished and its staged change is being checked: {transaction_id, summary}. A
+## file_preview follows when the review is ready; otherwise the turn just completes.
+signal review_preparing(event: Dictionary)
 signal file_decision(event: Dictionary)
 signal art_review(event: Dictionary)
 signal models_received(models: Array)
@@ -196,6 +199,8 @@ func _handle(event: Dictionary) -> void:
 			models_received.emit(event.get("models", []))
 		"timing":
 			timing_received.emit(event)
+		"review_preparing":
+			review_preparing.emit(event)
 		"file_preview":
 			file_preview.emit(event)
 		"art_review":

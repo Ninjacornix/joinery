@@ -187,6 +187,7 @@ func _connect_chat(settings: EditorSettings) -> void:
 		profile = str(settings.get_setting("joinery/connection"))
 	_chat = CHAT_SCRIPT.new()
 	_chat.context_provider = _editor_context
+	_review_tab.follow(_chat)
 	_chat.editor_action.connect(_on_editor_action)
 	_chat.file_preview.connect(_on_file_preview)
 	_chat.file_decision.connect(_on_file_decision)
@@ -859,7 +860,6 @@ func _apply_changes() -> void:
 
 func _on_file_preview(event: Dictionary) -> void:
 	_file_review = event.duplicate(true)
-	_review_tab.show_live(event)
 	_call_dock(
 		"show_file_review",
 		[

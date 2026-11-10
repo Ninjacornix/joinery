@@ -262,10 +262,14 @@ func _approvals() -> void:
 			}
 		)
 	)
+	# The change Journeyman just finished, still being checked.
+	var preparing := {"transaction_id": "ashtray", "summary": "Texture the ashtray"}
+	tab.call("set_preparing", preparing)
 	var dock := tab.get_parent() as Control
 	var bottom: Control = dock.get_parent() as Control if dock != null else tab
 	await get_tree().create_timer(0.3).timeout
 	await _shot("review-list", [bottom])
+	tab.call("clear_live")
 	var settled := {"state": "approved", "by": "creation"}
 	tab.call("apply_listing", {"transactions": [], "art_bible": settled})
 	await _shot("review-list-empty", [bottom])
