@@ -1,0 +1,19 @@
+name: Nightly blueprint combinations
+
+# Every night, boot every blueprint with every allowed set of features in the
+# built engine, not just the sample the per-push run boots.
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  native:
+    uses: ./.github/workflows/native.yml
+    with:
+      editors: '{"include":[{"os":"ubuntu-24.04","target":"linux-x86_64","archive":"tar.gz","jobs":4}]}'
+      runtimes: false
+      combo_matrix: full

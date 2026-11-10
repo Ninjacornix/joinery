@@ -52,8 +52,14 @@ SIDEBAR_STATES = (
     "conversation",
     "not-sent",
     "error",
+    "feature-plan",
+    "history",
+    "art-gate",
     "settings",
+    "settings-compact",
 )
+# Captured at the wide width only: the art direction and game brief documents.
+SIDEBAR_WIDE = ("art-direction", "art-board", "brief")
 # Captured at the narrow width only: each Appearance accent, and Reduce motion on.
 SIDEBAR_NARROW = (
     "accent-brass",
@@ -94,6 +100,7 @@ STARTUP_SCREENS = (
     "setup-catalog-failed",
     "setup-1-details",
     "setup-2-tools",
+    "setup-2-steam-error",
     "setup-3-art",
     "setup-failed",
     "setup-creating",
@@ -275,6 +282,10 @@ def sidebar(capture: Path, logs: Path) -> Harness:
     ] + [
         f"sidebar-{state}-{theme}-480.png"
         for state in SIDEBAR_NARROW
+        for theme in THEMES
+    ] + [
+        f"sidebar-{state}-{theme}-1000.png"
+        for state in SIDEBAR_WIDE
         for theme in THEMES
     ]
     with tempfile.TemporaryDirectory(prefix="joinery-visual-sidebar-") as directory:

@@ -11,6 +11,10 @@ on:
         description: Download and run the three portable game exports
         type: boolean
         default: true
+      combo_matrix:
+        description: Blueprint and feature combinations to boot ("default" samples, "full" boots every one)
+        type: string
+        default: default
 
 permissions:
   contents: read
@@ -94,9 +98,40 @@ jobs:
         if: runner.os == 'Windows'
         run: uv run python release/windows_graphics.py --engine "$JOINERY_RELEASE_ENGINE" --output out/windows-software-gl --cache "$RUNNER_TEMP/mesa" --github-env "$GITHUB_ENV"
       - name: Lint native addon
-        run: uvx --from gdtoolkit==4.5.0 gdlint godot_addon/joinery/*.gd tests/godot/project_setup_flow_test.gd tests/godot/command_job_test.gd tests/godot/chat_transport_test.gd tests/godot/audio_preview_test.gd
+        # The glob takes in every addon script, the part picker, parts panel
+        # and sidebar pieces included; tests/godot holds their GDScript tests.
+        run: uvx --from gdtoolkit==4.5.0 gdlint godot_addon/joinery/*.gd tests/godot
+      - name: Lint blueprint and feature game code
+        run: uvx --from gdtoolkit==4.5.0 gdlint blueprints features
+      - name: Play every blueprint and feature in the built engine
+        if: runner.os != 'Windows'
+        env:
+          JOINERY_COMBO_MATRIX: ${{ inputs.combo_matrix == 'full' && 'full' || '' }}
+        run: |
+          mkdir -p out/native-evidence
+          JOINERY_TEST_GODOT="$JOINERY_RELEASE_ENGINE" uv run pytest tests/blueprints tests/test_blueprints.py tests/test_capture_blueprints.py --junitxml=out/native-evidence/blueprints.xml
+      - name: Boot the blueprint matrix and keep its report
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p out/matrix
+          JOINERY_TEST_GODOT="$JOINERY_RELEASE_ENGINE" JOINERY_BLUEPRINT_MATRIX=1 JOINERY_MATRIX_REPORT=out/matrix uv run pytest tests/test_blueprint_matrix.py -m blueprint_matrix
+      - name: Upload the blueprint matrix report
+        if: ${{ always() && runner.os == 'Linux' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: blueprint-matrix
+          path: out/matrix/matrix.md
+          if-no-files-found: warn
+          retention-days: 14
       - name: Exercise native controls and real chat pipes
         run: uv run python tests/godot/run_widget_tests.py | tee out/widget-tests.log
+      - name: Exercise the Project apps dialog and the app rail
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            xvfb-run -a uv run python tests/godot/run_setup_tests.py | tee out/setup-tests.log
+          else
+            uv run python tests/godot/run_setup_tests.py | tee out/setup-tests.log
+          fi
       - name: Install the pinned provider for the local API startup fixture
         run: npm install --global --ignore-scripts @openai/codex@0.167.0
       - name: Exercise isolated connection, API and project creation flow
