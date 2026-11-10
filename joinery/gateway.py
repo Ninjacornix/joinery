@@ -16,88 +16,26 @@ from typing import Any, cast
 from mcp.types import CallToolResult, TextContent
 
 from joinery import parts as part_targets
-from joinery import references
+from joinery import references, submission
 from joinery import tools as tool_modules
 from joinery.art_approval import approved, review
-from joinery.art_approval import fingerprint as bible_fingerprint
 from joinery.authoring import run_offline
-from joinery.bible_rules import check_rules, load_rules, ui_resources
-from joinery.bible_schema import REFERENCE_DIR
 from joinery.catalog import blocked_tools, load_catalog, load_project_tools
-from joinery.deps import check_deps
-from joinery.lockfile import asset_files, check_assets
+from joinery.lockfile import asset_files
 from joinery.locking import record_custom_outputs
 from joinery.mcp_runtime import MCPConnection, PolicyStop, validate_arguments
-from joinery.policy import load_denylist
 from joinery.read_access import read_only
 from joinery.review import evidence
 from joinery.server_install import configured, installation
+from joinery.submission import is_reference
 from joinery.timing import TurnTiming
-from joinery.transactions import DIRECTORY, FileTransaction, ProjectLease, inventory
+from joinery.transactions import FileTransaction, ProjectLease, inventory
 from joinery.workers import (
     blender_worker,
     godot_worker,
     inkscape_worker,
     supercollider_worker,
 )
-
-PROTECTED = {
-    "joinery.toml",
-    ".mcp.json",
-    "policy",
-    ".claude",
-    ".codex",
-    ".gemini",
-    ".opencode",
-}
-#: Asset files wherever they land in the project: a change to one needs an
-#: approved art bible and passes the provenance gate, like art/ and audio/.
-ASSET_SUFFIXES = frozenset(
-    {
-        ".blend",
-        ".glb",
-        ".gltf",
-        ".fbx",
-        ".obj",
-        ".dae",
-        ".kra",
-        ".xcf",
-        ".psd",
-        ".aseprite",
-        ".ase",
-        ".ptex",
-        ".png",
-        ".jpg",
-        ".jpeg",
-        ".webp",
-        ".svg",
-        ".bmp",
-        ".tga",
-        ".gif",
-        ".exr",
-        ".hdr",
-        ".tif",
-        ".tiff",
-        ".dds",
-        ".ktx",
-        ".ktx2",
-        ".wav",
-        ".ogg",
-        ".mp3",
-        ".flac",
-        ".opus",
-        ".aif",
-        ".aiff",
-        ".ttf",
-        ".otf",
-        ".woff",
-        ".woff2",
-        ".mp4",
-        ".webm",
-        ".ogv",
-    }
-)
-
 
 #: Native document operations: each saves, exports and records a recipe, and its
 #: result is imported into Godot before the next call can use it.
@@ -144,15 +82,6 @@ def _with_note(tool: dict[str, Any], note: str) -> dict[str, Any]:
     return tool
 
 
-def _is_reference(path: str) -> bool:
-    """Under art/reference/: the user's own boards, allowed before approval.
-
-    `art/reference/../hero.blend` is not: PurePath does not resolve `..`.
-    """
-    pure = PurePosixPath(path.replace("\\", "/").removeprefix("res://"))
-    return ".." not in pure.parts and pure.is_relative_to(REFERENCE_DIR)
-
-
 def _reference_only(arguments: Any) -> bool:
     """Every project asset path in the arguments is a reference board, and one is.
 
@@ -175,27 +104,7 @@ def _reference_only(arguments: Any) -> bool:
                 collect(item)
 
     collect(arguments)
-    return bool(paths) and all(_is_reference(p) for p in paths)
-
-
-def _approved_in(project: Path, stage: Path) -> bool:
-    """The project's bible is approved and the stage carries that same bible."""
-    try:
-        return approved(project) and bible_fingerprint(project) == bible_fingerprint(
-            stage
-        )
-    except ValueError:
-        return False
-
-
-def _ui_changes(stage: Path, changes: list[dict[str, Any]]) -> bool:
-    """Changed UI resources that the bible's accessibility rules check."""
-    try:
-        rules = load_rules(stage)
-    except ValueError:
-        return False  # lint reports invalid rules; they cannot block UI work
-    files = [c["path"] for c in changes if DIRECTORY not in {c["before"], c["after"]}]
-    return bool(ui_resources(rules, files))
+    return bool(paths) and all(is_reference(p) for p in paths)
 
 
 def result_text(result: CallToolResult) -> str:
@@ -411,7 +320,7 @@ class ProjectGateway:
         ):
             # Not an error the agent should work around: the user decides. The
             # sidebar shows the art gate card when the turn finishes.
-            gate = self._art_gate()
+            gate = self.art_gate_event()
             return CallToolResult(
                 content=[
                     TextContent(
@@ -609,7 +518,7 @@ class ProjectGateway:
         self.runtime_config = None
         self.runtime_injected = None
 
-    def _art_gate(self) -> dict[str, Any]:
+    def art_gate_event(self) -> dict[str, Any]:
         """The art gate result: the sidebar asks the user to approve, then resumes."""
         self.art_gate = {
             "kind": "art_gate",
@@ -647,64 +556,18 @@ class ProjectGateway:
         self.staged.clear()
         self.runtime_owned = False
         self._strip_runtime()
-        changes = tx.diff()
+        checked = await submission.validate(self, tx, set())
+        changes = checked.changes
         if not changes:
             await self.cancel()
             return None
-        for change in changes:
-            if Path(change["path"]).parts[0] in PROTECTED:
-                raise PermissionError(
-                    "Model tools cannot change project policy or MCP configuration. Use project setup."
-                )
-        # A scene and the model or texture it loads are decided together: never
-        # stage a scene that points at a file nobody is adding.
-        gaps = references.missing(
-            tx.stage,
-            [c["path"] for c in changes if c["after"] not in {"", DIRECTORY}],
-        )
-        for scene, paths in references.users_of(
-            tx.stage, [c["path"] for c in changes if not c["after"]]
-        ).items():
-            gaps.setdefault(scene, []).extend(paths)
-        if gaps:
-            raise ValueError(references.refusal(gaps))
-        asset_changes = [
-            change["path"]
-            for change in changes
-            if (
-                Path(change["path"]).parts[0] in {"art", "audio"}
-                and change["path"] != "art/bible.md"
-                or Path(change["path"]).suffix.lower() in ASSET_SUFFIXES
-            )
-            and DIRECTORY not in {change["before"], change["after"]}
-        ]
-        bible_ok = _approved_in(self.project, tx.stage)
-        rules = False
-        if asset_changes:
-            # Reference boards come before the bible; they still need a lock entry.
-            if not bible_ok and not all(_is_reference(p) for p in asset_changes):
-                # Nothing is applied: the stage is dropped and the user is asked.
-                gate = self._art_gate()
-                self.art_gate = None
-                await self.cancel()
-                return gate
-            problems = check_assets(tx.stage, load_catalog())
-            if problems:
-                raise ValueError("Asset validation failed: " + "; ".join(problems))
-            rules = bible_ok
-        else:
-            # UI themes and scenes are checked for text contrast and size.
-            rules = bible_ok and _ui_changes(tx.stage, changes)
-        problems = check_deps(tx.stage, load_denylist())
-        if problems:
-            raise ValueError("Dependency validation failed: " + "; ".join(problems))
-        godot = any(
-            Path(change["path"]).suffix
-            in {".gd", ".tscn", ".tres", ".gdshader", ".glb"}
-            or change["path"] == "project.godot"
-            for change in changes
-        ) and not self._import_current(tx)
-        await self._checks(tx, changes, rules, godot)
+        if checked.gate is not None:
+            # Nothing is applied: the stage is dropped and the user is asked.
+            self.art_gate = None
+            await self.cancel()
+            return checked.gate
+        if checked.problems:
+            raise ValueError("; ".join(p.message for p in checked.problems))
         text_diffs: list[str] = []
         for change in changes:
             if Path(change["path"]).suffix in {
@@ -740,7 +603,7 @@ class ProjectGateway:
         reviewed = tx.review()
         if any(Path(change["path"]).suffix == ".blend" for change in changes):
             self.progress("Rendering the before and after…")
-        with self._span("review_media"):
+        with self.span("review_media"):
             media = await evidence(
                 tx,
                 changes,
@@ -755,64 +618,14 @@ class ProjectGateway:
             "media": media,
         }
 
-    def _span(self, phase: str) -> AbstractContextManager[None]:
+    def span(self, phase: str) -> AbstractContextManager[None]:
         return self.timing.span(phase) if self.timing else nullcontext()
 
-    def _import_current(self, tx: FileTransaction) -> bool:
+    def import_current(self, tx: FileTransaction) -> bool:
         """Godot already imported this exact stage cleanly (after a native export)."""
         if self._imported is None or self._imported[0] != tx.id:
             return False
         return self._imported[1] == inventory(tx.stage, include_dirs=True)
-
-    async def _checks(
-        self,
-        tx: FileTransaction,
-        changes: list[dict[str, str]],
-        rules: bool,
-        godot: bool,
-    ) -> None:
-        """The art bible's measured rules and Godot's import check, side by side.
-
-        Each runs in the offline worker and takes seconds; neither writes what
-        the other reads (the rules mount the stage read-only).
-        """
-
-        async def measured() -> list[str]:
-            if not rules:
-                return []
-            with self._span("review_rules"):
-                return await check_rules(
-                    tx.stage,
-                    [change["path"] for change in changes],
-                    lambda argv, root: run_offline(argv, root, 180, readonly=True),
-                )
-
-        async def imported() -> str:
-            if not godot:
-                return ""
-            with self._span("review_import"):
-                got = await run_offline(
-                    ["godot", "--headless", "--path", "/work", "--editor", "--import"],
-                    tx.stage,
-                    180,
-                )
-            if (
-                not got.ok
-                or "SCRIPT ERROR:" in got.output
-                or "Parse Error:" in got.output
-            ):
-                return got.output[-4000:] or "Godot exited with an error."
-            return ""
-
-        found = await asyncio.gather(measured(), imported(), return_exceptions=True)
-        for outcome in found:
-            if isinstance(outcome, BaseException):
-                raise outcome
-        problems, failed = cast(tuple[list[str], str], tuple(found))
-        if problems:
-            raise ValueError("Art bible check failed: " + "; ".join(problems))
-        if failed:
-            raise ValueError("Godot import/script validation failed: " + failed)
 
     async def decide(self, identifier: str, accept: bool) -> dict[str, Any]:
         tx = self.transaction

@@ -23,7 +23,7 @@ async def main() -> None:
         (project / "art/bible.md").write_text("Automated technical fixture; no game artwork.")
         gateway = ProjectGateway(project)
         try:
-            with patch("joinery.gateway.approved", return_value=True):
+            with patch("joinery.gateway.approved", return_value=True), patch("joinery.submission.approved", return_value=True):
                 await gateway.discover()
                 result = await gateway.call("joinery-blender-ops", "operate_document", {"tool": "blender", "source": "art/sources/fixture.blend", "code": 'bpy.ops.mesh.primitive_cube_add(size=1)\nbpy.context.object.name="Fixture"', "exports": ["art/models/fixture.glb"]})
                 assert not result.is_error, result_text(result)

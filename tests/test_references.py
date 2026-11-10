@@ -32,13 +32,14 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr("joinery.gateway.configured", lambda _: ([], []))
     monkeypatch.setattr("joinery.gateway.evidence", AsyncMock(return_value=[]))
     monkeypatch.setattr("joinery.gateway.approved", lambda _project: True)
-    monkeypatch.setattr("joinery.gateway._approved_in", lambda *_: True)
-    monkeypatch.setattr("joinery.gateway.check_assets", lambda *_: [])
+    monkeypatch.setattr("joinery.submission.approved_in", lambda *_: True)
+    monkeypatch.setattr("joinery.submission.check_assets", lambda *_: [])
 
     async def offline(_argv: list[str], _root: Path, *_a: Any, **_k: Any) -> Result:
         return Result(True, "", "", 0.0)
 
     monkeypatch.setattr("joinery.gateway.run_offline", offline)
+    monkeypatch.setattr("joinery.submission.run_offline", offline)
     return tmp_path
 
 
@@ -77,7 +78,7 @@ def test_a_scene_without_its_model_is_refused(
         run(gateway.finish())
     message = str(error.value)
     assert "scenes/props/ashtray.tscn uses art/models/ashtray.glb" in message
-    assert "same change" in message and "Nothing was staged" in message
+    assert "same change" in message and message.startswith("Not submitted: ")
     run(gateway.close())
 
 

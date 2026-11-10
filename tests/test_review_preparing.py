@@ -15,6 +15,7 @@ import pytest
 from bridge import stdio
 from bridge.instructions import REVIEW_GUIDE
 from bridge.protocol import Done, Message
+from joinery import submission
 from joinery.gateway import ProjectGateway
 from joinery.runner import Result
 from joinery.transactions import FileTransaction
@@ -131,6 +132,7 @@ def staged(
         return Result(True, "", "", 0.0)
 
     monkeypatch.setattr("joinery.gateway.run_offline", offline)
+    monkeypatch.setattr("joinery.submission.run_offline", offline)
     gateway = ProjectGateway(tmp_path)
     tx = FileTransaction(tmp_path)
     tx.begin("Room")
@@ -199,10 +201,10 @@ def test_rules_and_import_run_side_by_side(
         await asyncio.sleep(0.3)
         return Result(True, "", "", 0.3)
 
-    monkeypatch.setattr("joinery.gateway.check_rules", slow_rules)
-    monkeypatch.setattr("joinery.gateway.run_offline", slow_import)
+    monkeypatch.setattr("joinery.submission.check_rules", slow_rules)
+    monkeypatch.setattr("joinery.submission.run_offline", slow_import)
     start = time.monotonic()
-    asyncio.run(gateway._checks(tx, [], rules=True, godot=True))
+    asyncio.run(submission.checks(tx, [], rules=True, godot=True))
     assert time.monotonic() - start < 0.55
     asyncio.run(gateway.close())
 
@@ -217,9 +219,11 @@ def test_a_failed_rule_still_wins_over_a_clean_import(
     async def rules(*_a: Any) -> list[str]:
         return ["art/models/a.glb: 9000 triangles, the bible allows 600"]
 
-    monkeypatch.setattr("joinery.gateway.check_rules", rules)
-    with pytest.raises(ValueError, match="Art bible check failed: art/models/a.glb"):
-        asyncio.run(gateway._checks(tx, [], rules=True, godot=True))
+    monkeypatch.setattr("joinery.submission.check_rules", rules)
+    problems = asyncio.run(submission.checks(tx, [], rules=True, godot=True))
+    assert [p.check for p in problems] == ["art_bible"]
+    assert problems[0].message.startswith("Art bible check failed: art/models/a.glb")
+    assert problems[0].paths == ["art/models/a.glb"]
     asyncio.run(gateway.close())
 
 

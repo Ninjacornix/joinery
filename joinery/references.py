@@ -135,7 +135,10 @@ def users_of(root: Path, removed: Iterable[str]) -> dict[str, list[str]]:
 
 
 def refusal(gaps: dict[str, list[str]]) -> str:
-    """The review refusal for scenes that load files nobody is adding."""
+    """Why a change with scenes that load files nobody is adding isn't submitted.
+
+    The stage survives: the agent can add the file or fix the scene and submit again.
+    """
     lines = [
         f"{scene} uses {', '.join(paths)}, which "
         + ("isn't" if len(paths) == 1 else "aren't")
@@ -143,8 +146,9 @@ def refusal(gaps: dict[str, list[str]]) -> str:
         for scene, paths in sorted(gaps.items())
     ]
     return (
-        "; ".join(lines)
-        + ". Nothing was staged. Make the model or texture and the scene that uses it "
+        "Not submitted: "
+        + "; ".join(lines)
+        + ". Make the model or texture and the scene that uses it "
         "in the same change, or point the scene at a file the project has."
     )
 

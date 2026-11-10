@@ -216,7 +216,7 @@ async def main(metrics_path: Path) -> None:
                 assert done, "Real provider did not complete successfully"
 
             try:
-                with patch("joinery.gateway.approved", return_value=True):
+                with patch("joinery.gateway.approved", return_value=True), patch("joinery.submission.approved", return_value=True):
                     await stage("connect", session.connect(project))
                     await stage(
                         "create_model_turn",

@@ -53,6 +53,7 @@ def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         return Result(True, "", "", 0.0)
 
     monkeypatch.setattr("joinery.gateway.run_offline", offline)
+    monkeypatch.setattr("joinery.submission.run_offline", offline)
     return tmp_path
 
 
