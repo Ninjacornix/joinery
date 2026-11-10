@@ -267,6 +267,8 @@ class ProjectGateway:
         self.edit_scene: (
             Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None
         ) = None
+        #: Capture the editor's viewport as the user sees it (read-only); set by the chat host.
+        self.view_editor: Callable[[], Awaitable[dict[str, Any]]] | None = None
         self._call_lock = asyncio.Lock()
         self.progress: Callable[[str], None] = lambda _text: None
         self.timing: TurnTiming | None = None

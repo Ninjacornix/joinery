@@ -86,6 +86,25 @@ def art_review_event(project: Path) -> dict[str, Any]:
     return event
 
 
+def editor_view(project: Path, result: dict[str, Any]) -> dict[str, Any]:
+    """The sidebar's answer to a view request, checked: the screenshot must be one it saved
+    under the attachment folder. Returns {path, view, width, height, camera}."""
+    if not result.get("success"):
+        raise ValueError(
+            str(result.get("message") or "The editor view could not be captured.")
+        )
+    (path,) = chat_attachments.validate(project, [str(result.get("path", ""))])
+    camera = result.get("camera")
+    return {
+        "path": path,
+        "view": str(result.get("view", "")),
+        "width": int(result.get("width", 0) or 0),
+        "height": int(result.get("height", 0) or 0),
+        "camera": camera if isinstance(camera, dict) else {},
+        "note": "A screenshot of the user's editor for context, not an asset.",
+    }
+
+
 class ThreadInput:
     """Read synchronous Windows anonymous stdin pipes without blocking asyncio.
 
@@ -193,6 +212,24 @@ async def serve(project: Path, agent_id: str, profile_id: str = "") -> int:
             editor_calls.pop(request_id, None)
 
     gateway.edit_scene = edit_scene
+    view_calls: dict[str, asyncio.Future[dict[str, Any]]] = {}
+
+    async def view_editor() -> dict[str, Any]:
+        """Ask the sidebar for a screenshot of the editor's viewport (read-only)."""
+        if active is None or active.done():
+            raise ValueError("Looking at the editor requires an active user request.")
+        request_id = uuid.uuid4().hex
+        future: asyncio.Future[dict[str, Any]] = (
+            asyncio.get_running_loop().create_future()
+        )
+        view_calls[request_id] = future
+        emit({"kind": "editor_view", "request_id": request_id})
+        try:
+            return editor_view(project, await asyncio.wait_for(future, 15))
+        finally:
+            view_calls.pop(request_id, None)
+
+    gateway.view_editor = view_editor
 
     async def policy_stop(reason: str) -> None:
         if bridge is not None:
@@ -418,6 +455,13 @@ async def serve(project: Path, agent_id: str, profile_id: str = "") -> int:
                         editor_calls[request_id].set_result(result)
                     else:
                         bridge.editor_result(request_id, result)
+                elif data.get("kind") == "editor_view_result":
+                    result = data.get("result")
+                    if not isinstance(result, dict):
+                        raise TypeError("Invalid editor view result.")
+                    waiting = view_calls.get(str(data.get("request_id", "")))
+                    if waiting is not None and not waiting.done():
+                        waiting.set_result(result)
                 elif data.get("kind") == "cancel":
                     if specialists is not None:
                         await specialists.close()

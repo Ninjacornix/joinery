@@ -209,6 +209,11 @@ class GatewayRPC:
                     data["joinery"] = {"status": "staged", "requires_review": True}
             elif method == "editor_context":
                 data = {"editor": self.gateway.editor_context}
+            elif method == "editor_view":
+                # Read-only, so specialists may look too.
+                if self.gateway.view_editor is None:
+                    raise ValueError("No live editor is connected to this gateway.")
+                data = await self.gateway.view_editor()
             elif method == "editor_edit":
                 if self.inspection_only:
                     raise ValueError("Specialists cannot change the live editor.")

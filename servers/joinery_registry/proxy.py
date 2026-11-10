@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import json
 from pathlib import Path
 from typing import Any
 
 from mcp.server import MCPServer
-from mcp.types import CallToolResult, TextContent, ToolAnnotations
+from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
 
+from joinery import chat_attachments
 from joinery.editor_ops import SceneEdit
 from joinery.gateway_rpc import rpc
 from servers.errors import tool_errors
@@ -46,6 +48,19 @@ def make_server(socket: Path) -> MCPServer[Any]:
     async def inspect_editor() -> dict[str, Any]:
         """Read the current project's live editor scene, node identities, selection and unsaved scene context. Use these identities for edit_scene. Saved-file MCP tools and game_* runtime tools are different targets."""
         return await rpc(socket, "editor_context", {})
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True))
+    @tool_errors
+    async def view_editor() -> CallToolResult:
+        """See the editor's current 3D or 2D viewport exactly as the user sees it, with the camera position. Use it when the user asks you to look at something. The screenshot is context only, never an asset."""
+        data = await rpc(socket, "editor_view", {})
+        media, encoded = chat_attachments.encoded(Path(str(data["path"])))
+        return CallToolResult(
+            content=[
+                ImageContent(type="image", data=encoded, mime_type=media),
+                TextContent(type="text", text=json.dumps(data)),
+            ]
+        )
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors

@@ -191,7 +191,12 @@ def violation(raw: dict[str, Any]) -> Verdict | None:
         values = raw.get("tool_input") or raw.get("args") or {}
         allowed = event.kind == "other"
         if event.kind == "mcp" and event.server.replace("_", "-") == "joinery-registry":
-            allowed = event.tool in {"discover_tools", "tool_schema", "inspect_editor"}
+            allowed = event.tool in {
+                "discover_tools",
+                "tool_schema",
+                "inspect_editor",
+                "view_editor",
+            }
             if event.tool == "call_tool" and isinstance(values, dict):
                 allowed = read_only(
                     str(values.get("server", "")), str(values.get("tool", ""))
