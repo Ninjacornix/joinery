@@ -96,6 +96,7 @@ func _enter_tree() -> void:
 	_review_tab.changes_applied.connect(_on_review_row_applied)
 	_review_tab.art_requested.connect(func() -> void: _dock.art_review_requested.emit())
 	_review_button = add_control_to_bottom_panel(_review_tab, "Review")
+	load("res://addons/joinery/timeline_tab.gd").install(self)
 	# Revert runs the sidebar's own, so the chat's change card follows.
 	_review_tab.attach(_dock.get("_slash"), _review_button)
 	_dock.review_requested.connect(_show_edit_review_panel)
@@ -458,9 +459,8 @@ func _on_toggle_focus() -> void:
 	var editor := get_editor_interface()
 	if _focus.is_active():
 		_focus.restore()
-		# The panels coming back say it themselves. An empty note clears any earlier
-		# "Panels hidden" line, so the footer never claims panels are hidden once they are
-		# back, and a pending review gets its own line again.
+		# The panels coming back say it themselves; an empty note clears "Panels hidden", and a
+		# pending review gets its own footer line again.
 		_status("" if _review_open else "Panels shown")
 	elif _focus.apply(editor.get_base_control(), _review_tab):
 		_focus.show_review(_review_open)

@@ -2,6 +2,10 @@
 extends RefCounted
 ## Narrow live-scene transactions. Preview never saves or replaces the scene.
 
+## An edit was accepted into the open scene ([param scene_path], "" for a scene not saved yet).
+## It is on disk, and joins the Timeline, once the scene is saved.
+signal accepted(scene_path: String, summary: String)
+
 const NODE_OPERATIONS := preload("node_operations.gd")
 
 var root: Node
@@ -190,7 +194,10 @@ func accept(undo: EditorUndoRedoManager) -> Dictionary:
 	undo.commit_action(false)
 	# One wording for an accepted change everywhere; the summary is already the review title.
 	var result := {"success": true, "status": "accepted", "message": "Change accepted"}
+	var accepted_in := root.scene_file_path if is_instance_valid(root) else ""
+	var accepted_summary := summary
 	_clear()
+	accepted.emit(accepted_in, accepted_summary)
 	return result
 
 

@@ -37,6 +37,8 @@ CASES = {
     "share_view_test.gd": "share view: ok",
     "chat_images_test.gd": "chat images: ok",
     "usage_meter_test.gd": "usage meter: ok",
+    # Last: it puts the shared disposable project under git.
+    "timeline_test.gd": "timeline: ok",
 }
 #: Cases that need a game made from a blueprint (the real `joinery feature` CLI runs there).
 GAME_CASES = {"sidebar_feature_test.gd"}

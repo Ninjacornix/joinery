@@ -69,6 +69,7 @@ func _run() -> void:
 	await _sidebar(dock)
 	await _reviews(dock)
 	await _approvals()
+	await _timeline()
 	await _tools()
 	await _panels(base, dock)
 	await _dialogs()
@@ -274,6 +275,123 @@ func _approvals() -> void:
 	tab.call("apply_listing", {"transactions": [], "art_bible": settled})
 	await _shot("review-list-empty", [bottom])
 	tab.call("apply_listing", {"transactions": [], "art_bible": {"state": "missing"}})
+	_plugin.hide_bottom_panel()
+	await _frames()
+
+
+## The Timeline tab: entries with a filter, one entry's files open, and the offer to start one.
+func _timeline() -> void:
+	var tab: Control
+	for node: Node in EditorInterface.get_base_control().find_children("Timeline", "", true, false):
+		if node.get_script() == load("res://addons/joinery/timeline_tab.gd"):
+			tab = node as Control
+	_check(tab != null, "The Timeline tab exists")
+	if tab == null:
+		return
+	tab.set("cli_enabled", false)
+	tab.call("show_list")
+	_plugin.make_bottom_panel_item_visible(tab)
+	var now := Time.get_unix_time_from_system()
+	var people := ["Ada Lovelace", "Ada Lovelace", "Grace Hopper", "Ada Lovelace", "Joinery user"]
+	var subjects := [
+		"Darken the door wood",
+		"Revert: Add fog to the harbour",
+		"Add fog to the harbour",
+		"Model a brass harbour lamp",
+		"Start Harbour Watch",
+	]
+	var entries: Array = []
+	for index: int in subjects.size():
+		(
+			entries
+			. append(
+				{
+					"commit": "%040x" % (index + 1),
+					"subject": subjects[index],
+					"author": people[index],
+					"time": now - [180, 4000, 5000, 90000, 400000][index],
+					"files": [2, 1, 1, 3, 48][index],
+				}
+			)
+		)
+	var listing := {"state": "ready", "auto_commit": true, "entries": entries, "more": true}
+	tab.call("apply_listing", listing)
+	var dock := tab.get_parent() as Control
+	var bottom: Control = dock.get_parent() as Control if dock != null else tab
+	# Taller, as someone reading their timeline would drag it; put back afterwards.
+	var split: SplitContainer
+	var walker: Node = bottom
+	while walker != null and split == null:
+		walker = walker.get_parent()
+		split = walker as SplitContainer
+	var offset := split.split_offset if split != null else 0
+	if split != null:
+		split.split_offset = offset - 360
+	await get_tree().create_timer(0.3).timeout
+	await _shot("timeline-list", [bottom])
+	var cache := OS.get_cache_dir().path_join("joinery-visual")
+	var before := cache.path_join("timeline-wood-before.png")
+	var after := cache.path_join("timeline-wood-after.png")
+	_planks(Color("b07a45")).save_png(before)
+	_planks(Color("6b4423")).save_png(after)
+	tab.call("open_entry", entries[0])
+	var view: Control = tab.call("entry_view")
+	var files := [
+		{
+			"path": "scenes/door.tscn",
+			"change": "modified",
+			"kind": "text",
+			"added": 2,
+			"removed": 1
+		},
+		{"path": "art/textures/door_wood.png", "change": "modified", "kind": "image"},
+	]
+	view.call(
+		"show_entry",
+		{"subject": subjects[0], "author": people[0], "time": now - 180, "files": files}
+	)
+	view.call("set_file_open", "art/textures/door_wood.png", true)
+	(
+		view
+		. call(
+			"apply_file",
+			{
+				"path": "scenes/door.tscn",
+				"kind": "text",
+				"diff":
+				[
+					"@@ -12,3 +12,4 @@",
+					' [node name="Door" type="MeshInstance3D" parent="."]',
+					'-material_override = ExtResource("oak")',
+					'+material_override = ExtResource("oak_dark")',
+					"+transform = Transform3D(1.2, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0)",
+				],
+			}
+		)
+	)
+	(
+		view
+		. call(
+			"apply_file",
+			{
+				"path": "art/textures/door_wood.png",
+				"kind": "image",
+				"before": before,
+				"after": after,
+				"before_size": 48_200,
+				"after_size": 47_900,
+			}
+		)
+	)
+	await get_tree().create_timer(0.3).timeout
+	await _shot("timeline-entry", [bottom])
+	view.call("set_restore", "art/textures/door_wood.png", "done")
+	await _shot("timeline-restored", [bottom])
+	tab.call("show_list")
+	tab.call("apply_listing", {"state": "none", "message": "", "auto_commit": true, "entries": []})
+	await _shot("timeline-start", [bottom])
+	if split != null:
+		split.split_offset = offset
 	_plugin.hide_bottom_panel()
 	await _frames()
 
