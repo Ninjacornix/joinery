@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -244,6 +245,9 @@ def test_capability_check_covers_the_exporter_and_the_pack() -> None:
     }
 
 
+@pytest.mark.skipif(
+    os.name == "nt", reason="the snippet runs in the Linux worker, not on a Windows host"
+)
 @pytest.mark.parametrize(
     ("present", "installed"),
     [
