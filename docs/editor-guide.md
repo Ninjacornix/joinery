@@ -21,7 +21,7 @@ command; Enter sends it in chat. `/help` replies with the command list. System a
 diagnostics go to Output. The sidebar starts wide enough for chat and connects the agent selected at startup.
 
 Changes open in a separate **Review** panel below the viewport. Model/image/audio
-previews appear before the scrollable file details; Accept and Reject stay visible.
+previews appear before the scrollable file details; Accept and Discard stay visible.
 Accepting a model import opens its 3D asset preview automatically. Exporting a
 model does not place an instance in the game scene unless that was requested.
 The chat status shows the current work phase while the native application runs.
@@ -33,7 +33,7 @@ but their CLIs are not installed on the development machine for live verificatio
 
 Live scene tools support node creation, deletion, duplication, renaming,
 reparenting, transforms, resources, imported scene instances, existing scripts
-and persistent signals. Accept records native undo/redo; Reject restores the
+and persistent signals. Accept records native undo/redo; Discard restores the
 preview. Saved scenes/scripts and creative documents use isolated project
 transactions, conflict checks and durable recovery journals.
 
@@ -53,6 +53,35 @@ Use `/art` to review and approve its current version. Changing its content
 invalidates approval. An agent cannot approve its own direction or file changes.
 Use `/tools` for actual MCP connection/probe status; diagnostics stay in Output.
 
+### Sidebar commands
+
+- `/feature` or `/feature list` says what the game has and what can be added.
+  `/feature add|remove <id>` shows a plan first (files, settings in plain words,
+  notes and conflicts). Nothing changes until you press **Apply**; Journeyman
+  never applies a feature itself. After it is applied the card offers
+  **Revert**, which shows **Reverting…** while it runs, or **Too old to revert**
+  once its restore data is gone. When `project.godot` changed, the editor
+  offers to reload the project so its settings in memory never overwrite the
+  new ones.
+- `/brief` opens `design/brief.md` read-only, with **Ask Journeyman to change
+  it**. With no brief, **Write the brief** drafts one from the starting point.
+- `/tools` gives each app's state and its one action (for example Start Docker
+  or Rebuild), the same report as the app rail and project setup. When an app
+  needs something, the sidebar header says so in one line.
+- When a request needs art and the art direction is not approved yet, the
+  request's card stops at the art gate: **Review art direction** opens `/art`,
+  and after approval the held request goes out again.
+- Changes are accepted or **Discarded** in the Review panel. **Compact** in
+  history asks for confirmation inline before it frees space.
+
+### Picking a part of a model
+
+In the Tools workspace, a model's parts list shows its objects, materials and
+maps; pick one, or drag it onto the sidebar, to make it the target. In the 3D
+viewport, Alt+click picks the material under the pointer (on stock Godot only
+while the model's root is selected). Typed edits then stay inside that part,
+and review says what else changed.
+
 For an installation with a matching Joinery editor already built or bundled:
 
 ```sh
@@ -65,7 +94,94 @@ uv run joinery launch --project /path/to/game  # update and open a closed projec
 ```
 
 Run commands from the extracted runtime/source folder. For an existing project,
-use `joinery setup --project /path/to/game` instead of `new`. A source checkout
+use `joinery setup --project /path/to/game` instead of `new`.
+
+### Starting from a blueprint
+
+`joinery new` makes the same project as the Project Manager's new-project
+wizard. Add `--blueprint` to start from a small playable game:
+
+```sh
+uv run joinery blueprints                 # the starting points
+uv run joinery features                   # what a game can add
+uv run joinery new /path/to/game --tools godot,blender \
+  --blueprint first-person-3d --features controller,save-load
+# With Steam: the app ID is digits only; leave it out to add it later.
+uv run joinery new /path/to/game --tools godot --blueprint top-down \
+  --features online-play,steam --steam-app-id 480 --connect steam
+```
+
+Without `--features` the blueprint's suggested features are used;
+`--features ""` adds none. Every new project gets the Joinery addon with its MIT
+licence (the addon ships inside your game) and the plugin turned on. With a
+blueprint it also gets the game, `design/brief.md` with the controls the game
+really binds, and an `art/bible.md` draft whose technical sections come from the
+blueprint's preset, marked as suggestions. Finish and approve the bible before
+any asset work. A bad feature mix is refused before any folder is made.
+
+With Steam on, Joinery writes `[game.steam]` (app ID and how players connect)
+and downloads the pinned GodotSteam extension into the project, checked against
+the SHA-256 recorded in the repo and listed in `joinery.lock`. If the download
+fails, the project is still made: the game runs, and Steam calls do nothing
+until the extension is there. Set `JOINERY_NO_DOWNLOADS=1` to skip the download
+(tests, offline machines). Joinery never publishes anything to Steam.
+`--connect` only matters with Online play: players meet through Steam (the
+default) or by direct IP.
+
+The wizard runs the same step as `joinery game apply --project <path>
+--blueprint <id> --features a,b [--steam-app-id N] [--connect steam|direct]`,
+which prints one JSON line per finished step. `joinery blueprints --json` is the
+catalogue the wizard shows: each blueprint's screenshot, and for every feature
+whether it can be chosen there, why not, and what it adds.
+
+### Changing features
+
+Adding or removing a feature is a reviewed change, like any other:
+
+```sh
+uv run joinery feature list --project /path/to/game
+uv run joinery feature add translations --project /path/to/game --plan   # what would change
+uv run joinery feature add translations --project /path/to/game          # review, then y/N
+uv run joinery feature remove steam --project /path/to/game --yes
+```
+
+`--plan` writes nothing and prints the files, the `project.godot` edits and any
+notes as JSON; the sidebar shows the same before and after. Without `--yes` the
+change is staged and you are asked; with `--json` it waits for your review
+(`joinery transactions accept|reject --project <path> --id <id>`). Files you
+edited after a feature added them are kept on removal. Adding Steam downloads
+GodotSteam once the change is accepted; removing it removes the extension. With
+Translations, Joinery offers the command that rebuilds the list of text to
+translate.
+
+### Brief, bible and checks
+
+```sh
+uv run joinery brief --project /path/to/game        # write design/brief.md (setup answers, else the starting point)
+uv run joinery brief --project /path/to/game --json # the brief's summary and suggestions
+uv run joinery bible --project /path/to/game --upgrade   # bring an older bible up to date
+uv run joinery check bible --project /path/to/game  # gaps, reference board and suggestions
+uv run joinery check catalogue                      # every blueprint and feature is valid
+```
+
+The bible upgrade only adds sections and markers. It is a reviewed change, and
+because the bible's text changes you approve it again with `/art`.
+
+### Tools and agents
+
+`joinery status --project <path>` shows what each of the project's tools can do
+right now (`--text` for plain text, `--catalog` for every tool, `--refresh` to
+run every check again, `--agents` to add each agent's connection). `joinery doctor` reads the same report and runs the
+checks the cache cannot answer in the offline workers; `--cached` answers from
+the cache only and `--refresh` runs everything. Nothing needs installing on the
+host besides the Joinery editor.
+
+`joinery connect status` only says an agent is installed and signed in.
+`joinery connect verify --agent codex [--project <path>]` sends one tiny message
+through the real chat bridge (one small model call), records the answer, and
+exits 0 only when it worked. The agent picker and settings then show a
+**verified** badge; quota or sign-in problems show as their own message
+instead. A source checkout
 also needs the patched editor built first; the release notes cover that path.
 Bootstrap installs the configured servers and offline worker images, and may
 take a while on the first run. Review its `unavailable` results and the MCP probe;
@@ -73,8 +189,8 @@ having a desktop application installed does not establish MCP readiness.
 
 `update-addon --project ...` keeps an addon backup and updates only managed gate
 commands; it refuses to hot-replace the addon in a running project editor.
-`transactions list|recover|revert --project ... [--id ...]` provides durable file
-recovery/revert. Native scene edits remain in Godot's undo history and must be
+`transactions list|accept|reject|recover|revert --project ... [--id ...]`
+decides a waiting change and provides durable file recovery/revert. Native scene edits remain in Godot's undo history and must be
 saved normally. A new authoring connection recovers interrupted file commits and
 discards abandoned previews before accepting requests. Concurrent authoring
 hosts for one project are refused.
@@ -104,13 +220,19 @@ masked API key. It can also activate an environment key. Custom profiles use
 Codex (Responses API) or opencode (OpenAI-compatible API) and are saved outside
 projects in a private local file. Keys never enter subprocess arguments or logs.
 
-Project setup uses a fixed window with horizontal renderer choices and Back/Next
-navigation. Preferred MCPs are selected by default; other candidates can be
-configured as project custom tools by supplying an executable and JSON arguments.
+The new-project wizard has three steps in one fixed window. **What are you
+making?** shows the starting points as cards with a screenshot, then the name,
+folder and the game in one sentence (the renderer is under Advanced).
+**Features and apps** has a switch per feature: Steam asks for the Steam app ID
+inline (digits only, empty to add it later) and, with Online play on, how players
+connect (Steam or Direct IP). The apps sit behind one line with **Change…**;
+preferred MCPs are on by default, and other candidates can be set up as custom
+tools with a command and arguments. **Brief and art direction** asks the brief
+and art questions, pre-filled from the starting point.
 
 The editor's **Tools** workspace previews project assets and opens their native
 sources in Blender, Krita, GIMP, Inkscape, SuperCollider, Material Maker,
-Audacity (when installed), or a configured custom application. Choose a tool
+or a configured custom application. Choose a tool
 to filter its assets, select an asset, and use **Open in**. Changes saved in the
 desktop app are detected automatically. Provenance and recipe information stay
 available through the CLI.
@@ -124,8 +246,8 @@ project's `joinery.toml`:
 [desktop.krita]
 command = "/Applications/krita.app"
 
-[desktop.audacity]
-command = "/path/to/audacity"
+[desktop.gimp]
+command = "/path/to/gimp"
 ```
 
 Custom tools declared in `[[tools.custom]]` can add a separate desktop command:
@@ -144,3 +266,6 @@ agreement does not claim that recipe replay has passed.
 
 CLI equivalents: `joinery workspace --project <path>` and
 `joinery open art/painting.kra --tool krita --project <path> --dry-run`.
+`joinery parts <model> --project <path>` lists the objects, materials and maps
+of a model (a GLB or its source document). `joinery history usage|compact
+--project <path>` shows or frees the space kept for undoing accepted changes.

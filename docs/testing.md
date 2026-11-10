@@ -92,9 +92,14 @@ isolated copy of that binary, with a throwaway home and no agent sign-in.
 # Headless widgets: command jobs, chat transport, sidebar, audio, scene edits,
 # responsive sidebar, design tokens (ui_theme_test) and the Review panel.
 uv run python tests/godot/run_widget_tests.py
-# Project Manager: agent connect, API form, the three-step wizard, and creating a
-# fixture project through `joinery setup` with a custom connector.
+# Project Manager: agent connect, API form, the three-step wizard (starting point
+# cards, features and apps, brief and art) and creating a fixture project.
 uv run --frozen python tests/godot/run_startup_test.py
+# The Project apps dialog and the app rail, against a fixture CLI built on the
+# real readiness core (--capture DIR keeps screenshots).
+uv run python tests/godot/run_setup_tests.py [--capture DIR]
+# Part picking: the parts list, Alt+click and part targets.
+uv run python tests/godot/run_parts_tests.py
 # The sidebar in a real editor window, and scene edits in the editor.
 uv run python tests/godot/run_assistant_ui_test.py
 uv run python tests/godot/run_scene_edit_test.py
@@ -120,8 +125,9 @@ uv run python tests/godot/run_visual_suite.py --only sidebar --only editor-light
 Screens:
 
 - `pm-*`: agent connection, sign-in, API form, project list, the app-list failure
-  banner, each wizard step (Name your game, Choose your apps, Look and sound),
-  a failed creation step with Retry, and creation in progress.
+  banner, each wizard step (What are you making?, Features and apps, Brief and
+  art direction), the Steam app ID error, a failed creation step with Try again,
+  and creation in progress.
 - `sidebar-*`, at 480 and 1000 px: connecting, no assistant, empty, chips,
   command menu, a request sending, working (steps and timer), waiting for review
   (thumbnail and footer), accepted (with Revert), conversation, not sent (Retry),
@@ -222,6 +228,64 @@ limit (`uv run python tests/integration/supercollider_native.py nrt`), and a rec
 image feeds a Material Maker graph as a recipe input
 (`uv run python tests/integration/materialmaker_parts.py`).
 
+## Art bible rules in the workers
+
+`tests/test_bible_rules.py` checks the bible's measured rules. The Godot-backed
+test runs whenever `JOINERY_TEST_GODOT` or the stock binary under `.tools/`
+exists. The Blender and ffmpeg tests measure real files in the creative worker,
+so they run only on request, with Docker running and the worker image built:
+
+```sh
+JOINERY_WORKER_TESTS=1 uv run pytest tests/test_bible_rules.py
+```
+
+## Blueprints and features in Godot
+
+`tests/blueprints/` applies each blueprint and feature into a fresh project and
+runs it headless in Godot 4.7 (`JOINERY_TEST_GODOT`, else the stock binary under
+`.tools/`; without either the Godot tests skip with a reason). Every Godot run
+gets a private HOME beside its project (`tests/blueprints/godot_run.py`), so
+`user://`, saves and editor settings never touch your own folders and projects
+can run in parallel. `JOINERY_COMBO_MATRIX=full` boots every combination instead
+of the default sample.
+
+Steam tests never download GodotSteam. The real-extension check runs only when
+the pinned archive is already in `~/.cache/joinery/godotsteam/<version>/`, and
+`JOINERY_NO_DOWNLOADS=1` makes `joinery new` and `game apply` skip the download.
+Godot user arguments in `godot_run` may contain `{settings}`, replaced with a
+settings file of the project's own. Starting the native workflow with
+`combo_matrix: full` boots every combination; on Linux it keeps the blueprint
+matrix report (`out/matrix/matrix.md`) as an artifact.
+
+The new-project cards show `blueprints/<id>/capture.png`, made by running each
+blueprint in the patched editor (recorded in `capture.toml`). Re-run it by hand
+when a blueprint's look changes:
+
+```sh
+uv run python release/capture_blueprints.py [--blueprint ID]
+```
+
+The full matrix (every blueprint alone, with each feature and with all of them,
+played in Godot) is slow, so it carries the `blueprint_matrix` marker and runs
+only when asked:
+
+```sh
+JOINERY_BLUEPRINT_MATRIX=1 uv run pytest tests/test_blueprint_matrix.py
+uv run pytest -m blueprint_matrix
+# Write <cell>.json per cell and a matrix.md table with timings:
+JOINERY_MATRIX_REPORT=out/matrix JOINERY_BLUEPRINT_MATRIX=1 uv run pytest tests/test_blueprint_matrix.py
+uv run python -m tests.blueprints.matrix out/matrix   # print the table again
+```
+
+The command-line path to a new game is tested without Godot:
+`tests/test_project.py` runs `joinery new --blueprint` on the real catalogue
+(addon with its MIT licence, brief controls from the applied input map, bible
+preset, no folder left after a bad feature mix), `tests/test_game_setup.py`
+covers `joinery game apply` and Steam (GodotSteam calls replaced, so nothing is
+downloaded), and `tests/test_cli.py` drives every other subcommand through
+`joinery.cli.main`. Feature changes as reviewed transactions, including the game
+manifest they carry, are in `tests/test_transactions.py`.
+
 ## Tool readiness
 
 Each catalog tool has one module under `joinery/tools/` that declares its
@@ -235,9 +299,12 @@ the real workers:
 
 ```sh
 # Tier 0 live, worker and MCP checks from the cache (missing ones show "checking").
-uv run python -m joinery.readiness --project testbed
+uv run joinery status --project testbed
 # Run every check now (worker commands run with --network none).
-uv run python -m joinery.readiness --project testbed --refresh
+uv run joinery status --project testbed --refresh
+# The same report as text, and doctor from the cache alone.
+uv run joinery status --project testbed --text
+uv run joinery doctor --project testbed --cached
 ```
 
 Tests cannot establish every operation exposed by a third-party application or

@@ -54,13 +54,15 @@ audit ran on macOS.
 
 | Application | Alpha automation | Evidence and boundary |
 | --- | --- | --- |
-| Blender 5.2.1 | Native `.blend` source editing, GLB export, registered source resolution and replay | Real Codex create/edit/scene-instance/review workflow; reject restores originals; native geometry and Godot import verified |
+| Blender 5.2.1 | Native `.blend` source editing, GLB export, registered source resolution and replay | Real Codex create/edit/scene-instance/review workflow; reject restores originals; native geometry and Godot import verified. GLB exports apply modifiers (a Mask, Subdivision or geometry-nodes model exports as Blender shows it) and keep every shape key as a morph target; the saved `.blend` keeps its modifiers. An MPFB2 human with a Rigify rig exports exactly its deform bones |
 | Krita 5.2.9 | Native `.kra` painted layers and PNG export | Actual red/blue pixels, layer retention, create/edit/replay/reject/accept/revert verified |
-| Material Maker 1.8 | Native `.ptex` graph and Godot material/texture export | Connected shader exports real red/blue texture pixels; roughness changes, replay and transaction lifecycle verified; shutdown warnings remain |
-| Inkscape 1.4 | Editable SVG and PNG export | Stable element ID, actual exported pixels, replay and transaction lifecycle verified |
-| SuperCollider | Editable `.scd` patches and offline NRT audio export | Audible WAV, native UTF-8 source recreation, update/replay and transaction lifecycle verified; no live audio-device workflow claim |
-| GIMP 3.0.4 | Native `.xcf` create, inspect (layer tree, channels, paths) and edit through Joinery's Python-Fu adapter in `joinery-paint`, run headless in the offline creative worker; per-layer or composite PNG exports, byte-identical on replay; readiness checks `gimp-console --version`, a Python-Fu batch probe and `document_capabilities`; desktop open/view | `joinery rebuild` replays GIMP recipes once `joinery/recipe.py` dispatches through the tool modules; wrapping an existing PNG into an `.xcf` does not yet record that PNG as a recipe input; the community gimp-mcp pin was dropped because it needs a live desktop GIMP |
-| Surge XT | Supported through `joinery-sound` | Offline render of named parameters and notes to WAV, exact replay; no factory `.fxp` loading or random sources yet ([ADR 0021](adr/0021-surge-xt.md)) |
+| Material Maker 1.8 | Native `.ptex` graph and Godot material/texture export | Connected shader exports real red/blue texture pixels; roughness changes, replay and transaction lifecycle verified. An image input is recorded in the recipe's sources with a relative path; an unrecorded input is refused. Shutdown warnings remain |
+| Inkscape 1.4 | Editable SVG and PNG export | Stable element ID, actual exported pixels, replay and transaction lifecycle verified; the pinned MCP adds read-only analysis tools |
+| SuperCollider 3.13 | Editable `.scd` patches and offline NRT audio export | Audible WAV, native UTF-8 source recreation, update/replay and transaction lifecycle verified. A broken patch fails within a minute instead of hanging. Live audition records outside the project with no bundled samples; no live audio-device routing claim |
+| GIMP 3.0.4 | First-party adapter: native `.xcf` create, inspect (layer tree, channels, paths) and edit through Joinery's Python-Fu adapter in `joinery-paint`, run headless in the offline creative worker; per-layer or composite PNG exports, byte-identical on replay; readiness checks `gimp-console --version`, a Python-Fu batch probe and `document_capabilities`; desktop open/view | `joinery rebuild` replays GIMP recipes once `joinery/recipe.py` dispatches through the tool modules; wrapping an existing PNG into an `.xcf` does not yet record that PNG as a recipe input; the community gimp-mcp pin was dropped because it needs a live desktop GIMP |
+| Surge XT 1.3.4 | Supported through `joinery-sound` | Offline render of named parameters and notes to WAV, exact replay; a one-parameter edit keeps the rest; an unknown parameter is refused. No factory `.fxp` loading or random sources yet ([ADR 0021](adr/0021-surge-xt.md)) |
+| Music (MIDI) | Songs written as MIDI sources (`compose_music`, `edit_music`, `render_music` in `joinery-sound`), rendered offline through FluidSynth (Debian FluidR3_GM SoundFont) and Surge XT patches | Piano and drums through FluidSynth with a Surge XT bass: exact sample count, loop tags, −16 LUFS; transpose and program edits; an imported `.mid` renders unchanged; four recipes replay byte-identically |
+| Audio edits | Typed ffmpeg operations (`process_audio`): trim silence, fade, loudness, loop points, format | On SuperCollider and Surge XT renders: trim, fade from silence, −18 LUFS under −1 dBTP, then a looping stereo 44.1 kHz Ogg with loop tags; edits chain, replay byte-identically, and refusals (imported file, empty fade, outside `audio/`, escaping path) change nothing |
 | Custom tools | Explicit project MCP/desktop configuration | Readiness and provenance remain tool-specific; never inferred from a catalog entry |
 
 ### Removed tools
@@ -92,10 +94,28 @@ services or downloaded art were used to inflate test coverage.
 
 Desktop **Open in**, native authoring, MCP connection and read-only probe success
 are separate capabilities. Run `joinery mcp status --project ... --probe` (or
-`/tools`) to inspect actual readiness. `joinery doctor` reports the shared
-readiness checks: Docker, each worker image, a version or feature command run
-inside the worker with no network, and the installed MCP pins. It does not run
-an authoring round trip.
+`/tools`) to inspect actual readiness; a server whose runtime is missing counts
+as a failure. `joinery status` and `joinery doctor` report the shared readiness
+checks: Docker, each worker image, a version or feature command run inside the
+worker with no network, and the installed MCP pins. Doctor no longer needs
+Godot, Xvfb or ffmpeg on the host; the checks run in the workers
+(`--cached` answers from the cache alone, `--refresh` runs everything again).
+A pinned MCP without a recorded source hash is reinstalled. Neither command
+runs an authoring round trip.
+
+## Editor features on stock Godot
+
+The addon still loads on stock Godot 4.7; some parts need the patched editor.
+
+| Feature | Patched editor | Stock Godot 4.7 |
+| --- | --- | --- |
+| New-project wizard (starting points, features, Steam) | Project Manager wizard | `joinery new --blueprint` makes the same project |
+| Part selection (ADR 0028) | Workspace parts list and viewport Alt+click | Parts list works fully; Alt+click only while the model's root is selected |
+| Steam projects | GodotSteam 4.23 loads in the editor and game | The same; Joinery lists the extension for startup loading, which avoids a crash on the first import |
+
+Models exported by Joinery embed their textures in the GLB
+(`embedded_image_handling=3`, written on the first export), so Godot writes no
+texture files that no recipe made.
 
 ## Providers and review
 
@@ -105,6 +125,11 @@ an authoring round trip.
 | Claude Code | Stream-JSON transport covered; live account check reached a provider quota error, so a complete native authoring workflow is not claimed |
 | Gemini CLI, opencode | ACP protocol fixture coverage; CLIs unavailable for a real signed-in workflow in the local audit |
 | Additional API models | Explicit endpoint/model/key profiles supported through Codex Responses or opencode OpenAI-compatible transport; individual endpoints/models are not all certified |
+
+`joinery connect verify --agent <id>` sends one tiny, tool-free message through
+the real chat bridge and records the answer; only then does the agent show as
+verified. Signed in is not the same as verified: an account can be signed in
+and still out of quota.
 
 Provider login does not approve art direction or transactions. The model cannot
 accept its own changes or approve the project's art bible. Asset export alone

@@ -74,20 +74,48 @@ with networking switched off.
 
 ```sh
 uv sync --frozen
-uv run joinery new ~/games/my-game --name "My Game" --tools godot,blender
+uv run joinery new ~/games/my-game --name "My Game" --tools godot,blender \
+  --blueprint first-person-3d --features controller,save-load
 uv run joinery bootstrap --project ~/games/my-game
 uv run joinery launch --project ~/games/my-game
 ```
+
+`--blueprint` starts from a small playable game (leave it out for an empty
+project); `joinery blueprints` lists them and `joinery features` what a game can
+add, such as controller support, saving, online play, Steam or translations.
+With Steam, add `--steam-app-id N` (or leave it out to add it later); Joinery
+downloads the pinned GodotSteam extension and never publishes anything.
+The Project Manager's **New project** wizard asks the same questions.
 
 Then, in the editor:
 
 - Project setup asks a few questions and drafts your art bible; type `/art` to
   review and approve it.
 - Ask Journeyman for something, for example "make a low-poly wooden crate".
-- Review the preview and press **Accept** or **Reject**.
-- Type `/` to see every command, or `/help`.
+- Review the preview and press **Accept** or **Discard**.
+- Type `/` to see every command, or `/help`. `/feature add <id>` plans a
+  feature change and applies it only when you press Apply.
 
 Projects stay plain Godot projects, so they open in stock Godot too.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `joinery new PATH [--blueprint ID --features a,b]` | Make a project, the same one the new-project wizard makes |
+| `joinery blueprints [describe ID] [--json]`, `joinery features` | The starting points and the features a game can add |
+| `joinery feature add\|remove\|list ID --project P [--plan]` | Add or remove a feature as a reviewed change |
+| `joinery setup --project P` | Change a project's tools |
+| `joinery bootstrap --project P` | Install the pinned tool servers and offline workers |
+| `joinery status --project P`, `joinery doctor` | What each tool can do right now |
+| `joinery connect status\|verify --agent ID` | Is the agent signed in, and does it really answer |
+| `joinery brief --project P`, `joinery bible --project P [--upgrade]` | Write the game brief and art bible; bring an older bible up to date |
+| `joinery check all\|bible\|catalogue` | Policy, bible and blueprint checks |
+| `joinery transactions list\|accept\|reject\|revert --project P` | Decide, undo or recover project changes |
+| `joinery rebuild --project P` | Rebuild every asset from its recipe and compare |
+| `joinery launch [--project P]` | Open the editor |
+
+The [editor guide](docs/editor-guide.md) has every option.
 
 ## Learn more
 

@@ -28,6 +28,8 @@ implemented. See [ADR 0017](adr/0017-project-mcp-gateway.md) and the
 | SuperCollider | Native patch, NRT WAV, record/replay/reject | Live device routing is separate from NRT asset authoring |
 | Other providers | Claude stream transport; Gemini/OpenCode ACP fixtures and read-only host boundary | Claude live check hit quota; Gemini/OpenCode live auth paths need installed CLIs |
 | Recovery/distribution | Review conflict and recovery tests, project lease, addon protocol/version checks, manifest bundle | Engine bundles target their built platform |
+| New game from a blueprint | `joinery new --blueprint` and `joinery game apply` (the wizard's step) share `joinery/game_setup.py`: addon with its MIT licence, blueprint and features, brief, bible preset, `[game.steam]` and the pinned GodotSteam download; made projects import and run in stock Godot and open in the patched editor without script errors | A failed GodotSteam download leaves Steam calls doing nothing until it is installed |
+| Feature add/remove | Staged in a file transaction and reviewed like any change; the game manifest is carried on accept, dropped on reject and restored on revert; `--plan` shows the before and after | Steam and translations follow-ups run only after accept |
 
 This table distinguishes implementation from live verification. Account quotas,
 missing optional licensed apps and unapproved art direction are not represented
