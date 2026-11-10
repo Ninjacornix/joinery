@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 from run_startup_test import isolated_editor, isolated_environment
@@ -58,46 +59,73 @@ def _game(path: Path, env: dict[str, str]) -> Path:
     return path
 
 
+def _remove_when_released(path: Path, seconds: float = 30.0) -> None:
+    """Delete the scratch folder once every process has let go of it.
+
+    Hosts the editor starts (chat, CLI jobs) shut down on their own when their
+    pipes close, a moment after the editor exits. Windows refuses to remove a
+    folder while such a process still runs in it, so wait for them to finish;
+    a host that never exits still fails the run after `seconds`.
+    """
+    deadline = time.monotonic() + seconds
+    while True:
+        try:
+            shutil.rmtree(path)
+            return
+        except FileNotFoundError:
+            return
+        except PermissionError:
+            if time.monotonic() > deadline:
+                raise
+            time.sleep(0.5)
+
+
 def main(selected: list[str]) -> int:
+    temporary = Path(tempfile.mkdtemp(prefix="joinery native widgets "))
+    try:
+        return _run(selected, temporary)
+    finally:
+        _remove_when_released(temporary)
+
+
+def _run(selected: list[str], temporary: Path) -> int:
     cases = {case: CASES[case] for case in selected} if selected else CASES
-    with tempfile.TemporaryDirectory(prefix="joinery native widgets ") as directory:
-        temporary = Path(directory)
-        env = isolated_environment(temporary, ROOT, temporary / "captures")
-        env["JOINERY_TEST_PYTHON"] = sys.executable
-        project = _project(temporary / "project")
-        audio = project / "audio/sfx/door_creak.wav"
-        audio.parent.mkdir(parents=True)
-        shutil.copyfile(ROOT / "testbed/audio/sfx/door_creak.wav", audio)
-        game = _game(temporary / "game", env) if GAME_CASES & set(cases) else None
-        binary = isolated_editor(engine_binary(), temporary)
+    env = isolated_environment(temporary, ROOT, temporary / "captures")
+    env["JOINERY_TEST_PYTHON"] = sys.executable
+    project = _project(temporary / "project")
+    audio = project / "audio/sfx/door_creak.wav"
+    audio.parent.mkdir(parents=True)
+    shutil.copyfile(ROOT / "testbed/audio/sfx/door_creak.wav", audio)
+    game = _game(temporary / "game", env) if GAME_CASES & set(cases) else None
+    binary = isolated_editor(engine_binary(), temporary)
 
-        def base(path: Path) -> list[str]:
-            return [str(binary), "--headless", "--audio-driver", "Dummy", "--path", str(path)]
+    def base(path: Path) -> list[str]:
+        return [str(binary), "--headless", "--audio-driver", "Dummy", "--path", str(path)]
 
-        commands = [(base(project) + ["--editor", "--import"], "")]
-        if game is not None:
-            commands.append((base(game) + ["--editor", "--import"], ""))
-        commands += [
-            (
-                base(game if case in GAME_CASES and game else project)
-                + ["--script", str(ROOT / "tests/godot" / case)],
-                marker,
-            )
-            for case, marker in cases.items()
-        ]
-        failed: list[str] = []
-        for argv, marker in commands:
-            result = subprocess.run(
-                argv, env=env, capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=120, check=False,
-            )
-            output = result.stdout + result.stderr
-            print(output, flush=True)
-            if result.returncode or marker not in output or "ERROR:" in output:
-                failed.append(marker or " ".join(argv[-2:]))
-        if failed:
-            print("FAILED:", ", ".join(failed), flush=True)
-            return 1
+    commands = [(base(project) + ["--editor", "--import"], "")]
+    if game is not None:
+        commands.append((base(game) + ["--editor", "--import"], ""))
+    commands += [
+        (
+            base(game if case in GAME_CASES and game else project)
+            + ["--script", str(ROOT / "tests/godot" / case)],
+            marker,
+        )
+        for case, marker in cases.items()
+    ]
+    failed: list[str] = []
+    for argv, marker in commands:
+        result = subprocess.run(
+            argv, env=env, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=120, check=False,
+        )
+        output = result.stdout + result.stderr
+        print(output, flush=True)
+        if result.returncode or marker not in output or "ERROR:" in output:
+            failed.append(marker or " ".join(argv[-2:]))
+    if failed:
+        print("FAILED:", ", ".join(failed), flush=True)
+        return 1
     return 0
 
 
