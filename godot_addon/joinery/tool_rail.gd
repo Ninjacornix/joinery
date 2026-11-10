@@ -67,6 +67,8 @@ var _action_job: RefCounted
 var _action_tool := ""
 var _since_check := 0.0
 ## The app whose card a click dismissed; it stays hidden until the pointer enters again.
+## Whether the open card came from keyboard focus, which keeps it open while focused.
+var _card_by_keys := false
 var _card_dismissed := ""
 var _card: Card
 var _card_layer: Control
@@ -321,9 +323,15 @@ func _add_tool(id: String, title: String, source: Dictionary) -> void:
 	button.mouse_entered.connect(
 		func() -> void:
 			_card_dismissed = ""
+			_card_by_keys = false
 			_show_card(id)
 	)
-	button.focus_entered.connect(_show_card.bind(id))
+	button.focus_entered.connect(
+		func() -> void:
+			# Only keyboard focus keeps a card open; a click also focuses the button.
+			_card_by_keys = not button.is_hovered()
+			_show_card(id)
+	)
 	var item := _item(button, source, true)
 	_tools.add_child(item)
 	_buttons[id] = button
@@ -604,7 +612,7 @@ func _track_card(delta: float) -> void:
 		(
 			item != null
 			and _card_dismissed != _card_tool
-			and (item.button.is_hovered() or item.button.has_focus())
+			and (item.button.is_hovered() or (_card_by_keys and item.button.has_focus()))
 		)
 		or _card.get_global_rect().has_point(_card.get_global_mouse_position())
 		or (focus != null and _card.is_ancestor_of(focus))
@@ -612,8 +620,8 @@ func _track_card(delta: float) -> void:
 	_card_idle = 0.0 if inside else _card_idle + delta
 	if _card_idle >= CARD_GRACE:
 		_card.remove_meta("howto")
-		_restore_tip()
-		UI_MOTION.exit(_card, item)
+		# Gone at once: a fading card over the work area lags behind the pointer.
+		_hide_card_now()
 
 
 ## Another app's card replaces this one at once.
