@@ -587,7 +587,7 @@ func _update_list_state() -> void:
 		var query := _search.text.strip_edges()
 		var tool := _tool_id()
 		if _top_level().is_empty():
-			message = "No assets yet. Ask Journeyman to make one."
+			message = "No assets yet. Scene shapes aren't assets; ask Journeyman to model one."
 		elif not query.is_empty():
 			message = "No assets match “%s”." % query
 		elif tool == "__imports":
