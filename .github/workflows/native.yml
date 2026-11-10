@@ -184,7 +184,39 @@ jobs:
         run: |
           uv run joinery new out/mcp-check --name "Native MCP check" --tools godot
           uv run joinery mcp install --project out/mcp-check --tool godot
-          uv run joinery mcp status --project out/mcp-check --probe | tee out/native-evidence/mcp.json
+          # Runners have no Docker worker images, so status reports the Godot
+          # server as runtime-missing (its writes need joinery-mcp-worker).
+          # Keep that report as evidence; the check below connects to the
+          # host server and runs its read-only probe directly.
+          uv run joinery mcp status --project out/mcp-check --probe > out/native-evidence/mcp.json || true
+          cat out/native-evidence/mcp.json
+          uv run python - <<'PY'
+          import asyncio
+          from pathlib import Path
+
+          from joinery import readiness
+          from joinery.mcp_runtime import MCPConnection
+          from joinery.server_install import _run_probes, configured
+
+          project = Path('out/mcp-check')
+
+          async def main() -> None:
+              specs, missing = configured(project)
+              assert not missing, missing
+              (spec,) = [s for s in specs if s.name == 'godot']
+              connection = MCPConnection(spec, project)
+              try:
+                  await connection.connect()
+                  failed, reason = await _run_probes(
+                      connection, readiness.mcp_probes('godot', ['godot']), project
+                  )
+                  assert not failed, f'{failed}: {reason}'
+                  print('godot MCP answered its read-only probe on the host')
+              finally:
+                  await connection.close()
+
+          asyncio.run(main())
+          PY
       - name: Read the release version
         id: release_version
         # Same script as release.yml: maps the package version (0.2.0, 0.2.0a1)
