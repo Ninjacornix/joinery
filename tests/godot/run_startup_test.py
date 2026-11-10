@@ -26,6 +26,7 @@ CAPTURES = (
     "startup-api-submenu.png",
     "startup-setup-details.png",
     "startup-setup-tools.png",
+    "startup-setup-history.png",
     "startup-setup-art.png",
 )
 #: The new-project wizard's pages, captured by visual_startup_test.gd in each
@@ -37,6 +38,7 @@ WIZARD_PAGES = (
     "setup-2-tools",
     "setup-2-steam-error",
     "setup-2-steam-too-big",
+    "setup-2-history",
     "setup-3-art",
     "setup-creating",
 )

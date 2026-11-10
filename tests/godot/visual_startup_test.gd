@@ -333,6 +333,15 @@ func _features(dialog: Window, next: Button) -> bool:
 	_check(not next.disabled and not _label_visible(dialog, "Use digits only, like 480."), "480")
 	await _scroll_to(dialog, steam)
 	await _shot("setup-2-tools", dialog)
+	# The step ends with how many older versions the project keeps.
+	var history: OptionButton = null
+	for node: Node in dialog.find_children("*", "OptionButton", true, false):
+		if node.get_accessibility_name() == "Keep older versions" and node.is_visible_in_tree():
+			history = node
+	_check(history != null, "Step 2 asks how many older versions to keep")
+	if history != null:
+		await _scroll_to(dialog, history)
+		await _shot("setup-2-history", dialog)
 	return true
 
 

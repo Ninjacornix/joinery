@@ -1,0 +1,157 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Wed, 11 Nov 2026 00:15:42 +0100
+Subject: [PATCH] feat(editor): choose how many older versions a new project
+ keeps
+
+Joinery-only, not meant for upstream: it extends the Joinery wizard.
+
+Features and apps ends with Keep older versions: the last 50 changes up
+to 2 GB (the default), the last 10 up to 1 GB, or only the newest. The
+choice is passed to joinery game apply as --history, or to joinery
+setup when there is no starting point, which write [history] in
+joinery.toml. Custom numbers are set later in the editor's Settings.
+---
+ editor/project_manager/project_dialog.cpp | 57 ++++++++++++++++++++++-
+ editor/project_manager/project_dialog.h   |  4 ++
+ 2 files changed, 59 insertions(+), 2 deletions(-)
+
+diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
+index 688dfc0..0659601 100644
+--- a/editor/project_manager/project_dialog.cpp
++++ b/editor/project_manager/project_dialog.cpp
+@@ -794,7 +794,7 @@ Label *ProjectDialog::_joinery_caption(const String &p_text) const {
+ // opens, because the font size is only known once the theme is.
+ void ProjectDialog::_joinery_apply_sizes() {
+ 	const Size2 control = Size2(0, _joinery_control_h(2.5));
+-	for (Control *c : { (Control *)project_name, (Control *)joinery_pitch, (Control *)joinery_preset_picker, (Control *)joinery_apps_change, (Control *)joinery_check_again, (Control *)joinery_folder_change, (Control *)joinery_cancel, (Control *)joinery_back, (Control *)joinery_next, (Control *)joinery_banner_retry, (Control *)joinery_banner_plain, (Control *)joinery_advanced, (Control *)joinery_apps_advanced, (Control *)joinery_details_button, (Control *)joinery_banner_details_button }) {
++	for (Control *c : { (Control *)project_name, (Control *)joinery_pitch, (Control *)joinery_preset_picker, (Control *)joinery_history_picker, (Control *)joinery_apps_change, (Control *)joinery_check_again, (Control *)joinery_folder_change, (Control *)joinery_cancel, (Control *)joinery_back, (Control *)joinery_next, (Control *)joinery_banner_retry, (Control *)joinery_banner_plain, (Control *)joinery_advanced, (Control *)joinery_apps_advanced, (Control *)joinery_details_button, (Control *)joinery_banner_details_button }) {
+ 		if (c) {
+ 			c->set_custom_minimum_size(control);
+ 		}
+@@ -961,6 +961,7 @@ void ProjectDialog::_joinery_hide_wizard() {
+ 	joinery_features_box->hide();
+ 	joinery_summary->hide();
+ 	joinery_container->hide();
++	joinery_history_box->hide();
+ 	joinery_look_page->hide();
+ 	joinery_creating->hide();
+ 	joinery_folder_row->hide();
+@@ -985,6 +986,8 @@ void ProjectDialog::_joinery_reset_pages() {
+ 	joinery_apps_advanced->set_pressed(false);
+ 	joinery_apps_change->set_pressed(false);
+ 	joinery_container->hide();
++	joinery_history_box->hide();
++	joinery_history_picker->select(0);
+ 	joinery_features_box->hide();
+ 	joinery_look_page->hide();
+ 	joinery_creating->hide();
+@@ -1033,6 +1036,7 @@ void ProjectDialog::_joinery_show_step(int p_step) {
+ 	joinery_banner->set_visible(first && joinery_load_failed);
+ 	joinery_features_box->set_visible(p_step == JOINERY_PAGE_APPS && joinery_blueprints_ready);
+ 	joinery_container->set_visible(p_step == JOINERY_PAGE_APPS);
++	joinery_history_box->set_visible(p_step == JOINERY_PAGE_APPS);
+ 	joinery_loading_row->set_visible(joinery_loading && !joinery_load_tools_only);
+ 	joinery_look_page->set_visible(p_step == JOINERY_PAGE_LOOK);
+ 	joinery_creating->set_visible(creating);
+@@ -2948,6 +2952,8 @@ void ProjectDialog::_joinery_begin_create() {
+ 	if (steam && _joinery_feature_on("online-play") && joinery_connect_direct) {
+ 		joinery_job_connect = joinery_connect_direct->is_pressed() ? "direct" : "steam";
+ 	}
++	const int history = joinery_history_picker->get_selected();
++	joinery_job_history = history >= 0 ? String(joinery_history_picker->get_item_metadata(history)) : String();
+ 
+ 	Dictionary answers = _joinery_field_values(joinery_bible_inputs, joinery_bible_keys);
+ 	answers["title"] = project_name->get_text().strip_edges();
+@@ -3107,6 +3113,10 @@ bool ProjectDialog::_joinery_run_create_step(int p_step, String &r_output, Strin
+ 				args.push_back("--connect");
+ 				args.push_back(joinery_job_connect);
+ 			}
++			if (!joinery_job_history.is_empty()) {
++				args.push_back("--history");
++				args.push_back(joinery_job_history);
++			}
+ 			if (!_joinery_uv(home, args, r_output)) {
+ 				return false;
+ 			}
+@@ -3131,7 +3141,14 @@ bool ProjectDialog::_joinery_run_create_step(int p_step, String &r_output, Strin
+ 		case 3: {
+ 			// `joinery setup` writes the apps into joinery.toml and the agent
+ 			// policy hooks, the same path `joinery new` takes (ADR 0004).
+-			return _joinery_uv(home, { "setup", "--project", path, "--tools", joinery_job_tools, "--custom-mcps-file", joinery_job_choices }, r_output);
++			// Without a starting point `game apply` didn't run, so setup saves
++			// the history choice instead.
++			Vector<String> args = { "setup", "--project", path, "--tools", joinery_job_tools, "--custom-mcps-file", joinery_job_choices };
++			if (joinery_job_blueprint.is_empty() && !joinery_job_history.is_empty()) {
++				args.push_back("--history");
++				args.push_back(joinery_job_history);
++			}
++			return _joinery_uv(home, args, r_output);
+ 		}
+ 		case 4: {
+ 			// `joinery brief` drafts design/brief.md from the answers, the
+@@ -4575,6 +4592,42 @@ ProjectDialog::ProjectDialog() {
+ 	joinery_connection_list->hide();
+ 	advanced_apps->add_child(joinery_connection_list);
+ 
++	// Joinery: step 2 ends with how many older versions the project keeps,
++	// so a change can be reverted. The ids are `joinery history` presets;
++	// Custom numbers are set later in Settings.
++	joinery_history_box = memnew(VBoxContainer);
++	joinery_history_box->add_theme_constant_override(SNAME("separation"), _joinery_space(2));
++	joinery_history_box->hide();
++	vb->add_child(joinery_history_box);
++	joinery_history_box->add_child(_joinery_heading(TTRC("Keep older versions")));
++	joinery_history_picker = memnew(OptionButton);
++	joinery_history_picker->set_theme_type_variation(SNAME("JoineryFieldPicker"));
++	joinery_history_picker->set_h_size_flags(Control::SIZE_EXPAND_FILL);
++	joinery_history_picker->set_accessibility_name(TTRC("Keep older versions"));
++	struct HistoryChoice {
++		const char *id;
++		const char *name;
++	};
++	static const HistoryChoice history_choices[] = {
++		{ "keep-50", TTRC("Last 50 changes, up to 2 GB") },
++		{ "keep-10", TTRC("Last 10 changes, up to 1 GB") },
++		{ "latest", TTRC("Only the newest") },
++	};
++	for (const HistoryChoice &choice : history_choices) {
++		const int item = joinery_history_picker->get_item_count();
++		joinery_history_picker->add_item(TTR(choice.name));
++		joinery_history_picker->set_item_metadata(item, String(choice.id));
++	}
++	joinery_history_picker->select(0);
++	joinery_history_box->add_child(joinery_history_picker);
++	{
++		Label *history_caption = memnew(Label);
++		history_caption->set_text(TTRC("Older versions of models, textures and sounds, so a change can be reverted. Fewer takes less space. Change it any time in Settings."));
++		history_caption->set_theme_type_variation(SNAME("JoineryCaption"));
++		history_caption->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
++		joinery_history_box->add_child(history_caption);
++	}
++
+ 	// Joinery: step 3, the optional brief and art direction on one page, in
+ 	// sections: Game brief, Look and sound, References, Starting rules.
+ 	joinery_look_page = memnew(VBoxContainer);
+diff --git a/editor/project_manager/project_dialog.h b/editor/project_manager/project_dialog.h
+index d310c41..b2ecf39 100644
+--- a/editor/project_manager/project_dialog.h
++++ b/editor/project_manager/project_dialog.h
+@@ -209,6 +209,9 @@ private:
+ 	// Step 2: one row per app, grouped Engine / 3D / 2D / Audio. How Joinery
+ 	// connects to each app sits under one collapsed Advanced disclosure.
+ 	VBoxContainer *joinery_container = nullptr;
++	// How many older versions the new project keeps (`joinery history`).
++	VBoxContainer *joinery_history_box = nullptr;
++	OptionButton *joinery_history_picker = nullptr;
+ 	Control *joinery_loading_row = nullptr;
+ 	ProgressBar *joinery_loading_bar = nullptr;
+ 	VBoxContainer *joinery_tool_list = nullptr;
+@@ -308,6 +311,7 @@ private:
+ 	String joinery_job_features;
+ 	String joinery_job_steam_id;
+ 	String joinery_job_connect;
++	String joinery_job_history;
+ 	String joinery_job_brief;
+ 	Ref<FileAccess> joinery_choices_file;
+ 	Ref<ButtonGroup> renderer_button_group;

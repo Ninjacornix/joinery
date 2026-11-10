@@ -390,6 +390,7 @@ func _wizard(create: Button) -> void:
 		fields[0].text = OS.get_environment("JOINERY_TEST_MCP_COMMAND")
 		fields[1].text = '--stdio "argument with spaces"'
 	await _capture(dialog, "startup-setup-tools.png")
+	await _check_history_choice(dialog)
 	next.pressed.emit()
 	await create_timer(0.2).timeout
 	_check(_label_text(dialog, STEP_TITLES[2]) != null, "Step 3 is Brief and art direction")
@@ -446,6 +447,10 @@ func _wizard(create: Button) -> void:
 	var config := FileAccess.get_file_as_string(project.path_join("joinery.toml"))
 	_check(config.contains('id = "hi-godot-godot-ai"'), "Save the selected alternative as custom")
 	_check(
+		config.contains("[history]") and config.contains("keep = 10\nmax_mb = 1024"),
+		"The new project keeps the chosen number of older versions"
+	)
+	_check(
 		FileAccess.file_exists(project.path_join("addons/joinery/plugin.cfg")),
 		"Copy the Joinery addon into the project"
 	)
@@ -462,6 +467,34 @@ func _wizard(create: Button) -> void:
 			server.get("args", []) == ["--stdio", "argument with spaces"],
 			"Preserve argument boundaries"
 		)
+
+
+## Step 2 ends with "Keep older versions": the three presets, the default first. Choose the
+## middle one (captured); the created project's joinery.toml is checked for it.
+func _check_history_choice(dialog: ConfirmationDialog) -> void:
+	var history: OptionButton = null
+	for node: Node in dialog.find_children("*", "OptionButton", true, false):
+		if node.get_accessibility_name() == "Keep older versions":
+			history = node
+	_check(history != null and history.is_visible_in_tree(), "Step 2 asks what to keep")
+	if history == null:
+		return
+	var items: Array[String] = []
+	for index: int in history.item_count:
+		items.append(history.get_item_text(index))
+	_check(
+		items == ["Last 50 changes, up to 2 GB", "Last 10 changes, up to 1 GB", "Only the newest"],
+		"Three plain choices: %s" % [items]
+	)
+	_check(history.selected == 0, "The default keeps the last 50 changes")
+	history.select(1)
+	history.item_selected.emit(1)
+	var scroll := history.get_parent()
+	while scroll != null and not scroll is ScrollContainer:
+		scroll = scroll.get_parent()
+	if scroll != null:
+		(scroll as ScrollContainer).ensure_control_visible(history)
+	await _capture(dialog, "startup-setup-history.png")
 
 
 ## Step 1 refuses a folder that already holds a game, or any other files, and writes
