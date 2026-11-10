@@ -17,7 +17,7 @@ import importlib
 import json
 import tomllib
 from collections.abc import Mapping
-from pathlib import Path
+from pathlib import Path, PurePath
 from types import ModuleType
 from typing import Any, cast
 
@@ -93,7 +93,14 @@ def project_game(project: Path) -> dict[str, Any] | None:
 
 
 def _json_safe(value: Any) -> Any:
-    return json.loads(json.dumps(value, default=str))
+    return json.loads(json.dumps(value, default=_plain))
+
+
+def _plain(value: Any) -> str:
+    """Project paths read the same on every platform: forward slashes."""
+    if isinstance(value, PurePath):
+        return value.as_posix()
+    return str(value)
 
 
 def _hooks(project: Path) -> dict[str, str]:

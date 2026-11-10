@@ -392,3 +392,13 @@ def test_starting_points_are_offered_compactly() -> None:
     assert registry.addable(catalogue, None)["blueprints"] == [
         {"id": "blank", "name": "Blank", "pitch": "Empty."}
     ]
+
+
+def test_paths_in_tool_answers_use_forward_slashes() -> None:
+    from pathlib import PureWindowsPath
+
+    from servers.joinery_registry.server import _json_safe
+
+    assert _json_safe({"file": PureWindowsPath("art/reference/a.kra")}) == {
+        "file": "art/reference/a.kra"
+    }
