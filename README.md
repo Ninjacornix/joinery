@@ -48,8 +48,11 @@ What changed in this version, and what is still missing:
 4. Accept keeps it and can be reverted later. Discard restores every file, even
    when more than one tool was involved.
 
-No art or audio work starts until you approve the game's art bible. Journeyman
-cannot approve the bible or its own changes.
+No art or audio work starts until the game's art bible is approved. The bible
+the New project wizard drafts from your own answers counts as approved, so art
+and audio work can start right away. If the bible changes later, approve it
+again with one click in `/art`. Journeyman cannot approve the bible or its own
+changes.
 
 ## Tools
 
@@ -97,7 +100,8 @@ Project Manager asks the same questions.
 
 In the editor:
 
-- Type `/art` to finish and approve the art bible drafted for your game, and
+- Type `/art` to read the art bible drafted for your game, and to finish or
+  approve it again after it changes, and
   `/brief` to read the game brief.
 - Ask Journeyman for a change, then press **Accept** or **Discard** in the
   Review panel.
