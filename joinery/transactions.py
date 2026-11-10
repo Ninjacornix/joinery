@@ -54,19 +54,29 @@ CARRIED = (".joinery/game-manifest.json",)
 
 
 class ProjectLease:
-    """One authoring host owns recovery/review for a project at a time."""
+    """One authoring host owns recovery/review for a project at a time.
 
-    def __init__(self, project: Path) -> None:
+    Reconnecting closes the previous host's pipes and starts a new host at once;
+    the old one lets go of the lock a moment later, once it sees the pipes close.
+    So the lease waits up to ``wait`` seconds before deciding another editor has it.
+    """
+
+    def __init__(self, project: Path, wait: float = 10.0) -> None:
         path = project / ".joinery/session.lock"
         path.parent.mkdir(parents=True, exist_ok=True)
         self.file: BinaryIO = path.open("a+b")
-        try:
-            lock_file(self.file)
-        except BlockingIOError:
-            self.file.close()
-            raise ValueError(
-                "This project already has an active Joinery chat connection. Close it before reconnecting from another editor."
-            ) from None
+        deadline = time.monotonic() + wait
+        while True:
+            try:
+                lock_file(self.file)
+                return
+            except BlockingIOError:
+                if time.monotonic() >= deadline:
+                    self.file.close()
+                    raise ValueError(
+                        "This project already has an active Joinery chat connection. Close it before reconnecting from another editor."
+                    ) from None
+                time.sleep(0.2)
 
     def close(self) -> None:
         if not self.file.closed:

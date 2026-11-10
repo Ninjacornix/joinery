@@ -116,7 +116,7 @@ def test_project_lease_survives_contending_process_and_releases_on_death(
     tmp_path: Path,
 ) -> None:
     lease = ProjectLease(tmp_path)
-    code = "from pathlib import Path; from joinery.transactions import ProjectLease; import sys\ntry: lease=ProjectLease(Path(sys.argv[1]))\nexcept ValueError: raise SystemExit(23)\nraise SystemExit(0)"
+    code = "from pathlib import Path; from joinery.transactions import ProjectLease; import sys\ntry: lease=ProjectLease(Path(sys.argv[1]), wait=0.3)\nexcept ValueError: raise SystemExit(23)\nraise SystemExit(0)"
     try:
         result = subprocess.run(
             [sys.executable, "-c", code, str(tmp_path)],
