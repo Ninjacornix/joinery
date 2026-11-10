@@ -275,3 +275,61 @@ def test_agent_menu_uses_registry_names(
     assert main() == 0
     data = json.loads(capsys.readouterr().out)
     assert data["agents"] == [{"id": a.id, "name": a.name} for a in all_agents()]
+
+
+def test_baked_maps_fold_under_their_source_as_a_material(project: Path) -> None:
+    recipe(
+        project,
+        "blender",
+        ["art/tiles_albedo.png", "art/tiles_roughness.png", "art/tiles.blend"],
+    )
+    assets = {a["path"]: a for a in index(project)["assets"]}
+    source = assets["art/tiles.blend"]
+    assert source["kind"] == "material"
+    assert source["parts"] == ["art/tiles_albedo.png", "art/tiles_roughness.png"]
+    assert source["part_of"] == ""
+    for part in source["parts"]:
+        assert assets[part]["part_of"] == "art/tiles.blend"
+        assert assets[part]["kind"] == "image"
+        # A folded part still opens on its own.
+        assert {o["tool"] for o in assets[part]["open_options"]} >= {"blender", "krita"}
+
+
+def test_render_only_source_is_an_image_and_siblings_stay_separate(
+    project: Path,
+) -> None:
+    (project / "art/src").mkdir()
+    recipe(project, "blender", ["art/sky.png", "art/src/sky.blend"])
+    text = (project / "recipes/asset.toml").read_text()
+    (project / "recipes/asset.toml").write_text(text + 'renders = ["art/sky.png"]\n')
+    assets = {a["path"]: a for a in index(project)["assets"]}
+    assert assets["art/src/sky.blend"]["kind"] == "image"
+    assert assets["art/src/sky.blend"]["parts"] == ["art/sky.png"]
+
+
+def test_two_native_outputs_are_not_folded_and_sounds_keep_their_kind(
+    project: Path,
+) -> None:
+    recipe(project, "blender", ["art/first.blend", "art/second.blend"])
+    assets = {a["path"]: a for a in index(project)["assets"]}
+    assert assets["art/first.blend"]["parts"] == []
+    assert assets["art/second.blend"]["part_of"] == ""
+    assert assets["art/second.blend"]["kind"] == "model"
+    recipe(project, "supercollider", ["audio/a.wav", "audio/b.wav"], "recipes/s.scd")
+    sounds = [a for a in index(project)["assets"] if a["path"].startswith("audio/")]
+    assert [(a["kind"], a["part_of"]) for a in sounds] == [("sound", ""), ("sound", "")]
+
+
+def test_removed_desktop_apps_are_offered_only_when_installed(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recipe(project, "supercollider", ["audio/creak.wav"], "recipes/creak.scd")
+    sound = next(a for a in index(project)["assets"] if a["path"] == "audio/creak.wav")
+    assert "audacity" in {o["tool"] for o in sound["open_options"]}
+    monkeypatch.setattr(
+        desktop.shutil,
+        "which",
+        lambda name: None if name == "audacity" else f"/apps/{name}",
+    )
+    sound = next(a for a in index(project)["assets"] if a["path"] == "audio/creak.wav")
+    assert "audacity" not in {o["tool"] for o in sound["open_options"]}

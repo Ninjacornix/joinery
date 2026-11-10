@@ -1,100 +1,267 @@
 @tool
 extends VBoxContainer
-## One shared viewer for all creation tools. Desktop opening is independent
-## of MCP readiness; the Python index owns provenance and launch resolution.
+## One shared viewer for all creation tools. Desktop opening is independent of MCP readiness;
+## the Python index owns provenance, launch resolution, asset kinds and which derived files
+## (baked maps, exports, renders) fold under their source asset.
 
 signal catalog_changed(tools: Array, assets: Array)
 signal creator_changed(tool: String)
 signal asset_selected(asset: Dictionary)
+## The user asked to set up apps (an app needed to open an asset is missing).
+signal setup_requested
 
 const COMMAND_SCRIPT := preload("res://addons/joinery/command_job.gd")
 const AUDIO_SCRIPT := preload("res://addons/joinery/audio_preview.gd")
-const CONTEXT_SCRIPT := preload("res://addons/joinery/preview_context.gd")
+const MODEL_SCRIPT := preload("res://addons/joinery/model_preview.gd")
+const LIST_SCRIPT := preload("res://addons/joinery/asset_list.gd")
+const INDICATOR_SCRIPT := preload("res://addons/joinery/activity_indicator.gd")
+const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
+const UI_COMPONENTS := preload("res://addons/joinery/ui_components.gd")
+const UI_MOTION := preload("res://addons/joinery/ui_motion.gd")
+## Section titles in list order; "other" collects files of no known kind.
+const SECTIONS := {
+	"model": "Models",
+	"sound": "Sounds",
+	"image": "Images",
+	"material": "Materials",
+	"scene": "Scenes",
+	"other": "Other files",
+}
+## Readiness ("status", older names too) → [dot, wording], the same marks as the app rail.
+const READINESS := {
+	"ready": ["ready", "Ready"],
+	"preparing": ["working", "Downloading…"],
+	"needs_docker": ["off", "Needs Docker"],
+	"needs_licence": ["off", "Needs your licence"],
+	"unavailable": ["off", "Not available yet"],
+	"installed": ["ready", "Ready"],
+	"licence": ["off", "Needs your licence"],
+	"missing": ["off", "Not installed"],
+}
+const IMAGES := ["png", "jpg", "jpeg", "webp", "bmp", "tga", "svg"]
+const SOUNDS := ["wav", "ogg", "mp3"]
+const MODELS := ["blend", "glb", "gltf", "tscn"]
+const TEXTS := ["scd", "sc", "gd", "ptex"]
+## Browser column width as a multiple of the editor font size.
+const BROWSER_EM := 16.0
+## Seconds between automatic refreshes while visible, and how long "Opened in …" stays.
+const REFRESH_SECONDS := 2.0
+const OPENED_SECONDS := 2.0
 
-var _tools: ItemList
-var _heading: Label
-var _creator_heading: Label
+var _browser: VBoxContainer
+var _filter_section: VBoxContainer
+var _tools: LIST_SCRIPT
 var _search: LineEdit
-var _assets: ItemList
+var _loading: HBoxContainer
+var _loading_indicator: INDICATOR_SCRIPT
+var _empty: Label
+var _error_box: VBoxContainer
+var _error_label: Label
+var _assets: LIST_SCRIPT
+var _header: HBoxContainer
 var _title: Label
-var _status: Label
-var _preview: VBoxContainer
-var _open_with: OptionButton
-var _open: Button
-var _audio: AudioStreamPlayer
-var _audio_panel: VBoxContainer
+var _caption: Label
 var _actions: HBoxContainer
+var _open: Button
+var _open_menu: MenuButton
+var _open_with: PopupMenu
+var _open_indicator: INDICATOR_SCRIPT
+var _unavailable: HBoxContainer
+var _unavailable_title: Label
+var _unavailable_label: Label
+var _setup_link: Button
+var _parts: HFlowContainer
+var _preview: VBoxContainer
+var _status: Label
+var _audio: AudioStreamPlayer
+var _audio_panel: AUDIO_SCRIPT
 var _command_job: RefCounted
 var _job := ""
 var _data: Dictionary = {}
+var _by_path: Dictionary = {}
 var _rows: Array[Dictionary] = []
 var _current: Dictionary = {}
 var _selected_path := ""
 var _stamp := ""
+var _load_error := ""
 var _refresh_elapsed := 0.0
 var _invalidated := false
 var _queued_open := PackedStringArray()
 var _pending_scene_preview := ""
 var _preview_import_changed := false
+var _opening := ""
+var _opened := ""
+var _opened_until := 0
+var _loaded_once := false
+## The app the preview's "isn't installed" block names; the header does not repeat it.
+var _explained_app := ""
 
 
 func _ready() -> void:
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
+	UI_THEME.watch(self)
+	var page := MarginContainer.new()
+	page.theme_type_variation = "JoineryPage"
+	page.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	add_child(page)
 	var split := HSplitContainer.new()
-	split.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	add_child(split)
-	var browser := VBoxContainer.new()
-	browser.custom_minimum_size.x = maxf(240, get_theme_default_font_size() * 14)
-	split.add_child(browser)
-	_heading = Label.new()
-	_heading.text = "Assets"
-	_heading.set_theme_type_variation("HeaderLarge")
-	browser.add_child(_heading)
-	_creator_heading = Label.new()
-	_creator_heading.text = "Created in"
-	browser.add_child(_creator_heading)
-	_tools = ItemList.new()
-	_tools.custom_minimum_size.y = get_theme_default_font_size() * 6
-	_tools.item_selected.connect(func(_index: int) -> void: _filter())
-	browser.add_child(_tools)
-	_search = LineEdit.new()
-	_search.placeholder_text = "Find an asset…"
-	_search.text_changed.connect(func(_text: String) -> void: _filter())
-	browser.add_child(_search)
-	_assets = ItemList.new()
-	_assets.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_assets.item_selected.connect(_select)
-	browser.add_child(_assets)
-	var body := VBoxContainer.new()
-	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	split.add_child(body)
-	var header := HBoxContainer.new()
-	body.add_child(header)
-	_title = Label.new()
-	_title.text = "Choose an asset"
-	_title.set_theme_type_variation("HeaderLarge")
-	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	header.add_child(_title)
-	_actions = HBoxContainer.new()
-	_actions.hide()
-	header.add_child(_actions)
-	_open_with = OptionButton.new()
-	_open_with.item_selected.connect(_update_open)
-	_actions.add_child(_open_with)
-	_open = Button.new()
-	_open.text = "Open"
-	_open.disabled = true
-	_open.pressed.connect(_open_source)
-	_actions.add_child(_open)
-	_preview = VBoxContainer.new()
-	_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body.add_child(_preview)
-	_status = Label.new()
-	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_status.hide()
-	body.add_child(_status)
+	page.add_child(split)
+	_build_browser(split)
+	_build_body(split)
 	_audio = AudioStreamPlayer.new()
 	add_child(_audio)
+	_on_theme_rebuilt()
+	_update_list_state()
+
+
+func _build_browser(split: HSplitContainer) -> void:
+	_browser = VBoxContainer.new()
+	_browser.theme_type_variation = "JoineryStack"
+	split.add_child(_browser)
+	_filter_section = VBoxContainer.new()
+	_filter_section.theme_type_variation = "JoineryTight"
+	_browser.add_child(_filter_section)
+	var heading := MarginContainer.new()
+	heading.theme_type_variation = "JoineryInset"
+	heading.add_child(UI_COMPONENTS.label("Created in", "JoinerySection"))
+	_filter_section.add_child(heading)
+	_tools = LIST_SCRIPT.new()
+	_tools.fit_content = true
+	_tools.item_selected.connect(func(_index: int) -> void: _filter(true))
+	_filter_section.add_child(_tools)
+	_search = LineEdit.new()
+	_search.placeholder_text = "Find an asset"
+	_search.accessibility_name = "Find an asset"
+	_search.clear_button_enabled = true
+	_search.text_changed.connect(func(_text: String) -> void: _filter())
+	UI_COMPONENTS.bind_height(_search, "md", false)
+	_browser.add_child(_search)
+	_loading = HBoxContainer.new()
+	_loading.theme_type_variation = "JoineryRow"
+	_loading_indicator = INDICATOR_SCRIPT.new()
+	_loading.add_child(_loading_indicator)
+	_loading.add_child(UI_COMPONENTS.label("Loading assets…", "JoineryCaption"))
+	_browser.add_child(_loading)
+	_empty = UI_COMPONENTS.label("", "JoineryCaption", true)
+	_browser.add_child(_empty)
+	_error_box = VBoxContainer.new()
+	_error_box.theme_type_variation = "JoineryTight"
+	_error_label = UI_COMPONENTS.label("", "JoineryError", true)
+	_error_box.add_child(_error_label)
+	var retry := UI_COMPONENTS.secondary("Retry")
+	retry.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	retry.pressed.connect(_retry)
+	_error_box.add_child(retry)
+	_browser.add_child(_error_box)
+	_assets = LIST_SCRIPT.new()
+	_assets.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_assets.item_selected.connect(_select)
+	_browser.add_child(_assets)
+
+
+func _build_body(split: HSplitContainer) -> void:
+	var body := VBoxContainer.new()
+	body.theme_type_variation = "JoineryStack"
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	split.add_child(body)
+	_header = HBoxContainer.new()
+	_header.theme_type_variation = "JoineryRow"
+	_header.hide()
+	body.add_child(_header)
+	var names := VBoxContainer.new()
+	names.theme_type_variation = "JoineryTight"
+	names.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	names.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_header.add_child(names)
+	_title = UI_COMPONENTS.label("", "JoineryTitle")
+	names.add_child(_title)
+	_caption = UI_COMPONENTS.label("", "JoineryCaption")
+	names.add_child(_caption)
+	_actions = HBoxContainer.new()
+	_actions.theme_type_variation = "JoineryRow"
+	_actions.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_header.add_child(_actions)
+	_open_indicator = INDICATOR_SCRIPT.new()
+	_actions.add_child(_open_indicator)
+	_open = UI_COMPONENTS.primary("Open")
+	_open.pressed.connect(_open_option.bind(0))
+	_actions.add_child(_open)
+	_open_menu = MenuButton.new()
+	_open_menu.theme_type_variation = "JoineryIconButton"
+	_open_menu.flat = false
+	_open_menu.focus_mode = Control.FOCUS_ALL
+	_open_menu.tooltip_text = "Open with…"
+	_open_menu.accessibility_name = "Open with"
+	UI_COMPONENTS.bind_icon(_open_menu, "chevron")
+	UI_COMPONENTS.bind_height(_open_menu, "md")
+	_open_menu.icon_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_open_menu.theme_changed.connect(
+		func() -> void:
+			var side := float(UI_THEME.control_h(_open_menu, "md"))
+			var square := _open_menu.text.is_empty()
+			_open_menu.custom_minimum_size = Vector2(side if square else 0.0, side)
+	)
+	_open_with = _open_menu.get_popup()
+	_open_with.id_pressed.connect(_open_option)
+	_actions.add_child(_open_menu)
+	_build_unavailable(body)
+	_parts = HFlowContainer.new()
+	_parts.hide()
+	body.add_child(_parts)
+	_preview = VBoxContainer.new()
+	_preview.theme_type_variation = "JoineryTight"
+	_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	body.add_child(_preview)
+	_status = UI_COMPONENTS.label("", "JoineryError", true)
+	_status.hide()
+	body.add_child(_status)
+
+
+## The compact "app isn't installed" notice under the asset title: the same title, line and
+## "Open Project apps" action as the preview's empty state, for files that still preview.
+func _build_unavailable(body: VBoxContainer) -> void:
+	_unavailable = HBoxContainer.new()
+	_unavailable.theme_type_variation = "JoineryRow"
+	_unavailable.hide()
+	body.add_child(_unavailable)
+	var texts := VBoxContainer.new()
+	texts.theme_type_variation = "JoineryTight"
+	texts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	texts.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_unavailable.add_child(texts)
+	_unavailable_title = UI_COMPONENTS.label("")
+	texts.add_child(_unavailable_title)
+	_unavailable_label = UI_COMPONENTS.label("", "JoineryCaption", true)
+	texts.add_child(_unavailable_label)
+	_setup_link = _setup_button()
+	_unavailable.add_child(_setup_link)
+
+
+func _setup_button() -> Button:
+	var setup := UI_COMPONENTS.secondary("Open Project apps")
+	setup.tooltip_text = "See which apps this project uses and what each one needs"
+	setup.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	setup.pressed.connect(func() -> void: setup_requested.emit())
+	return setup
+
+
+## Title and line for a missing app (notice and empty state); a preview still works here.
+static func _missing_text(app: String, extension: String, previews: bool) -> Array[String]:
+	var noun := "sound" if extension in SOUNDS else "image" if extension in IMAGES else "model"
+	var look := "listen" if noun == "sound" else "look at it"
+	var line := "You can %s here, but changing this %s needs %s." % [look, noun, app]
+	if not previews:
+		line = "Install %s on this computer to see and change .%s files." % [app, extension]
+	return ["%s isn't installed" % app, line]
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_THEME_CHANGED and _browser != null:
+		_on_theme_rebuilt()
+
+
+func _on_theme_rebuilt() -> void:
+	_browser.custom_minimum_size.x = roundf(UI_THEME.font_size(self, "body") * BROWSER_EM)
 
 
 func _exit_tree() -> void:
@@ -116,7 +283,7 @@ func _process(delta: float) -> void:
 			_queued_open = PackedStringArray()
 			_start_job("open", arguments)
 			return
-		if is_visible_in_tree() and (_invalidated or _refresh_elapsed >= 2.0):
+		if is_visible_in_tree() and (_invalidated or _refresh_elapsed >= REFRESH_SECONDS):
 			refresh()
 		return
 	var result: Dictionary = _command_job.poll()
@@ -124,34 +291,27 @@ func _process(delta: float) -> void:
 		return
 	_command_job = null
 	_refresh_elapsed = 0.0
+	if _job == "open":
+		_finish_open(result)
+		return
 	if int(result["code"]) != 0:
-		_show_error(
-			"Could not load assets." if _job == "refresh" else "Could not open application."
-		)
-		_status.tooltip_text = (
-			str(result["error"]) if result.get("error") else str(result["output"])
-		)
+		var reason := _first_line(str(result["error"]) if result.get("error") else "")
+		if reason.is_empty():
+			reason = _first_line(str(result["output"]))
+		_load_error = reason if not reason.is_empty() else "The workspace command failed."
+		_update_list_state()
 		return
 	var payload: Variant = JSON.parse_string(str(result["output"]))
 	if not payload is Dictionary:
-		_show_error("Could not read workspace data.")
+		_load_error = "The workspace command did not return asset data."
+		_update_list_state()
 		return
-	_status.hide()
-	if _job == "refresh":
-		_stamp = str(payload.get("stamp", ""))
-		if (
-			not bool(payload.get("unchanged", false))
-			and (payload != _data or _preview_import_changed)
-		):
-			_apply_data(payload)
-			_preview_import_changed = false
-	else:
-		invalidate()
-
-
-func _show_error(message: String) -> void:
-	_status.text = message
-	_status.show()
+	_load_error = ""
+	_stamp = str(payload.get("stamp", ""))
+	if not bool(payload.get("unchanged", false)) and (payload != _data or _preview_import_changed):
+		_apply_data(payload)
+		_preview_import_changed = false
+	_update_list_state()
 
 
 func invalidate() -> void:
@@ -184,9 +344,14 @@ func _start_job(job: String, arguments: PackedStringArray) -> void:
 	args.append_array(["--project", ProjectSettings.globalize_path("res://")])
 	_command_job = COMMAND_SCRIPT.new()
 	var error: Error = _command_job.start("uv", args)
-	if error != OK:
-		_command_job = null
-		_show_error("Could not start workspace task: %s" % error_string(error))
+	if error == OK:
+		return
+	_command_job = null
+	if job == "open":
+		_finish_open({"code": int(error), "error": error_string(error), "output": ""})
+	else:
+		_load_error = "The workspace command could not start (%s)." % error_string(error)
+		_update_list_state()
 
 
 func refresh() -> void:
@@ -203,40 +368,79 @@ func refresh() -> void:
 	_start_job("refresh", arguments)
 
 
+func _retry() -> void:
+	_load_error = ""
+	_update_list_state()
+	invalidate()
+	refresh()
+
+
 func _apply_data(data: Dictionary) -> void:
 	var selected_tool := _tool_id()
 	_data = data
-	_tools.clear()
-	_tools.add_item("All tools")
-	_tools.set_item_metadata(0, "")
-	_tools.select(0)
+	_by_path.clear()
+	for asset: Dictionary in data.get("assets", []):
+		_by_path[str(asset["path"])] = asset
+	var top := _top_level()
+	var entries: Array[Dictionary] = [{"id": "", "label": "All apps", "tool": {}}]
 	for tool: Dictionary in data.get("tools", []):
+		entries.append({"id": str(tool["id"]), "label": str(tool["name"]), "tool": tool})
+	entries.append({"id": "__imports", "label": "Imported", "tool": {}})
+	entries.append({"id": "__unassigned", "label": "Unassigned", "tool": {}})
+	var shown: Array[Dictionary] = []
+	for entry: Dictionary in entries:
 		var count := 0
-		for asset: Dictionary in data.get("assets", []):
-			if _matches_tool(asset, str(tool["id"])):
+		for asset: Dictionary in top:
+			if _matches_tool(asset, entry["id"]):
 				count += 1
-		if count == 0 and not bool(tool.get("enabled", false)):
-			continue
-		_tools.add_item("%s (%d)" % [tool["name"], count])
-		var index := _tools.item_count - 1
-		_tools.set_item_metadata(index, tool["id"])
-		if str(tool["id"]) == selected_tool:
-			_tools.select(index)
-	for category: String in ["__imports", "__unassigned"]:
-		var count := 0
-		for asset: Dictionary in data.get("assets", []):
-			if _matches_tool(asset, category):
-				count += 1
-		if count > 0:
-			var label := "Imported" if category == "__imports" else "Unassigned"
-			_tools.add_item("%s (%d)" % [label, count])
-			var index := _tools.item_count - 1
-			_tools.set_item_metadata(index, category)
-			if selected_tool == category:
-				_tools.select(index)
-	_filter()
-	catalog_changed.emit(data.get("tools", []), data.get("assets", []))
+		entry["count"] = count
+		var tool: Dictionary = entry["tool"]
+		if entry["id"] == "" or count > 0 or bool(tool.get("enabled", false)):
+			shown.append(entry)
+	# Same rows as before: update counts in place so they roll instead of being rebuilt.
+	var same := _tools.item_count == shown.size()
+	for index: int in shown.size() if same else 0:
+		same = same and str(_tools.get_item_metadata(index)) == shown[index]["id"]
+	if not same:
+		_tools.clear()
+		for entry: Dictionary in shown:
+			_tools.set_item_metadata(_tools.add_item(entry["label"]), entry["id"])
+	var chosen := 0
+	for index: int in shown.size():
+		_tools.set_item_count(index, shown[index]["count"])
+		if not (shown[index]["tool"] as Dictionary).is_empty():
+			_show_readiness(index, shown[index]["tool"])
+		if shown[index]["id"] == selected_tool:
+			chosen = index
+	_tools.select(chosen)
+	_filter(not _loaded_once)
+	_loaded_once = true
+	catalog_changed.emit(data.get("tools", []), top)
 	creator_changed.emit(_tool_id())
+
+
+## A tool's readiness: dot, wording in the tooltip; "unavailable" disables the row.
+func _show_readiness(index: int, tool: Dictionary) -> void:
+	var status := str(tool.get("status", ""))
+	if not READINESS.has(status):
+		_tools.set_item_status(index, "")
+		_tools.set_item_tooltip(index, str(tool["name"]))
+		_tools.set_item_disabled(index, false)
+		return
+	var state: Array = READINESS[status]
+	var reason := str(tool.get("status_reason", ""))
+	var text := "%s · %s" % [tool["name"], state[1]]
+	_tools.set_item_status(index, state[0])
+	_tools.set_item_tooltip(index, text + (". " + reason if not reason.is_empty() else ""))
+	_tools.set_item_disabled(index, status == "unavailable")
+
+
+func _top_level() -> Array[Dictionary]:
+	var top: Array[Dictionary] = []
+	for asset: Dictionary in _data.get("assets", []):
+		if str(asset.get("part_of", "")).is_empty():
+			top.append(asset)
+	return top
 
 
 func _matches_tool(asset: Dictionary, tool: String) -> bool:
@@ -252,77 +456,136 @@ func _tool_id() -> String:
 	return str(_tools.get_item_metadata(selected[0])) if not selected.is_empty() else ""
 
 
+func _tool_name(tool: String) -> String:
+	for entry: Dictionary in _data.get("tools", []):
+		if str(entry["id"]) == tool:
+			return str(entry["name"])
+	return ""
+
+
 func use_rail_navigation() -> void:
-	_tools.hide()
-	_creator_heading.hide()
+	_filter_section.hide()
 
 
 func _display_name(path: String) -> String:
 	return path.get_file().get_basename().replace("_", " ").replace("-", " ").capitalize()
 
 
-func _asset_kind(path: String) -> String:
-	match path.get_extension().to_lower():
-		"blend", "glb", "gltf", "tscn":
-			if (
-				path.get_extension().to_lower() == "blend"
-				and not ResourceLoader.exists("res://" + path)
-			):
-				return "Source"
-			return "Model"
-		"png", "jpg", "jpeg", "webp", "bmp", "tga", "svg":
-			return "Image"
-		"wav", "ogg", "mp3", "flac", "aiff":
-			return "Audio"
-	return "Source"
+## The asset's kind from the index, or from its extension for older indexes.
+func _kind_of(asset: Dictionary) -> String:
+	var kind := str(asset.get("kind", ""))
+	if SECTIONS.has(kind):
+		return kind
+	var extension := str(asset.get("path", "")).get_extension().to_lower()
+	if extension in ["blend", "glb", "gltf"]:
+		return "model"
+	if extension in ["tscn", "scn"]:
+		return "scene"
+	if extension in IMAGES or extension in ["kra", "ora"]:
+		return "image"
+	if extension in SOUNDS or extension in ["scd", "sc"]:
+		return "sound"
+	return "material" if extension == "ptex" else "other"
 
 
-func _filter() -> void:
+## "Model" for "model": the singular of the section title.
+static func _kind_name(kind: String) -> String:
+	return "File" if kind == "other" else str(SECTIONS[kind]).trim_suffix("s")
+
+
+func _matches_search(asset: Dictionary, query: String) -> bool:
+	if query.is_empty() or query in _display_name(str(asset["path"])).to_lower():
+		return true
+	for part: Variant in asset.get("parts", []):
+		if query in _display_name(str(part)).to_lower():
+			return true
+	return false
+
+
+func _filter(animate := false) -> void:
 	_assets.clear()
 	_rows.clear()
 	var tool := _tool_id()
 	creator_changed.emit(tool)
-	_heading.text = "All assets"
-	for entry: Dictionary in _data.get("tools", []):
-		if str(entry["id"]) == tool:
-			_heading.text = str(entry["name"])
 	var query := _search.text.strip_edges().to_lower()
-	for asset: Dictionary in _data.get("assets", []):
-		var path := str(asset["path"])
-		var matches_search := query.is_empty() or query in _display_name(path).to_lower()
-		if _matches_tool(asset, tool) and matches_search:
+	for asset: Dictionary in _top_level():
+		if _matches_tool(asset, tool) and _matches_search(asset, query):
 			_rows.append(asset)
+	var order := SECTIONS.keys()
 	_rows.sort_custom(
 		func(left: Dictionary, right: Dictionary) -> bool:
-			return (
-				_display_name(str(left["path"])).naturalnocasecmp_to(
-					_display_name(str(right["path"]))
-				)
-				< 0
-			)
+			var a := order.find(_kind_of(left))
+			var b := order.find(_kind_of(right))
+			if a != b:
+				return a < b
+			var title := _display_name(str(left["path"]))
+			return title.naturalnocasecmp_to(_display_name(str(right["path"]))) < 0
 	)
 	var label_counts: Dictionary = {}
 	for asset: Dictionary in _rows:
 		var label := _display_name(str(asset["path"]))
 		label_counts[label] = int(label_counts.get(label, 0)) + 1
+	var section := ""
 	for asset: Dictionary in _rows:
+		var kind := _kind_of(asset)
+		if kind != section:
+			section = kind
+			_assets.add_section(SECTIONS[kind])
 		var path := str(asset["path"])
 		var label := _display_name(path)
 		if int(label_counts[label]) > 1:
-			label += " · " + _asset_kind(path)
-		_assets.add_item(label)
-		_assets.set_item_tooltip(_assets.item_count - 1, path)
+			label += " · " + path.get_extension().to_lower()
+		var index := _assets.add_item(label, kind if kind != "other" else "")
+		_assets.set_item_tooltip(index, path)
+	if animate:
+		_assets.stagger()
+	var found := _rows.find_custom(_holds_selection)
+	if found >= 0:
+		_assets.select(found)
+		_show_asset(_by_path.get(_selected_path, _rows[found]), false)
+	else:
+		_clear_selection()
+	_update_list_state()
+
+
+func _holds_selection(row: Dictionary) -> bool:
+	return str(row["path"]) == _selected_path or (row.get("parts", []) as Array).has(_selected_path)
+
+
+func _clear_selection() -> void:
 	_clear_preview()
 	_current = {}
-	_open.disabled = true
-	_actions.hide()
-	_open_with.clear()
-	_title.text = "No assets for this tool" if _rows.is_empty() else "Choose an asset"
-	for index: int in _rows.size():
-		if str(_rows[index]["path"]) == _selected_path:
-			_assets.select(index)
-			_select(index, false)
-			break
+	_header.hide()
+	_parts.hide()
+	_status.hide()
+	if not _rows.is_empty():
+		_preview.add_child(UI_COMPONENTS.label("Choose an asset to preview it.", "JoineryCaption"))
+
+
+## Loading, error and empty states of the asset list.
+func _update_list_state() -> void:
+	var loading := _data.is_empty() and _load_error.is_empty()
+	_loading.visible = loading
+	_loading_indicator.running = loading
+	_error_box.visible = not _load_error.is_empty()
+	_error_label.text = "Couldn't load assets. " + _load_error
+	var message := ""
+	if not loading and _load_error.is_empty() and _rows.is_empty():
+		var query := _search.text.strip_edges()
+		var tool := _tool_id()
+		if _top_level().is_empty():
+			message = "No assets yet. Ask Journeyman to make one."
+		elif not query.is_empty():
+			message = "No assets match “%s”." % query
+		elif tool == "__imports":
+			message = "No imported assets."
+		elif tool == "__unassigned":
+			message = "Every asset has a recorded app."
+		else:
+			message = "No assets from %s yet. Ask Journeyman to make one." % _tool_name(tool)
+	_empty.text = message
+	_empty.visible = not message.is_empty()
+	_assets.visible = not _rows.is_empty()
 
 
 func select_resource(path: String) -> void:
@@ -350,7 +613,7 @@ func select_tool(tool: String) -> void:
 		if str(_tools.get_item_metadata(index)) == tool:
 			_tools.select(index)
 			_search.clear()
-			_filter()
+			_filter(true)
 			if not _rows.is_empty() and _current.is_empty():
 				_assets.select(0)
 				_select(0)
@@ -360,57 +623,205 @@ func select_tool(tool: String) -> void:
 
 
 func _select(index: int, notify: bool = true) -> void:
-	if str(_rows[index]["path"]) != _selected_path:
+	_show_asset(_rows[index], notify)
+
+
+## Show [param asset] (a top-level asset or one of its parts) in the header and preview.
+func _show_asset(asset: Dictionary, notify: bool) -> void:
+	var path := str(asset["path"])
+	if path != _selected_path:
 		_preview_import_changed = false
-	_current = _rows[index]
-	_selected_path = str(_current["path"])
-	_title.text = _display_name(_selected_path)
-	_actions.show()
-	_open_with.clear()
-	for option: Dictionary in _current.get("open_options", []):
-		_open_with.add_item(str(option["name"]))
-		var item := _open_with.item_count - 1
-		_open_with.set_item_metadata(item, option)
-		if str(option["tool"]) == _tool_id():
-			_open_with.select(item)
-		# Keep unavailable apps discoverable, with their configuration hint.
-		var hint := str(option["reason"]) if not option["available"] else str(option["path"])
-		_open_with.set_item_tooltip(item, hint)
-	_update_open(_open_with.selected)
-	_show_preview("res://" + _selected_path, _preview_import_changed)
+	_current = asset
+	_selected_path = path
+	var owner := _owner_of(asset)
+	_title.text = _display_name(str(owner["path"]))
+	_title.tooltip_text = str(owner["path"])
+	_caption.text = _describe(owner)
+	_header.show()
+	_status.hide()
+	_show_parts(owner, path)
+	_update_open()
+	_show_preview("res://" + path, _preview_import_changed)
 	_preview_import_changed = false
 	if notify:
 		asset_selected.emit(_current.duplicate(true))
 
 
-func _update_open(index: int) -> void:
-	_open_with.visible = _open_with.item_count > 1
-	if _open_with.item_count == 0:
-		_open.disabled = true
-		_open.text = "Open"
-		_open.tooltip_text = "No compatible application is configured."
-		return
-	var option: Dictionary = _open_with.get_item_metadata(index)
-	_open.disabled = not bool(option["available"])
-	_open.tooltip_text = str(option["path"]) if option["available"] else str(option["reason"])
-	_open.text = "Open" if _open_with.visible else "Open in " + str(option["name"])
+func _owner_of(asset: Dictionary) -> Dictionary:
+	var owner := str(asset.get("part_of", ""))
+	return _by_path.get(owner, asset) if not owner.is_empty() else asset
 
 
-func _open_source() -> void:
-	if _current.is_empty() or _open_with.item_count == 0:
+## "Model · made in Blender", "Image · imported".
+func _describe(asset: Dictionary) -> String:
+	var words: Array[String] = [_kind_name(_kind_of(asset))]
+	var tool := _tool_name(str(asset.get("tool", "")))
+	if str(asset.get("origin", "")) == "human-import":
+		words.append("imported")
+	elif not tool.is_empty():
+		words.append("made in " + tool)
+	return " · ".join(words)
+
+
+## Parts: a segment per file (the source, then each derived part), so each can be previewed
+## and opened on its own.
+func _show_parts(owner: Dictionary, viewing: String) -> void:
+	for child: Node in _parts.get_children():
+		_parts.remove_child(child)
+		child.queue_free()
+	var parts: Array = owner.get("parts", [])
+	_parts.visible = not parts.is_empty()
+	if parts.is_empty():
 		return
-	var option: Dictionary = _open_with.get_item_metadata(_open_with.selected)
-	_start_job(
-		"open",
-		PackedStringArray(
-			[
-				"open",
-				str(_current["path"]),
-				"--tool",
-				str(option["tool"]),
-			]
+	var heading := UI_COMPONENTS.label("Parts", "JoineryCaption")
+	heading.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_parts.add_child(heading)
+	var owner_path := str(owner["path"])
+	for item: Variant in [owner_path] + parts:
+		var path := str(item)
+		var segment := Button.new()
+		segment.theme_type_variation = "JoinerySegment"
+		segment.toggle_mode = true
+		segment.focus_mode = Control.FOCUS_ALL
+		segment.text = "Source" if path == owner_path else _part_name(owner_path, path)
+		segment.tooltip_text = path
+		segment.accessibility_name = segment.text
+		segment.set_pressed_no_signal(path == viewing)
+		segment.pressed.connect(_view_part.bind(path))
+		UI_COMPONENTS.bind_height(segment, "sm")
+		UI_MOTION.press_feedback(segment)
+		_parts.add_child(segment)
+
+
+func _part_name(owner: String, part: String) -> String:
+	var base := owner.get_file().get_basename()
+	var name := part.get_file().get_basename().trim_prefix(base).lstrip("_-. ")
+	if name.is_empty():
+		return _kind_name(_kind_of(_by_path.get(part, {"path": part})))
+	return name.replace("_", " ").replace("-", " ").capitalize()
+
+
+func _view_part(path: String) -> void:
+	if _by_path.has(path) and path != _selected_path:
+		_show_asset(_by_path[path], true)
+	else:
+		_show_parts(_owner_of(_current), _selected_path)
+
+
+## The open action: "Open in Blender" (primary) plus an "Open with…" menu when more than one
+## app can open the file. A missing app is explained under the title with a way to set it up.
+func _update_open() -> void:
+	_open_with.clear()
+	var options: Array = _current.get("open_options", [])
+	for index: int in options.size():
+		var option: Dictionary = options[index]
+		_open_with.add_item(str(option["name"]), index)
+		_open_with.set_item_metadata(index, option)
+		var available := bool(option["available"])
+		_open_with.set_item_disabled(index, not available)
+		_open_with.set_item_tooltip(
+			index, str(option["path"]) if available else _unavailable_text(option)
 		)
+	_open_menu.visible = options.size() > 1
+	_set_menu_label(false)
+	_unavailable.hide()
+	_open.visible = not options.is_empty()
+	if options.is_empty():
+		return
+	var primary: Dictionary = options[0]
+	var app := str(primary["name"])
+	if not bool(primary["available"]):
+		_open.hide()
+		var missing := _source_missing(primary)
+		var extension := str(_current.get("path", "")).get_extension().to_lower()
+		var lines := _missing_text(app, extension, true)
+		_unavailable_title.text = "The source file is missing" if missing else lines[0]
+		_unavailable_label.text = "" if missing else lines[1]
+		_unavailable_label.visible = not missing
+		# Project apps can't bring back a missing source file.
+		_setup_link.visible = not missing
+		# The preview's empty state already says the app is missing: say it once.
+		_unavailable.visible = _explained_app != app or _source_missing(primary)
+		_set_menu_label(options.any(func(item: Dictionary) -> bool: return item["available"]))
+		return
+	_open.tooltip_text = str(primary["path"])
+	if _opening == app:
+		return
+	_open.disabled = false
+	var opened := _opened == app and Time.get_ticks_msec() < _opened_until
+	_open.text = ("Opened in " if opened else "Open in ") + app
+
+
+## The "Open with" menu is a chevron beside "Open in …", or, when the creating app is missing
+## but another app can open the file, a labelled secondary button.
+func _set_menu_label(labelled: bool) -> void:
+	var text := "Open with…" if labelled else ""
+	if _open_menu.text == text:
+		return
+	_open_menu.text = text
+	_open_menu.theme_type_variation = (
+		"JoinerySecondaryButton" if labelled else "JoineryIconButton"
 	)
+
+
+func _unavailable_text(option: Dictionary) -> String:
+	if _source_missing(option):
+		return "The source file is missing."
+	return "Install %s on this computer to open it here." % option["name"]
+
+
+static func _source_missing(option: Dictionary) -> bool:
+	return str(option.get("reason", "")).begins_with("Source missing")
+
+
+func _open_option(index: int) -> void:
+	var options: Array = _current.get("open_options", [])
+	if _current.is_empty() or index < 0 or index >= options.size():
+		return
+	var option: Dictionary = options[index]
+	if not bool(option["available"]) or not _opening.is_empty():
+		return
+	_opening = str(option["name"])
+	_status.hide()
+	if bool(options[0]["available"]):
+		_open.disabled = true
+		_open.text = "Opening %s…" % _opening
+	_open_indicator.running = true
+	var arguments := ["open", str(_current["path"]), "--tool", str(option["tool"])]
+	_start_job("open", PackedStringArray(arguments))
+
+
+func _finish_open(result: Dictionary) -> void:
+	var app := _opening
+	_opening = ""
+	_open_indicator.running = false
+	if int(result["code"]) == 0:
+		_opened = app
+		_opened_until = Time.get_ticks_msec() + roundi(OPENED_SECONDS * 1000.0)
+		_update_open()
+		get_tree().create_timer(OPENED_SECONDS).timeout.connect(_end_opened.bind(app))
+		invalidate()
+		return
+	_update_open()
+	var reason := _first_line(str(result.get("error", "")))
+	if reason.is_empty():
+		reason = _first_line(str(result.get("output", "")))
+	_status.text = "Couldn't open %s. %s" % [app, reason]
+	_status.show()
+
+
+func _end_opened(app: String) -> void:
+	if _opened == app and Time.get_ticks_msec() >= _opened_until:
+		_opened = ""
+		if is_inside_tree():
+			_update_open()
+
+
+static func _first_line(text: String) -> String:
+	for line: String in text.split("\n"):
+		if not line.strip_edges().is_empty():
+			return line.strip_edges()
+	return ""
 
 
 func _clear_preview() -> void:
@@ -421,6 +832,11 @@ func _clear_preview() -> void:
 	_audio_panel = null
 	_audio.pitch_scale = 1.0
 	_audio.volume_db = 0
+	if not _explained_app.is_empty():
+		# The header takes over saying the app is missing again.
+		_explained_app = ""
+		if not _current.is_empty():
+			_update_open()
 	for child: Node in _preview.get_children():
 		_preview.remove_child(child)
 		child.queue_free()
@@ -432,87 +848,117 @@ func _show_preview(path: String, reimported: bool = false) -> void:
 		ResourceLoader.CACHE_MODE_REPLACE if reimported else ResourceLoader.CACHE_MODE_REUSE
 	)
 	if not FileAccess.file_exists(path):
-		var missing := Label.new()
-		missing.text = "This file is missing."
-		_preview.add_child(missing)
+		_note("This file is missing.")
 		return
 	path = _preview_path(path)
 	var extension := path.get_extension().to_lower()
-	if extension in ["png", "jpg", "jpeg", "webp", "bmp", "tga", "svg"]:
-		var image := Image.load_from_file(ProjectSettings.globalize_path(path))
-		if image != null and not image.is_empty():
-			_show_image(image)
+	var image := _load_image(path)
+	if image != null:
+		_show_image(image)
+		return
+	if extension in SOUNDS and ResourceLoader.exists(path):
+		var stream := ResourceLoader.load(path, "", cache_mode) as AudioStream
+		if stream != null:
+			_show_audio(stream)
 			return
-	if extension in ["kra", "ora"]:
-		var archive := ZIPReader.new()
-		if archive.open(ProjectSettings.globalize_path(path)) == OK:
-			var image := Image.new()
-			var error := image.load_png_from_buffer(archive.read_file("mergedimage.png"))
-			archive.close()
-			if error == OK:
-				_show_image(image)
-				return
-	if extension in ["wav", "ogg", "mp3"] and ResourceLoader.exists(path):
-		_audio.stream = ResourceLoader.load(path, "", cache_mode) as AudioStream
-		if _audio.stream != null:
-			_audio.stream = _audio.stream.duplicate() as AudioStream
-			if _audio.stream is AudioStreamWAV:
-				_audio.stream.loop_mode = AudioStreamWAV.LOOP_DISABLED
-			elif _audio.stream is AudioStreamOggVorbis or _audio.stream is AudioStreamMP3:
-				_audio.stream.loop = false
-			_show_audio()
-			return
-	if extension in ["blend", "glb", "gltf", "tscn"] and ResourceLoader.exists(path):
+	if extension in MODELS and ResourceLoader.exists(path):
 		var scene := ResourceLoader.load(path, "", cache_mode) as PackedScene
 		if scene != null:
 			_show_scene(scene)
 			return
-	if extension in ["scd", "sc", "gd", "svg", "ptex"] and FileAccess.file_exists(path):
-		var text := TextEdit.new()
-		text.editable = false
-		text.text = FileAccess.get_file_as_string(path)
-		text.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		_preview.add_child(text)
+	if extension in TEXTS and FileAccess.file_exists(path):
+		_show_source(FileAccess.get_file_as_string(path))
 		return
-	var note := Label.new()
 	if extension in ["glb", "gltf"] and not ResourceLoader.exists(path):
 		_pending_scene_preview = path
-		note.text = "Importing model…"
-	else:
-		note.text = "Preview unavailable for this format. Open it in its desktop app."
-	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_preview.add_child(note)
+		_note("Importing model…", true)
+		return
+	_show_no_preview(extension)
+
+
+## The preview's empty state for a file it can't show: how to see it, or, when the app that
+## opens it is missing, that the app isn't installed.
+func _show_no_preview(extension: String) -> void:
+	var options: Array = _current.get("open_options", [])
+	if options.is_empty():
+		_empty_state("No preview for .%s files" % extension, "")
+		return
+	var primary: Dictionary = options[0]
+	var app := str(primary["name"])
+	if bool(primary["available"]) or _source_missing(primary):
+		_empty_state("No preview for .%s files" % extension, "Open it in %s to see it." % app)
+		return
+	# The app is missing: one block says so and offers the one next step, instead of telling
+	# the user to open the file in an app they don't have.
+	_explained_app = app
+	_unavailable.hide()
+	var lines := _missing_text(app, extension, false)
+	_empty_state(lines[0], lines[1], _setup_button())
+
+
+## The image at [param path] (also the merged layer of a Krita or OpenRaster file), or null.
+static func _load_image(path: String) -> Image:
+	var extension := path.get_extension().to_lower()
+	if extension in IMAGES:
+		var image := Image.load_from_file(ProjectSettings.globalize_path(path))
+		return image if image != null and not image.is_empty() else null
+	if extension not in ["kra", "ora"]:
+		return null
+	var archive := ZIPReader.new()
+	if archive.open(ProjectSettings.globalize_path(path)) != OK:
+		return null
+	var layered := Image.new()
+	var error := layered.load_png_from_buffer(archive.read_file("mergedimage.png"))
+	archive.close()
+	return layered if error == OK else null
+
+
+## A centred empty state in the preview: the asset kind's icon, a [param title], an optional
+## [param line] saying what to do, and an optional [param action] button.
+func _empty_state(title: String, line: String, action: Button = null) -> void:
+	var block := VBoxContainer.new()
+	block.theme_type_variation = "JoineryTight"
+	block.alignment = BoxContainer.ALIGNMENT_CENTER
+	block.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_preview.add_child(block)
+	var icon := TextureRect.new()
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var kind := _kind_of(_current) if not _current.is_empty() else "other"
+	UI_COMPONENTS.bind_icon(icon, kind if UI_THEME.ICONS.has(kind) else "warning", "texture")
+	icon.theme_changed.connect(
+		func() -> void: icon.self_modulate = UI_THEME.color(icon, "text_faint")
+	)
+	block.add_child(icon)
+	var heading := UI_COMPONENTS.label(title, "JoineryBodyLarge")
+	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	block.add_child(heading)
+	if not line.is_empty():
+		var hint := UI_COMPONENTS.label(line, "JoineryCaption", true)
+		hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		block.add_child(hint)
+	if action != null:
+		action.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		block.add_child(action)
+
+
+func _note(text: String, busy := false) -> void:
+	var row := HBoxContainer.new()
+	row.theme_type_variation = "JoineryRow"
+	if busy:
+		var indicator: INDICATOR_SCRIPT = INDICATOR_SCRIPT.new()
+		indicator.running = true
+		row.add_child(indicator)
+	row.add_child(UI_COMPONENTS.label(text, "JoineryCaption", true))
+	_preview.add_child(row)
 
 
 func _preview_path(path: String) -> String:
 	var extension := path.get_extension().to_lower()
-	var native := extension in ["blend", "glb", "gltf", "tscn"]
+	var native := extension in MODELS
 	if native and ResourceLoader.exists(path):
 		return path
-	if (
-		not native
-		and (
-			extension
-			in [
-				"png",
-				"jpg",
-				"jpeg",
-				"webp",
-				"bmp",
-				"tga",
-				"svg",
-				"kra",
-				"ora",
-				"wav",
-				"ogg",
-				"mp3",
-				"scd",
-				"sc",
-				"gd",
-				"ptex",
-			]
-		)
-	):
+	if not native and extension in IMAGES + SOUNDS + TEXTS + ["kra", "ora"]:
 		return path
 	for relative: String in _current.get("previews", []):
 		var preview := "res://" + relative
@@ -530,97 +976,25 @@ func _show_image(image: Image) -> void:
 	_preview.add_child(view)
 
 
-func _show_audio() -> void:
-	var above := Control.new()
-	above.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_preview.add_child(above)
+func _show_source(text: String) -> void:
+	var code := CodeEdit.new()
+	code.editable = false
+	code.text = text
+	code.gutters_draw_line_numbers = false
+	code.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	code.accessibility_name = "Source"
+	_preview.add_child(code)
+
+
+func _show_audio(stream: AudioStream) -> void:
 	_audio_panel = AUDIO_SCRIPT.new()
 	_audio_panel.player = _audio
+	_audio_panel.set_stream(stream)
+	_audio_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_preview.add_child(_audio_panel)
-	var below := Control.new()
-	below.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_preview.add_child(below)
 
 
 func _show_scene(scene: PackedScene) -> void:
-	var container := SubViewportContainer.new()
-	container.stretch = true
-	container.mouse_target = false
-	container.mouse_force_pass_scroll_events = false
-	container.custom_minimum_size = Vector2(200, 200)
-	container.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_preview.add_child(container)
-	var viewport := SubViewport.new()
-	viewport.own_world_3d = true
-	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	container.add_child(viewport)
-	var root := Node3D.new()
-	viewport.add_child(root)
-	var instance := scene.instantiate(PackedScene.GEN_EDIT_STATE_DISABLED)
-	root.add_child(instance)
-	var bounds := AABB()
-	var meshes: Array[Node] = instance.find_children("*", "MeshInstance3D", true, false)
-	if instance is MeshInstance3D:
-		meshes.append(instance)
-	var found := false
-	for node: Node in meshes:
-		var mesh := node as MeshInstance3D
-		var box: AABB = mesh.global_transform * mesh.get_aabb()
-		bounds = bounds.merge(box) if found else box
-		found = true
-	var center := bounds.get_center()
-	var radius := maxf(bounds.size.length() * 0.5, 0.5)
-	var pivot := Node3D.new()
-	root.add_child(pivot)
-	pivot.position = center
-	pivot.rotation = Vector3(-0.4, PI / 4.0, 0)
-	var camera := Camera3D.new()
-	pivot.add_child(camera)
-	camera.fov = 42
-	camera.position.z = radius * 2.0
-	camera.near = maxf(radius * 0.001, 0.001)
-	camera.far = maxf(radius * 20.0, 100.0)
-	camera.current = true
-	container.gui_input.connect(_orbit_preview.bind(pivot, camera, radius))
-	var camera_id := camera.get_instance_id()
-	var pivot_id := pivot.get_instance_id()
-	var viewport_id := viewport.get_instance_id()
-	viewport.size_changed.connect(_frame_model.bind(camera_id, pivot_id, viewport_id, bounds))
-	_frame_model(camera_id, pivot_id, viewport_id, bounds)
-	var context: RefCounted = CONTEXT_SCRIPT.new()
-	context.apply(root, camera)
-
-
-func _frame_model(camera_id: int, pivot_id: int, viewport_id: int, bounds: AABB) -> void:
-	var camera := instance_from_id(camera_id) as Camera3D
-	var pivot := instance_from_id(pivot_id) as Node3D
-	var viewport := instance_from_id(viewport_id) as SubViewport
-	if not is_instance_valid(camera) or not is_instance_valid(viewport):
-		return
-	if not is_instance_valid(pivot) or not pivot.is_inside_tree():
-		return
-	var local_bounds: AABB = pivot.global_transform.affine_inverse() * bounds
-	var half := local_bounds.size * 0.5
-	var aspect := float(maxi(viewport.size.x, 1)) / maxi(viewport.size.y, 1)
-	var tangent := tan(deg_to_rad(camera.fov * 0.5))
-	var fit := maxf(half.y / tangent, half.x / (tangent * aspect))
-	camera.position.z = maxf((fit + half.z) * 1.15, 0.1)
-
-
-func _orbit_preview(event: InputEvent, pivot: Node3D, camera: Camera3D, radius: float) -> void:
-	if event is InputEventMouseMotion and event.button_mask & MOUSE_BUTTON_MASK_LEFT:
-		pivot.rotation.y -= event.relative.x * 0.01
-		pivot.rotation.x = clampf(pivot.rotation.x - event.relative.y * 0.01, -1.5, 1.5)
-	if event is InputEventMouseButton and event.pressed:
-		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
-			_zoom_model(camera, radius, pow(0.9, event.factor))
-		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
-			_zoom_model(camera, radius, pow(1.1, event.factor))
-	if event is InputEventMagnifyGesture and event.factor > 0:
-		_zoom_model(camera, radius, 1.0 / event.factor)
-	if event is InputEventPanGesture:
-		_zoom_model(camera, radius, exp(event.delta.y * 0.05))
-
-
-func _zoom_model(camera: Camera3D, radius: float, factor: float) -> void:
-	camera.position.z = clampf(camera.position.z * factor, radius * 0.05, radius * 30.0)
+	var viewer: MODEL_SCRIPT = MODEL_SCRIPT.new()
+	_preview.add_child(viewer)
+	viewer.show_scene(scene)

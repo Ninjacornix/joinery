@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import tomllib
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,36 @@ from joinery.catalog import load_catalog, load_project_tools, selection_ids
 from joinery.desktop import TOOLS, launch, launcher, overrides, project_file
 from joinery.lockfile import AssetEntry, asset_files
 from joinery.recipe import IMAGE_SUFFIXES, Recipe, load_recipe, recipe_paths
+
+#: What an asset is, for grouping in the workspace: by file type first.
+KIND_SUFFIXES: dict[str, frozenset[str]] = {
+    "model": frozenset({".blend", ".glb", ".gltf", ".fbx", ".obj", ".dae", ".vox"}),
+    "scene": frozenset({".tscn", ".scn"}),
+    "material": frozenset({".ptex", ".mmg"}),
+    "image": frozenset(
+        {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tga", ".tif", ".tiff", ".exr"}
+        | {".hdr", ".svg", ".svgz", ".gif", ".kra", ".ora", ".psd", ".xcf"}
+        | {".ase", ".aseprite"}
+    ),
+    "sound": frozenset(
+        {".wav", ".ogg", ".mp3", ".flac", ".aiff", ".aif", ".aup3", ".aup"}
+        | {".rpp", ".mid", ".midi", ".mscz", ".mscx", ".scd", ".sc", ".fxp"}
+    ),
+}
+#: Fallback kind from the creating tool's domain when the file type says nothing.
+DOMAIN_KINDS = {
+    "3d": "model",
+    "2d": "image",
+    "audio": "sound",
+    "materials": "material",
+    "engine": "scene",
+}
+#: Baked texture-map names: a source whose parts are these is a material.
+MAP_NAMES = frozenset(
+    {"albedo", "basecolor", "base_color", "diffuse", "roughness", "metallic"}
+    | {"metalness", "normal", "height", "displacement", "ao", "occlusion"}
+    | {"emission", "specular", "opacity"}
+)
 
 
 def watch_stamp(project: Path) -> str:
@@ -61,6 +92,66 @@ class Asset:
     previews: list[str] = field(default_factory=list)
     verification: str = "Not checked by replay"
     open_options: list[OpenOption] = field(default_factory=list)
+    #: model, sound, image, material, scene or other.
+    kind: str = "other"
+    #: Derived files (baked maps, exports, renders) folded under this source asset.
+    parts: list[str] = field(default_factory=list)
+    #: For a part, the source asset it is folded under; empty for top-level assets.
+    part_of: str = ""
+
+
+def _suffix_kind(path: str) -> str:
+    suffix = Path(path).suffix.lower()
+    return next((k for k, s in KIND_SUFFIXES.items() if suffix in s), "")
+
+
+def _is_map(owner: str, part: str) -> bool:
+    stem = Path(part).stem.lower()
+    base = Path(owner).stem.lower()
+    name = stem.removeprefix(base).strip("_-. ")
+    return name in MAP_NAMES or any(stem.endswith("_" + m) for m in MAP_NAMES)
+
+
+def _fold(
+    assets: list[Asset], recipes: dict[str, Recipe], domains: Mapping[str, str]
+) -> None:
+    """Fold each recipe's derived outputs under its native source asset and set kinds.
+
+    The owner is the first recipe output or source that is a native document of the
+    recipe's tool (a .blend for Blender, a .ptex for Material Maker) and is itself an
+    asset. Other native documents stay separate assets; everything else the recipe
+    produced becomes a part. Every asset stays in the index, so parts still open and
+    preview on their own.
+    """
+    by_path = {asset.path: asset for asset in assets}
+    for recipe in recipes.values():
+        spec = TOOLS.get(recipe.tool)
+        native = spec.native if spec else ()
+        members = [
+            p for p in dict.fromkeys((*recipe.outputs, *recipe.sources)) if p in by_path
+        ]
+        owners = [p for p in members if Path(p).suffix.lower() in native]
+        if not owners:
+            continue
+        owner = by_path[owners[0]]
+        for path in members:
+            part = by_path[path]
+            if path in owners or part.part_of or part.parts:
+                continue
+            part.part_of = owner.path
+            owner.parts.append(path)
+        if owner.parts and all(_suffix_kind(p) == "image" for p in owner.parts):
+            if any(_is_map(owner.path, p) for p in owner.parts):
+                owner.kind = "material"
+            elif all(p in recipe.renders for p in owner.parts):
+                owner.kind = "image"
+    for asset in assets:
+        if asset.kind == "other":
+            asset.kind = (
+                _suffix_kind(asset.path)
+                or DOMAIN_KINDS.get(domains.get(asset.tool, ""))
+                or "other"
+            )
 
 
 def index(project: Path) -> dict[str, Any]:
@@ -69,10 +160,19 @@ def index(project: Path) -> dict[str, Any]:
     selected = load_project_tools(config) if config.is_file() else None
     enabled = selection_ids(catalog, selected) if selected else []
     names = {t.id: t.name for t in catalog.tool}
-    domains = {t.id: t.domain for t in catalog.tool}
+    domains: dict[str, str] = {t.id: t.domain for t in catalog.tool}
     if selected:
         names.update({t.id: t.name for t in selected.custom})
         domains.update({t.id: t.domain for t in selected.custom})
+    # Desktop apps Joinery no longer drives (catalog.REMOVED_TOOLS) still open
+    # documents when they are installed; they are never offered as missing apps
+    # except for assets they made.
+    kind_domains = {kind: domain for domain, kind in DOMAIN_KINDS.items()}
+    desktop_only = {tool for tool in TOOLS if tool not in names}
+    for tool in sorted(desktop_only):
+        names[tool] = TOOLS[tool].app
+        kind = _suffix_kind(TOOLS[tool].native[0]) if TOOLS[tool].native else ""
+        domains[tool] = kind_domains.get(kind, "engine")
     settings = overrides(project)
     recipes: dict[str, Recipe] = {}
     issues: list[str] = []
@@ -166,8 +266,10 @@ def index(project: Path) -> dict[str, Any]:
                 target = next(iter(asset.sources), rel)
             if target is None:
                 continue
-            exists = project_file(project, target).is_file()
             available, reason = programs[candidate]
+            if candidate in desktop_only and candidate != tool and not available:
+                continue
+            exists = project_file(project, target).is_file()
             asset.open_options.append(
                 OpenOption(
                     candidate,
@@ -179,6 +281,7 @@ def index(project: Path) -> dict[str, Any]:
             )
         asset.open_options.sort(key=lambda option: (option.tool != tool, option.name))
         assets.append(asset)
+    _fold(assets, recipes, domains)
     return {
         "tools": [
             {

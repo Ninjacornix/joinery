@@ -27,19 +27,32 @@ func _run() -> void:
 	var path := OS.get_environment("JOINERY_WORKSPACE_INDEX")
 	var payload: Dictionary = JSON.parse_string(FileAccess.get_file_as_string(path))
 	_workspace._apply_data(payload)
-	_check(_workspace._rows.size() == payload["assets"].size(), "All assets must be listed")
+	var top_level := 0
+	for asset: Dictionary in payload["assets"]:
+		top_level += 1 if str(asset.get("part_of", "")).is_empty() else 0
+	_check(top_level < payload["assets"].size(), "The index must fold derived parts")
+	_check(_workspace._rows.size() == top_level, "Every source asset must be listed once")
+	_check_groups()
 	_workspace.select_tool("blender")
 	for asset: Dictionary in _workspace._rows:
 		_check(asset["tool"] == "blender", "Creator filter must use ownership")
 	_check(
-		not _workspace._matches_tool({"tool": "blender", "open_options": [{"tool": "krita"}]}, "krita"),
+		not _workspace._matches_tool(
+			{"tool": "blender", "open_options": [{"tool": "krita"}]}, "krita"
+		),
 		"Compatible viewers must not count as creators"
 	)
 	for index: int in _workspace._assets.item_count:
 		_check(not ".blend" in _workspace._assets.get_item_text(index), "Hide file extensions")
 	_workspace._search.text = "stone tiles"
 	_workspace._filter()
-	_check(_workspace._rows.size() == 3, "Search must match readable asset names")
+	_check(_workspace._rows.size() == 1, "Baked maps must fold into their source asset")
+	_workspace._search.text = "roughness"
+	_workspace._filter()
+	_check(_workspace._rows.size() == 1, "Search must also match part names")
+	_workspace._search.text = "no such asset"
+	_workspace._filter()
+	_check(_workspace._empty.visible, "A search with no match must say so")
 	_workspace._search.clear()
 	_workspace.select_resource("res://art/props/door.blend")
 	_check(_workspace._current.get("path") == "art/props/door.blend", "Selection must resolve door")
@@ -91,6 +104,19 @@ func _run() -> void:
 	)
 	_workspace.select_resource("res://art/materials/stone_tiles_albedo.png")
 	_check(_workspace._preview.get_child(0) is TextureRect, "Image preview must load")
+	_check(_workspace._title.text == "Stone Tiles", "A part shows under its source asset")
+	_check(_workspace._caption.text == "Material · made in Blender", _workspace._caption.text)
+	_check(_workspace._parts.visible, "A source with parts must list them")
+	var segments: Array[String] = []
+	for segment: Node in _workspace._parts.get_children():
+		if segment is Button:
+			segments.append(segment.text)
+	_check(segments == ["Source", "Albedo", "Roughness"], "Parts: %s" % [segments])
+	var owner_row: PackedInt32Array = _workspace._assets.get_selected_items()
+	_check(
+		owner_row.size() == 1 and _workspace._rows[owner_row[0]]["path"].ends_with("tiles.blend"),
+		"Selecting a part must highlight its source row"
+	)
 	var option_tools: Array[String] = []
 	for index: int in _workspace._open_with.item_count:
 		option_tools.append(str(_workspace._open_with.get_item_metadata(index)["tool"]))
@@ -99,10 +125,8 @@ func _run() -> void:
 	_check(_workspace._audio.stream != null, "Audio preview must load")
 	_check(_workspace._audio.stream.get_length() > 0, "Audio preview must have duration")
 	_check(
-		is_equal_approx(
-			_workspace._audio_panel.seek_slider.max_value, _workspace._audio.stream.get_length()
-		),
-		"Audio seek control must match the stream duration"
+		is_equal_approx(_workspace._audio_panel.length, _workspace._audio.stream.get_length()),
+		"Audio transport must match the stream duration"
 	)
 	_workspace._audio_panel.play_button.pressed.emit()
 	_workspace._audio_panel.play_button.pressed.emit()
@@ -124,7 +148,8 @@ func _run() -> void:
 	while _workspace._command_job != null and Time.get_ticks_msec() < deadline:
 		await process_frame
 	_check(_workspace._command_job == null, "Workspace CLI refresh must finish")
-	_check(not _workspace._status.text.begins_with("Could not"), _workspace._status.text)
+	_check(_workspace._load_error.is_empty(), _workspace._load_error)
+	_check(not _workspace._error_box.visible, "A successful refresh shows no error")
 	_workspace.select_resource("res://art/props/door.blend")
 	var preview_id: int = _workspace._preview.get_child(0).get_instance_id()
 	_workspace.refresh()
@@ -141,7 +166,59 @@ func _run() -> void:
 	if not capture.is_empty():
 		await RenderingServer.frame_post_draw
 		root.get_texture().get_image().save_png(capture)
+	_check_states(payload)
 	print("workspace viewer: ", "FAILED" if _failed else "ok")
 	_workspace.queue_free()
 	await process_frame
 	quit(1 if _failed else 0)
+
+
+## Rows are grouped by kind under section titles.
+func _check_groups() -> void:
+	var titles: Array[String] = []
+	for label: Node in _workspace._assets.find_children("*", "Label", true, false):
+		if label.theme_type_variation == "JoinerySection":
+			titles.append(label.text)
+	_check(titles == ["Models", "Sounds", "Images", "Materials"], "Sections: %s" % [titles])
+	_check(not _workspace._assets.get_item_text(0).is_empty(), "Rows have names")
+
+
+## Open action, missing apps, readiness dots, and empty, loading and error states.
+func _check_states(payload: Dictionary) -> void:
+	_workspace.select_resource("res://art/props/door.blend")
+	var options: Array = _workspace._current["open_options"]
+	if bool(options[0]["available"]):
+		_check(_workspace._open.text == "Open in " + options[0]["name"], _workspace._open.text)
+	else:
+		_check(_workspace._unavailable.visible, "A missing app is explained inline")
+		_check(not _workspace._open.visible, "A missing app has no disabled button")
+		var requested: Array[int] = [0]
+		_workspace.setup_requested.connect(func() -> void: requested[0] += 1)
+		_workspace._setup_link.pressed.emit()
+		_check(requested[0] == 1, "Set up apps must ask for app setup")
+	var data := payload.duplicate(true)
+	var tools: Array = data["tools"]
+	tools[0]["status"] = "needs_docker"
+	tools[0]["status_reason"] = "Docker is not running"
+	_workspace._apply_data(data)
+	var dots := 0
+	for index: int in _workspace._tools.item_count:
+		var row: Button = _workspace._tools._rows[index]
+		dots += 1 if row.dot.visible else 0
+		if _workspace._tools.get_item_metadata(index) == tools[0]["id"]:
+			_check(row.tooltip_text.contains("Needs Docker"), row.tooltip_text)
+	_check(dots == 1, "Only tools that report readiness show a dot")
+	var counted: int = _workspace._tools.item_count
+	_workspace._apply_data(payload)
+	_check(_workspace._tools.item_count == counted, "Tool rows update in place")
+	_workspace._data = {}
+	_workspace._load_error = ""
+	_workspace._update_list_state()
+	_check(_workspace._loading.visible, "No data yet shows the loading state")
+	_workspace._load_error = "uv: command not found"
+	_workspace._update_list_state()
+	_check(_workspace._error_box.visible and not _workspace._loading.visible, "Error state")
+	_check(_workspace._error_label.text.begins_with("Couldn't load assets."), "Error wording")
+	_workspace._load_error = ""
+	_workspace._apply_data({"tools": payload["tools"], "assets": [], "issues": []})
+	_check(_workspace._empty.text.begins_with("No assets yet."), _workspace._empty.text)
