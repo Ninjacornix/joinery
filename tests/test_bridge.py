@@ -121,3 +121,11 @@ def test_game_suggestions_offer_missing_features_only(
             }
         ],
     }
+
+
+def test_agents_build_objects_as_one_unit() -> None:
+    from bridge.instructions import GAME_GUIDE, OBJECT_GUIDE
+
+    assert OBJECT_GUIDE in GAME_GUIDE
+    assert "its own scene" in OBJECT_GUIDE and "instance" in OBJECT_GUIDE
+    assert "Never assemble an object from loose meshes" in OBJECT_GUIDE

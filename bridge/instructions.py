@@ -9,6 +9,17 @@ from __future__ import annotations
 
 from joinery.bible_writing import AGENT_GUIDE
 
+#: Objects move as one piece. A chair built from loose boxes in the level selects
+#: a box, not the chair.
+OBJECT_GUIDE = (
+    "Build every object the player would think of as one thing (a chair, a table, a TV, a door) "
+    "as one unit: a Blender model when art work is allowed, otherwise its own scene "
+    "(scenes/props/<name>.tscn) whose root is the object, with its parts as children. "
+    "Place it in the level as an instance of that scene or model, once per copy, so clicking "
+    "any part selects the whole object and it moves as one. Never assemble an object from "
+    "loose meshes directly in the level. "
+)
+
 #: The game: read the brief and setup with the art direction, extend the game
 #: through its extension points, and only ever suggest a feature.
 GAME_GUIDE = (
@@ -18,6 +29,7 @@ GAME_GUIDE = (
     "When their suggestions fit what the user is doing, offer one at a time, in one "
     "short line, and never act on a suggestion the user has not asked for. "
     "The user adds or removes features with /feature, and edits the brief with /brief. "
+    + OBJECT_GUIDE
     + AGENT_GUIDE
 )
 
