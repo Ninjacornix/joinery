@@ -21,6 +21,7 @@ const PARTS_SCRIPT := preload("res://addons/joinery/parts_panel.gd")
 const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
 const UI_COMPONENTS := preload("res://addons/joinery/ui_components.gd")
 const UI_MOTION := preload("res://addons/joinery/ui_motion.gd")
+const WORDING := preload("res://addons/joinery/asset_wording.gd")
 ## Section titles in list order; "other" collects files of no known kind.
 const SECTIONS := {
 	"model": "Models",
@@ -29,17 +30,6 @@ const SECTIONS := {
 	"material": "Materials",
 	"scene": "Scenes",
 	"other": "Other files",
-}
-## Readiness ("status", older names too) → [dot, wording], the same marks as the app rail.
-const READINESS := {
-	"ready": ["ready", "Ready"],
-	"preparing": ["working", "Downloading…"],
-	"needs_docker": ["off", "Needs Docker"],
-	"needs_licence": ["off", "Needs your licence"],
-	"unavailable": ["off", "Not available yet"],
-	"installed": ["ready", "Ready"],
-	"licence": ["off", "Needs your licence"],
-	"missing": ["off", "Not installed"],
 }
 const IMAGES := ["png", "jpg", "jpeg", "webp", "bmp", "tga", "svg"]
 const SOUNDS := ["wav", "ogg", "mp3"]
@@ -258,14 +248,14 @@ func _setup_button() -> Button:
 	return setup
 
 
-## Title and line for a missing app (notice and empty state); a preview still works here.
-static func _missing_text(app: String, extension: String, previews: bool) -> Array[String]:
-	var noun := "sound" if extension in SOUNDS else "image" if extension in IMAGES else "model"
-	var look := "listen" if noun == "sound" else "look at it"
-	var line := "You can %s here, but changing this %s needs %s." % [look, noun, app]
-	if not previews:
-		line = "Install %s on this computer to see and change .%s files." % [app, extension]
-	return ["%s isn't installed" % app, line]
+## Title and line for a missing desktop app (notice and empty state), for [param option]:
+## the shared readiness report says whether Journeyman can still change the asset with it.
+func _missing_text(option: Dictionary, previews: bool) -> Array[String]:
+	var path := str(_current.get("path", ""))
+	var thing := WORDING.noun(_kind_of(_owner_of(_current)), path)
+	var extension := path.get_extension().to_lower()
+	var ready := WORDING.ready_for(_data.get("tools", []), option)
+	return WORDING.missing_text(str(option["name"]), thing, extension, previews, ready)
 
 
 func _notification(what: int) -> void:
@@ -435,12 +425,12 @@ func _apply_data(data: Dictionary) -> void:
 ## A tool's readiness: dot, wording in the tooltip; "unavailable" disables the row.
 func _show_readiness(index: int, tool: Dictionary) -> void:
 	var status := str(tool.get("status", ""))
-	if not READINESS.has(status):
+	if not WORDING.READINESS.has(status):
 		_tools.set_item_status(index, "")
 		_tools.set_item_tooltip(index, str(tool["name"]))
 		_tools.set_item_disabled(index, false)
 		return
-	var state: Array = READINESS[status]
+	var state: Array = WORDING.READINESS[status]
 	var reason := str(tool.get("status_reason", ""))
 	var text := "%s · %s" % [tool["name"], state[1]]
 	_tools.set_item_status(index, state[0])
@@ -549,7 +539,9 @@ func _filter(animate := false) -> void:
 		if int(label_counts[label]) > 1:
 			label += " · " + path.get_extension().to_lower()
 		var index := _assets.add_item(label, kind if kind != "other" else "")
-		_assets.set_item_tooltip(index, path)
+		var waiting := not str(asset.get("pending", "")).is_empty()
+		_assets.set_item_tooltip(index, path + (" · " + WORDING.WAITING if waiting else ""))
+		_assets.set_item_status(index, "working" if waiting else "")
 	if animate:
 		_assets.stagger()
 	var found := _rows.find_custom(_holds_selection)
@@ -674,6 +666,8 @@ func _describe(asset: Dictionary) -> String:
 		words.append("imported")
 	elif not tool.is_empty():
 		words.append("made in " + tool)
+	if not str(asset.get("pending", "")).is_empty():
+		words.append(WORDING.WAITING.to_lower())
 	return " · ".join(words)
 
 
@@ -747,13 +741,12 @@ func _update_open() -> void:
 	if not bool(primary["available"]):
 		_open.hide()
 		var missing := _source_missing(primary)
-		var extension := str(_current.get("path", "")).get_extension().to_lower()
-		var lines := _missing_text(app, extension, true)
+		var lines := _missing_text(primary, true)
 		_unavailable_title.text = "The source file is missing" if missing else lines[0]
 		_unavailable_label.text = "" if missing else lines[1]
 		_unavailable_label.visible = not missing
-		# Project apps can't bring back a missing source file.
-		_setup_link.visible = not missing
+		# Project apps can't bring back a missing source file, nor help an app that is ready.
+		_setup_link.visible = not missing and not WORDING.ready_for(_data.get("tools", []), primary)
 		# The preview's empty state already says the app is missing: say it once.
 		_unavailable.visible = _explained_app != app or _source_missing(primary)
 		_set_menu_label(options.any(func(item: Dictionary) -> bool: return item["available"]))
@@ -855,7 +848,12 @@ func _show_preview(path: String, reimported: bool = false) -> void:
 		ResourceLoader.CACHE_MODE_REPLACE if reimported else ResourceLoader.CACHE_MODE_REUSE
 	)
 	if not FileAccess.file_exists(path):
-		_note("This file is missing.")
+		# New in a change waiting for review: its image shows from the change's own copy.
+		var staged := PARTS_SCRIPT.load_image("res://" + str(_current.get("staged", "")))
+		if staged != null and str(_current.get("pending", "")) != "":
+			_show_image(staged)
+		else:
+			_note(WORDING.pending_note(_current))
 		return
 	path = _preview_path(path)
 	var extension := path.get_extension().to_lower()
@@ -899,8 +897,12 @@ func _show_no_preview(extension: String) -> void:
 	# the user to open the file in an app they don't have.
 	_explained_app = app
 	_unavailable.hide()
-	var lines := _missing_text(app, extension, false)
-	_empty_state(lines[0], lines[1], _setup_button())
+	var lines := _missing_text(primary, false)
+	_empty_state(
+		lines[0],
+		lines[1],
+		null if WORDING.ready_for(_data.get("tools", []), primary) else _setup_button()
+	)
 
 
 ## A centred empty state in the preview: the asset kind's icon, a [param title], an optional

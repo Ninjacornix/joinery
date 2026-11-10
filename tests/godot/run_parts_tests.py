@@ -6,7 +6,8 @@ Builds a throwaway project holding the committed hammer fixture the way a Joiner
 edit leaves it (recipe, lock, Joinery's import settings, exported texture PNGs and a
 cached parts report), imports it, then runs part_pick_test.gd and the parts section of
 workspace_test.gd headless. With --capture it also renders the workspace in dark and
-light and saves workspace-parts-<theme>.png for a visual check.
+light and saves workspace-parts-<theme>.png, and asset_workspace_test.gd's states as
+workspace-assets-<theme>-<state>.png, for a visual check.
 """
 
 from __future__ import annotations
@@ -70,7 +71,7 @@ def make_project(directory: Path) -> Path:
     cached.write_text(json.dumps({"sha256": digest, "inspection": inspection}))
     tests = project / "tests"
     tests.mkdir()
-    for name in ("part_pick_test.gd", "workspace_test.gd"):
+    for name in ("part_pick_test.gd", "workspace_test.gd", "asset_workspace_test.gd"):
         shutil.copyfile(ROOT / "tests/godot" / name, tests / name)
     return project
 
@@ -151,6 +152,16 @@ def main() -> int:
                     env,
                 )
                 print("saved", shot)
+                # Waiting-for-review rows and an app that is Ready but not installed.
+                prefix = args.capture.resolve() / f"workspace-assets-{theme}"
+                env["JOINERY_ASSET_CAPTURE"] = str(prefix)
+                godot(
+                    args.godot,
+                    project,
+                    ["--script", "res://tests/asset_workspace_test.gd"],
+                    env,
+                )
+                print("saved", f"{prefix}-*.png")
     print("parts tests: PASS")
     return 0
 
