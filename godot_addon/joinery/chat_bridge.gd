@@ -29,7 +29,12 @@ signal art_approved(sha256: String)
 signal suggestions(items: Array)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
+const ATTACHMENTS := preload("chat_attachments.gd")
+const EDITOR_VIEW := preload("editor_view.gd")
 var context_provider: Callable
+## Captures the editor's viewport for the agent's view_editor tool; returns editor_view.gd's
+## result. Tests replace it.
+var view_provider := Callable(EDITOR_VIEW, "capture")
 var _job: RefCounted
 var _connected := false
 var _pending: Dictionary = {}
@@ -78,14 +83,26 @@ func start(agent: String, profile: String, engine: String, project: String) -> v
 	status_changed.emit("connecting", "Connecting to " + agent.capitalize() + "…")
 
 
+## Send [param text] about [param targets]. Image attachments among the targets
+## (chat_attachments.gd) go as "attachments", a list of their saved paths.
 func submit(text: String, targets: Array) -> void:
+	var scene_targets: Array = []
+	var images: Array[String] = []
+	for target: Variant in targets:
+		if ATTACHMENTS.is_attachment(target):
+			images.append(str(target["path"]))
+		else:
+			scene_targets.append(target)
 	_pending = {
 		"kind": "prompt",
 		"text": text,
-		"targets": targets.duplicate(true),
+		"targets": scene_targets.duplicate(true),
 		"selection": _selection.duplicate(),
-		"editor_context": context_provider.call(targets) if context_provider.is_valid() else {},
+		"editor_context":
+		context_provider.call(scene_targets) if context_provider.is_valid() else {},
 	}
+	if not images.is_empty():
+		_pending["attachments"] = images
 	busy_changed.emit(true)
 	if _job == null:
 		var pending := _pending
@@ -180,6 +197,8 @@ func _handle(event: Dictionary) -> void:
 			file_decision.emit(event)
 		"editor_action":
 			editor_action.emit(event)
+		"editor_view":
+			_send_view(str(event.get("request_id", "")))
 		"done":
 			status_changed.emit("connected", _agent.capitalize() + " connected")
 			completed.emit(bool(event.get("ok", false)))
@@ -225,6 +244,21 @@ func send_editor_result(request_id: String, result: Dictionary) -> void:
 				)
 			)
 		)
+
+
+## Journeyman asked to see the editor (view_editor): capture the viewport and answer. The
+## request's card shows a step, so the user knows it looked.
+func _send_view(request_id: String) -> void:
+	status_changed.emit("working", "Looking at your view")
+	var result: Dictionary = (
+		view_provider.call()
+		if view_provider.is_valid()
+		else {"success": false, "message": "The editor view isn't available."}
+	)
+	result.erase("entry")
+	if _job != null and _connected:
+		var line := {"kind": "editor_view_result", "request_id": request_id, "result": result}
+		_job.send_line(JSON.stringify(line))
 
 
 func decide_files(identifier: String, accept: bool) -> void:

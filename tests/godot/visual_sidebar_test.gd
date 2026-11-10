@@ -123,6 +123,20 @@ func _thumbnail() -> String:
 	return path
 
 
+## A stand-in for the editor's 3D viewport: a floor, a crate and a door frame against the sky.
+func _shared_view() -> Dictionary:
+	var image := Image.create(640, 360, false, Image.FORMAT_RGBA8)
+	image.fill(Color("4b5d6e"))
+	image.fill_rect(Rect2i(0, 230, 640, 130), Color("5a5246"))
+	image.fill_rect(Rect2i(140, 150, 110, 100), Color("8a6a3c"))
+	image.fill_rect(Rect2i(380, 70, 90, 170), Color("6b4423"))
+	image.fill_rect(Rect2i(450, 150, 10, 10), Color("c9a14a"))
+	var entry: Dictionary = load("res://addons/joinery/chat_attachments.gd").save(
+		image, "3D view", "view"
+	)
+	return {"success": not entry.is_empty(), "entry": entry}
+
+
 func _states(light: bool, width: int) -> void:
 	root.size = Vector2i(width, HEIGHT)
 	var built := _build(light)
@@ -160,6 +174,13 @@ func _states(light: bool, width: int) -> void:
 
 	chat.set_resource_target("res://art/props/door_with_long_descriptive_name.glb", "PackedScene")
 	await _shot("chips", light, width, chat)
+
+	# "Share my view": the viewport goes with the next message as a thumbnail.
+	var composer: Control = chat.get("_composer")
+	composer.set("view_provider", _shared_view)
+	composer.call("share_view")
+	await _shot("shared-view", light, width, chat)
+	composer.get("attachments").call("clear")
 
 	var prompt: TextEdit = chat.get("_prompt")
 	prompt.text = "/"

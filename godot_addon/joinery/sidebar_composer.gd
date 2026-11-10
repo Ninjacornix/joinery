@@ -10,11 +10,19 @@ extends PanelContainer
 ## idle. The dock also shows Stop while a request is on its way, before Journeyman takes
 ## it. The draft stays in the field.
 ## Its border tweens to the accent while the field has focus.
+##
+## Images go with the message as thumbnails above the chips (sidebar_attachments.gd): the eye
+## button ("Share my view") adds a screenshot of the editor viewport the user is looking at.
+## Images are reference context for Journeyman, never assets. They ride in the targets list
+## ([method target_snapshot]), so a queued or retried message keeps them, and they leave the
+## composer once the message is sent or queued.
 
 signal submitted(text: String)
 signal stop_pressed
 ## A target chip was pressed: open [param path] where it is made.
 signal target_opened(path: String)
+## Something to tell the user in the status footer ("Share my view" failed, the limit…).
+signal notice(text: String)
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
@@ -22,12 +30,20 @@ const UI := preload("ui_components.gd")
 const INPUT_SCRIPT := preload("message_input.gd")
 const OPTIONS_SCRIPT := preload("composer_options.gd")
 const CHIP_SCRIPT := preload("target_chip.gd")
+const ATTACHMENTS := preload("chat_attachments.gd")
+const ATTACHMENT_ROW := preload("sidebar_attachments.gd")
+const EDITOR_VIEW := preload("editor_view.gd")
 
 var chips: HFlowContainer
+var attachments: ATTACHMENT_ROW
 var prompt: TextEdit
 var options: MenuButton
 var send: Button
 var stop: Button
+## "Share my view": a screenshot of the editor viewport goes with the next message.
+var view: Button
+## Captures the editor viewport (editor_view.gd's result); tests replace it.
+var view_provider := Callable(EDITOR_VIEW, "capture")
 var _style: StyleBoxFlat
 var _focus_tween: Tween
 var _focused := false
@@ -46,6 +62,9 @@ func _init() -> void:
 	var body := VBoxContainer.new()
 	body.theme_type_variation = "JoineryTight"
 	add_child(body)
+	attachments = ATTACHMENT_ROW.new()
+	attachments.changed.connect(_sync_send)
+	body.add_child(attachments)
 	chips = HFlowContainer.new()
 	chips.hide()
 	body.add_child(chips)
@@ -61,6 +80,12 @@ func _init() -> void:
 	var controls := HBoxContainer.new()
 	controls.theme_type_variation = "JoineryRowTight"
 	body.add_child(controls)
+	view = UI.icon_button("view", "Share my view: Journeyman sees this viewport with your message")
+	view.accessibility_name = "Share my view"
+	view.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	UI_MOTION.press_feedback(view)
+	view.pressed.connect(share_view)
+	controls.add_child(view)
 	options = OPTIONS_SCRIPT.new()
 	options.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	controls.add_child(options)
@@ -154,6 +179,24 @@ func _on_enter(text: String) -> void:
 	if _locked or _connection != "connected":
 		return
 	submitted.emit(text)
+	# The dock took the message (sent or queued) when it cleared the field; its images went too.
+	if prompt.text.is_empty() and attachments.count() > 0:
+		attachments.clear()
+
+
+## Add a screenshot of the editor viewport the user is looking at to the next message.
+func share_view() -> void:
+	if attachments.is_full():
+		notice.emit("Up to %d images go with one message." % ATTACHMENTS.MAX_IMAGES)
+		return
+	var result: Dictionary = view_provider.call() if view_provider.is_valid() else {}
+	var entry: Dictionary = result.get("entry", {})
+	if not result.get("success", false) or entry.is_empty():
+		notice.emit(str(result.get("message", "Couldn't capture the view.")))
+		return
+	attachments.add(entry)
+	UI_MOTION.pulse(view)
+	prompt.grab_focus()
 
 
 func _sync_send() -> void:
@@ -200,6 +243,7 @@ func _match_heights() -> void:
 	var square := send.get_combined_minimum_size()
 	options.custom_minimum_size.y = square.y
 	stop.custom_minimum_size = square
+	view.custom_minimum_size = square
 
 
 ## Put a queued message back: [param text] in the field and its [param targets] as chips. A
@@ -221,12 +265,26 @@ func restore(text: String, targets: Array) -> bool:
 # --- Targets -----------------------------------------------------------------------------------
 
 
+## The message's targets, then its attached images (chat_attachments.gd entries).
 func target_snapshot() -> Array[Dictionary]:
-	return _targets.duplicate(true)
+	var snapshot := _targets.duplicate(true)
+	snapshot.append_array(attachments.entries())
+	return snapshot
 
 
+## Show [param targets] as chips. Images among them replace the attached ones (a queued message
+## put back); a list without images (a new selection) leaves the attached images alone.
 func set_targets(targets: Array[Dictionary]) -> void:
-	_targets = targets.duplicate(true)
+	var scene_targets: Array[Dictionary] = []
+	var images: Array[Dictionary] = []
+	for target: Dictionary in targets:
+		if ATTACHMENTS.is_attachment(target):
+			images.append(target)
+		else:
+			scene_targets.append(target)
+	if not images.is_empty():
+		attachments.set_entries(images)
+	_targets = scene_targets.duplicate(true)
 	for child: Node in chips.get_children():
 		chips.remove_child(child)
 		child.queue_free()

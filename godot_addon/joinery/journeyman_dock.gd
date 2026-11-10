@@ -150,6 +150,7 @@ func _ready() -> void:
 	_composer.submitted.connect(_on_submit)
 	_composer.stop_pressed.connect(_request_cancel)
 	_composer.target_opened.connect(func(path: String) -> void: target_opened.emit(path))
+	_composer.notice.connect(func(text: String) -> void: show_status(text, 4.0))
 	_content.add_child(_composer)
 	_prompt = _composer.prompt
 	_chips = _composer.chips

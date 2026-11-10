@@ -129,6 +129,24 @@ the editor and whenever a change is staged or decided; it never polls.
   messages can wait. Editor commands such as `/art` still run at once; others
   such as `/feature` queue like messages.
 
+### Showing Journeyman what you see
+
+The eye button under the message box, **Share my view**, takes a screenshot
+of the viewport you are looking at (the 3D viewport, or the 2D one when that
+is showing) and puts it above the message as a thumbnail. It goes with your
+next message; **×** on the thumbnail takes it off. The request in the
+conversation keeps a small copy.
+
+Journeyman can also look by itself: when you say "look at this", it calls the
+read-only `view_editor` tool, which returns the same screenshot together with
+the editor camera's position and direction (zoom and visible area in 2D). The
+request shows the step "Looking at your view" when it does.
+
+Screenshots and attached images are references for Journeyman only, never
+assets. They are saved in `.joinery/attachments/` in your project, which is
+kept out of git and out of Godot's import, and never under `art/`; Joinery
+does not copy them anywhere else.
+
 ### Picking a part of a model
 
 In the Tools workspace, a model's parts list shows its objects, materials and

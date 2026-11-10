@@ -51,6 +51,7 @@ const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
 const INDICATOR := preload("activity_indicator.gd")
+const ATTACHMENT_ROW := preload("sidebar_attachments.gd")
 ## Apps recognised in step text; the card shows each one it sees once.
 const APPS := ["Blender", "Krita", "GIMP", "Material Maker", "Surge XT", "SuperCollider", "Godot"]
 ## Shown instead of Revert once the change's restore data is gone.
@@ -154,7 +155,16 @@ func _init(text := "", context: Array = []) -> void:
 	text_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	text_label.accessibility_name = "Your request"
 	text_label.text = request
-	_bubble.add_child(text_label)
+	# Attached images sit under the text, as small thumbnails.
+	var images := ATTACHMENT_ROW.strip(targets)
+	if images == null:
+		_bubble.add_child(text_label)
+	else:
+		var stack := VBoxContainer.new()
+		stack.theme_type_variation = "JoineryTight"
+		stack.add_child(text_label)
+		stack.add_child(images)
+		_bubble.add_child(stack)
 	# The theme's paragraph and line spacing both land under the last line; drop the first and
 	# match the second above the text, so the request sits in the middle of its bubble.
 	STYLE.on_theme_overrides(

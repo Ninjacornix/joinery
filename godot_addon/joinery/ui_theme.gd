@@ -97,6 +97,8 @@ const ICONS := {
 	"chevron": "GuiOptionArrow",
 	"external": "ExternalLink",
 	"reload": "Reload",
+	"view": "GuiVisibilityVisible",
+	"attach": "Load",
 }
 const DARK := {
 	"surface": Color("202123"),

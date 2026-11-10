@@ -49,6 +49,7 @@ SIDEBAR_STATES = (
     "no-agent",
     "empty",
     "chips",
+    "shared-view",
     "commands",
     "sending",
     "working",
