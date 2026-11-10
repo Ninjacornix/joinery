@@ -22,6 +22,7 @@ from joinery import (
     history,
     hook,
     references,
+    timeline,
 )
 from joinery.agents import all_agents
 from joinery.agents import get as get_agent
@@ -131,6 +132,8 @@ def _setup(
     policy_args: argparse.Namespace | None = None,
 ) -> int:
     config = project / "joinery.toml"
+    # First setup of a project the wizard is making: its timeline starts here.
+    fresh = timeline.looks_new(project)
     try:
         selection = _choose(tools, config, custom_mcps)
         policy = (
@@ -161,6 +164,9 @@ def _setup(
         except (OSError, ValueError) as exc:
             print(f"setup: {exc}", file=sys.stderr)
             return 1
+    started = _timeline_begin(project, fresh)
+    if started:
+        print(started)
     return 0
 
 
@@ -188,6 +194,22 @@ def _defaults(blueprint: str, features: list[str] | None) -> list[str]:
 def _print_step(step: dict[str, Any]) -> None:
     stream = sys.stderr if step.get("state") == "failed" else sys.stdout
     print(str(step.get("message", "")), file=stream)
+
+
+def _timeline_begin(project: Path, fresh: bool) -> str:
+    """Start a new project's timeline, or fold a creation step into its first entry.
+
+    Returns the sentence to show, or "". Never fails the step it follows.
+    """
+    try:
+        outcome = timeline.begin_project(project, fresh)
+    except (OSError, ValueError) as exc:
+        return f"Couldn't start the timeline. {exc}"
+    if outcome.get("started"):
+        return "Keeping a timeline of your changes with git."
+    if fresh and outcome.get("state") == "no-git":
+        return str(outcome["message"])
+    return ""
 
 
 def _new(
@@ -226,6 +248,9 @@ def _new(
         return 1
     if policy is not None:
         print(f"Keeping older versions: {policy.label}.")
+    started = _timeline_begin(path, fresh=True)
+    if started:
+        print(started)
     print(f"Created {path} with: {', '.join(selection.tools)}")
     print("Open it with: " + shlex.join(["joinery", "launch", "--project", str(path)]))
     return 0
@@ -237,6 +262,8 @@ def _game_apply(args: argparse.Namespace) -> int:
     def emit(step: dict[str, Any]) -> None:
         print(json.dumps(step), flush=True)
 
+    # The wizard runs this before `setup`, on a project with no work in it yet.
+    fresh = timeline.looks_new(args.project)
     try:
         policy = history.policy_from_args(args)
         chosen = _defaults(args.blueprint, _feature_list(args.features))
@@ -261,6 +288,9 @@ def _game_apply(args: argparse.Namespace) -> int:
     except (OSError, ValueError, RuntimeError) as exc:
         emit({"step": "error", "state": "failed", "message": str(exc)})
         return 1
+    started = _timeline_begin(args.project, fresh)
+    if started:
+        emit({"step": "timeline", "state": "done", "message": started})
     emit({"step": "finished", "state": "done", "message": "Your game is ready."})
     return 0
 
@@ -471,6 +501,8 @@ def _transaction_decision(project: Path, identifier: str, accept: bool) -> int:
     }
     if warning:
         outcome["warning"] = warning
+    if tx.timeline:
+        outcome["timeline"] = tx.timeline
     print(json.dumps(outcome))
     return 0
 
@@ -927,6 +959,7 @@ def _parser() -> argparse.ArgumentParser:
     )
     check.add_argument("--project", type=Path, default=ROOT / "testbed")
     history.register(commands)
+    timeline.register(commands)
     parts = _parts()
     if parts is not None:
         parts.register(commands)
@@ -938,6 +971,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "history":
         return history.run(args)
+
+    if args.command == "timeline":
+        return timeline.run(args)
 
     if args.command == "parts":
         parts = _parts()
@@ -1158,9 +1194,15 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.upgrade:
             return _bible_upgrade(args.project, args.yes, args.json)
-        return _bible(args.project)
+        code = _bible(args.project)
+        # The wizard writes the bible right after setup: it joins the first entry.
+        _timeline_begin(args.project, fresh=False)
+        return code
     if args.command == "brief":
-        return _brief(args.project, args.questions, args.json)
+        code = _brief(args.project, args.questions, args.json)
+        if not (args.questions or args.json):
+            _timeline_begin(args.project, fresh=False)
+        return code
     if args.command == "lock":
         problems = write_lock(args.project)
         for problem in problems:

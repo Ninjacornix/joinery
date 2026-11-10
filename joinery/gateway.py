@@ -841,6 +841,9 @@ class ProjectGateway:
         }
         if notice:
             event["message"] = "Change discarded. " + notice
+        if accept and tx.timeline.get("state") == "failed":
+            # The change is kept either way; say why the Timeline lacks it.
+            event["message"] = "Change accepted. " + tx.timeline.get("message", "")
         if (
             accept
             and any(change["path"] == "art/bible.md" for change in changes)

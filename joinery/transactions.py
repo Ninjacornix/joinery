@@ -277,6 +277,8 @@ class FileTransaction:
         self.decided = 0.0
         #: The apps that made this change ("blender", "joinery"), in first-use order.
         self.tools: list[str] = []
+        #: What adding the last decision to the git timeline did (timeline.record).
+        self.timeline: dict[str, str] = {}
 
     @property
     def original(self) -> Path:
@@ -470,8 +472,24 @@ class FileTransaction:
             self._discard(self.stage, self.snapshot)
             raise
         self._discard(self.stage)
+        self._add_to_timeline(changes, reverted=False)
         self._housekeep()
         return changes
+
+    def _add_to_timeline(self, changes: list[dict[str, str]], reverted: bool) -> None:
+        """Commit exactly this change's files to the project's git timeline.
+
+        Bookkeeping like retention: a timeline that can't be written never fails
+        a decision already made. The outcome is kept in ``self.timeline``.
+        """
+        from joinery import timeline  # Late: timeline stages restores through here.
+
+        paths = [
+            change["path"]
+            for change in [*changes, *self.carried]
+            if DIRECTORY not in {change["before"], change["after"]}
+        ]
+        self.timeline = timeline.record(self.project, paths, self.summary, reverted)
 
     def _carry(self) -> None:
         """Copy the stage's CARRIED records into the project, keeping the old ones.
@@ -630,6 +648,7 @@ class FileTransaction:
             self.decided = time.time()
             self._record(changes=changes)
             self._discard(self.stage, self.snapshot)
+        self._add_to_timeline(changes, reverted=True)
 
     @classmethod
     def load(cls, project: Path, identifier: str) -> FileTransaction:

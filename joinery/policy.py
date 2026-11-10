@@ -95,6 +95,24 @@ def generative_names(denylist: Denylist) -> frozenset[str]:
     return frozenset(names)
 
 
+#: `joinery timeline restore` and `start` are the user's own choices in the
+#: Timeline tab: an agent asks for a change and the user reviews it instead.
+_USER_ONLY = re.compile(r"\bjoinery\b(?:\s+\S+)*?\s+timeline\s+(?:restore|start)\b")
+
+
+def user_only_violation(command: str) -> Verdict | None:
+    """Refuse commands only the user runs, from the editor."""
+    for segment in _SEGMENTS.split(command):
+        if _USER_ONLY.search(segment):
+            return Verdict(
+                Severity.DENY,
+                "Restoring a file from the Timeline, or starting one, is the user's "
+                "choice in the Timeline tab. Ask the user, or make the change as a "
+                "reviewed edit.",
+            )
+    return None
+
+
 def url_violation(url: str, denylist: Denylist) -> Verdict | None:
     host = (urlparse(url).hostname or "").lower()
     for denied in denylist.hosts:

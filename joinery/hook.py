@@ -48,6 +48,7 @@ from joinery.policy import (
     load_denylist,
     normalise,
     url_violation,
+    user_only_violation,
 )
 from joinery.read_access import read_only
 
@@ -226,7 +227,9 @@ def violation(raw: dict[str, Any]) -> Verdict | None:
             event.server, event.tool, event.project_dir, event.arguments
         )
     if event.kind == "bash":
-        return command_violation(event.command, load_denylist())
+        return command_violation(event.command, load_denylist()) or user_only_violation(
+            event.command
+        )
     if event.kind == "fetch":
         return url_violation(event.url, load_denylist())
     return None
