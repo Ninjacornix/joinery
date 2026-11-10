@@ -12,7 +12,7 @@ from servers.joinery_registry.server import make_server
 SOURCES = [
     ("blender", "art/sources/hammer.blend", "art/models/hammer.glb"),
     ("krita", "art/icon.kra", "art/icon.png"),
-    ("aseprite", "art/walk.aseprite", "art/walk.png"),
+    ("gimp", "art/portrait.xcf", "art/portrait.png"),
     ("inkscape", "art/icon.svg", "art/vector.png"),
     ("material-maker", "art/stone.ptex", "art/stone.tres"),
     ("supercollider", "audio/impact.scd", "audio/impact.wav"),

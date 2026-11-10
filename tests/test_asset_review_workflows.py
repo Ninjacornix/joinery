@@ -13,7 +13,7 @@ from joinery.transactions import FileTransaction, inventory
 ASSETS = [
     pytest.param("art/sources/hammer.blend", "art/models/hammer.glb", id="blender"),
     pytest.param("art/icon.kra", "art/icon.png", id="krita"),
-    pytest.param("art/walk.aseprite", "art/walk.png", id="aseprite"),
+    pytest.param("audio/sources/creak.json", "audio/creak.wav", id="surge-xt"),
     pytest.param("art/steel.ptex", "art/steel.tres", id="material-maker"),
     pytest.param("art/ui.svg", "art/ui.png", id="inkscape"),
     pytest.param("audio/impact.scd", "audio/impact.wav", id="supercollider"),

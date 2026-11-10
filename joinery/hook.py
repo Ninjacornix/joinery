@@ -26,13 +26,20 @@ import json
 import os
 import subprocess
 import sys
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from joinery.agents import StopMode
 from joinery.agents import get as get_agent
-from joinery.catalog import ROOT, allowed_servers, blocked_tools, load_catalog
+from joinery.catalog import (
+    ROOT,
+    allowed_servers,
+    blocked_operation,
+    blocked_tools,
+    load_catalog,
+)
 from joinery.policy import (
     Severity,
     Verdict,
@@ -62,6 +69,8 @@ class Event:
     command: str  # shell command, for kind == "bash"
     url: str  # URL, for kind == "fetch"
     project_dir: Path
+    #: The MCP call's arguments, so operation-level blocks apply to every agent.
+    arguments: Mapping[str, Any] = field(default_factory=dict, compare=False)
 
 
 def _split_mcp(tool_name: str, explicit_server: str) -> tuple[str, str]:
@@ -128,7 +137,7 @@ def normalise_event(raw: dict[str, Any]) -> Event:
     lowered = tool_name.lower()
     if tool_name.startswith(("mcp__", "mcp_")) or explicit_server:
         server, tool = _split_mcp(tool_name, explicit_server)
-        return Event("mcp", server, tool, "", "", project_dir)
+        return Event("mcp", server, tool, "", "", project_dir, tool_input)
     if lowered in _SHELL_TOOLS:
         command = str(tool_input.get("command") or tool_input.get("cmd") or "")
         return Event("bash", "", "", command, "", project_dir)
@@ -138,7 +147,12 @@ def normalise_event(raw: dict[str, Any]) -> Event:
     return Event("other", "", "", "", "", project_dir)
 
 
-def mcp_violation(server: str, tool: str, project_dir: Path) -> Verdict | None:
+def mcp_violation(
+    server: str,
+    tool: str,
+    project_dir: Path,
+    arguments: Mapping[str, Any] | None = None,
+) -> Verdict | None:
     if not server:
         return Verdict(Severity.DENY, "MCP call with no resolvable server name")
     catalog = load_catalog()
@@ -162,6 +176,12 @@ def mcp_violation(server: str, tool: str, project_dir: Path) -> Verdict | None:
         return Verdict(
             Severity.DENY, f"{tool} is blocked on the preferred {server} MCP"
         )
+    operation = blocked_operation(catalog, server, tool, arguments or {})
+    if operation:
+        return Verdict(
+            Severity.DENY,
+            f"{tool} {operation} is blocked on the preferred {server} MCP",
+        )
     return None
 
 
@@ -180,7 +200,9 @@ def violation(raw: dict[str, Any]) -> Verdict | None:
             # Still check Rule Zero first: a forbidden asset service stops the
             # entire user turn, even when attempted by an inspection specialist.
             verdict = (
-                mcp_violation(event.server, event.tool, event.project_dir)
+                mcp_violation(
+                    event.server, event.tool, event.project_dir, event.arguments
+                )
                 if event.kind == "mcp"
                 else command_violation(event.command, load_denylist())
                 if event.kind == "bash"
@@ -195,7 +217,9 @@ def violation(raw: dict[str, Any]) -> Verdict | None:
                 "This specialist is read-only. Use the main thread for changes.",
             )
     if event.kind == "mcp":
-        return mcp_violation(event.server, event.tool, event.project_dir)
+        return mcp_violation(
+            event.server, event.tool, event.project_dir, event.arguments
+        )
     if event.kind == "bash":
         return command_violation(event.command, load_denylist())
     if event.kind == "fetch":

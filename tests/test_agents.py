@@ -142,8 +142,8 @@ def test_generative_attempt_blocks_loudly_without_json_stop(
 def test_not_enabled_only_denies_the_call(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    # Aseprite is vetted but not selected: a config state, not a violation.
-    event = {"tool_name": "mcp__aseprite__draw", "tool_input": {}}
+    # Inkscape's MCP is vetted but not selected: a config state, not a violation.
+    event = {"tool_name": "mcp__inkscape__inkscape_system", "tool_input": {}}
     code, out, err = run_with_agent(monkeypatch, capsys, event, "claude")
     assert code == 2  # Refuses this call; the turn continues.
     assert out == ""

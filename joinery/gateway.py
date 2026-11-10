@@ -15,11 +15,13 @@ from typing import Any, cast
 
 from mcp.types import CallToolResult, TextContent
 
+from joinery import tools as tool_modules
 from joinery.art_approval import approved, review
 from joinery.art_approval import fingerprint as bible_fingerprint
 from joinery.authoring import run_offline
-from joinery.bible_rules import check_rules
-from joinery.catalog import load_catalog, load_project_tools
+from joinery.bible_rules import check_rules, load_rules, ui_resources
+from joinery.bible_schema import REFERENCE_DIR
+from joinery.catalog import blocked_tools, load_catalog, load_project_tools
 from joinery.deps import check_deps
 from joinery.lockfile import asset_files, check_assets
 from joinery.locking import record_custom_outputs
@@ -46,6 +48,93 @@ PROTECTED = {
     ".gemini",
     ".opencode",
 }
+#: Asset files wherever they land in the project: a change to one needs an
+#: approved art bible and passes the provenance gate, like art/ and audio/.
+ASSET_SUFFIXES = frozenset(
+    {
+        ".blend", ".glb", ".gltf", ".fbx", ".obj", ".dae",
+        ".kra", ".xcf", ".psd", ".aseprite", ".ase", ".ptex",
+        ".png", ".jpg", ".jpeg", ".webp", ".svg", ".bmp", ".tga", ".gif",
+        ".exr", ".hdr", ".tif", ".tiff", ".dds", ".ktx", ".ktx2",
+        ".wav", ".ogg", ".mp3", ".flac", ".opus", ".aif", ".aiff",
+        ".ttf", ".otf", ".woff", ".woff2",
+        ".mp4", ".webm", ".ogv",
+    }
+)
+
+
+def _upstream_presentation(server: str) -> tuple[frozenset[str], dict[str, str]]:
+    """The tools policy blocks on `server`, and the notes its tool module adds.
+
+    Discovery leaves blocked tools out, so no agent is offered a tool that the
+    shared policy would deny (calls are still judged by the hook and runtime).
+    """
+    catalog = load_catalog()
+    notes: dict[str, str] = {}
+    for entry in catalog.tool:
+        if entry.mcp and entry.mcp.server == server and entry.id in tool_modules.REGISTRY:
+            notes.update(tool_modules.get(entry.id).mcp_notes)
+    return frozenset(blocked_tools(catalog, server)), notes
+
+
+def _with_note(tool: dict[str, Any], note: str) -> dict[str, Any]:
+    if note:
+        tool["description"] = (str(tool.get("description", "")).rstrip() + "\n\n" + note).strip()
+    return tool
+
+
+def _is_reference(path: str) -> bool:
+    """Under art/reference/: the user's own boards, allowed before approval.
+
+    `art/reference/../hero.blend` is not: PurePath does not resolve `..`.
+    """
+    pure = PurePosixPath(path.replace("\\", "/").removeprefix("res://"))
+    return ".." not in pure.parts and pure.is_relative_to(REFERENCE_DIR)
+
+
+def _reference_only(arguments: Any) -> bool:
+    """Every project asset path in the arguments is a reference board, and one is.
+
+    Lets a creative tool make a reference board before the bible is approved.
+    `finish` still refuses any other asset change without approval, so this
+    only decides whether the call may start.
+    """
+    paths: list[str] = []
+
+    def collect(value: Any) -> None:
+        if isinstance(value, str):
+            text = value.replace("\\", "/").removeprefix("res://")
+            if text.startswith(("art/", "audio/")):
+                paths.append(text)
+        elif isinstance(value, dict):
+            for item in value.values():
+                collect(item)
+        elif isinstance(value, list | tuple):
+            for item in value:
+                collect(item)
+
+    collect(arguments)
+    return bool(paths) and all(_is_reference(p) for p in paths)
+
+
+def _approved_in(project: Path, stage: Path) -> bool:
+    """The project's bible is approved and the stage carries that same bible."""
+    try:
+        return approved(project) and bible_fingerprint(project) == bible_fingerprint(
+            stage
+        )
+    except ValueError:
+        return False
+
+
+def _ui_changes(stage: Path, changes: list[dict[str, Any]]) -> bool:
+    """Changed UI resources that the bible's accessibility rules check."""
+    try:
+        rules = load_rules(stage)
+    except ValueError:
+        return False  # lint reports invalid rules; they cannot block UI work
+    files = [c["path"] for c in changes if DIRECTORY not in {c["before"], c["after"]}]
+    return bool(ui_resources(rules, files))
 
 
 def result_text(result: CallToolResult) -> str:
@@ -168,12 +257,17 @@ class ProjectGateway:
                     self.connections[spec.name] = connection
                 try:
                     await connection.connect()
+                    blocked, notes = _upstream_presentation(spec.name)
                     discovered = [
-                        {
-                            "server": spec.name,
-                            **tool.model_dump(by_alias=True, exclude_none=True),
-                        }
+                        _with_note(
+                            {
+                                "server": spec.name,
+                                **tool.model_dump(by_alias=True, exclude_none=True),
+                            },
+                            notes.get(tool.name, ""),
+                        )
                         for tool in connection.tools.values()
+                        if tool.name not in blocked
                     ]
                     return discovered, connection.readiness.model_dump()
                 except PolicyStop:
@@ -241,6 +335,7 @@ class ProjectGateway:
             not readonly
             and server not in {"godot", "joinery-registry"}
             and not approved(self.project)
+            and not _reference_only(arguments)
         ):
             raise PermissionError(
                 "Approve the project art bible before creative asset work."
@@ -444,42 +539,37 @@ class ProjectGateway:
                 raise PermissionError(
                     "Model tools cannot change project policy or MCP configuration. Use project setup."
                 )
-        assets_changed = any(
-            (
+        asset_changes = [
+            change["path"]
+            for change in changes
+            if (
                 Path(change["path"]).parts[0] in {"art", "audio"}
                 and change["path"] != "art/bible.md"
-                or Path(change["path"]).suffix.lower()
-                in {
-                    ".blend",
-                    ".glb",
-                    ".gltf",
-                    ".kra",
-                    ".aseprite",
-                    ".ptex",
-                    ".wav",
-                    ".ogg",
-                    ".png",
-                    ".jpg",
-                    ".svg",
-                }
+                or Path(change["path"]).suffix.lower() in ASSET_SUFFIXES
             )
             and DIRECTORY not in {change["before"], change["after"]}
-            for change in changes
-        )
-        if assets_changed:
-            if not approved(self.project) or bible_fingerprint(
-                self.project
-            ) != bible_fingerprint(tx.stage):
+        ]
+        bible_ok = _approved_in(self.project, tx.stage)
+        measure = lambda argv, root: run_offline(argv, root, 180, readonly=True)
+        if asset_changes:
+            # Reference boards come before the bible; they still need a lock entry.
+            if not bible_ok and not all(_is_reference(p) for p in asset_changes):
                 raise PermissionError(
                     "Approve the project art bible before asset work."
                 )
             problems = check_assets(tx.stage, load_catalog())
             if problems:
                 raise ValueError("Asset validation failed: " + "; ".join(problems))
+            if bible_ok:
+                problems = await check_rules(
+                    tx.stage, [change["path"] for change in changes], measure
+                )
+                if problems:
+                    raise ValueError("Art bible check failed: " + "; ".join(problems))
+        elif bible_ok and _ui_changes(tx.stage, changes):
+            # UI themes and scenes are checked for text contrast and size.
             problems = await check_rules(
-                tx.stage,
-                [change["path"] for change in changes],
-                lambda argv, root: run_offline(argv, root, 180, readonly=True),
+                tx.stage, [change["path"] for change in changes], measure
             )
             if problems:
                 raise ValueError("Art bible check failed: " + "; ".join(problems))

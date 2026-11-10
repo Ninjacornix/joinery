@@ -35,7 +35,14 @@ def read_only(server: str, tool: str) -> bool:
         or (server == "blender" and tool in BLENDER_READS)
         or (
             server == "joinery-registry"
-            and tool in {"art_direction", "list_assets", "resolve_source"}
+            and tool
+            in {
+                "art_direction",
+                "game_brief",
+                "game_setup",
+                "list_assets",
+                "resolve_source",
+            }
         )
         or (server == "claude-collider" and tool == "cc_status")
         or (

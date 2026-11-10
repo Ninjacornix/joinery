@@ -22,7 +22,7 @@ def run_hook(monkeypatch: pytest.MonkeyPatch, event: Any) -> int:
         ("mcp__joinery_registry__discover_tools", 0),
         ("mcp__joinery_verify__run_scene", 0),
         ("mcp__blender__execute", 0),
-        ("mcp__aseprite__draw", 2),  # Vetted, but not selected.
+        ("mcp__inkscape__inkscape_system", 2),  # Vetted, but not selected.
         ("mcp__meshy__text_to_3d", 2),
         ("mcp__claude_ai_Gmail__authenticate", 2),
         ("mcp__plugin_x_y__z", 2),

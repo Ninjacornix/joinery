@@ -282,7 +282,7 @@ class MCPConnection:
     async def call(
         self, tool: str, arguments: dict[str, Any], timeout: float = 60
     ) -> CallToolResult:
-        verdict = mcp_violation(self.spec.name, tool, self.project)
+        verdict = mcp_violation(self.spec.name, tool, self.project, arguments)
         if verdict is not None:
             if verdict.severity is Severity.STOP:
                 raise PolicyStop(verdict.reason)
