@@ -9,6 +9,43 @@ const HEIGHT := 760
 ## Extra captures at the narrow width only: each accent, and Reduce motion on.
 const ACCENTS: Array[String] = ["brass", "blue", "green", "violet"]
 const REQUEST := "Make the door a little wider and darken the wood."
+const BIBLE := """# Art Bible — Harbour Keeper
+
+## 1. Vision
+Calm, a little lonely, handmade. Never glossy or busy.
+
+## 2. Pillars
+**Worn**: every edge is chipped. **Hushed**: music only in safe rooms.
+
+## 6. Visual style
+- Overall look: stylised PBR, chunky bevels, soft rim light
+
+## 7. Palette (checked)
+Warm wood, sea blue accent, no pure black.
+
+## 9. Materials and texel density (checked)
+Roughness 0.4–0.95; metallic 0 or 1, only on metal named so.
+
+## 10. 3D rules (checked)
+Metres, +Y up; door 2.1 m; prop ≤ 3 000 triangles.
+
+## 16. Audio
+- Overall: soft synths, wooden foley
+
+## 19. Never (hard bans)
+- Neon, photo-real faces, lens flares
+"""
+const BRIEF := """# Harbour Keeper
+
+## Pitch
+Keep the harbour lights burning through one long winter night.
+
+## Core loop
+Walk the pier, refill the lamps, fix what the storm breaks.
+
+## Online
+None. One player.
+"""
 
 var _checks: GDScript
 var _theme: GDScript
@@ -95,12 +132,13 @@ func _states(light: bool, width: int) -> void:
 	var header: Node = chat.get("_header")
 	var footer: Node = chat.get("_footer")
 
-	# Connection states before an assistant is ready.
+	# Connection states before Journeyman is ready.
 	chat.set_chat_agent("codex")
 	chat.set_chat_state("connecting", "")
+	_check(str(header.get("_name").text) == "Connecting…", "Connecting names nobody")
 	await _shot("connecting", light, width, chat)
 	chat.set_chat_agent("")
-	chat.set_chat_state("error", "No assistant connected.")
+	chat.set_chat_state("error", "Journeyman isn't connected.")
 	_check(chat.get("connection_state") == "none", "No agent reads as none")
 	await _shot("no-agent", light, width, chat)
 
@@ -116,6 +154,7 @@ func _states(light: bool, width: int) -> void:
 		)
 	)
 	_check(not (footer as CanvasItem).visible, "The footer is hidden while idle")
+	_check(str(header.get("_name").text).is_empty(), "A healthy header shows no name")
 	_check(not str(footer.call("text")).contains("Ready"), "The sidebar never says Ready")
 	await _shot("empty", light, width, chat)
 
@@ -176,7 +215,7 @@ func _states(light: bool, width: int) -> void:
 	)
 	await _shot("conversation", light, width, chat)
 
-	# A request that never reached the assistant says so in place, with Retry.
+	# A request that never reached Journeyman says so in place, with Retry.
 	chat.call("_on_submit", "Now add a brass handle on the left side.")
 	card = transcript.call("current_card")
 	if card != null:
@@ -186,6 +225,14 @@ func _states(light: bool, width: int) -> void:
 	chat.set_chat_state("error", "Lost connection to Codex.")
 	_check((header.get("_banner") as CanvasItem).visible, "A lost connection shows the banner")
 	await _shot("error", light, width, chat)
+	chat.set_chat_state("connected", "Codex connected")
+	host.queue_free()
+	await _frames(2)
+	await _changes(light, width)
+	built = _build(light)
+	host = built[0]
+	chat = built[1]
+	await _frames()
 	chat.set_chat_state("connected", "Codex connected")
 
 	if width == WIDTHS[0]:
@@ -198,6 +245,9 @@ func _states(light: bool, width: int) -> void:
 	var settings: Node = chat.get("_settings")
 	settings.call("set_open", true)
 	await _shot("settings", light, width, chat)
+	settings.call("_ask_compact", true)
+	await _shot("settings-compact", light, width, chat)
+	settings.call("_ask_compact", false)
 	if width == WIDTHS[0]:
 		_theme.set_pref("reduce_motion", "on")
 		await _shot("reduce-motion", light, width, chat)
@@ -206,4 +256,170 @@ func _states(light: bool, width: int) -> void:
 	settings.call("set_open", false)
 
 	host.queue_free()
+	await _frames(2)
+
+
+## Change history and the sidebar's offers: a feature plan, the art gate, "Too old to
+## revert", "Reverting…", a discard, the app readiness line, an offer and the caption.
+func _changes(light: bool, width: int) -> void:
+	var built := _build(light)
+	var host: Control = built[0]
+	var chat: Control = built[1]
+	await _frames()
+	chat.set_chat_agent("codex")
+	chat.set_chat_state("connected", "Codex connected")
+	(
+		chat
+		. call(
+			"_on_readiness",
+			{
+				"tools":
+				[
+					{
+						"name": "Blender",
+						"status": "needs_docker",
+						"summary": "Blender runs offline in Docker.",
+						"action": {"id": "start_docker", "label": "Start Docker"},
+					}
+				]
+			}
+		)
+	)
+	(
+		chat
+		. call(
+			"_on_suggestions",
+			[
+				{
+					"text": "The brief says online play, but online play is not added.",
+					"command": "/feature add online-play",
+				}
+			]
+		)
+	)
+	(
+		chat
+		. call(
+			"_on_feature_planned",
+			{
+				"action": "add",
+				"feature": "controller",
+				"changes":
+				[
+					"features/controller/bindings.gd",
+					"features/controller/controller.gd",
+					"features/controller/controls_page.gd",
+					"joinery.toml",
+					"project.godot",
+					"tests/features/controller/controller_test.gd",
+				],
+				"config_edits":
+				[
+					{"section": "autoload", "key": "Controller", "before": null, "after": "x"},
+					{"section": "input", "key": "move_left", "before": "a", "after": "b"},
+					{"section": "input", "key": "move_right", "before": "a", "after": "b"},
+				],
+				"notes": [],
+				"conflicts": [],
+			}
+		)
+	)
+	await _shot("feature-plan", light, width, chat)
+
+	var transcript: Node = chat.get("_transcript")
+	# An old accepted change, a revert on its way, and a discard.
+	for item: Array in [["Darken the floor", "tx-old"], ["Widen the door", "tx-new"]]:
+		chat.call("_on_submit", item[0])
+		chat.set_chat_busy(true)
+		chat.show_file_review(item[0], "", [], [], item[1])
+		chat.set_chat_busy(false)
+		chat.call("_on_accept")
+		chat.hide_edit_review("Change accepted", "success")
+	chat.call("_on_revertible", {"tx-old": false, "tx-new": true})
+	var newest: Control = transcript.call("current_card")
+	_check(newest.get("_revert").visible, "A recent change offers Revert")
+	newest.get("_revert").pressed.emit()
+	chat.call("_on_submit", "Add a creak to the door")
+	chat.set_chat_busy(true)
+	chat.show_file_review("Add a creak", "", [], [], "tx-creak")
+	chat.set_chat_busy(false)
+	chat.call("_on_reject")
+	chat.hide_edit_review("Change rejected. Original restored.", "rejected")
+	await _shot("history", light, width, chat)
+
+	chat.call("_on_submit", "Make the door look older")
+	chat.set_chat_busy(true)
+	chat.set_chat_state("working", "Opening door.blend in Blender")
+	chat.call("_on_art_gate", {"needs_art_approval": true})
+	chat.set_chat_busy(false)
+	chat.show_status("Focus mode on", 30.0, "Undo", func() -> void: pass)
+	await _shot("art-gate", light, width, chat)
+	chat.show_status("")
+	if width == WIDTHS[-1]:
+		await _documents(light, width, chat)
+	host.queue_free()
+	await _frames(2)
+
+
+## The art direction and the game brief in the document view, at the wide size only.
+func _documents(light: bool, width: int, chat: Control) -> void:
+	var dialogs: GDScript = load("res://addons/joinery/art_review_dialog.gd")
+	var picture := _thumbnail()
+	var reference := "art/reference/door_sketch.png"
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://art/reference"))
+	DirAccess.copy_absolute(picture, ProjectSettings.globalize_path("res://" + reference))
+	var event := {
+		"text": BIBLE,
+		"approved": false,
+		"version": 1,
+		"references":
+		[
+			{
+				"id": "R1",
+				"reference": "my door sketch",
+				"kind": "sketch",
+				"take": "the brass handle",
+				"avoid": "the heavy frame",
+				"file": reference,
+			},
+			{
+				"id": "R2",
+				"reference": "Hob",
+				"kind": "game",
+				"take": "chunky silhouettes",
+				"avoid": "its saturated greens",
+				"file": "",
+			},
+		],
+		"suggestions":
+		[
+			"Before approving the bible: the palette section is not set yet. Ask about it.",
+			"When adding sound: the audio section is open. Ask about it.",
+		],
+	}
+	var size := Vector2i(roundi(width * 0.8), roundi(HEIGHT * 0.9))
+	var dialog: Window = dialogs.open(chat, event, size, func() -> void: pass)
+	await _frames(4)
+	var screen := "sidebar-art-direction-%s-%d" % ["light" if light else "dark", width]
+	_check(_checks.snapshot(screen, root, [dialog]), "Capture " + screen)
+	# The references board and the folded technical rules, further down.
+	var scroll := dialog.find_children("*", "ScrollContainer", true, false)[0] as ScrollContainer
+	var technical: Node = dialog.find_child("Technical", true, false)
+	technical.call("set_open", true)
+	await _frames(2)
+	scroll.scroll_vertical = int(dialog.find_child("References", true, false).position.y)
+	await _frames(2)
+	screen = "sidebar-art-board-%s-%d" % ["light" if light else "dark", width]
+	_check(_checks.snapshot(screen, root, [dialog]), "Capture " + screen)
+	dialog.hide()
+	dialog.queue_free()
+	await _frames(2)
+	var brief: Window = dialogs.open_document(
+		chat, "Game brief", BRIEF, size, "Change the game brief: "
+	)
+	await _frames(4)
+	screen = "sidebar-brief-%s-%d" % ["light" if light else "dark", width]
+	_check(_checks.snapshot(screen, root, [brief]), "Capture " + screen)
+	brief.hide()
+	brief.queue_free()
 	await _frames(2)

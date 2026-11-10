@@ -87,15 +87,18 @@ func _run() -> void:
 			"Offer only reported models plus Automatic"
 		)
 		chat._options._on_model(1)
-		_check(chat._options.effort_items().size() == 4, "Efforts must follow the reported model")
 		_check(_selection.get("model") == "fixture-sol", "Choosing a model reports it")
+		_check(_selection.get("effort") == "", "The mode decides the effort")
+		var labels: Array[String] = []
+		var popup: PopupMenu = chat._options.get_popup()
+		for index: int in popup.item_count:
+			labels.append(popup.get_item_text(index))
+		_check(not labels.has("Effort"), "There is no Effort menu")
+		_check(labels.has("Model: GPT-6.1 Sol"), "The menu names the chosen model")
 		chat.restore_selection_options({"mode": "fast", "model": "fixture-sol", "effort": "ultra"})
-		_check(
-			chat._options.effort_items()[-1] == "Unavailable: ultra",
-			"A removed effort preference must remain visible until the user changes it"
-		)
-		chat.restore_selection_options({"mode": "fast", "model": "fixture-sol", "effort": ""})
-		_check(chat._options.text == "Fast · GPT-6.1 Sol", "The closed picker reads as the choice")
+		_check(chat._options.selection()["effort"] == "", "A saved effort is dropped")
+		_check(chat._options.text == "Fast", "The closed picker shows the mode only")
+		_check(chat._options.tooltip_text.contains("GPT-6.1 Sol"), "The tooltip names the model")
 		chat._options._on_mode(2)
 		_check(
 			_selection["model"] == "fixture-sol" and _selection["mode"] == "thorough",
@@ -103,7 +106,7 @@ func _run() -> void:
 		)
 		chat.set_chat_agent("codex")
 		chat.set_chat_state("connected", "Codex connected")
-		_check(chat._header._name.text == "Codex", "The header names the assistant, no wording")
+		_check(chat._header._name.text.is_empty(), "A healthy header names nobody")
 		_check(not chat._header._banner.visible, "No banner while connected")
 		chat.set_resource_target("res://models/assembly.glb", "PackedScene")
 		var submitted := {"count": 0, "text": "", "targets": []}
@@ -238,7 +241,7 @@ func _run() -> void:
 		_check(chat._footer.text() == "Waiting for your review", "The footer waits for review")
 		_check(not chat._prompt.editable, "The composer waits for the decision")
 		_check(
-			chat._prompt.placeholder_text == "Accept or reject the change first",
+			chat._prompt.placeholder_text == "Accept or discard the change first",
 			"Say how to continue during review"
 		)
 		chat._on_accept()
@@ -257,16 +260,22 @@ func _run() -> void:
 		var reverted: Array[String] = []
 		chat._transcript.revert_requested.connect(func(id: String) -> void: reverted.append(id))
 		change._revert.pressed.emit()
-		_check(reverted == ["tx-1"] and change.state == "reverted", "Revert is optimistic")
+		_check(
+			reverted == ["tx-1"] and change.state == "accepted" and change.reverting(),
+			"Revert waits for Joinery: Reverting…"
+		)
 		change.revert_finished(false, "files changed since")
-		_check(change.state == "accepted" and change._error.visible, "A failed revert rolls back")
+		_check(
+			change.state == "accepted" and change._error.visible and change._revert.visible,
+			"A failed revert says why and offers Revert again"
+		)
 		chat._slash.cancel()
 		chat.restore_selection_options({"mode": "thorough", "model": "missing", "effort": ""})
 		chat.set_model_options([])
 		_check(
 			(
 				chat._options.model_items()[-1] == "Unavailable: missing"
-				and chat._options.text.contains("missing")
+				and chat._options.tooltip_text.contains("missing")
 			),
 			"Stale model preference must be visible"
 		)

@@ -31,6 +31,7 @@ func _run() -> void:
 	if plugin == null:
 		get_tree().quit(1)
 		return
+	_part_picking(plugin)
 	await _review_layout(plugin)
 	await _accepted_model_preview(plugin)
 	var box := {
@@ -53,7 +54,28 @@ func _run() -> void:
 	get_tree().quit(1 if _failed else 0)
 
 
-## The Review panel lives in the bottom panel, first tab, and keeps Accept and Reject on
+## Alt+click part picking listens to every 3D view event, so it must pass everything else
+## through: plain clicks, and Alt+clicks with no model selected. It never claims an object
+## (that would switch the editor to the Tools screen).
+func _part_picking(plugin: EditorPlugin) -> void:
+	var camera := EditorInterface.get_editor_viewport_3d(0).get_camera_3d()
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.pressed = true
+	click.position = Vector2(40, 40)
+	EditorInterface.get_selection().clear()
+	_check(plugin._forward_3d_gui_input(camera, click) == AFTER_GUI_INPUT_PASS, "Plain click")
+	click.alt_pressed = true
+	_check(
+		plugin._forward_3d_gui_input(camera, click) == AFTER_GUI_INPUT_PASS,
+		"Alt+click with no model selected passes through"
+	)
+	var probe := Node3D.new()
+	_check(not plugin._handles(probe), "Part picking never claims an object")
+	probe.free()
+
+
+## The Review panel lives in the bottom panel, first tab, and keeps Accept and Discard on
 ## screen for a long diff and for a large media preview. Its inner layout (details, media
 ## sizing) is covered by review_panel_test.gd.
 func _review_layout(plugin: EditorPlugin) -> void:
@@ -83,7 +105,7 @@ func _review_layout(plugin: EditorPlugin) -> void:
 		_check(tabs.get_tab_idx_from_control(review.get_parent()) == 0, "Review is the first tab")
 	_check_choices(plugin, "long diff")
 	await _capture("joinery-scroll-review.png")
-	# A model preview fills the panel; Accept and Reject stay below it.
+	# A model preview fills the panel; Accept and Discard stay below it.
 	var still := Image.create(320, 320, false, Image.FORMAT_RGBA8)
 	still.fill(Color(0.35, 0.37, 0.4))
 	# An isolated home has no cache folder until something makes it.
@@ -115,7 +137,7 @@ func _review_layout(plugin: EditorPlugin) -> void:
 func _check_choices(plugin: EditorPlugin, context: String) -> void:
 	var dock: Control = plugin._dock
 	var bottom := dock.get_viewport_rect().end.y
-	for prefix: String in ["Accept", "Reject"]:
+	for prefix: String in ["Accept", "Discard"]:
 		var button := _button_starting(plugin._review_panel, prefix)
 		_check(button != null and button.is_visible_in_tree(), prefix + " is shown: " + context)
 		if button != null:

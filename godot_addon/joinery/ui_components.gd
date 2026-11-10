@@ -18,6 +18,16 @@ const STATUS_ICONS := {
 	"warning": ["warning", "text_muted"],
 	"stopped": ["close", "text_muted"],
 }
+## Readiness status (design addendum S, ADR 0030) -> [wording, dot state]: the one vocabulary
+## for project setup, the app rail and the asset workspace.
+const READINESS := {
+	"ready": ["Ready", "ready"],
+	"preparing": ["Downloading…", "working"],
+	"needs_docker": ["Needs Docker", "attention"],
+	"needs_licence": ["Needs your licence", "attention"],
+	"unavailable": ["Not available yet", "off"],
+}
+const _INDICATOR := preload("activity_indicator.gd")
 
 
 ## A labelled field: the label above, the control at full width, an optional help caption and
@@ -89,7 +99,7 @@ class StatusDot:
 
 	func _notification(what: int) -> void:
 		if what == NOTIFICATION_THEME_CHANGED:
-			var side := roundf(8 * UI_THEME.unit(self))
+			var side := float(UI_THEME.dot_px(self))
 			custom_minimum_size = Vector2(side, side)
 
 	func _draw() -> void:
@@ -111,6 +121,87 @@ class SettingRow:
 	extends MarginContainer
 	var box: HBoxContainer
 	var title: Label
+
+
+## A settings row with a switch: title (and an optional description) on the left, the switch
+## on the trailing edge, CONTROL_H.md tall. When the switch cannot change, a caption under the
+## title says why ([method set_disabled_reason]); a disabled switch never stands unexplained.
+class SwitchRow:
+	extends MarginContainer
+	signal toggled(on: bool)
+	var title: Label
+	var description: Label
+	var reason: Label
+	var switch_button: CheckButton
+
+	## Set the switch without emitting [signal toggled] (a programmatic change).
+	func set_on(on: bool) -> void:
+		switch_button.set_pressed_no_signal(on)
+
+	func is_on() -> bool:
+		return switch_button.button_pressed
+
+	## Disable the switch and show [param text] under the title; "" enables it again.
+	func set_disabled_reason(text: String) -> void:
+		switch_button.disabled = not text.is_empty()
+		reason.text = text
+		reason.visible = not text.is_empty()
+		switch_button.tooltip_text = text
+
+
+## The one action a readiness state offers ("Start Docker", "Rebuild", "Check again",
+## "Get it"), as a secondary button. [method set_action] takes the `action` field of a
+## readiness entry ({id, label} or null) and hides the button when there is nothing to do.
+class StatusAction:
+	extends Button
+	var action_id := ""
+
+	func set_action(value: Variant) -> void:
+		var spec: Dictionary = value if value is Dictionary else {}
+		action_id = str(spec.get("id", ""))
+		text = str(spec.get("label", ""))
+		accessibility_name = text
+		visible = not action_id.is_empty()
+
+
+## An app's readiness at the trailing edge of its row: a dot, the plain wording, a busy
+## indicator while an action runs, and the one action button. [method set_entry] takes an
+## entry from `joinery status` (ADR 0030); its tooltip adds the summary and when it was last
+## checked, so a stalled check never looks current.
+class Readiness:
+	extends HBoxContainer
+	var entry: Dictionary = {}
+	var dot: StatusDot
+	var wording: Label
+	var busy: Control
+	var action: StatusAction
+
+	## Show [param value]; an unknown status hides the badge and the action.
+	func set_entry(value: Dictionary) -> void:
+		var key := str(value.get("status", ""))
+		if not _SCRIPT.READINESS.has(key):
+			hide()
+			action.set_action(null)
+			return
+		entry = value
+		var spec: Array = _SCRIPT.READINESS[key]
+		var checking := bool(value.get("checking", false)) and key == "ready"
+		dot.state = "working" if checking else str(spec[1])
+		wording.text = "Checking…" if checking else str(spec[0])
+		var tip := str(value.get("summary", ""))
+		var stamp := _SCRIPT.last_checked(str(value.get("checked_at", "")))
+		var shown := tip if not tip.is_empty() else wording.text
+		tooltip_text = shown if stamp.is_empty() else shown + "\n" + stamp
+		action.set_action(value.get("action"))
+		show()
+
+	## While an action runs: the dots and [param text] (e.g. "Checking…"), the button off.
+	func set_busy(on: bool, text := "") -> void:
+		busy.visible = on
+		busy.set("running", on)
+		action.disabled = on
+		if on and not text.is_empty():
+			wording.text = text
 
 
 ## One app in an app list (the Project Manager wizard and the editor's Project apps dialog
@@ -415,6 +506,24 @@ static func _tint_status_icon(rect: TextureRect) -> void:
 	rect.self_modulate = UI_THEME.color(rect, str(spec[1]))
 
 
+## "Last checked 14:02" in local time for a readiness `checked_at` (ISO 8601 with an offset),
+## or "" when it is missing or unreadable. Shown beside readiness so a stalled check never
+## looks current.
+static func last_checked(iso: String) -> String:
+	if iso.length() < 19:
+		return ""
+	var unix := Time.get_unix_time_from_datetime_string(iso.substr(0, 19))
+	if unix <= 0:
+		return ""
+	var offset := iso.substr(19)
+	if offset.length() >= 6 and offset[0] in ["+", "-"]:
+		var minutes := offset.substr(1, 2).to_int() * 60 + offset.substr(4, 2).to_int()
+		unix -= (1 if offset[0] == "+" else -1) * minutes * 60
+	var bias := int(Time.get_time_zone_from_system().get("bias", 0)) * 60
+	var local := Time.get_datetime_dict_from_unix_time(unix + bias)
+	return "Last checked %02d:%02d" % [int(local["hour"]), int(local["minute"])]
+
+
 ## Update a row made by [method status].
 static func set_status(row: HBoxContainer, text: String, state: String) -> void:
 	(row.get_node("Dot") as StatusDot).state = state
@@ -428,6 +537,33 @@ static func set_status(row: HBoxContainer, text: String, state: String) -> void:
 ## apart (OK comes first on platforms that swap OK and Cancel). Every button is CONTROL_H.md
 ## tall with one shared minimum width. Buttons without a type variation (or with
 ## JoineryQuietButton) get JoineryPrimaryButton (OK) or JoinerySecondaryButton (the rest).
+## A small question on [param parent]: [param buttons] is [OK text, Cancel text]. The dialog
+## frees itself once answered; [param on_ok] runs on OK.
+static func confirm(
+	parent: Control, title: String, text: String, buttons: Array, on_ok: Callable
+) -> ConfirmationDialog:
+	var dialog := ConfirmationDialog.new()
+	dialog.title = title
+	dialog.dialog_text = text
+	dialog.dialog_autowrap = true
+	dialog.ok_button_text = str(buttons[0])
+	dialog.cancel_button_text = str(buttons[1])
+	dialog.theme = UI_THEME.build(parent)
+	dialog.get_ok_button().theme_type_variation = "JoineryPrimaryButton"
+	dialog.get_cancel_button().theme_type_variation = "JoinerySecondaryButton"
+	dialog_footer(dialog)
+	dialog.confirmed.connect(on_ok)
+	dialog.visibility_changed.connect(
+		func() -> void:
+			if not dialog.visible:
+				dialog.queue_free()
+	)
+	parent.add_child(dialog)
+	var size := UI_THEME.dialog_size(parent, "connect")
+	dialog.popup_centered(Vector2i(size.x, 0))
+	return dialog
+
+
 ## Opening the dialog focuses OK without drawing the focus ring (the ring shows once the
 ## keyboard moves focus), or the first field while OK is disabled. Call it
 ## after adding the dialog's buttons; buttons added later are arranged too.
@@ -606,6 +742,97 @@ static func switch(text := "") -> CheckButton:
 	check.focus_mode = Control.FOCUS_ALL
 	UI_MOTION.attach_switch(check)
 	return check
+
+
+## A [SwitchRow] titled [param title] with an optional [param description] caption, starting
+## [param on]. Connect to SwitchRow.toggled; call set_disabled_reason() to lock it with a why.
+static func switch_row(title: String, description := "", on := false) -> SwitchRow:
+	var row := SwitchRow.new()
+	row.theme_type_variation = "JoineryInset"
+	var line := HBoxContainer.new()
+	line.theme_type_variation = "JoineryRow"
+	row.add_child(line)
+	var words := VBoxContainer.new()
+	words.theme_type_variation = "JoineryFlush"
+	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	words.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	line.add_child(words)
+	row.title = label(title)
+	row.title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	words.add_child(row.title)
+	row.description = label(description, "JoineryCaption", true)
+	row.description.visible = not description.is_empty()
+	words.add_child(row.description)
+	row.reason = label("", "JoineryCaption", true)
+	row.reason.name = "Reason"
+	row.reason.hide()
+	words.add_child(row.reason)
+	row.switch_button = switch()
+	row.switch_button.accessibility_name = title
+	row.switch_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	row.switch_button.set_pressed_no_signal(on)
+	row.switch_button.toggled.connect(func(value: bool) -> void: row.toggled.emit(value))
+	line.add_child(row.switch_button)
+	bind_height(line, "md", false)
+	return row
+
+
+## A banner with one sentence and one secondary action ("Lost connection. [Reconnect]",
+## "Open Docker Desktop… [Check again]"). The text label is the "Text" child and the button
+## the "Action" child; connect to the button's pressed signal. [param variation] is
+## JoineryBanner for something that went wrong, JoineryCard for plain guidance.
+static func notice(
+	text: String, action_text: String, variation := "JoineryBanner"
+) -> PanelContainer:
+	var panel := PanelContainer.new()
+	panel.theme_type_variation = variation
+	var line := HBoxContainer.new()
+	line.theme_type_variation = "JoineryRow"
+	panel.add_child(line)
+	var words := label(text, "", true)
+	words.name = "Text"
+	words.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	line.add_child(words)
+	var button := secondary(action_text)
+	button.name = "Action"
+	button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	line.add_child(button)
+	return panel
+
+
+## A [Readiness] badge, hidden until [method Readiness.set_entry] gets a known status.
+static func readiness(entry: Dictionary = {}) -> Readiness:
+	var badge := Readiness.new()
+	badge.name = "Readiness"
+	badge.theme_type_variation = "JoineryRow"
+	badge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	badge.mouse_filter = Control.MOUSE_FILTER_PASS
+	var words := status("", "off")
+	words.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	badge.dot = words.get_node("Dot") as StatusDot
+	badge.dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	badge.wording = words.get_node("Text") as Label
+	badge.add_child(words)
+	badge.busy = _INDICATOR.new()
+	badge.add_child(badge.busy)
+	badge.action = status_action()
+	badge.action.name = "Action"
+	badge.add_child(badge.action)
+	badge.hide()
+	badge.set_entry(entry)
+	return badge
+
+
+## A [StatusAction] button for a readiness entry's [param action] ({id, label} or null).
+static func status_action(action: Variant = null) -> StatusAction:
+	var button := StatusAction.new()
+	button.theme_type_variation = "JoinerySecondaryButton"
+	button.focus_mode = Control.FOCUS_ALL
+	bind_height(button, "md")
+	UI_MOTION.press_feedback(button)
+	_steady_states(button)
+	button.set_action(action)
+	return button
 
 
 ## A quiet picker (OptionButton, JoineryPicker) holding [param items]. [param height] is

@@ -366,6 +366,10 @@ static func reveal(node: Control, direction := "down") -> void:
 		node.draw_rect(Rect2(0.0, top, node.size.x, shown), Color.WHITE)
 	node.draw.connect(mask)
 	node.set_meta("_joinery_reveal_state", [mask, prior])
+	# Leaving the tree kills the tween before it ends: take the mask down then too.
+	var cleanup := _end_reveal.bind(node)
+	if not node.tree_exiting.is_connected(cleanup):
+		node.tree_exiting.connect(cleanup, CONNECT_ONE_SHOT)
 	var step := func(value: float) -> void:
 		node.set_meta("_joinery_reveal", value)
 		node.queue_redraw()
@@ -521,6 +525,7 @@ static func stop(node: CanvasItem) -> void:
 	node.modulate.a = 1.0
 	if node is Control:
 		(node as Control).scale = Vector2.ONE
+		_end_reveal(node as Control)
 
 
 static func _tween(node: Node, channel: String) -> Tween:

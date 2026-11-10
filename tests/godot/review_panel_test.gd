@@ -1,10 +1,13 @@
 extends SceneTree
 ## The Review panel, headless: counts, Before/After only with pairs, a real image preview,
-## loading and failure, details, optimistic Accept/Reject with rollback, and results.
+## loading and failure, details, optimistic Accept/Discard with rollback, and results. Also
+## the settings page's Compact history, which asks in place before it runs.
 
 const PANEL := preload("res://addons/joinery/review_panel.gd")
 const DETAILS := preload("res://addons/joinery/review_details.gd")
 const UI_MOTION := preload("res://addons/joinery/ui_motion.gd")
+const SETTINGS := preload("res://addons/joinery/journeyman_settings.gd")
+const DISCARDED := "Discarded. Your files were not touched."
 
 var _failed := false
 var _host: Control
@@ -52,6 +55,7 @@ func _run() -> void:
 	await _check_applying(panel)
 	await _check_optimistic(panel)
 	await _check_motion(panel)
+	await _check_compact()
 	panel.clear()
 	_host.queue_free()
 	Engine.remove_meta("joinery_ui_config")
@@ -153,7 +157,7 @@ func _check_image_pair(panel: PANEL) -> void:
 	)
 	_check(
 		is_equal_approx(panel._accept.size.x, panel._reject.size.x),
-		"Accept and Reject share one width"
+		"Accept and Discard share one width"
 	)
 	_check(
 		panel._reject.get_global_rect().position.x < panel._accept.get_global_rect().position.x,
@@ -343,9 +347,11 @@ func _check_optimistic(panel: PANEL) -> void:
 	_check(panel._error.visible and panel._error.text.begins_with("Blender"), "The error shows")
 	_check(not panel._accept.disabled, "Buttons work again after an error")
 	_check(panel.pending, "The change is still pending after an error")
+	_check(panel._reject.text == "Discard", "The button reads Discard, never Reject")
 	panel._reject.pressed.emit()
-	_check(rejected[0] == 1, "Reject emits reject_pressed")
-	_check(panel._outcome_text.text == "Change rejected", "The outcome reads Change rejected")
+	_check(rejected[0] == 1, "Discard emits reject_pressed")
+	_check(panel._outcome_text.text == DISCARDED, "The outcome says the files were not touched")
+	_check(panel._outcome_note.text == "Discarding…", "The note says it is discarding")
 	_check(not panel._error.visible, "Deciding again hides the old error")
 	panel.set_applying(false)
 	await _frames()
@@ -400,3 +406,43 @@ func _check_motion(panel: PANEL) -> void:
 	await create_timer(0.4).timeout
 	_check(panel._body.visible and not panel._outcome.visible, "The rollback settles")
 	UI_MOTION.set_enabled(false)
+
+
+## Compact history asks first, in a row on the page (no dialog): Cancel leaves the history as
+## it is; Compact runs `joinery history compact`.
+func _check_compact() -> void:
+	var page: ScrollContainer = SETTINGS.new()
+	page.size = Vector2(600, 500)
+	_host.add_child(page)
+	await _frames()
+	var menu: PopupMenu = page._history_button.get_popup()
+	menu.id_pressed.emit(0)
+	await _frames()
+	_check(page._compact_confirm.visible, "Compact history asks first")
+	_check(page._history_job == null, "Nothing runs before the answer")
+	var texts: Array[String] = []
+	for label: Node in page._compact_confirm.find_children("*", "Label", true, false):
+		texts.append((label as Label).text)
+	_check(
+		texts.has("Compact history? Older changes can no longer be reverted."),
+		"The question says what Compact costs"
+	)
+	var buttons: Array[String] = []
+	for button: Node in page._compact_confirm.find_children("*", "Button", true, false):
+		buttons.append((button as Button).text)
+	_check(buttons == ["Cancel", "Compact"], "The row offers Compact and Cancel")
+	_check(page.find_children("*", "ConfirmationDialog", true, false).is_empty(), "No dialog")
+	(page._compact_confirm.find_children("*", "Button", true, false)[0] as Button).pressed.emit()
+	_check(not page._compact_confirm.visible, "Cancel closes the question")
+	_check(page._history_job == null, "Cancel runs nothing")
+	menu.id_pressed.emit(0)
+	await _frames()
+	page._compact_button.pressed.emit()
+	_check(not page._compact_confirm.visible, "Compact closes the question")
+	_check(
+		page._history_job != null and page._history_action == "compact",
+		"Compact runs joinery history compact"
+	)
+	page._cancel_history()
+	page.queue_free()
+	await _frames()

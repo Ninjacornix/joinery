@@ -1,3 +1,4 @@
+# gdlint: disable=max-public-methods
 @tool
 extends ScrollContainer
 ## The conversation. Each request is a change card (sidebar_change_card.gd); replies are plain
@@ -10,6 +11,13 @@ extends ScrollContainer
 ## The scrollbar's gutter is always reserved inside it, so bubbles keep one right edge with or
 ## without a bar. The bottom edge fades instead of cutting messages. Bold text is the body
 ## family at a semibold weight and the same size, never a separate display font.
+##
+## Short notes ("Focus mode on") are a transient caption over the bottom inset
+## ([method show_caption]). They take no layout height: the dock's rows stay put, and while a
+## caption shows the conversation gets that much room at its end, so the newest line scrolls
+## clear of it instead of hiding under it.
+## Offers ([method add_offer]) are one quiet line with their actions; a feature plan
+## ([method add_plan]) is a card that changes nothing until the user presses Apply.
 
 signal example_chosen(text: String)
 signal retry_requested(card: Control)
@@ -20,6 +28,7 @@ const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
 const CARD := preload("sidebar_change_card.gd")
+const INDICATOR := preload("activity_indicator.gd")
 const EXAMPLES := [
 	"Make the selected model taller", "Add a footstep sound", "Repaint this texture warmer"
 ]
@@ -48,6 +57,13 @@ var _text_scale := 1.0
 var _show_timings := true
 var _scaled: Array = []
 var _retry_allowed := true
+var _caption: PanelContainer
+## Room at the end of the conversation while the caption shows.
+var _caption_room: Control
+var _caption_text: Label
+var _caption_action: Button
+var _caption_callback: Callable
+var _caption_serial := 0
 
 
 func _ready() -> void:
@@ -64,6 +80,7 @@ func _ready() -> void:
 	UI_MOTION.rubber_band(self)
 	STYLE.on_theme_overrides(self, _apply_fade)
 	resized.connect(_on_resized)
+	_build_caption()
 
 
 func _notification(what: int) -> void:
@@ -151,7 +168,7 @@ func set_examples_enabled(on: bool) -> void:
 		button.disabled = not on
 		button.focus_mode = Control.FOCUS_ALL if on else Control.FOCUS_NONE
 		button.tooltip_text = (
-			"Write this in the message box" if on else "Connect an assistant to use this"
+			"Write this in the message box" if on else "Connect Journeyman to use this"
 		)
 
 
@@ -518,6 +535,8 @@ func _format(source: String) -> String:
 
 
 func _process(_delta: float) -> void:
+	if _caption != null and _caption.visible:
+		_place_caption()
 	if not _dirty or _body == null:
 		return
 	_dirty = false
@@ -532,3 +551,399 @@ func _process(_delta: float) -> void:
 
 func _scroll_end() -> void:
 	scroll_vertical = int(get_v_scroll_bar().max_value)
+
+
+# --- Transient caption ---------------------------------------------------------------------------
+
+
+## A short note over the bottom inset ("Focus mode on · /focus to undo") that clears after
+## [param seconds]. [param action] adds a link that runs [param callback]. It takes no layout
+## height: it floats over the transcript's faded bottom edge.
+func show_caption(text: String, seconds := 3.0, action := "", callback := Callable()) -> void:
+	_caption_serial += 1
+	var serial := _caption_serial
+	_caption_text.text = text
+	_caption_text.tooltip_text = text
+	_caption_action.text = action
+	_caption_action.visible = not action.is_empty() and callback.is_valid()
+	_caption_callback = callback
+	if text.is_empty():
+		_hide_caption()
+		return
+	_place_caption()
+	_body.move_child(_caption_room, -1)
+	_caption_room.custom_minimum_size.y = _caption.size.y + UI_THEME.space(self, 2)
+	if _follow:
+		_scroll_end.call_deferred()
+	if not _caption.visible:
+		UI_MOTION.fade_in(_caption)
+	if is_inside_tree():
+		get_tree().create_timer(seconds).timeout.connect(
+			func() -> void:
+				if serial == _caption_serial:
+					_hide_caption()
+		)
+
+
+## The caption's text ("" when hidden).
+func caption_text() -> String:
+	return _caption_text.text if _caption.visible else ""
+
+
+func _build_caption() -> void:
+	_caption_room = Control.new()
+	_caption_room.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_body.add_child(_caption_room)
+	_caption = PanelContainer.new()
+	_caption.top_level = true
+	_caption.z_index = 1
+	_caption.mouse_filter = Control.MOUSE_FILTER_PASS
+	_caption.accessibility_name = "Note"
+	_caption.hide()
+	STYLE.on_theme_overrides(
+		_caption,
+		func() -> void:
+			var box := StyleBoxFlat.new()
+			box.bg_color = _caption.get_theme_color("surface_raised", "Joinery")
+			box.set_corner_radius_all(UI_THEME.radius(_caption, "md"))
+			var pad := float(UI_THEME.space(_caption, 2))
+			box.content_margin_left = pad
+			box.content_margin_right = pad
+			box.content_margin_top = float(UI_THEME.space(_caption, 1))
+			box.content_margin_bottom = float(UI_THEME.space(_caption, 1))
+			_caption.add_theme_stylebox_override("panel", box)
+	)
+	# Internal, so the scroll container keeps laying out only the conversation.
+	add_child(_caption, false, Node.INTERNAL_MODE_BACK)
+	var row := HBoxContainer.new()
+	row.theme_type_variation = "JoineryRowTight"
+	_caption.add_child(row)
+	_caption_text = UI.label("", "JoineryCaption")
+	# The note keeps its full width: the caption grows to fit it, up to the transcript's.
+	_caption_text.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
+	_caption_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(_caption_text)
+	_caption_action = UI.link("")
+	_caption_action.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	UI.bind_height(_caption_action, "xs")
+	_caption_action.pressed.connect(
+		func() -> void:
+			if _caption_callback.is_valid():
+				_caption_callback.call()
+			_hide_caption()
+	)
+	row.add_child(_caption_action)
+
+
+## Bottom of the visible transcript, on the text inset, left of the scrollbar gutter.
+func _place_caption() -> void:
+	var inset := float(UI_THEME.space(self, 2))
+	var width := maxf(0.0, size.x - gutter() - inset * 2.0)
+	var wanted := _caption.get_combined_minimum_size()
+	_caption.size = Vector2(minf(maxf(wanted.x, 0.0), width), wanted.y)
+	var origin := get_global_rect().position
+	_caption.global_position = origin + Vector2(inset, size.y - _caption.size.y - inset)
+
+
+func _hide_caption() -> void:
+	_caption_serial += 1
+	_caption_room.custom_minimum_size.y = 0.0
+	if _caption.visible:
+		UI_MOTION.exit(_caption)
+
+
+# --- Offers and plans ----------------------------------------------------------------------------
+
+
+## One quiet line from Joinery with its actions, as [[label, callable], …]. Each action runs
+## its callable; the line stays until [method remove_offer]. Returns the line.
+func add_offer(text: String, actions: Array = []) -> Control:
+	_hide_empty()
+	var row := HBoxContainer.new()
+	row.theme_type_variation = "JoineryRow"
+	row.accessibility_name = "Suggestion: " + text
+	row.set_meta("joinery_offer", text)
+	var picture := STYLE.glyph("accent")
+	row.add_child(picture)
+	var column := VBoxContainer.new()
+	column.theme_type_variation = "JoineryTight"
+	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(column)
+	var label := UI.label(text, "JoineryCaption", true)
+	column.add_child(label)
+	_scale(label, "caption")
+	if not actions.is_empty():
+		var links := HBoxContainer.new()
+		links.theme_type_variation = "JoineryRow"
+		column.add_child(links)
+		for action: Array in actions:
+			var button := UI.link(str(action[0]))
+			button.accessibility_name = str(action[0])
+			UI.bind_height(button, "xs")
+			STYLE.hug_left(button)
+			var callback: Callable = action[1]
+			button.pressed.connect(func() -> void: callback.call())
+			links.add_child(button)
+	_inset(_current_turn()).add_child(row)
+	_log.append("Joinery  " + text)
+	UI_MOTION.fade_in(row)
+	_follow = true
+	_dirty = true
+	return row
+
+
+## Take an offer line away.
+func remove_offer(row: Control) -> void:
+	if is_instance_valid(row):
+		UI_MOTION.exit(row, null, row.queue_free)
+
+
+## Every offer line still shown, oldest first.
+func offer_texts() -> PackedStringArray:
+	var texts := PackedStringArray()
+	for row: Node in _body.find_children("*", "HBoxContainer", true, false):
+		if row.has_meta("joinery_offer") and not row.is_queued_for_deletion():
+			texts.append(str(row.get_meta("joinery_offer")))
+	return texts
+
+
+## A feature plan from `joinery feature … --plan --json` as a card: what it adds, which
+## settings change, and notes. Nothing changes until Apply ([signal FeaturePlan.apply_pressed]).
+func add_plan(plan: Dictionary, title: String) -> FeaturePlan:
+	_hide_empty()
+	_turn = VBoxContainer.new()
+	_turn.theme_type_variation = "JoineryStack"
+	_body.add_child(_turn)
+	var card := FeaturePlan.new()
+	card.build(plan, title)
+	_turn.add_child(card)
+	for pair: Array in card.scalables():
+		_scale(pair[0], pair[1])
+	_log.append("Joinery  " + title)
+	UI_MOTION.fade_in(card)
+	_last_notice = ""
+	_follow = true
+	_dirty = true
+	return card
+
+
+## The plan for adding or removing a game feature. States: planned, applying, applied,
+## cancelled, failed (Apply again).
+class FeaturePlan:
+	extends PanelContainer
+
+	signal apply_pressed
+	signal cancel_pressed
+	signal revert_pressed(transaction_id: String)
+
+	## Files listed before "and N more".
+	const MAX_FILES := 6
+
+	var state := "planned"
+	var plan: Dictionary = {}
+	var transaction_id := ""
+	var title_label: Label
+	var _column: VBoxContainer
+	var _lines: Array[Label] = []
+	var _headings: Array[Label] = []
+	var _error: Label
+	var _actions: HBoxContainer
+	var _apply: Button
+	var _cancel: Button
+	var _outcome: HBoxContainer
+	var _outcome_icon: TextureRect
+	var _outcome_text: Label
+	var _revert: Button
+	var _working: Control
+
+	func build(data: Dictionary, title: String) -> void:
+		plan = data.duplicate(true)
+		STYLE.boxed(self, "JoineryChangeCard")
+		size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		accessibility_name = title
+		_column = VBoxContainer.new()
+		_column.theme_type_variation = "JoineryStack"
+		add_child(_column)
+		var head := VBoxContainer.new()
+		head.theme_type_variation = "JoineryTight"
+		_column.add_child(head)
+		title_label = UI.label(title, "JoineryBodyLarge", true)
+		head.add_child(title_label)
+		_lines.append(_caption(head, "Nothing changes until you apply it."))
+		var files := _files(plan.get("changes", []))
+		if not files.is_empty():
+			_group("Files", files)
+		var settings := _settings(plan.get("config_edits", []))
+		if not settings.is_empty():
+			_group("Settings", settings)
+		var notes: Array[String] = []
+		for note: Variant in plan.get("notes", []):
+			notes.append(str(note))
+		if not notes.is_empty():
+			_group("Notes", notes)
+		_error = UI.label("", "JoineryError", true)
+		_error.hide()
+		_column.add_child(_error)
+		var conflicts: Array = plan.get("conflicts", [])
+		if not conflicts.is_empty():
+			_error.text = " ".join(conflicts.map(func(c: Variant) -> String: return str(c)))
+			_error.show()
+		_actions = HBoxContainer.new()
+		_actions.theme_type_variation = "JoineryRow"
+		_actions.alignment = BoxContainer.ALIGNMENT_END
+		_column.add_child(_actions)
+		_working = INDICATOR.new()
+		_working.hide()
+		_actions.add_child(_working)
+		_cancel = UI.secondary("Cancel")
+		_cancel.accessibility_name = "Cancel this change"
+		_cancel.pressed.connect(_on_cancel)
+		_apply = UI.primary("Apply")
+		_apply.accessibility_name = "Apply: " + title
+		_apply.disabled = not conflicts.is_empty()
+		_apply.pressed.connect(_on_apply)
+		var ordered := (
+			[_apply, _cancel] if DisplayServer.get_swap_cancel_ok() else [_cancel, _apply]
+		)
+		for button: Button in ordered:
+			_actions.add_child(button)
+		_outcome = HBoxContainer.new()
+		_outcome.theme_type_variation = "JoineryRowTight"
+		_outcome.hide()
+		_column.add_child(_outcome)
+		_outcome_icon = STYLE.glyph()
+		_outcome.add_child(_outcome_icon)
+		_outcome_text = UI.label("", "JoineryCaption", true)
+		_outcome_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_outcome.add_child(_outcome_text)
+		_revert = UI.quiet("Revert")
+		_revert.tooltip_text = "Put back the files from before this change"
+		_revert.hide()
+		UI.bind_height(_revert, "xs")
+		_revert.pressed.connect(func() -> void: revert_pressed.emit(transaction_id))
+		_outcome.add_child(_revert)
+
+	## Controls whose text follows the transcript text size, as [control, TYPE step] pairs.
+	func scalables() -> Array:
+		var pairs: Array = [[title_label, "body"], [_outcome_text, "caption"]]
+		for line: Label in _lines:
+			pairs.append([line, "caption"])
+		for heading: Label in _headings:
+			pairs.append([heading, "body"])
+		return pairs
+
+	## The visible texts of the card, top to bottom (for tests and captures).
+	func texts() -> PackedStringArray:
+		var found := PackedStringArray()
+		for label: Node in find_children("*", "Label", true, false):
+			if (label as Label).is_visible_in_tree():
+				found.append((label as Label).text)
+		return found
+
+	## Apply is running: both buttons wait, with dots, until [method set_applied].
+	func set_applying() -> void:
+		state = "applying"
+		_apply.disabled = true
+		_cancel.disabled = true
+		_apply.text = "Applying…"
+		_working.show()
+		_working.set("running", true)
+		_error.hide()
+
+	## Applied: the buttons give way to the outcome, with Revert when there is a transaction.
+	func set_applied(text: String, transaction := "") -> void:
+		state = "applied"
+		transaction_id = transaction
+		_settle("success", "success", text)
+		_revert.visible = not transaction.is_empty()
+		UI_MOTION.pulse(_outcome)
+
+	## The apply failed: say why in place and offer Apply again.
+	func set_failed(text: String) -> void:
+		state = "failed"
+		_working.set("running", false)
+		_working.hide()
+		_apply.text = "Apply"
+		_apply.disabled = false
+		_cancel.disabled = false
+		_error.text = text
+		UI_MOTION.fade_in(_error)
+
+	## A revert of the applied change finished.
+	func set_reverted(ok: bool, message := "") -> void:
+		if ok:
+			_revert.hide()
+			_settle("reload", "text_muted", "Reverted")
+			return
+		_error.text = (
+			"Couldn't revert. " + message if not message.is_empty() else "Couldn't revert."
+		)
+		UI_MOTION.fade_in(_error)
+
+	func _on_apply() -> void:
+		if state in ["planned", "failed"] and not _apply.disabled:
+			set_applying()
+			apply_pressed.emit()
+
+	func _on_cancel() -> void:
+		if state in ["planned", "failed"]:
+			state = "cancelled"
+			_settle("close", "text_muted", "Cancelled. Nothing changed.")
+			cancel_pressed.emit()
+
+	func _settle(icon_name: String, role: String, text: String) -> void:
+		_working.set("running", false)
+		_actions.hide()
+		_error.hide()
+		STYLE.set_glyph(_outcome_icon, icon_name, role)
+		_outcome_text.text = text
+		_outcome.show()
+
+	func _group(heading: String, lines: Array[String]) -> void:
+		var group := VBoxContainer.new()
+		group.theme_type_variation = "JoineryTight"
+		_column.add_child(group)
+		var title := UI.label(heading)
+		group.add_child(title)
+		_headings.append(title)
+		for line: String in lines:
+			_lines.append(_caption(group, line))
+
+	func _caption(parent: Control, text: String) -> Label:
+		var label := UI.label(text, "JoineryCaption", true)
+		parent.add_child(label)
+		return label
+
+	## Changed paths without the .uid sidecars, at most MAX_FILES then "and N more".
+	static func _files(changes: Array) -> Array[String]:
+		var paths: Array[String] = []
+		for change: Variant in changes:
+			var path := str(change.get("path", "")) if change is Dictionary else str(change)
+			if not path.is_empty() and not path.ends_with(".uid"):
+				paths.append(path)
+		if paths.size() > MAX_FILES:
+			var more := paths.size() - (MAX_FILES - 1)
+			paths = paths.slice(0, MAX_FILES - 1)
+			paths.append("and %d more" % more)
+		return paths
+
+	## project.godot edits as plain lines: "Adds autoload Controller", "Changes input: pause,
+	## move left". Values stay out: they are engine text, not something to read here.
+	static func _settings(edits: Array) -> Array[String]:
+		var groups := {}
+		for edit: Variant in edits:
+			if not edit is Dictionary:
+				continue
+			var verb := (
+				"Adds"
+				if edit.get("before") == null
+				else "Removes" if edit.get("after") == null else "Changes"
+			)
+			var key := "%s %s" % [verb, str(edit.get("section", "")).replace("_", " ")]
+			if not groups.has(key):
+				groups[key] = []
+			groups[key].append(str(edit.get("key", "")).replace("_", " "))
+		var lines: Array[String] = []
+		for key: String in groups:
+			lines.append("%s: %s" % [key, ", ".join(groups[key])])
+		return lines

@@ -25,6 +25,20 @@ const TYPE := {"caption": 0.85, "body": 1.0, "body_lg": 1.15, "title": 1.3, "dis
 ## xs: inline text buttons; sm: chips and the composer picker; md: buttons, inputs and
 ## settings rows; lg: provider cards and wizard rows.
 const CONTROL_H := {"xs": 1.75, "sm": 2.0, "md": 2.5, "lg": 3.0}
+## The named size exceptions (design direction v2 #62), the only sizes outside the scales above.
+## Icons in logical pixels × unit: sm for inline glyphs, md for the app rail, tile for icon
+## tiles. Read with [method icon_px].
+const ICON := {"sm": 16, "md": 20, "tile": 28}
+## A status dot's diameter in logical pixels × unit. Read with [method dot_px].
+const DOT := 8
+## The composer's Send and Stop button side in logical pixels × unit. Read with [method send_px].
+const SEND := 32
+## The audio transport's play button side in logical pixels × unit. Read with
+## [method transport_px].
+const TRANSPORT := 40
+## Dialog sizes in em (multiples of the body font): the agent connect dialog and document
+## dialogs (art direction, brief). Read with [method dialog_size].
+const DIALOG := {"connect": Vector2(32, 36), "doc": Vector2(48, 36)}
 ## Durations in seconds. fast: hover and focus colour; base: fades and reveals; confirm: success
 ## flash; enter/exit: entrances and exits (exits are 20% shorter); menu: popovers and menus;
 ## stagger: delay between list rows. Animation helpers live in ui_motion.gd.
@@ -197,6 +211,33 @@ static func font_size(context: Node, type_name: String) -> int:
 ## Control height in pixels for a CONTROL_H step ("xs", "sm", "md", "lg").
 static func control_h(context: Node, name: String) -> int:
 	return roundi(_base_size(context) * float(CONTROL_H.get(name, CONTROL_H["md"])))
+
+
+## Icon size in pixels for an ICON step ("sm" 16, "md" 20, "tile" 28, × unit).
+static func icon_px(context: Node, name := "sm") -> int:
+	return roundi(int(ICON.get(name, ICON["sm"])) * unit(context))
+
+
+## Status dot diameter in pixels (DOT × unit).
+static func dot_px(context: Node) -> int:
+	return roundi(DOT * unit(context))
+
+
+## Send and Stop button side in pixels (SEND × unit).
+static func send_px(context: Node) -> int:
+	return roundi(SEND * unit(context))
+
+
+## Audio transport button side in pixels (TRANSPORT × unit).
+static func transport_px(context: Node) -> int:
+	return roundi(TRANSPORT * unit(context))
+
+
+## A DIALOG size ("connect", "doc") in pixels: em × the body font size.
+static func dialog_size(context: Node, name: String) -> Vector2i:
+	var em: Vector2 = DIALOG.get(name, DIALOG["connect"])
+	var body := float(font_size(context, "body"))
+	return Vector2i(roundi(em.x * body), roundi(em.y * body))
 
 
 # --- Colour ----------------------------------------------------------------------------------
@@ -412,8 +453,8 @@ static func watch(root: Control) -> void:
 ## JoinerySectionButton, JoineryPicker (OptionButton/MenuButton), JoinerySwitch (CheckButton).
 ## Inputs: JoineryLineEditError, JoineryTextEditError.
 ## Panels (PanelContainer): JoineryCard, JoineryCardSelected, JoineryBanner, JoineryChip,
-## JoineryPopup, JoineryComposer, JoineryComposerFocused, JoineryBubble, JoineryChangeCard,
-## JoineryMediaFrame, JoineryLoadingFrame, JoineryIconTile, JoineryDock.
+## JoineryPopup, JoineryHoverCard, JoineryComposer, JoineryComposerFocused, JoineryBubble,
+## JoineryChangeCard, JoineryMediaFrame, JoineryLoadingFrame, JoineryIconTile, JoineryDock.
 ## Containers: JoineryFlush (0), JoineryTight (4), JoineryRowTight (4), JoineryRow (8),
 ## JoineryStack (12), JoinerySections (24) for Box containers; HSplitContainer keeps a 12
 ## gutter between its columns; JoineryInset (side margins 8), JoineryPage

@@ -133,6 +133,24 @@ func _check_tokens() -> void:
 		file.get_value("journeyman", "text_size", "") == "Large", "Text size stays in [journeyman]"
 	)
 	_check(UI_THEME.set_pref("text_size", "Normal") == OK, "Restore the text size")
+	# The named size exceptions (design direction v2 #62), and nothing else outside the scales.
+	_check(UI_THEME.ICON == {"sm": 16, "md": 20, "tile": 28}, "ICON token")
+	_check(UI_THEME.DOT == 8 and UI_THEME.SEND == 32 and UI_THEME.TRANSPORT == 40, "Size tokens")
+	_check(UI_THEME.DIALOG["connect"] == Vector2(32, 36), "Connect dialog size in em")
+	_check(UI_THEME.DIALOG["doc"] == Vector2(48, 36), "Document dialog size in em")
+	_check(UI_THEME.icon_px(_host, "md") == roundi(20 * unit), "Rail icons are ICON.md")
+	_check(UI_THEME.dot_px(_host) == roundi(8 * unit), "Dots are DOT")
+	_check(UI_THEME.send_px(_host) == roundi(32 * unit), "Send is SEND")
+	_check(UI_THEME.transport_px(_host) == roundi(40 * unit), "Play is TRANSPORT")
+	var body := UI_THEME.font_size(_host, "body")
+	_check(
+		UI_THEME.dialog_size(_host, "doc") == Vector2i(48 * body, 36 * body), "Dialogs are in em"
+	)
+	var built := UI_THEME.build(_host)
+	_check(
+		built.get_constant("icon_max_width", "Button") == roundi(16 * unit),
+		"Inline icons are ICON.sm"
+	)
 	var numeric := UI_THEME.numeric_font(_host) as FontVariation
 	var tag := TextServerManager.get_primary_interface().name_to_tag("tnum")
 	_check(
@@ -184,6 +202,22 @@ func _check_build() -> void:
 	)
 	_check(theme.get_stylebox("normal", "CheckButton") is StyleBoxEmpty, "Switch has no box")
 	_check(theme.has_icon("frame_3", "JoinerySwitch"), "Switch travel frames are built")
+	# A checked box shows its state with the glyph; no fill behind the row, hovered or not.
+	for state: String in ["pressed", "hover_pressed"]:
+		var box := theme.get_stylebox(state, "CheckBox") as StyleBoxFlat
+		_check(box != null and box.bg_color.a == 0.0, "CheckBox %s fill is transparent" % state)
+	# Hovering a selected card keeps the selected look.
+	_check(
+		(
+			theme.get_stylebox("hover_pressed", "JoineryCardButton")
+			== theme.get_stylebox("pressed", "JoineryCardButton")
+		),
+		"A selected card keeps its look on hover"
+	)
+	_check(
+		theme.get_type_variation_base("JoineryHoverCard") == "PanelContainer",
+		"The hover card is a panel"
+	)
 	# One control height: inputs, buttons and pickers in a row share top and bottom edges.
 	var holder := VBoxContainer.new()
 	holder.theme = theme
@@ -295,6 +329,32 @@ func _check_motion() -> void:
 	_check(check.has_theme_icon_override("checked"), "The knob travels through frames")
 	await create_timer(UI_THEME.MOTION["base"] + 0.1).timeout
 	_check(not check.has_theme_icon_override("checked"), "The knob settles on the theme icon")
+	# A reveal cut short (its node leaves the tree, or stop()) takes its mask down.
+	var box := VBoxContainer.new()
+	box.size = Vector2(100, 100)
+	themed.add_child(box)
+	UI_MOTION.reveal(box)
+	_check(box.has_meta("_joinery_reveal_state"), "A reveal masks its node")
+	themed.remove_child(box)
+	_check(not box.has_meta("_joinery_reveal_state"), "Leaving the tree ends the reveal")
+	_check(box.clip_children == CanvasItem.CLIP_CHILDREN_DISABLED, "Clipping is restored")
+	themed.add_child(box)
+	UI_MOTION.reveal(box)
+	UI_MOTION.stop(box)
+	_check(not box.has_meta("_joinery_reveal_state"), "stop() ends the reveal")
+	# A morph hands over only on landing: the target stays clear while the ghost travels.
+	var source := PanelContainer.new()
+	var target := PanelContainer.new()
+	for node: Control in [source, target]:
+		node.custom_minimum_size = Vector2(40, 20)
+		themed.add_child(node)
+	target.position = Vector2(200, 200)
+	await process_frame
+	UI_MOTION.morph(source, target)
+	await create_timer(UI_THEME.MOTION["base"]).timeout
+	_check(target.modulate.a == 0.0, "The morph target waits for the landing")
+	await create_timer(UI_THEME.MOTION["base"] + UI_THEME.MOTION["fast"] + 0.1).timeout
+	_check(target.modulate.a == 1.0 and not source.visible, "The morph lands and hands over")
 	_check(UI_THEME.set_pref("reduce_motion", "on") == OK, "Reduce motion")
 	_check(not UI_MOTION.is_enabled(), "Reduce motion turns every animation off")
 	_check(UI_THEME.set_pref("reduce_motion", "off") == OK, "Restore motion")
@@ -351,7 +411,55 @@ func _check_components() -> void:
 	_check(indicator.visible and indicator.custom_minimum_size.y > 0, "Running indicator shows")
 	indicator.set("running", false)
 	_check(not indicator.visible and not indicator.is_processing(), "Stopped indicator hides")
+	await _check_readiness_parts(themed)
 	themed.queue_free()
+	await process_frame
+
+
+## The switch row, the status action and the readiness badge.
+func _check_readiness_parts(themed: Control) -> void:
+	var switch_row := UI.switch_row("Online play", "Play with friends", false)
+	themed.add_child(switch_row)
+	var flips: Array[bool] = []
+	switch_row.toggled.connect(func(on: bool) -> void: flips.append(on))
+	switch_row.switch_button.button_pressed = true
+	_check(flips == [true], "A switch row reports its switch")
+	switch_row.set_on(false)
+	_check(flips == [true] and not switch_row.is_on(), "set_on changes it quietly")
+	_check(not switch_row.reason.visible, "No reason while the switch can change")
+	switch_row.set_disabled_reason("Needs Online play first.")
+	_check(switch_row.switch_button.disabled, "A reason disables the switch")
+	_check(switch_row.reason.visible, "A disabled switch says why")
+	switch_row.set_disabled_reason("")
+	_check(not switch_row.switch_button.disabled and not switch_row.reason.visible, "Re-enabled")
+	var action := UI.status_action({"id": "start_docker", "label": "Start Docker"})
+	themed.add_child(action)
+	_check(action.visible and action.text == "Start Docker", "The action shows its label")
+	_check(action.action_id == "start_docker", "The action keeps its id")
+	action.set_action(null)
+	_check(not action.visible, "No action, no button")
+	var badge := UI.readiness()
+	themed.add_child(badge)
+	_check(not badge.visible, "An unknown readiness shows nothing")
+	(
+		badge
+		. set_entry(
+			{
+				"status": "needs_docker",
+				"summary": "Krita runs offline in Docker.",
+				"action": {"id": "start_docker", "label": "Start Docker"},
+				"checked_at": "2026-11-10T14:02:00+00:00",
+			}
+		)
+	)
+	_check(badge.visible and badge.wording.text == "Needs Docker", "Readiness wording")
+	_check(badge.dot.state == "attention", "Needs Docker is an attention dot")
+	_check(badge.action.visible and badge.action.text == "Start Docker", "One action")
+	_check(badge.tooltip_text.contains("Last checked "), "The tooltip says when it was checked")
+	badge.set_entry({"status": "ready", "checking": true})
+	_check(badge.wording.text == "Checking…" and not badge.action.visible, "Checking, no action")
+	_check(UI.last_checked("") == "", "No time, no stamp")
+	_check(UI.last_checked("2026-11-10T14:02:00+00:00").begins_with("Last checked "), "Stamp")
 	await process_frame
 
 

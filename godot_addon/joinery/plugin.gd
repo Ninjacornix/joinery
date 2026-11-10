@@ -4,9 +4,8 @@ extends EditorPlugin
 ## project questionnaire and Focus mode.
 ##
 ## Plugin first, per CLAUDE.md: everything here uses stock Godot extension
-## points, so the addon still loads on an unpatched editor. The parts that the
-## plugin API genuinely cannot reach are listed in `_unreachable_from_a_plugin`
-## and need the fork (ADR 0004, ADR 0005).
+## points, so the addon still loads on an unpatched editor. The new-project screen and the
+## editor layout changes live in the fork (ADR 0004, ADR 0005).
 
 const DOCK_SCRIPT := preload("res://addons/joinery/journeyman_dock.gd")
 const SETUP_SCRIPT := preload("res://addons/joinery/project_setup.gd")
@@ -18,6 +17,7 @@ const EDITS_SCRIPT := preload("res://addons/joinery/scene_edits.gd")
 const CHAT_SCRIPT := preload("res://addons/joinery/chat_bridge.gd")
 const CONNECT_SCRIPT := preload("res://addons/joinery/agent_connect.gd")
 const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
+const UI_COMPONENTS := preload("res://addons/joinery/ui_components.gd")
 
 ## Focus mode is remembered, so a user who wants the stripped-back layout gets
 ## it on every launch instead of re-toggling it each session.
@@ -29,12 +29,13 @@ const SETUP_PENDING := "joinery/setup_pending"
 
 ## One wording per outcome, shared with the sidebar notices.
 const ACCEPTED := "Change accepted"
-const REJECTED := "Change rejected. Original restored."
+const REJECTED := "Discarded. Your files were not touched."
 
-## Dialog sizes in multiples of the editor font size (em).
-const CONNECT_EM := Vector2(32, 36)
-const ART_EM := Vector2(48, 36)
 const ART_DIALOG := preload("res://addons/joinery/art_review_dialog.gd")
+const PICK_SCRIPT := preload("res://addons/joinery/part_pick.gd")
+const CHIP_SCRIPT := preload("res://addons/joinery/target_chip.gd")
+## Shown in the Review panel when a combined file and scene review went stale.
+const STALE_REVIEW := "The scene changed while you were reviewing. Nothing was applied."
 
 var _dock: Control
 var _setup: AcceptDialog
@@ -94,6 +95,12 @@ func _enter_tree() -> void:
 	if _review_panel.has_signal("show_requested"):
 		_review_panel.connect("show_requested", _show_edit_review_panel)
 	_workspace.asset_selected.connect(_on_asset_selected)
+	if _workspace.has_signal("part_selected"):
+		_workspace.connect("part_selected", set_part_target)
+	# Alt+click on a model in the 3D view picks one of its parts. Forwarding is always on
+	# rather than through _handles: this plugin has a main screen, and a main-screen plugin
+	# that handles an object takes the editor over to that screen.
+	set_input_event_forwarding_always_enabled()
 	if _workspace.has_signal("setup_requested"):
 		_workspace.connect("setup_requested", _on_project_setup)
 	_dock.target_opened.connect(_on_target_opened)
@@ -120,6 +127,8 @@ func _enter_tree() -> void:
 		_dock.connect("connect_requested", _on_connect_requested)
 	if _dock.has_signal("change_reverted"):
 		_dock.connect("change_reverted", _on_change_reverted)
+	if _dock.has_signal("files_changed"):
+		_dock.connect("files_changed", _on_files_changed)
 
 	get_editor_interface().get_selection().selection_changed.connect(_dock.on_selection_changed)
 	_dock.on_selection_changed()
@@ -522,32 +531,16 @@ func _raise_dock() -> void:
 			return
 
 
-## What this plugin cannot do, and why. Kept in code so it stays honest.
-func _unreachable_from_a_plugin() -> Array[String]:
-	return [
-		(
-			"Replacing the Project Manager's create-project screen: it runs before "
-			+ "a project is open, so no plugin is loaded. Needs the fork patch in "
-			+ "ADR 0004. `joinery new` is the working path today."
-		),
-		(
-			"Removing built-in docks outright: Focus mode hides them, which is "
-			+ "reversible. Actually restructuring the layout is ADR 0005."
-		),
-		"A 3D viewport right-click slot: 2D has one, 3D does not. Fork patch 1.",
-	]
-
-
 # --- Connecting an assistant -----------------------------------------------------------------
 
 
 ## The sidebar's "Connect an assistant": the Project Manager's connection screen, in a dialog.
 func _on_connect_requested() -> void:
 	if is_instance_valid(_connect_dialog):
-		_connect_dialog.popup_centered(_em_size(CONNECT_EM))
+		_connect_dialog.popup_centered(UI_THEME.dialog_size(_dock, "connect"))
 		return
 	var dialog := AcceptDialog.new()
-	dialog.title = "Connect an assistant"
+	dialog.title = "Connect Journeyman"
 	dialog.ok_button_text = "Close"
 	dialog.theme = UI_THEME.build(_dock)
 	var view: Control = CONNECT_SCRIPT.new()
@@ -559,7 +552,7 @@ func _on_connect_requested() -> void:
 	dialog.confirmed.connect(dialog.queue_free)
 	_dock.add_child(dialog)
 	_connect_dialog = dialog
-	dialog.popup_centered(_em_size(CONNECT_EM))
+	dialog.popup_centered(UI_THEME.dialog_size(_dock, "connect"))
 
 
 ## Signed in: remember the agent, close the dialog and restart the chat with it. The
@@ -582,9 +575,27 @@ func _on_agent_connected(agent: String, method_or_view: Variant, view: Variant =
 	)
 
 
-func _em_size(em: Vector2) -> Vector2i:
-	var font := float(_dock.get_theme_default_font_size())
-	return Vector2i(roundi(em.x * font), roundi(em.y * font))
+## A change the user applied wrote files: show them, and when it edited project.godot offer to
+## reload, so the editor's settings in memory never overwrite the new ones.
+func _on_files_changed(_transaction_id: String, paths: PackedStringArray) -> void:
+	EditorInterface.get_resource_filesystem().scan()
+	if paths.has("project.godot"):
+		_offer_reload()
+
+
+func _offer_reload() -> void:
+	UI_COMPONENTS.confirm(
+		_dock,
+		"Reload the project",
+		"This change edited the project settings. Reload to use them. Scenes are saved first.",
+		["Reload", "Later"],
+		_reload_project
+	)
+
+
+func _reload_project() -> void:
+	EditorInterface.save_all_scenes()
+	EditorInterface.restart_editor(false)
 
 
 # --- Scene edits and file reviews ------------------------------------------------------------
@@ -761,7 +772,7 @@ func _accept_scene_edit(quiet := false) -> void:
 				_review_failed("This scene has unsaved changes. Save it, then accept again.")
 				return
 		if not bool(_chat.get("_connected")):
-			_review_failed("The assistant is not connected. Reconnect, then accept again.")
+			_review_failed("Journeyman isn't connected. Reconnect, then accept again.")
 			return
 		_deciding = true
 		_chat.decide_files(str(_file_review["transaction_id"]), true)
@@ -813,7 +824,7 @@ func _reject_scene_edit(message: String = REJECTED, kind: String = "rejected") -
 			_deciding = true
 			_chat.decide_files(str(_file_review["transaction_id"]), false)
 		else:
-			_review_failed("The assistant is not connected. Reconnect, then reject again.")
+			_review_failed("Journeyman isn't connected. Reconnect, then discard again.")
 	if _edits != null and _edits.pending():
 		_edits.reject()
 		_chat.finish_live_review()
@@ -858,8 +869,8 @@ func _on_file_preview(event: Dictionary) -> void:
 func _on_art_review(event: Dictionary) -> void:
 	ART_DIALOG.open(
 		_dock,
-		str(event.get("text", "")),
-		_em_size(ART_EM),
+		event,
+		UI_THEME.dialog_size(_dock, "doc"),
 		func() -> void: _chat.approve_art(str(event.get("sha256", "")))
 	)
 
@@ -876,7 +887,7 @@ func _on_file_decision(event: Dictionary) -> void:
 		if not valid:
 			# The gateway restores the files and answers with a rejected decision.
 			_file_accept_live_id = ""
-			_review_failed("The preview changed before it was accepted. Restoring the files.")
+			_review_failed(STALE_REVIEW)
 			_chat.rollback_files(str(event["transaction_id"]))
 			return
 	_file_review.clear()
@@ -954,3 +965,28 @@ func _on_change_reverted(transaction_id: String) -> void:
 		_status("Reverted. Not reloaded, it has unsaved edits: " + ", ".join(kept))
 	_workspace.invalidate()
 	_workspace.refresh()
+
+
+# --- Picking a part of a model -------------------------------------------------------------
+
+
+## Never claims an object: a main-screen plugin that handles a model switches the editor to
+## its screen. Alt+click picking uses always-on input forwarding instead.
+func _handles(_object: Object) -> bool:
+	return false
+
+
+func _forward_3d_gui_input(camera: Camera3D, event: InputEvent) -> int:
+	var part := PICK_SCRIPT.editor_pick(camera, event)
+	if part.is_empty():
+		return AFTER_GUI_INPUT_PASS
+	set_part_target(CHIP_SCRIPT.for_part(part))
+	return AFTER_GUI_INPUT_STOP
+
+
+## Make [param target] (a target_chip.for_part target) the message target. A sidebar without
+## part targets gets the whole model instead.
+func set_part_target(target: Dictionary) -> void:
+	if not _call_dock("set_part_target", [target]):
+		var model := str(target.get("resource", "")).split("#")[0]
+		_call_dock("set_resource_target", [model, "PackedScene"])

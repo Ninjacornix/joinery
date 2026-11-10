@@ -58,7 +58,7 @@ static func _metrics(context: Node) -> Dictionary:
 		"font": font,
 		"line": line,
 		"h": heights,
-		"icon": roundf(16 * u),
+		"icon": roundf(int(UI_THEME.ICON["sm"]) * u),
 		"ring": maxf(1.0, roundf(2 * u)),
 	}
 
@@ -300,7 +300,7 @@ static func _buttons(t: Theme, c: Dictionary, m: Dictionary) -> void:
 		"icon": c["text"],
 	}
 	var square := (float(m["h"]["md"]) - float(m["icon"])) / 2.0
-	var send_pad := (roundf(32 * float(m["u"])) - float(m["icon"])) / 2.0
+	var send_pad := (roundf(UI_THEME.SEND * float(m["u"])) - float(m["icon"])) / 2.0
 	var types := {
 		"Button": secondary,
 		"JoinerySecondaryButton": secondary,
@@ -521,6 +521,9 @@ static func _panels(t: Theme, c: Dictionary, m: Dictionary) -> void:
 		"JoineryChip": [c["accent_tint"], Color.TRANSPARENT, 0.0, "md", _sp(m, 2), _sp(m, 1) / 2.0],
 		"JoineryPopup":
 		[c["surface_raised"], c["border_subtle"], hairline, "lg", _sp(m, 1), _sp(m, 1)],
+		# A card that explains something beside its trigger (the rail's readiness card).
+		"JoineryHoverCard":
+		[c["surface_raised"], c["border_subtle"], hairline, "lg", _sp(m, 3), _sp(m, 3)],
 		"JoineryComposer":
 		[c["surface_sunken"], c["border_strong"], hairline, "xl", _sp(m, 2), _sp(m, 2)],
 		"JoineryComposerFocused":

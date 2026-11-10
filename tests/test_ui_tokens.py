@@ -118,3 +118,43 @@ def test_the_guard_catches_what_it_should() -> None:
         if PALETTE.search(arguments)
     ]
     assert coloured == [5]
+
+
+#: The named size exceptions (design direction v2 #62). Only ui_theme.gd defines them; screens
+#: read them through UI_THEME (ICON, DOT, SEND, TRANSPORT, DIALOG and their *_px helpers).
+NAMED = ("ICON", "DOT", "SEND", "TRANSPORT", "DIALOG")
+#: Their values, as literals a screen might copy instead: a pixel size times the unit, or an
+#: em size pair for a dialog.
+NAMED_PIXELS = re.compile(
+    r"\b(?:16|20|28|32|40)(?:\.0)?\s*\*\s*(?:UI_THEME\.unit\(|float\(m\[\"u\"\]\)|u\b)"
+    r"|UI_THEME\.unit\([^)]*\)\s*\*\s*(?:16|20|28|32|40)\b"
+)
+NAMED_EM = re.compile(r"Vector2i?\(\s*(?:32|48)\s*,\s*36\s*\)")
+#: Screens owned elsewhere that still carry a copy; each entry names what replaces it.
+PENDING: dict[str, str] = {}
+
+
+def test_named_size_exceptions_are_tokens() -> None:
+    theme = (ADDON / "ui_theme.gd").read_text(encoding="utf-8")
+    for name in NAMED:
+        assert re.search(rf"^const {name} :=", theme, re.MULTILINE), name
+    assert 'const ICON := {"sm": 16, "md": 20, "tile": 28}' in theme
+    assert 'const DIALOG := {"connect": Vector2(32, 36), "doc": Vector2(48, 36)}' in theme
+
+
+def test_no_copies_of_the_named_sizes() -> None:
+    hits = []
+    for path in sorted(ADDON.glob("*.gd")):
+        if path.name == "ui_theme.gd" or path.name in PENDING:
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if NAMED_PIXELS.search(line) or NAMED_EM.search(line):
+                hits.append(f"{path.name}:{number} {line.strip()}")
+    assert not hits, "Use UI_THEME.ICON, DOT, SEND, TRANSPORT or DIALOG:\n" + "\n".join(hits)
+
+
+def test_the_named_size_guard_catches_copies() -> None:
+    assert NAMED_PIXELS.search("var side := roundf(8 * UI_THEME.unit(self)) + 32 * u")
+    assert NAMED_PIXELS.search('var pad := roundf(32 * float(m["u"]))')
+    assert NAMED_EM.search("const CONNECT_EM := Vector2(32, 36)")
+    assert not NAMED_PIXELS.search("var gap := roundf(3.0 * UI_THEME.unit(self))")

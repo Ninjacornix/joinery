@@ -1,9 +1,10 @@
 @tool
 extends MenuButton
-## The composer's one options picker. Closed, it reads as the effective choice ("Auto",
-## "Thorough · GPT-6.1 Sol · High") with a chevron that hugs the text. Its menu holds the
-## modes as radio items, then "Model" and "Effort" submenus when the provider offers a choice.
-## A saved model or effort the provider no longer lists stays visible as "Unavailable: …".
+## The composer's one options picker. Closed, it reads as the reply mode ("Auto", "Thorough")
+## with a chevron that hugs the text; the chosen model shows in its tooltip. Its menu holds the
+## modes as radio items, then a "Model" submenu when the provider offers a choice. How hard the
+## model works follows from the mode, so there is no separate effort choice. A saved model the
+## provider no longer lists stays visible as "Unavailable: …".
 
 signal changed(selection: Dictionary)
 
@@ -15,15 +16,13 @@ const MODE_HINTS := ["Adapts to your request", "Favours short replies", "Favours
 ## Closed label width cap, in multiples of the font size.
 const MAX_EM := 16.0
 const MODEL_ID := 100
-const EFFORT_ID := 200
 
 var _models: Array = []
 var _selection: Dictionary = {"mode": "auto", "model": "", "effort": ""}
+var _last_reply := ""
 var _model_menu: PopupMenu
-var _effort_menu: PopupMenu
-## Choices in the submenus, by item index: model ids and effort values.
+## Choices in the model submenu, by item index.
 var _model_ids: Array[String] = []
-var _effort_ids: Array[String] = []
 
 
 func _init() -> void:
@@ -35,13 +34,10 @@ func _init() -> void:
 	alignment = HORIZONTAL_ALIGNMENT_LEFT
 	focus_mode = Control.FOCUS_ALL
 	accessibility_name = "Reply mode and model"
-	tooltip_text = "Reply mode and model"
 	UI.bind_icon(self, "chevron")
 	size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_model_menu = PopupMenu.new()
 	_model_menu.id_pressed.connect(_on_model)
-	_effort_menu = PopupMenu.new()
-	_effort_menu.id_pressed.connect(_on_effort)
 	get_popup().id_pressed.connect(_on_mode)
 	_rebuild()
 
@@ -50,12 +46,11 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_THEME_CHANGED:
 		_fit()
 	elif what == NOTIFICATION_PREDELETE:
-		for menu: PopupMenu in [_model_menu, _effort_menu]:
-			if is_instance_valid(menu) and menu.get_parent() == null:
-				menu.free()
+		if is_instance_valid(_model_menu) and _model_menu.get_parent() == null:
+			_model_menu.free()
 
 
-## Models reported by the provider: [{id, name, efforts?}].
+## Models reported by the provider: [{id, name}].
 func set_models(models: Array) -> void:
 	_models = []
 	for item: Variant in models:
@@ -64,19 +59,20 @@ func set_models(models: Array) -> void:
 	_rebuild()
 
 
-## Restore a saved {mode, model, effort} without emitting [signal changed].
+## Restore a saved {mode, model} without emitting [signal changed]. A saved effort is
+## dropped: the mode decides it now.
 func restore(selection: Dictionary) -> void:
 	_selection = {
 		"mode": str(selection.get("mode", "auto")),
 		"model": str(selection.get("model", "")),
-		"effort": str(selection.get("effort", "")),
+		"effort": "",
 	}
 	if not _selection["mode"] in MODES:
 		_selection["mode"] = "auto"
 	_rebuild()
 
 
-## The current {mode, model, effort}.
+## The current {mode, model, effort}; effort is always "" (the mode decides it).
 func selection() -> Dictionary:
 	return _selection.duplicate()
 
@@ -94,9 +90,15 @@ func set_mode(mode: String) -> void:
 func show_execution(event: Dictionary) -> void:
 	var parts := [str(event.get("name", "Provider default"))]
 	parts.append(str(event.get("mode", "auto")).capitalize())
-	if not str(event.get("effort", "")).is_empty():
-		parts.append(str(event["effort"]).capitalize())
-	tooltip_text = "Last reply: " + " · ".join(parts)
+	_last_reply = "Last reply: " + " · ".join(parts)
+	_sync_tooltip()
+
+
+## The chosen mode and model, then the route of the last reply when there was one.
+func _sync_tooltip() -> void:
+	tooltip_text = "Reply mode: %s. Model: %s." % [summary(), model_name()]
+	if not _last_reply.is_empty():
+		tooltip_text += "\n" + _last_reply
 
 
 ## The model submenu entries (model names, "Automatic" first), for tests and captures.
@@ -104,45 +106,35 @@ func model_items() -> Array[String]:
 	return _items(_model_menu)
 
 
-## The effort submenu entries ("Automatic" first).
-func effort_items() -> Array[String]:
-	return _items(_effort_menu)
-
-
-## The closed label: the mode, then the chosen model and effort.
+## The closed label: the mode only.
 func summary() -> String:
-	var parts: Array[String] = [MODE_NAMES[MODES.find(_selection["mode"])]]
+	return MODE_NAMES[MODES.find(_selection["mode"])]
+
+
+## The chosen model's name, or "Automatic".
+func model_name() -> String:
 	var model := str(_selection["model"])
-	if not model.is_empty():
-		var found := _model(model)
-		parts.append(str(found.get("name", model)) if not found.is_empty() else model)
-	var effort := str(_selection["effort"])
-	if not effort.is_empty():
-		parts.append(effort.capitalize())
-	return " · ".join(parts)
+	if model.is_empty():
+		return "Automatic"
+	var found := _model(model)
+	return str(found.get("name", model)) if not found.is_empty() else model
 
 
 func _rebuild() -> void:
 	var popup := get_popup()
-	for menu: PopupMenu in [_model_menu, _effort_menu]:
-		if menu.get_parent() != null:
-			menu.get_parent().remove_child(menu)
+	if _model_menu.get_parent() != null:
+		_model_menu.get_parent().remove_child(_model_menu)
 	popup.clear()
 	for index: int in MODES.size():
 		popup.add_radio_check_item(MODE_NAMES[index], index)
 		popup.set_item_checked(index, MODES[index] == _selection["mode"])
 		popup.set_item_tooltip(index, MODE_HINTS[index])
 	_fill_models()
-	_fill_efforts()
-	var show_models := _model_ids.size() > 1
-	var show_efforts := _effort_ids.size() > 1
-	if show_models or show_efforts:
+	if _model_ids.size() > 1:
 		popup.add_separator()
-	if show_models:
-		popup.add_submenu_node_item("Model", _model_menu, MODEL_ID)
-	if show_efforts:
-		popup.add_submenu_node_item("Effort", _effort_menu, EFFORT_ID)
+		popup.add_submenu_node_item("Model: " + model_name(), _model_menu, MODEL_ID)
 	text = summary()
+	_sync_tooltip()
 	_fit()
 
 
@@ -157,21 +149,6 @@ func _fill_models() -> void:
 	if not saved.is_empty() and _model(saved).is_empty():
 		_add_choice(_model_menu, _model_ids, "Unavailable: " + saved, saved, saved)
 		_model_menu.set_item_disabled(_model_menu.item_count - 1, true)
-
-
-func _fill_efforts() -> void:
-	_effort_menu.clear()
-	_effort_ids.clear()
-	var saved := str(_selection["effort"])
-	var efforts: Array = _model(str(_selection["model"])).get("efforts", [])
-	if efforts.is_empty() and saved.is_empty():
-		return
-	_add_choice(_effort_menu, _effort_ids, "Automatic", "", saved)
-	for value: Variant in efforts:
-		_add_choice(_effort_menu, _effort_ids, str(value).capitalize(), str(value), saved)
-	if not saved.is_empty() and not efforts.has(saved):
-		_add_choice(_effort_menu, _effort_ids, "Unavailable: " + saved, saved, saved)
-		_effort_menu.set_item_disabled(_effort_menu.item_count - 1, true)
 
 
 func _add_choice(
@@ -201,14 +178,7 @@ func _on_model(id: int) -> void:
 		return
 	_selection["model"] = _model_ids[id]
 	_selection["effort"] = ""
-	_rebuild()
-	changed.emit(selection())
-
-
-func _on_effort(id: int) -> void:
-	if id < 0 or id >= _effort_ids.size() or _effort_ids[id] == _selection["effort"]:
-		return
-	_selection["effort"] = _effort_ids[id]
+	_last_reply = ""
 	_rebuild()
 	changed.emit(selection())
 

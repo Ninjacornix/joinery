@@ -1,9 +1,9 @@
 @tool
 extends MarginContainer
-## The status line above the composer. Hidden when idle (it never says "Ready"). While the
-## assistant works: activity dots and what it is doing. While a change waits: "Waiting for
-## your review" with "Show review". While a check runs: "Running /doctor…". Short notes from
-## [method show_status] replace it for a few seconds, then it returns to the current state.
+## The status line above the composer. Hidden when idle (it never says "Ready"). While
+## Journeyman works: activity dots and what it is doing. While a change waits: "Waiting for
+## your review" with "Show review". While a check runs: "Running /doctor…". Short notes are
+## not shown here: they are the transcript's transient caption (chat_history.show_caption).
 
 signal review_requested
 
@@ -11,14 +11,12 @@ const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const INDICATOR := preload("activity_indicator.gd")
 
-## What the footer shows when no transient note is up: "idle", "busy", "review" or "command".
+## What the footer shows: "idle", "busy", "review" or "command".
 var mode := "idle"
 var _indicator: Control
 var _text: Label
 var _show: Button
 var _detail := ""
-var _note := ""
-var _note_serial := 0
 var _leaving := false
 
 
@@ -53,27 +51,10 @@ func set_mode(state: String, detail := "") -> void:
 	_refresh()
 
 
-## A transient line that clears after [param seconds].
-func show_status(text: String, seconds := 3.0) -> void:
-	_note = text
-	_note_serial += 1
-	var serial := _note_serial
-	_refresh()
-	if is_inside_tree():
-		get_tree().create_timer(seconds).timeout.connect(
-			func() -> void:
-				if serial == _note_serial:
-					_note = ""
-					_refresh()
-		)
-
-
 func _refresh() -> void:
 	var line := ""
 	var working := false
-	if not _note.is_empty():
-		line = _note
-	elif mode == "busy":
+	if mode == "busy":
 		line = _detail if not _detail.is_empty() else "Thinking…"
 		working = true
 	elif mode == "command":
@@ -84,7 +65,7 @@ func _refresh() -> void:
 	_text.text = line
 	_text.tooltip_text = line
 	_indicator.set("running", working)
-	_show.visible = mode == "review" and _note.is_empty()
+	_show.visible = mode == "review"
 	var should_show := not line.is_empty()
 	if should_show and (not visible or _leaving):
 		_leaving = false

@@ -14,11 +14,19 @@ signal art_review(event: Dictionary)
 signal models_received(models: Array)
 signal execution_changed(event: Dictionary)
 signal timing_received(event: Dictionary)
-## The queued prompt was written to the assistant's host (the optimistic bubble resolves).
+## The queued prompt was written to the agent's host (the optimistic bubble resolves).
 signal sent
-## A line from Joinery itself, not the assistant ("info" or "error"). Without a listener it
+## A line from Joinery itself, not Journeyman ("info" or "error"). Without a listener it
 ## falls back to message_received.
 signal notice(text: String, kind: String)
+## Asset work stopped before anything was made: the art direction needs the user's approval
+## first. [param event] is {needs_art_approval, resume, message}.
+signal art_gate(event: Dictionary)
+## The user approved the art direction ([param sha256] is the approved bible).
+signal art_approved(sha256: String)
+## Features the game brief asks for that the game lacks: [{text, command}], offered one at a
+## time and never acted on unasked.
+signal suggestions(items: Array)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 var context_provider: Callable
@@ -41,7 +49,7 @@ func start(agent: String, profile: String, engine: String, project: String) -> v
 	_engine = engine
 	_project = project
 	if agent.is_empty():
-		status_changed.emit("error", "No assistant connected.")
+		status_changed.emit("error", "Journeyman isn't connected.")
 		return
 	var args := PackedStringArray(
 		[
@@ -109,7 +117,8 @@ func _process(_delta: float) -> void:
 	if _job == null:
 		return
 	for line: String in _job.take_lines():
-		var event: Variant = JSON.parse_string(line)
+		var event_json := JSON.new()
+		var event: Variant = event_json.data if event_json.parse(line) == OK else null
 		if event is Dictionary:
 			_handle(event)
 	var result: Dictionary = _job.poll()
@@ -161,6 +170,12 @@ func _handle(event: Dictionary) -> void:
 			file_preview.emit(event)
 		"art_review":
 			art_review.emit(event)
+		"art_gate":
+			art_gate.emit(event)
+		"art_approved":
+			art_approved.emit(str(event.get("sha256", "")))
+		"suggestions":
+			suggestions.emit(event.get("items", []))
 		"file_decision":
 			file_decision.emit(event)
 		"editor_action":
@@ -179,7 +194,7 @@ func refresh_models() -> void:
 	if _job != null and _connected:
 		_job.send_line(JSON.stringify({"kind": "models_request"}))
 	else:
-		_notice("Connect your assistant before refreshing its models.", "info")
+		_notice("Connect Journeyman before refreshing its models.", "info")
 
 
 func _notice(text: String, kind: String) -> void:
@@ -190,7 +205,7 @@ func _notice(text: String, kind: String) -> void:
 
 
 func _display_name() -> String:
-	return _agent.capitalize() if not _agent.is_empty() else "your assistant"
+	return _agent.capitalize() if not _agent.is_empty() else "Journeyman"
 
 
 func send_editor_result(request_id: String, result: Dictionary) -> void:

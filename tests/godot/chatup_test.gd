@@ -82,6 +82,122 @@ func _run_with_motion() -> void:
 	motion.call("set_enabled", false)
 
 
+func _visible_text(node: Node) -> String:
+	var texts := PackedStringArray()
+	for child: Node in node.find_children("*", "", true, false):
+		if child is CanvasItem and not (child as CanvasItem).is_visible_in_tree():
+			continue
+		if child is Label or child is Button:
+			texts.append(child.get("text"))
+		elif child is TextEdit:
+			texts.append((child as TextEdit).placeholder_text)
+	return "\n".join(texts)
+
+
+## Revert is honest: "Reverting…" until Joinery confirms; a change past retention says
+## "Too old to revert". The art gate holds a request and sends it again after approval.
+func _run_revert_and_gate() -> void:
+	var chat := load(DOCK_PATH).new() as Control
+	root.add_child(chat)
+	chat.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	await process_frame
+	chat.set_chat_agent("codex")
+	chat.set_chat_state("connected", "")
+	var sent: Array[String] = []
+	chat.prompt_submitted.connect(func(text: String, _targets: Array) -> void: sent.append(text))
+	# An accepted change whose restore data was pruned.
+	chat._on_submit("Darken the floor")
+	chat.set_chat_busy(true)
+	chat.show_file_review("Darker floor", "", [], [], "tx-old")
+	chat.set_chat_busy(false)
+	var old: Control = chat._transcript.current_card()
+	chat._on_accept()
+	chat.hide_edit_review("Change accepted", "success")
+	chat._on_revertible({"tx-old": false})
+	_check(not old._revert.visible, "A change past retention offers no Revert")
+	_check(
+		old._too_old.is_visible_in_tree() and old._too_old.text == "Too old to revert",
+		"A card with revertible=false says Too old to revert"
+	)
+	# A change that can be reverted: not optimistic.
+	chat._on_submit("Widen the door")
+	chat.set_chat_busy(true)
+	chat.show_file_review("Wider door", "", [], [], "tx-new")
+	chat.set_chat_busy(false)
+	var card: Control = chat._transcript.current_card()
+	chat._on_accept()
+	chat.hide_edit_review("Change accepted", "success")
+	chat._on_revertible({"tx-new": true})
+	_check(card._revert.visible and not card._too_old.visible, "A recent change offers Revert")
+	var asked: Array[String] = []
+	# Stand in for the CLI: this test confirms the revert itself.
+	for link: Dictionary in chat._transcript.revert_requested.get_connections():
+		chat._transcript.revert_requested.disconnect(link["callable"])
+	chat._transcript.revert_requested.connect(func(id: String) -> void: asked.append(id))
+	card._revert.pressed.emit()
+	_check(asked == ["tx-new"], "Revert asks Joinery to revert that change")
+	_check(
+		card.state == "accepted" and card.reverting() and card._reverting.is_visible_in_tree(),
+		"Revert shows Reverting… and keeps the change accepted until confirmed"
+	)
+	_check(not card._revert.visible, "Revert can't be pressed twice")
+	chat._on_reverted("tx-new", false, "door.blend changed since")
+	_check(
+		card.state == "accepted" and card._revert.visible and card._error.visible,
+		"A failed revert says why in place and offers Revert again"
+	)
+	card._revert.pressed.emit()
+	chat._on_reverted("tx-new", true, "")
+	_check(
+		card.state == "reverted" and card._outcome_text.text == "Reverted",
+		"The card reads Reverted once Joinery confirms"
+	)
+	# The art gate holds a request; approval sends it again without retyping.
+	var gate_reviews := [0]
+	chat.art_review_requested.connect(func() -> void: gate_reviews[0] += 1)
+	chat._on_submit("Make the door look older")
+	var held: Control = chat._transcript.current_card()
+	chat.set_chat_busy(true)
+	chat.set_chat_state("working", "Opening door.blend in Blender")
+	chat._on_art_gate({"needs_art_approval": true, "resume": "Make the door look older"})
+	chat.set_chat_busy(false)
+	_check(held.gated(), "The art gate holds the request")
+	_check(
+		held.gate_text() == "Before Blender makes anything, agree how your game should look.",
+		"The gate card says what to agree first"
+	)
+	var review: Button = held._gate.find_children("*", "Button", true, false)[0]
+	_check(review.text == "Review the look", "Review the look is the primary action")
+	review.pressed.emit()
+	_check(gate_reviews[0] == 1, "Review the look opens the art direction")
+	var before := sent.size()
+	chat._on_art_approved("abc")
+	_check(
+		sent.size() == before + 1 and sent[-1] == "Make the door look older",
+		"After approval the held request goes out again as it was"
+	)
+	_check(held.state == "sending" and not held._gate.visible, "The card resumes in place")
+	_check(chat._transcript.caption_text() == "Art direction approved", "Approval is confirmed")
+	# Discard: the panel and the card both say the files were not touched.
+	chat._on_submit("Add a creak")
+	chat.set_chat_busy(true)
+	chat.show_file_review("Creak", "", [], [], "tx-creak")
+	chat.set_chat_busy(false)
+	var creak: Control = chat._transcript.current_card()
+	chat._on_reject()
+	chat.hide_edit_review("Change rejected. Original restored.", "rejected")
+	_check(
+		creak.state == "rejected" and creak._outcome_text.text == chat.DISCARDED,
+		"A discard reads Discarded. Your files were not touched."
+	)
+	_check(
+		chat._review._outcome_text.text == chat.DISCARDED,
+		"The Review panel confirms the discard with the same words"
+	)
+	chat.queue_free()
+	await process_frame
+
+
 func _run() -> void:
 	load(MOTION_PATH).set_enabled(false)
 	root.size = Vector2i(800, 800)
@@ -183,8 +299,8 @@ func _run() -> void:
 	_check(chat._slash.running().is_empty(), "Agent command must complete without blocking UI")
 	_check(chat._prompt.editable, "The composer returns after the check")
 	_check(
-		chat._transcript.get_parsed_text().contains("Supported assistants:"),
-		"Show a conversational assistant list"
+		chat._transcript.get_parsed_text().contains("Journeyman can use:"),
+		"Show which accounts Journeyman can use"
 	)
 	_check(
 		not chat._transcript.get_parsed_text().contains("PreToolUse"),
@@ -192,9 +308,14 @@ func _run() -> void:
 	)
 	chat.set_chat_agent("codex")
 	chat.set_chat_state("connecting", "Connecting to Codex…")
-	_check(chat._header._name.text == "Connecting to Codex…", "Say what is connecting")
+	_check(chat._header._name.text == "Connecting…", "Say it is connecting, without a name")
 	chat.set_chat_state("connected", "Codex connected")
 	_check(chat.connection_state == "connected", "Track the real connection state")
+	_check(
+		chat._header._name.text.is_empty() and not chat._header._dot.visible,
+		"A healthy header shows no name and no dot"
+	)
+	_check(chat._prompt.placeholder_text == "Ask Journeyman…", "The persona is Journeyman")
 	chat._on_submit("Say hello")
 	chat.set_chat_busy(true)
 	_check(chat._stop.visible, "A streaming reply can be stopped")
@@ -203,7 +324,7 @@ func _run() -> void:
 	chat.finish_agent_response(true)
 	chat.set_chat_busy(false)
 	_check(
-		chat._transcript.get_parsed_text().contains("Codex  Hello 世界"),
+		chat._transcript.get_parsed_text().contains("Journeyman  Hello 世界"),
 		"Stream one agent message without repeated headers"
 	)
 	chat.set_chat_state("error", "Lost connection to Codex.")
@@ -216,17 +337,27 @@ func _run() -> void:
 	chat.set_chat_agent("")
 	chat.set_chat_state("error", "No assistant connected.")
 	_check(chat.connection_state == "none", "No assistant chosen is its own state")
-	_check(chat._header._banner_action.text == "Connect an assistant", "Offer to connect one")
+	_check(chat._header._banner_action.text == "Connect", "Offer to connect an account")
+	_check(not _visible_text(chat).to_lower().contains("assistant"), "No copy says assistant")
 	var connects := [0]
 	chat.connect_requested.connect(func() -> void: connects[0] += 1)
 	chat._header._banner_action.pressed.emit()
-	_check(connects[0] == 1, "Connect an assistant asks the editor to connect")
-	chat.show_status("Focus mode on · /focus to undo", 0.1)
-	_check(chat._footer.text() == "Focus mode on · /focus to undo", "Transient footer line")
+	_check(connects[0] == 1, "Connect asks the editor to connect")
+	var undone := [0]
+	chat.show_status("Focus mode on", 0.1, "Undo", func() -> void: undone[0] += 1)
+	_check(
+		chat._transcript.caption_text() == "Focus mode on" and not chat._footer.visible,
+		"A transient note is a caption over the transcript, not a footer line"
+	)
+	_check(chat._transcript._caption.top_level, "The caption takes no layout height")
+	chat._transcript._caption_action.pressed.emit()
+	_check(undone[0] == 1, "The caption's link runs its action")
+	chat.show_status("Panels hidden", 0.1)
 	await create_timer(0.3).timeout
-	_check(not chat._footer.visible, "The transient line clears")
+	_check(chat._transcript.caption_text().is_empty(), "The transient caption clears")
 	chat.queue_free()
 	await process_frame
+	await _run_revert_and_gate()
 	await _run_with_motion()
 	print("sidebar chat: ", "FAILED" if _failed else "ok")
 	quit(1 if _failed else 0)

@@ -1,9 +1,10 @@
 @tool
 extends CenterContainer
-## "Connect an AI assistant": the Project Manager's first screen, also usable inside an editor
-## AcceptDialog. Choosing a signed-in assistant continues; a fresh sign-in shows "Connected"
-## on its card, fades out, then emits [signal connected]. In the Project Manager the fork
-## switches to the project list on that signal; elsewhere this screen only emits it.
+## "Connect Journeyman to your account": the Project Manager's first screen, also usable
+## inside an editor AcceptDialog. Choosing a signed-in account continues; a fresh sign-in
+## shows "Connected" on its card, fades out, then emits [signal connected]. In the Project
+## Manager the fork switches to the project list on that signal; elsewhere this screen only
+## emits it.
 
 ## [param agent_id] is the assistant (or API driver); [param method] how it signed in.
 signal connected(agent_id: String, method: String)
@@ -33,7 +34,7 @@ const SIGN_IN_WAIT := 180.0
 ## text say it is unavailable.
 const UNAVAILABLE_ALPHA := 0.6
 ## Under the list while no assistant is chosen: why Continue is not available yet.
-const CHOOSE_HINT := "Choose an assistant to continue."
+const CHOOSE_HINT := "Choose an account to continue."
 
 var engine_home := ""
 var initial_agent := ""
@@ -98,7 +99,9 @@ func _ready() -> void:
 	var header := VBoxContainer.new()
 	header.theme_type_variation = "JoineryTight"
 	_choices.add_child(header)
-	header.add_child(UI_COMPONENTS.label("Connect an AI assistant", "JoineryDisplay", true))
+	header.add_child(
+		UI_COMPONENTS.label("Connect Journeyman to your account", "JoineryDisplay", true)
+	)
 	header.add_child(
 		UI_COMPONENTS.label(
 			"Sign in with Claude Code, Codex, Gemini or opencode, or use an API key.",
@@ -399,9 +402,9 @@ func _continue_reason(data: Dictionary, ready: bool) -> String:
 	if ready:
 		return ""
 	if _selected.is_empty():
-		return "Choose an assistant first."
+		return "Choose an account first."
 	if data.is_empty():
-		return "Checking this assistant…"
+		return "Checking this account…"
 	if not data.get("supported", true):
 		return str(data.get("reason", UNAVAILABLE))
 	return "Check this connection in API settings."
@@ -484,7 +487,10 @@ func _process(delta: float) -> void:
 		return
 	_job = null
 	_elapsed = 0
-	var payload: Variant = JSON.parse_string(str(result["output"]))
+	var payload_json := JSON.new()
+	var payload: Variant = (
+		payload_json.data if payload_json.parse(str(result["output"])) == OK else null
+	)
 	if not payload is Dictionary:
 		_waiting_for = ""
 		_show_message(HELPER_MISSING, true)

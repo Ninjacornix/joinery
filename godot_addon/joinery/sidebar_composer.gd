@@ -1,13 +1,13 @@
 @tool
 extends PanelContainer
 ## The composer: selected-target chips, the message field, the options picker, and Send. While
-## the assistant works, Stop takes Send's slot (an icon crossfade with a little blur); the
+## Journeyman works, Stop takes Send's slot (an icon crossfade with a little blur); the
 ## field stays editable but Enter waits. While a change waits for review the field is locked.
 ## Send is live only when it can act: connected, unlocked and with text in the field; otherwise
 ## it takes its muted disabled look (so the banner's button, when there is one, is the only
 ## accent action). The reply-mode picker rests with Send: it is live only while connected and
-## idle. The dock also shows Stop while a request is on its way, before the
-## assistant takes it. The draft stays in the field.
+## idle. The dock also shows Stop while a request is on its way, before Journeyman takes
+## it. The draft stays in the field.
 ## Its border tweens to the accent while the field has focus.
 
 signal submitted(text: String)
@@ -24,7 +24,6 @@ var prompt: TextEdit
 var options: MenuButton
 var send: Button
 var stop: Button
-var agent_name := "Codex"
 var _style: StyleBoxFlat
 var _focus_tween: Tween
 var _focused := false
@@ -43,7 +42,7 @@ func _init() -> void:
 	chips.hide()
 	body.add_child(chips)
 	prompt = INPUT_SCRIPT.new()
-	prompt.accessibility_name = "Message to your assistant"
+	prompt.accessibility_name = "Message to Journeyman"
 	prompt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	prompt.text_submitted.connect(_on_enter)
 	prompt.focus_entered.connect(_set_focus.bind(true))
@@ -115,7 +114,7 @@ func set_locked(locked: bool) -> void:
 	set_placeholder()
 
 
-## Follow the assistant connection: Send is live only while connected.
+## Follow Journeyman's connection: Send is live only while connected.
 func set_connection(state: String) -> void:
 	_connection = state
 	_sync_send()
@@ -127,10 +126,9 @@ func set_placeholder(waiting := "") -> void:
 	if not waiting.is_empty():
 		prompt.placeholder_text = waiting
 	elif not _locked and _connection == "none":
-		prompt.placeholder_text = "Connect an assistant to start"
+		prompt.placeholder_text = "Connect Journeyman to start"
 	elif not _locked:
-		var name := agent_name if not agent_name.is_empty() else "your assistant"
-		prompt.placeholder_text = "Message " + name
+		prompt.placeholder_text = "Ask Journeyman…"
 
 
 ## Mark Stop as pressed and waiting for the reply to end.
@@ -184,6 +182,7 @@ func _restyle() -> void:
 ## The picker matches Send's height so the row's controls share top and bottom lines, and Stop
 ## takes exactly Send's square so the swap never shifts the row.
 func _match_heights() -> void:
+	send.custom_minimum_size = Vector2.ONE * UI_THEME.send_px(send)
 	var square := send.get_combined_minimum_size()
 	options.custom_minimum_size.y = square.y
 	stop.custom_minimum_size = square

@@ -29,7 +29,7 @@ const DRIVERS := [
 	],
 ]
 const UNAVAILABLE := "This connection is unavailable on this platform."
-const NOT_INSTALLED := "Install the selected assistant to use this connection."
+const NOT_INSTALLED := "Install the selected app to use this connection."
 
 var _driver: OptionButton
 var _saved: OptionButton

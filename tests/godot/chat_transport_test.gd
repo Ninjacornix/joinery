@@ -60,7 +60,7 @@ func _run() -> void:
 	_check(backend._connected, "Connect before sending a queued prompt")
 	_check(receipts[0] == 1, "The bridge reports when the prompt was sent")
 	_check(
-		chat._transcript.get_parsed_text().contains("Codex  世界 Door"),
+		chat._transcript.get_parsed_text().contains("Journeyman  世界 Door"),
 		"Preserve split UTF-8 frames and the submitted target snapshot"
 	)
 	backend.submit("error", [])

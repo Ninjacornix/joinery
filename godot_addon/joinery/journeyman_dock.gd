@@ -1,18 +1,24 @@
 # gdlint: disable=max-public-methods
 @tool
 extends PanelContainer
-## Journeyman, the sidebar chat. Top to bottom: the header (assistant status, settings menu)
-## and its error banner, the transcript of change cards and replies, the status footer, and the
-## composer. The Review panel is built here but lives in the editor's bottom panel
-## ([method take_review_panel]); decisions are made only there.
+## Journeyman, the sidebar chat. Top to bottom: the header (quiet when all is well; the
+## connection banner and one app readiness line when needed, and the settings menu), the
+## transcript of change cards and replies, the status footer, and the composer. The Review
+## panel is built here but lives in the editor's bottom panel ([method take_review_panel]);
+## decisions are made only there. The persona is always "Journeyman"; the provider (Codex,
+## Claude…) is named only in the lost-connection banner and in Settings.
 ##
 ## Sending is optimistic: the request card appears at once in a "sending" state (Stop already
-## in Send's slot) and resolves when the assistant picks it up, or offers Retry. A request
+## in Send's slot) and resolves when Journeyman picks it up, or offers Retry. A request
 ## lost with the connection turns the header dot red and disables Send, leaving Retry as the
 ## one action; once the banner shows Reconnect, the card says only "Not sent" until it is
 ## back. While a step is live on the card the footer stays out of the way. A chat bridge added
-## as a child is attached automatically ([method attach_bridge]) for send receipts, notices
-## and transaction ids.
+## as a child is attached automatically ([method attach_bridge]) for send receipts, notices,
+## transaction ids, the art gate, approvals and the game's suggestions.
+##
+## "/feature add|remove <id>" shows a plan card from `joinery feature … --plan`; the feature is
+## applied only when the user presses Apply on it. "/brief" opens design/brief.md read-only.
+## Suggestions from the game brief arrive one line at a time and are never acted on unasked.
 
 signal setup_requested
 signal focus_toggle_requested
@@ -22,7 +28,7 @@ signal accept_edit_requested
 signal reject_edit_requested
 signal cancel_requested
 signal reconnect_requested
-## "Connect an assistant" in the no-assistant banner.
+## "Connect" in the first-run banner.
 signal connect_requested
 signal art_review_requested
 signal review_requested
@@ -32,6 +38,9 @@ signal models_refresh_requested
 signal target_opened(path: String)
 ## An accepted change was reverted on disk; the editor should rescan and reload its files.
 signal change_reverted(transaction_id: String)
+## A change the user applied from the sidebar (a feature) wrote [param paths] (project-relative)
+## on disk. Without a listener the dock rescans the file system itself.
+signal files_changed(transaction_id: String, paths: PackedStringArray)
 
 const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
 const HISTORY_SCRIPT := preload("res://addons/joinery/chat_history.gd")
@@ -43,12 +52,21 @@ const COMPOSER_SCRIPT := preload("res://addons/joinery/sidebar_composer.gd")
 const MENU_SCRIPT := preload("res://addons/joinery/command_menu.gd")
 const SLASH_SCRIPT := preload("res://addons/joinery/slash_commands.gd")
 const REVIEW_PATH := "res://addons/joinery/review_panel.gd"
-const REVIEW_WAIT := "Accept or reject the change first"
+const ART_DIALOG := preload("res://addons/joinery/art_review_dialog.gd")
+const REVIEW_WAIT := "Accept or discard the change first"
+const PERSONA := "Journeyman"
+const DISCARDED := "Discarded. Your files were not touched."
+const BRIEF_PATH := "res://design/brief.md"
+## Document view size, in multiples of the font size.
+const DOCUMENT_EM := Vector2(46, 40)
 ## Minimum dock width in multiples of the font size.
 const MIN_EM := 24
 
-## "connected", "connecting", "error" or "none" (no assistant chosen).
+## "connected", "connecting", "error" or "none" (no account connected yet).
 var connection_state := "connecting"
+## The latest art review from the bridge ({text, sha256, approved, version, references,
+## suggestions}); the art direction dialog reads it.
+var art_review_event: Dictionary = {}
 var _content: VBoxContainer
 var _header: HEADER_SCRIPT
 var _transcript: HISTORY_SCRIPT
@@ -80,6 +98,15 @@ var _outcome := "done"
 var _failure := ""
 var _active_card: Control
 var _bridge: Node
+## The plan card of the last "/feature add|remove" and its {action, feature}.
+var _plan_card: Control
+var _plan: Dictionary = {}
+## Suggestions from the game brief still to offer, and the one on show.
+var _offers: Array[Dictionary] = []
+var _offer_row: Control
+var _offered: Array[String] = []
+## True between an art approval and sending the request the art gate held.
+var _resume_ready := false
 
 
 func _init() -> void:
@@ -97,6 +124,7 @@ func _ready() -> void:
 	_header = HEADER_SCRIPT.new()
 	_header.reconnect_pressed.connect(func() -> void: reconnect_requested.emit())
 	_header.connect_pressed.connect(func() -> void: connect_requested.emit())
+	_header.readiness_check_pressed.connect(func() -> void: run_command("/tools"))
 	_content.add_child(_header)
 	_transcript = HISTORY_SCRIPT.new()
 	_transcript.accessibility_name = "Conversation"
@@ -109,7 +137,6 @@ func _ready() -> void:
 	_footer.review_requested.connect(func() -> void: review_requested.emit())
 	_content.add_child(_footer)
 	_composer = COMPOSER_SCRIPT.new()
-	_composer.agent_name = _agent_name
 	_composer.submitted.connect(_on_submit)
 	_composer.stop_pressed.connect(_request_cancel)
 	_content.add_child(_composer)
@@ -134,11 +161,19 @@ func _ready() -> void:
 	_slash.started.connect(func(_command: String) -> void: _sync())
 	_slash.finished.connect(_on_slash_finished)
 	_slash.reverted.connect(_on_reverted)
+	_slash.feature_planned.connect(_on_feature_planned)
+	_slash.feature_applied.connect(_on_feature_applied)
+	_slash.readiness_changed.connect(_on_readiness)
+	_slash.revertible_changed.connect(_on_revertible)
+	_slash.bible_upgraded.connect(_on_bible_upgraded)
 	add_child(_slash)
 	_review = _make_review()
 	_settings = SETTINGS_SCRIPT.attach(self, _header.row, _content)
 	_show_connection()
 	_settings.apply_all()
+	if Engine.is_editor_hint():
+		# Which enabled app needs something, from the cache (refreshed in the background).
+		_slash.check_readiness.call_deferred()
 
 
 func _exit_tree() -> void:
@@ -189,7 +224,15 @@ func _input(event: InputEvent) -> void:
 ## own wiring of the other bridge signals is unchanged.
 func attach_bridge(bridge: Node) -> void:
 	_bridge = bridge
-	var links := {"sent": _on_sent, "notice": _on_notice, "file_preview": _on_bridge_preview}
+	var links := {
+		"sent": _on_sent,
+		"notice": _on_notice,
+		"file_preview": _on_bridge_preview,
+		"art_review": _on_art_review_event,
+		"art_gate": _on_art_gate,
+		"art_approved": _on_art_approved,
+		"suggestions": _on_suggestions,
+	}
 	for signal_name: String in links:
 		if (
 			bridge.has_signal(signal_name)
@@ -223,6 +266,70 @@ func _on_bridge_preview(event: Dictionary) -> void:
 	var card := _card()
 	if card != null and card.transaction_id.is_empty():
 		card.transaction_id = str(event.get("transaction_id", ""))
+
+
+func _on_art_review_event(event: Dictionary) -> void:
+	art_review_event = event.duplicate(true)
+
+
+## Asset work stopped at the art gate: the request's card holds it until approval.
+func _on_art_gate(_event: Dictionary) -> void:
+	var card := _card()
+	if card != null:
+		card.show_art_gate()
+
+
+## The art direction was approved: requests the gate held go out again as they were.
+func _on_art_approved(_sha256: String) -> void:
+	show_status("Art direction approved")
+	_resume_ready = true
+	_resume_held()
+
+
+## After approval, send the held request as soon as nothing else is in the way.
+func _resume_held() -> void:
+	if not _resume_ready or _busy or _review_pending:
+		return
+	_resume_ready = false
+	for card: Control in _transcript._cards:
+		if is_instance_valid(card) and card.gated():
+			_send_request(card)
+			return
+
+
+## One-line suggestions from the game brief ({text, command}), offered one at a time.
+func _on_suggestions(items: Array) -> void:
+	for item: Variant in items:
+		if not item is Dictionary:
+			continue
+		var text := str(item.get("text", ""))
+		if text.is_empty() or _offered.has(text):
+			continue
+		_offered.append(text)
+		_offers.append(item)
+	if not is_instance_valid(_offer_row):
+		_next_offer()
+
+
+func _next_offer() -> void:
+	if is_instance_valid(_offer_row):
+		_transcript.remove_offer(_offer_row)
+	_offer_row = null
+	if _offers.is_empty():
+		return
+	var item: Dictionary = _offers.pop_front()
+	var actions: Array = []
+	var command := str(item.get("command", ""))
+	if not command.is_empty():
+		actions.append([command, _take_offer.bind(command)])
+	actions.append(["Not now", _next_offer])
+	_offer_row = _transcript.add_offer(str(item.get("text", "")), actions)
+
+
+## The user chose an offer: plan it (a plan changes nothing), and show the next one.
+func _take_offer(command: String) -> void:
+	_next_offer()
+	run_command(command)
 
 
 # --- Composer and commands ---------------------------------------------------------------------
@@ -288,7 +395,17 @@ func _on_submit(text: String) -> void:
 		run_command(entry)
 		return
 	_assistant_open = false
-	_send_request(_transcript.add_request(entry, target_snapshot()))
+	var card := _transcript.add_request(entry, target_snapshot())
+	card.connect("gate_review_requested", func() -> void: art_review_requested.emit())
+	card.connect(
+		"gate_describe_requested", func() -> void: fill_composer("Here's how my game should look: ")
+	)
+	_send_request(card)
+
+
+## Put [param text] in the message box, ready to edit and send (offers and "Ask Journeyman").
+func fill_composer(text: String) -> void:
+	_fill_prompt(text)
 
 
 func _send_request(card: Control) -> void:
@@ -320,7 +437,7 @@ func _on_card_failed(reason: String) -> void:
 		_transcript.set_examples_enabled(false)
 
 
-## Stop takes Send's slot while the assistant works or a request is on its way to it.
+## Stop takes Send's slot while Journeyman works or a request is on its way to it.
 func _sync_send_slot() -> void:
 	var card := _card()
 	_composer.set_busy(_busy or (card != null and card.state == "sending"))
@@ -346,6 +463,8 @@ func _on_slash_requested(command: String) -> void:
 			setup_requested.emit()
 		"/art":
 			art_review_requested.emit()
+		"/brief":
+			_open_brief()
 		"/models":
 			models_refresh_requested.emit()
 		"/focus":
@@ -356,16 +475,111 @@ func _on_slash_requested(command: String) -> void:
 
 func _on_slash_finished(_command: String, text: String, kind: String) -> void:
 	_sync()
-	_transcript.add_notice(text, kind)
+	if not text.is_empty():
+		_transcript.add_notice(text, kind)
 
 
 func _on_reverted(transaction_id: String, ok: bool, message: String) -> void:
 	var card := _transcript.card_for(transaction_id)
 	if card != null:
 		card.revert_finished(ok, message)
+	if is_instance_valid(_plan_card) and _plan_card.transaction_id == transaction_id:
+		_plan_card.set_reverted(ok, message)
 	if ok:
-		show_status("Change reverted")
 		change_reverted.emit(transaction_id)
+
+
+## "/brief": the game brief, read-only. Without one, offer to write it from the setup answers.
+func _open_brief() -> void:
+	if not FileAccess.file_exists(BRIEF_PATH):
+		var row: Array[Control] = []
+		var write := func() -> void:
+			_transcript.remove_offer(row[0])
+			_slash.write_brief()
+		row.append(
+			_transcript.add_offer(
+				"This project has no game brief yet.", [["Write the brief", write]]
+			)
+		)
+		return
+	var text := FileAccess.get_file_as_string(BRIEF_PATH)
+	ART_DIALOG.open_document(self, "Game brief", text, _dialog_size(), "Change the game brief: ")
+
+
+## "Update to the new layout" in the art direction dialog.
+func upgrade_bible() -> void:
+	show_status("Updating the art direction…", 30.0)
+	_slash.upgrade_bible()
+
+
+func _on_bible_upgraded(ok: bool, message: String) -> void:
+	if not ok:
+		_transcript.add_notice(
+			"Couldn't update the art direction. " + message if not message.is_empty() else "",
+			"error"
+		)
+		show_status("")
+		return
+	show_status("Art direction updated. Approve it again when it looks right.", 5.0)
+	art_review_requested.emit()
+
+
+func _on_feature_planned(plan: Dictionary) -> void:
+	var action := str(plan.get("action", "add"))
+	var id := str(plan.get("feature", ""))
+	var verb := "Add" if action == "add" else "Remove"
+	var card: Control = _transcript.add_plan(plan, "%s %s" % [verb, SLASH_SCRIPT.feature_name(id)])
+	_plan_card = card
+	_plan = {"action": action, "feature": id}
+	card.connect("apply_pressed", func() -> void: _slash.apply_feature(action, id))
+	card.connect("revert_pressed", func(tx: String) -> void: _slash.revert(tx))
+
+
+func _on_feature_applied(ok: bool, message: String, transaction_id: String) -> void:
+	if not is_instance_valid(_plan_card):
+		return
+	if not ok:
+		_plan_card.set_failed(message)
+		return
+	var name := SLASH_SCRIPT.feature_name(str(_plan.get("feature", "")))
+	var done := ("Added %s." if _plan.get("action") == "add" else "Removed %s.") % name
+	var paths := PackedStringArray()
+	for path: Variant in _plan_card.plan.get("changes", []):
+		paths.append(str(path))
+	if paths.has("project.godot"):
+		message += " Reload the project to use its new settings (Project > Reload Current Project)."
+	_plan_card.set_applied((done + " " + message).strip_edges(), transaction_id)
+	if not files_changed.get_connections().is_empty():
+		files_changed.emit(transaction_id, paths)
+	elif Engine.is_editor_hint():
+		EditorInterface.get_resource_filesystem().scan()
+
+
+## The header names the first enabled app that needs something.
+func _on_readiness(report: Dictionary) -> void:
+	_header.show_readiness(SLASH_SCRIPT.readiness_line(report))
+
+
+## Which accepted changes can still be reverted, from `joinery transactions list`.
+func _on_revertible(states: Dictionary) -> void:
+	for id: String in states:
+		var card := _transcript.card_for(id)
+		if card != null:
+			card.set_revertible(bool(states[id]))
+
+
+## Ask again which changes can be reverted (after Compact in Settings, an accept, a revert).
+func refresh_revertible() -> void:
+	_slash.check_revertible()
+
+
+func _dialog_size() -> Vector2i:
+	var em := float(get_theme_default_font_size())
+	var window := get_window().size if is_inside_tree() else Vector2i(1280, 800)
+	return Vector2i(
+		mini(roundi(DOCUMENT_EM.x * em), roundi(window.x * 0.9)),
+		mini(roundi(DOCUMENT_EM.y * em), roundi(window.y * 0.9))
+	)
 
 
 ## Footer and composer follow the state: a running check, a reply, a pending review, or idle.
@@ -389,7 +603,7 @@ func _sync() -> void:
 func _request_cancel() -> void:
 	var card := _card()
 	if not _busy and card != null and card.state == "sending":
-		# Stopped before the assistant took it: the request stays here, ready to Retry.
+		# Stopped before Journeyman took it: the request stays here, ready to Retry.
 		card.set_failed()
 		cancel_requested.emit()
 		return
@@ -399,9 +613,11 @@ func _request_cancel() -> void:
 	cancel_requested.emit()
 
 
-## A transient footer line ("Focus mode on · /focus to undo") that clears after [param seconds].
-func show_status(text: String, seconds := 3.0) -> void:
-	_footer.show_status(text, seconds)
+## A transient caption ("Focus mode on · /focus to undo") over the bottom of the transcript
+## that clears after [param seconds]. [param action] adds a link that runs [param callback].
+## It takes no layout height. "" clears it.
+func show_status(text: String, seconds := 3.0, action := "", callback := Callable()) -> void:
+	_transcript.show_caption(text, seconds, action, callback)
 
 
 ## Apply settings: {mode, text_scale, show_timings, details_open}; missing keys are kept.
@@ -428,6 +644,25 @@ func on_selection_changed() -> void:
 func set_resource_target(path: String, type: String = "Resource", source: String = "") -> void:
 	if not path.is_empty():
 		_set_targets([CHIP_SCRIPT.for_resource(path, type, source)])
+
+
+## Make a part of a model the message target ({part_kind, resource, object, material, …} from
+## `joinery parts` or a viewport pick, or a target already built from one).
+func set_part_target(part: Dictionary) -> void:
+	if not part.is_empty():
+		_set_targets([CHIP_SCRIPT.for_part(part)])
+
+
+## A part dragged from the workspace's parts list ({type: "joinery_part", part}) becomes the
+## target wherever it lands in the sidebar; the message box keeps its own text drops.
+func _can_drop_data(_at: Vector2, data: Variant) -> bool:
+	return (
+		data is Dictionary and data.get("type") == "joinery_part" and data.get("part") is Dictionary
+	)
+
+
+func _drop_data(_at: Vector2, data: Variant) -> void:
+	set_part_target(data["part"])
 
 
 func target_snapshot() -> Array[Dictionary]:
@@ -460,13 +695,13 @@ func _sync_chips() -> void:
 	_chips.visible = not _target_context.is_empty()
 
 
-# --- Assistant state ---------------------------------------------------------------------------
+# --- Connection state --------------------------------------------------------------------------
 
 
+## The provider behind Journeyman ("codex"); named only when its connection is lost.
 func set_chat_agent(agent: String) -> void:
 	_agent_name = agent.capitalize()
 	if _composer != null:
-		_composer.agent_name = _agent_name
 		_composer.set_placeholder(REVIEW_WAIT if _review_pending else "")
 		_header.show_state(connection_state, _agent_name)
 		_transcript.set_examples_enabled(connection_state == "connected")
@@ -512,6 +747,8 @@ func set_chat_busy(busy: bool) -> void:
 				card.finish(_outcome)
 	_sync_send_slot()
 	_sync()
+	if not busy and was_busy:
+		_resume_held()
 
 
 func set_model_options(models: Array) -> void:
@@ -542,7 +779,7 @@ func show_timing(event: Dictionary) -> void:
 
 func append_agent_text(text: String, new_message: bool) -> void:
 	_on_sent()
-	_transcript.append_delta(_agent_name, text, new_message or not _assistant_open)
+	_transcript.append_delta(PERSONA, text, new_message or not _assistant_open)
 	_assistant_open = true
 
 
@@ -555,7 +792,7 @@ func show_agent_message(text: String) -> void:
 		return
 	_on_sent()
 	finish_agent_response(false)
-	_transcript.add_message(_agent_name, text)
+	_transcript.add_message(PERSONA, text)
 
 
 func finish_agent_response(_ok: bool) -> void:
@@ -584,6 +821,7 @@ func take_review_panel() -> Control:
 func show_edit_review(summary: String, count := 0) -> void:
 	_review_call("show_scene_review", [summary, count])
 	_open_review([])
+	_arrive()
 
 
 func show_file_review(
@@ -595,25 +833,38 @@ func show_file_review(
 	var card := _card()
 	if card != null and not transaction_id.is_empty():
 		card.transaction_id = transaction_id
+	_arrive()
+
+
+## The request card travels into the Review panel's header (a shared-element entrance).
+func _arrive() -> void:
+	var card := _card()
+	if card != null and card.is_visible_in_tree() and _review.has_method("arrive_from"):
+		_review.call("arrive_from", card.get_global_rect())
 
 
 ## Close the review. [param kind] is "success", "rejected", "info" or "error"; the message is
-## shown on the request's card, or as a notice when there is none.
+## shown on the request's card, or as a notice when there is none. A discard always reads
+## "Discarded. Your files were not touched.": nothing in the game changed.
 func hide_edit_review(message: String = "", kind := "info") -> void:
 	var was_pending := _review_pending
 	_review_pending = false
 	var decided := _decision_kind(message, kind)
-	if decided == "success" and was_pending and _review.has_method("show_result"):
-		_review.call("show_result", true, message)
+	if decided == "rejected":
+		message = DISCARDED
+	if decided in ["success", "rejected"] and was_pending and _review.has_method("show_result"):
+		_review.call("show_result", decided == "success", message)
 	else:
 		_review_call("clear", [])
 	_sync()
 	if was_pending:
 		review_closed.emit()
-	if message.is_empty():
-		return
-	finish_agent_response(false)
-	_transcript.add_decision(message, decided, _card() if was_pending else null)
+	if decided == "success" and was_pending:
+		refresh_revertible()
+	if not message.is_empty():
+		finish_agent_response(false)
+		_transcript.add_decision(message, decided, _card() if was_pending else null)
+	_resume_held()
 
 
 func set_review_applying(on: bool) -> void:
@@ -648,7 +899,7 @@ func _on_accept() -> void:
 func _on_reject() -> void:
 	var card := _card()
 	if card != null and card.awaiting_decision():
-		card.set_outcome("rejected", "Change rejected. Original restored.", true)
+		card.set_outcome("rejected", DISCARDED, true)
 	reject_edit_requested.emit()
 
 
@@ -686,7 +937,7 @@ static func _decision_kind(message: String, kind: String) -> String:
 	var lower := message.to_lower()
 	if lower.contains("accepted"):
 		return "success"
-	if lower.contains("rejected"):
+	if lower.contains("rejected") or lower.contains("discarded"):
 		return "rejected"
 	return "info"
 

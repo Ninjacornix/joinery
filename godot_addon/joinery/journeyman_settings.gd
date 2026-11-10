@@ -17,7 +17,7 @@ const TEXT_SIZES := UI_THEME.TEXT_SIZES
 const MODES := ["Auto", "Fast", "Thorough"]
 ## What each reply mode does, shown as its tooltip.
 const MODE_HINTS := [
-	"The assistant picks how much to do for each request",
+	"Journeyman picks how much to do for each request",
 	"Short, quick replies for small changes",
 	"Takes longer and works through bigger changes step by step",
 ]
@@ -30,7 +30,7 @@ const TROUBLESHOOTING := [
 	["Check app connections", "/tools"],
 	["Check assets", "/check"],
 	["Verify recipes", "/rebuild"],
-	["Supported assistants", "/agents"],
+	["Accounts Journeyman can use", "/agents"],
 ]
 ## Blank space right of the ink in the 16-unit chevron and disclosure glyphs (icons/ui), so
 ## every trailing control's ink ends on the content edge, where the switches end.
@@ -38,6 +38,7 @@ const CHEVRON_INK := 3.75 / 16.0
 const DISCLOSURE_INK := 4.75 / 16.0
 const BUTTON_STATES := ["normal", "hover", "pressed", "hover_pressed", "disabled", "focus"]
 const COMPACT_TIP := "Keep the current assets and drop older restore data"
+const COMPACT_ASK := "Compact history? Older changes can no longer be reverted."
 
 var dock: Control
 var _body: VBoxContainer
@@ -58,6 +59,9 @@ var _history_button: MenuButton
 var _history_indicator: Control
 var _history_job: RefCounted
 var _history_action := ""
+## The inline "Compact history?" row with Compact and Cancel.
+var _compact_confirm: Control
+var _compact_button: Button
 
 
 ## Add the menu button to the sidebar header and the hidden settings page below it.
@@ -98,9 +102,11 @@ func set_open(open: bool) -> void:
 		_refresh_rows()
 		_history("usage")
 		UI_MOTION.stagger(_body.get_children())
-	elif _history_action != "compact":
-		# Reading the size can stop; a running Compact finishes even with the page closed.
-		_cancel_history()
+	else:
+		_compact_confirm.hide()
+		if _history_action != "compact":
+			# Reading the size can stop; a running Compact finishes even with the page closed.
+			_cancel_history()
 
 
 ## journeyman.cfg in the user config dir (the Project Manager reads the same file).
@@ -290,9 +296,9 @@ func _build_replies() -> void:
 func _hint_mode() -> void:
 	var index := _mode_picker.selected
 	_mode_picker.tooltip_text = (
-		"How the assistant replies. " + MODE_HINTS[index]
+		"How Journeyman replies. " + MODE_HINTS[index]
 		if index >= 0 and index < MODE_HINTS.size()
-		else "How the assistant replies"
+		else "How Journeyman replies"
 	)
 
 
@@ -311,6 +317,47 @@ func _build_project() -> void:
 	tools.add_child(_build_history_menu())
 	_history_row = UI.setting_row("History", tools)
 	section.body.add_child(_history_row)
+	section.body.add_child(_build_compact_confirm())
+
+
+## Compact asks first, in place: no dialog, and Cancel leaves everything as it was.
+func _build_compact_confirm() -> Control:
+	var inset := MarginContainer.new()
+	inset.theme_type_variation = "JoineryInset"
+	inset.name = "CompactConfirm"
+	inset.hide()
+	var row := HBoxContainer.new()
+	row.theme_type_variation = "JoineryRow"
+	inset.add_child(row)
+	var ask := UI.label(COMPACT_ASK, "JoineryCaption", true)
+	ask.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(ask)
+	var cancel := UI.secondary("Cancel")
+	cancel.accessibility_name = "Keep the history as it is"
+	cancel.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	cancel.pressed.connect(_ask_compact.bind(false))
+	row.add_child(cancel)
+	_compact_button = UI.primary("Compact")
+	_compact_button.accessibility_name = "Compact history"
+	_compact_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_compact_button.pressed.connect(
+		func() -> void:
+			_ask_compact(false)
+			_history("compact")
+	)
+	row.add_child(_compact_button)
+	_compact_confirm = inset
+	return inset
+
+
+## Show or hide the "Compact history?" row.
+func _ask_compact(open: bool) -> void:
+	if open == _compact_confirm.visible:
+		return
+	if open:
+		UI_MOTION.enter(_compact_confirm)
+	else:
+		_compact_confirm.hide()
 
 
 func _build_troubleshooting() -> void:
@@ -340,7 +387,7 @@ func _build_history_menu() -> MenuButton:
 	var menu := _history_button.get_popup()
 	menu.add_item("Compact history", 0)
 	menu.set_item_tooltip(0, COMPACT_TIP)
-	menu.id_pressed.connect(func(_id: int) -> void: _history("compact"))
+	menu.id_pressed.connect(func(_id: int) -> void: _ask_compact(true))
 	_history_size = UI.label("", "JoineryNumeric")
 	_history_size.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_history_button.add_child(_history_size)
@@ -576,6 +623,9 @@ func _process(_delta: float) -> void:
 		return
 	if _history_action == "compact":
 		UI_MOTION.pulse(_history_row)
+		if dock != null and dock.has_method("refresh_revertible"):
+			# Cards whose restore data is gone now say "Too old to revert".
+			dock.call("refresh_revertible")
 		_history("usage")
 		return
 	var bytes := _usage_bytes(str(result.get("output", "")))
@@ -612,7 +662,8 @@ static func _usage_bytes(output: String) -> int:
 	for line: String in lines:
 		if not line.strip_edges().begins_with("{"):
 			continue
-		var data: Variant = JSON.parse_string(line)
+		var data_json := JSON.new()
+		var data: Variant = data_json.data if data_json.parse(line) == OK else null
 		if not data is Dictionary:
 			continue
 		for key: String in ["total_bytes", "bytes", "size_bytes", "total"]:

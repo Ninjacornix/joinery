@@ -1,13 +1,19 @@
 @tool
 extends VBoxContainer
-## The sidebar's top: a status dot and the assistant's name (or "Connecting to Codex…" with
-## the activity dots), the settings menu on the right, and, when the assistant is not
-## reachable, a banner with the one action that fixes it: a danger-tinted error for a lost
-## connection, and a calm accent-tinted card for first-run setup (no assistant yet), which is
-## a step, not a failure. The banner keeps SPACE.5 above and below, like other sections.
+## The sidebar's top. When all is well it holds only the settings menu on the right: no name,
+## no dot. It says "Connecting…" with the activity dots while Journeyman connects, and a red
+## dot with "Not connected" after a failure. When Journeyman is not reachable a banner offers
+## the one action that fixes it: a danger-tinted error for a lost connection, and a calm
+## accent-tinted card for first-run setup (no account yet), which is a step, not a failure.
+## The banner keeps SPACE.5 above and below, like other sections.
+##
+## Under the row, one quiet line can name an app that needs something, with its fix and a
+## "Check again" link ([method show_readiness]).
 
 signal reconnect_pressed
 signal connect_pressed
+## "Check again" on the app readiness line.
+signal readiness_check_pressed
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
@@ -27,6 +33,9 @@ var _banner_icon: TextureRect
 var _banner_text: Label
 var _banner_action: Button
 var _banner_kind := ""
+var _readiness: HBoxContainer
+var _readiness_text: Label
+var _readiness_action: Button
 
 
 func _init() -> void:
@@ -44,6 +53,7 @@ func _init() -> void:
 	_name = UI.label("", "JoineryCaption")
 	_name.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(_name)
+	_build_readiness(inset)
 	# The gap around the banner comes and goes with it, so the idle header stays tight.
 	_banner_gap = MarginContainer.new()
 	_banner_gap.hide()
@@ -86,29 +96,68 @@ func _init() -> void:
 	column.add_child(_banner_action)
 
 
-## Show [param state] ("connected", "connecting", "error", "none") for [param agent].
-## [param detail] is the error to show in the banner. Without [param with_banner] an error
-## only turns the dot red: used when a request that failed to send already offers Retry.
+## Show [param state] ("connected", "connecting", "error", "none"). [param agent] names the
+## provider in the lost-connection banner only ("Lost connection to Codex."); the header itself
+## never names it. [param detail] is the error to show in the banner. Without
+## [param with_banner] an error only turns the dot red: used when a request that failed to
+## send already offers Retry.
 func show_state(state: String, agent: String, detail := "", with_banner := true) -> void:
-	var named := agent if not agent.is_empty() else "Assistant"
+	var named := agent if not agent.is_empty() else "Journeyman"
 	_indicator.set("running", state == "connecting")
-	_dot.visible = state != "connecting"
-	_dot.set("state", {"connected": "ready", "error": "attention", "none": "off"}.get(state, "off"))
-	_dot.tooltip_text = (
-		{"connected": "Connected", "error": "Not connected", "none": "No assistant"}.get(state, "")
-	)
-	if state == "error" and not detail.is_empty():
-		_dot.tooltip_text = detail
-	_name.text = "Connecting to %s…" % named if state == "connecting" else named
+	# Healthy is quiet: nothing but the menu.
+	_dot.visible = state == "error"
+	_dot.set("state", "attention" if state == "error" else "off")
+	_dot.tooltip_text = detail if state == "error" and not detail.is_empty() else "Not connected"
+	_name.text = str({"connecting": "Connecting…", "error": "Not connected"}.get(state, ""))
 	_name.tooltip_text = _name.text
 	if state == "none":
-		_show_banner("none", "No assistant yet. Connect one to start.", "Connect an assistant")
+		_show_banner("none", "Connect Journeyman to your account to start.", "Connect")
 	elif state == "error" and with_banner:
 		var text := detail if not detail.is_empty() else "Lost connection to %s." % named
 		_show_banner("error", text, "Reconnect")
 	elif _banner.visible:
 		UI_MOTION.exit(_banner)
 		_banner_kind = ""
+
+
+## One line about an app that needs something ("Blender needs Docker. Start Docker Desktop,
+## then Check again."), with a "Check again" link; "" hides it.
+func show_readiness(text: String) -> void:
+	var fresh := not _readiness.visible or _readiness_text.text != text
+	_readiness_text.text = text
+	_readiness_text.tooltip_text = text
+	if text.is_empty():
+		if _readiness.visible:
+			UI_MOTION.exit(_readiness)
+	elif fresh:
+		UI_MOTION.enter(_readiness)
+
+
+## The readiness line's text ("" when hidden).
+func readiness_text() -> String:
+	return _readiness_text.text if _readiness.visible else ""
+
+
+func _build_readiness(inset: MarginContainer) -> void:
+	var column := VBoxContainer.new()
+	column.theme_type_variation = "JoineryTight"
+	inset.remove_child(row)
+	column.add_child(row)
+	inset.add_child(column)
+	_readiness = HBoxContainer.new()
+	_readiness.theme_type_variation = "JoineryRowTight"
+	_readiness.accessibility_name = "App status"
+	_readiness.hide()
+	column.add_child(_readiness)
+	_readiness_text = UI.label("", "JoineryCaption", true)
+	_readiness_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_readiness.add_child(_readiness_text)
+	_readiness_action = UI.link("Check again")
+	_readiness_action.accessibility_name = "Check the apps again"
+	_readiness_action.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	UI.bind_height(_readiness_action, "xs")
+	_readiness_action.pressed.connect(func() -> void: readiness_check_pressed.emit())
+	_readiness.add_child(_readiness_action)
 
 
 func _show_banner(kind: String, text: String, action: String) -> void:

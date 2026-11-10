@@ -1,12 +1,23 @@
+# gdlint: disable=max-public-methods
 @tool
 extends VBoxContainer
 ## One request in the transcript, kept as a change card so the session reads as a history you
 ## can trace and revert. The user's bubble holds only the request text. Under it, on the
-## transcript inset, the assistant's side: the apps at work and a rolling timer, the live
+## transcript inset, Journeyman's side: the apps at work and a rolling timer, the live
 ## steps, a thumbnail when a change is ready, and inline errors. The decision line
 ## ("Change accepted", with "Revert" on accepted file changes) is placed by the transcript at
 ## the end of the turn, after the reply ([signal outcome_placing]). The decision itself is
 ## always made in the Review panel; its only trigger in the sidebar is the footer.
+##
+## Revert is not optimistic: the line says "Reverting…" until Joinery confirms, then
+## "Reverted", or shows the error in place with Revert offered again. A change whose restore
+## data is gone says "Too old to revert" instead of offering the button
+## ([method set_revertible]).
+##
+## When asset work needs the art direction approved first, the card holds the request (the
+## art gate): "Before Blender makes anything, agree how your game should look." with
+## "Review the look" and "Describe my own". After approval the dock sends the same request
+## again, so nothing is retyped.
 ##
 ## The status line is the turn's one header in every state: the app glyph and name, then
 ## "· 0:14" while it runs and "· Completed in 1:12" with its disclosure chevron when done. Steps
@@ -20,8 +31,8 @@ extends VBoxContainer
 ## which the transcript moves into the card's status line ([method adopt_timing]); opening it
 ## shows the steps again with the timing details.
 ##
-## States: sending, failed (not sent), working, ready, applying, accepted, rejected, reverted,
-## stopped, done.
+## States: sending, failed (not sent), working, gated, ready, applying, accepted, rejected,
+## reverted, stopped, done.
 
 signal retry_requested
 ## The request could not be sent; [param reason] says why ("" when unknown).
@@ -30,6 +41,10 @@ signal revert_requested(transaction_id: String)
 ## The decision line is about to show; the transcript moves [param row] to the end of the turn.
 ## Without a listener the row is shown under the card's own steps.
 signal outcome_placing(row: Control)
+## "Review the look" on the art gate.
+signal gate_review_requested
+## "Describe my own" on the art gate.
+signal gate_describe_requested
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
@@ -37,9 +52,9 @@ const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
 const INDICATOR := preload("activity_indicator.gd")
 ## Apps recognised in step text; the card shows each one it sees once.
-const APPS := [
-	"Blender", "Krita", "Aseprite", "Material Maker", "Surge XT", "SuperCollider", "Godot"
-]
+const APPS := ["Blender", "Krita", "GIMP", "Material Maker", "Surge XT", "SuperCollider", "Godot"]
+## Shown instead of Revert once the change's restore data is gone.
+const TOO_OLD := "Too old to revert"
 ## Step lines that only say the assistant is busy; the footer shows these, not the card.
 const GENERIC_STEPS := ["Thinking…", "Preparing your request…", "Sending…"]
 ## Step verbs whose past tense is not "-ed".
@@ -108,6 +123,12 @@ var _outcome: HBoxContainer
 var _outcome_icon: TextureRect
 var _outcome_text: Label
 var _revert: Button
+var _reverting: HBoxContainer
+var _too_old: Label
+## False once `joinery transactions list` says the restore data is gone.
+var _revertible := true
+var _gate: VBoxContainer
+var _gate_text: Label
 var _error: Label
 var _summary: Button
 var _details: Label
@@ -217,6 +238,23 @@ func _init(text := "", context: Array = []) -> void:
 	_revert.pressed.connect(_on_revert)
 	UI.bind_height(_revert, "xs")
 	_outcome.add_child(_revert)
+	_reverting = HBoxContainer.new()
+	_reverting.theme_type_variation = "JoineryRowTight"
+	_reverting.accessibility_name = "Reverting this change"
+	var dots := INDICATOR.new()
+	dots.set("running", true)
+	_reverting.add_child(dots)
+	var reverting_text := UI.label("Reverting…", "JoineryCaption")
+	reverting_text.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
+	_reverting.add_child(reverting_text)
+	_reverting.hide()
+	_outcome.add_child(_reverting)
+	_too_old = UI.label(TOO_OLD, "JoineryCaption")
+	_too_old.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
+	_too_old.tooltip_text = "Its restore data was cleared. Ask Journeyman to change it back."
+	_too_old.mouse_filter = Control.MOUSE_FILTER_PASS
+	_too_old.hide()
+	_outcome.add_child(_too_old)
 	_outcome.hide()
 	_set_sending_look(true)
 
@@ -267,10 +305,12 @@ func _sync_failure() -> void:
 	_retry.visible = _retry_allowed
 
 
-## Back to sending after Retry.
+## Back to sending after Retry, or when the art gate lets a held request go.
 func set_sending() -> void:
 	state = "sending"
 	_failure.hide()
+	if _gate != null:
+		_gate.hide()
 	_set_sending_look(true)
 
 
@@ -359,10 +399,16 @@ func set_elapsed(seconds: int) -> void:
 	UI_MOTION.roll_number(_timer, seconds, UI_MOTION.format_clock)
 
 
-## The turn ended. [param outcome] is "done", "cancelled" or "failed".
+## The turn ended. [param outcome] is "done", "cancelled" or "failed". A request held by the
+## art gate stays held.
 func finish(outcome: String) -> void:
 	if state == "sending":
 		set_failed()
+		return
+	if state == "gated":
+		_timer.hide()
+		_tick_current("success")
+		_sync_activity()
 		return
 	_timer.hide()
 	_tick_current(
@@ -414,8 +460,7 @@ func set_outcome(kind: String, text: String, optimistic := false) -> void:
 		STYLE.set_glyph(_outcome_icon, spec[0], spec[1])
 	_outcome_text.text = text
 	# Revert only once the accept is confirmed: an accept still on its way may yet roll back.
-	_revert.visible = kind == "success" and not transaction_id.is_empty() and not optimistic
-	_revert.disabled = false
+	_sync_revert(kind == "success" and not optimistic)
 	_place_outcome()
 	_outcome.show()
 	_sync_activity()
@@ -461,7 +506,7 @@ func decide(kind: String, text: String) -> bool:
 	if not _previous_outcome.is_empty() and state == target:
 		_previous_outcome = []
 		_outcome_text.text = text
-		_revert.visible = kind == "success" and not transaction_id.is_empty()
+		_sync_revert(kind == "success")
 		return true
 	var open := awaiting_decision() or not _previous_outcome.is_empty()
 	if kind == "stopped":
@@ -472,22 +517,112 @@ func decide(kind: String, text: String) -> bool:
 	return true
 
 
-## The revert finished. On failure the card goes back to Accepted and shows why.
+## The revert finished. On success the line reads "Reverted"; on failure it stays accepted,
+## offers Revert again and shows why in place.
 func revert_finished(ok: bool, message := "") -> void:
+	_reverting.hide()
 	if ok:
+		state = "reverted"
+		_outcome_text.text = "Reverted"
+		STYLE.set_glyph(_outcome_icon, "reload", "text_muted")
+		_outcome_icon.show()
+		_revert.hide()
+		_too_old.hide()
 		UI_MOTION.pulse(_outcome)
 		return
-	set_outcome("success", "Change accepted")
+	_sync_revert(true)
 	show_error("Couldn't revert. " + message if not message.is_empty() else "Couldn't revert.")
 
 
+## Whether this change can still be reverted (`revertible` from `joinery transactions
+## list`). A change that can't shows "Too old to revert" instead of the button.
+func set_revertible(on: bool) -> void:
+	_revertible = on
+	if state == "accepted" and not _reverting.visible:
+		_sync_revert(true)
+
+
+## True while a revert of this change is running.
+func reverting() -> bool:
+	return _reverting.visible
+
+
+## Hold the request until the art direction is approved. [param app] names the app that was
+## about to make something ("Blender"), or "" for the one the card saw at work.
+func show_art_gate(app := "") -> void:
+	set_sent()
+	state = "gated"
+	_timer.hide()
+	_tick_current("success")
+	if _gate == null:
+		_build_gate()
+	var who := app if not app.is_empty() else _gate_app()
+	_gate_text.text = "Before %s makes anything, agree how your game should look." % who
+	_column.move_child(_gate, _column.get_child_count() - 1)
+	UI_MOTION.fade_in(_gate)
+	_sync_activity()
+
+
+## True while the art gate holds this request.
+func gated() -> bool:
+	return state == "gated"
+
+
+## The art gate's sentence ("" when there is no gate).
+func gate_text() -> String:
+	return _gate_text.text if _gate != null and _gate.visible else ""
+
+
+func _build_gate() -> void:
+	_gate = VBoxContainer.new()
+	_gate.theme_type_variation = "JoineryRow"
+	_gate.accessibility_name = "Art direction needed"
+	_gate.hide()
+	_column.add_child(_gate)
+	_gate_text = UI.label("", "", true)
+	_gate.add_child(_gate_text)
+	var actions := HBoxContainer.new()
+	actions.theme_type_variation = "JoineryRow"
+	_gate.add_child(actions)
+	var review := UI.primary("Review the look")
+	review.accessibility_name = "Review the art direction"
+	review.pressed.connect(func() -> void: gate_review_requested.emit())
+	actions.add_child(review)
+	var own := UI.link("Describe my own")
+	own.accessibility_name = "Describe how your game should look"
+	own.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	own.pressed.connect(func() -> void: gate_describe_requested.emit())
+	actions.add_child(own)
+	var note := UI.label("Your request will continue after you approve.", "JoineryCaption", true)
+	_gate.add_child(note)
+
+
+## The app this request was using, else Journeyman itself.
+func _gate_app() -> String:
+	for app: String in _seen_apps:
+		if app != "Godot":
+			return app
+	return "Journeyman"
+
+
+## Revert, "Reverting…" or "Too old to revert" on the accepted line.
+func _sync_revert(accepted: bool) -> void:
+	var file_change := accepted and not transaction_id.is_empty()
+	_revert.visible = file_change and _revertible
+	_revert.disabled = false
+	_too_old.visible = file_change and not _revertible
+	_reverting.hide()
+
+
 func _on_revert() -> void:
-	# Optimistic: the card reads "Reverted" at once; revert_finished rolls it back on failure.
-	_revert.disabled = true
-	set_outcome("info", "Reverted")
-	STYLE.set_glyph(_outcome_icon, "reload", "text_muted")
-	_outcome_icon.show()
-	state = "reverted"
+	# Not optimistic: the line says "Reverting…" until Joinery confirms (revert_finished).
+	if state != "accepted" or _reverting.visible:
+		return
+	_revert.hide()
+	_error.hide()
+	_reverting.show()
+	UI_MOTION.fade_in(_reverting)
+	_sync_activity()
 	revert_requested.emit(transaction_id)
 
 

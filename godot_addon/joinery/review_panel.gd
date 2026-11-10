@@ -2,17 +2,18 @@
 extends VBoxContainer
 ## The Review panel: the one place to decide on a change. Top to bottom: the request as the
 ## title with a counts caption and a Before/After switch, a large preview that takes the
-## remaining height, the Details toggle with the changed files below it, and Reject / Accept
-## at the bottom right.
+## remaining height, the Details toggle with the changed files below it, and Discard / Accept
+## at the bottom right. Discard only throws the proposed change away: the user's files were
+## never touched, and the panel says so.
 ##
-## Deciding is optimistic: pressing Accept or Reject collapses the review into one line
+## Deciding is optimistic: pressing Accept or Discard collapses the review into one line
 ## ("Change accepted", with dots while the commit runs) at once. [method show_result] confirms
 ## it with a pulse and clears the panel; [method show_error] rolls the review back with the
 ## error above the buttons. The dock forwards its calls here and listens to the signals.
 
 ## The user chose Accept. The panel already shows the optimistic outcome.
 signal accept_pressed
-## The user chose Reject. The panel already shows the optimistic outcome.
+## The user chose Discard. The panel already shows the optimistic outcome.
 signal reject_pressed
 ## A review is ready: bring the panel into view.
 signal show_requested
@@ -24,14 +25,14 @@ const INDICATOR := preload("activity_indicator.gd")
 const MEDIA := preload("review_media.gd")
 const DETAILS := preload("review_details.gd")
 const ACCEPTED := "Change accepted"
-const REJECTED := "Change rejected"
+const REJECTED := "Discarded. Your files were not touched."
 const SCENE_NOTE := "The change is shown in the viewport."
-## Minimum width of Accept and Reject, in em.
+## Minimum width of Accept and Discard, in em.
 const BUTTON_EM := 8.0
 ## Open Details grow with their rows up to this many control heights, then scroll; the
 ## scroll bar shows only past that.
 const DETAILS_ROWS := 6
-## Opacity of a disabled Reject: it keeps its fill and shape, only dimmed.
+## Opacity of a disabled Discard: it keeps its fill and shape, only dimmed.
 const DISABLED_ALPHA := 0.5
 
 ## True while a change waits for a decision (also while the decision is being applied).
@@ -111,7 +112,7 @@ func _on_theme_rebuilt() -> void:
 
 ## Size the buttons once the children have seen the new theme too. The panel hears about a
 ## theme change before its buttons, so reading their styles at once would pin the old theme's
-## box as Reject's disabled style and make Reject taller than Accept.
+## box as Discard's disabled style and make Discard taller than Accept.
 func _queue_sizes() -> void:
 	if _sizes_queued:
 		return
@@ -170,9 +171,9 @@ func set_applying(on: bool) -> void:
 		else ("Try keeping this change again" if _failed else "Keep this change")
 	)
 	_reject.tooltip_text = (
-		"Applying the change…" if on else "Discard this change and keep the original"
+		"Applying the change…" if on else "Throw this change away. Your files stay as they are."
 	)
-	# A disabled Reject keeps its fill and height, only dimmed, so the pair still reads as two
+	# A disabled Discard keeps its fill and height, only dimmed, so the pair still reads as two
 	# buttons (the theme's disabled secondary has no fill).
 	_reject.self_modulate.a = DISABLED_ALPHA if on else 1.0
 	_applying.visible = on
@@ -185,7 +186,7 @@ func set_applying(on: bool) -> void:
 
 ## Confirm the decision: the outcome line shows [param text] (for example
 ## "Kept · hammer.glb"), success pulses, the panel flashes for MOTION.confirm, then clears.
-## [param ok] false marks a rejection or a neutral outcome.
+## [param ok] false marks a discard or a neutral outcome.
 func show_result(ok: bool, text: String) -> void:
 	var serial := _next_serial()
 	var showing := _outcome.visible and _state == "deciding"
@@ -357,7 +358,7 @@ func _build_body() -> void:
 	_scene_note.hide()
 	_body.add_child(_scene_note)
 	# The Details toggle sits on its own row with the changed files directly below it, so they
-	# open downwards; Reject / Accept stay the last row.
+	# open downwards; Discard / Accept stay the last row.
 	_details_row = HBoxContainer.new()
 	_details_row.theme_type_variation = "JoineryRow"
 	_details_row.hide()
@@ -421,7 +422,8 @@ func _build_footer() -> void:
 	push.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	push.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_footer.add_child(push)
-	_reject = UI.secondary("Reject")
+	_reject = UI.secondary("Discard")
+	_reject.accessibility_name = "Discard this change"
 	_reject.pressed.connect(_decide.bind(false))
 	_accept = UI.primary("Accept")
 	_accept.pressed.connect(_decide.bind(true))
@@ -474,7 +476,7 @@ func _build_empty() -> void:
 	_empty.add_child(UI.label("No change to review", "JoineryBodyLarge"))
 	_empty.add_child(
 		UI.label(
-			"Ask Journeyman for a change. It shows here so you can accept or reject it.",
+			"Ask Journeyman for a change. It shows here so you can accept or discard it.",
 			"JoineryCaption",
 			true
 		)
@@ -539,7 +541,7 @@ func _decide(accepted: bool) -> void:
 	_set_state("deciding")
 	set_applying(true)
 	_outcome_text.text = ACCEPTED if accepted else REJECTED
-	_outcome_note.text = "Saving…" if accepted else "Restoring the original…"
+	_outcome_note.text = "Saving…" if accepted else "Discarding…"
 	_outcome_note.show()
 	_outcome_dots.running = true
 	_set_outcome_icon("success" if accepted else "close", "success" if accepted else "text_muted")
@@ -636,7 +638,7 @@ func _tint_outcome() -> void:
 		_error_icon.self_modulate = get_theme_color("danger", "Joinery")
 
 
-## Accept and Reject share one width: at least 8em, and wide enough for "Applying…".
+## Accept and Discard share one width: at least 8em, and wide enough for "Applying…".
 func _apply_sizes() -> void:
 	_sizes_queued = false
 	if _accept == null or not is_inside_tree():
@@ -651,7 +653,7 @@ func _apply_sizes() -> void:
 	var height := UI_THEME.control_h(self, "md")
 	for button: Button in [_accept, _reject]:
 		button.custom_minimum_size = Vector2(width, height)
-	# Reject keeps its normal fill and ink when disabled; set_applying dims it instead.
+	# Discard keeps its normal fill and ink when disabled; set_applying dims it instead.
 	_reject.add_theme_stylebox_override("disabled", _reject.get_theme_stylebox("normal"))
 	_reject.add_theme_color_override("font_disabled_color", _reject.get_theme_color("font_color"))
 	_fit_details()

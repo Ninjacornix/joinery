@@ -342,7 +342,9 @@ func _shape_play() -> void:
 	for state: String in _PLAY_STATES + ["focus"]:
 		play_button.remove_theme_stylebox_override(state)
 	play_button.end_bulk_theme_override()
-	var side := float(UI_THEME.control_h(play_button, "sm" if compact else "md"))
+	var side := float(
+		UI_THEME.control_h(play_button, "sm") if compact else UI_THEME.transport_px(play_button)
+	)
 	var glyph := float(play_button.get_theme_constant("icon_max_width"))
 	var pad := maxf(0.0, (side - glyph) / 2.0)
 	play_button.begin_bulk_theme_override()
