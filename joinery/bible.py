@@ -35,9 +35,9 @@ ANSWERS_FILE = ".joinery-bible-answers.json"
 #: Key in the answers file naming the bible preset, consumed with the answers.
 PRESET_KEY = "_preset"
 
-#: The interview as pages. Setup asks five short, optional questions on one
-#: page; grouping lives here, not in the dialog, so it can be re-cut without
-#: rebuilding the engine.
+#: The interview as pages. Setup asks six short, optional questions on one
+#: page, References included; grouping lives here, not in the dialog, so it
+#: can be re-cut without rebuilding the engine.
 GROUPS: tuple[tuple[str, str], ...] = (("look_and_sound", "Look and sound"),)
 
 #: Every answer the bible template takes, in order. `group` is the page that
@@ -56,10 +56,10 @@ QUESTIONS: tuple[dict[str, object], ...] = (
     },
     {
         "key": "references",
-        "group": "",
+        "group": "look_and_sound",
         "label": "References",
         "hint": "Games, films or places whose look you mean, and what to take from each.",
-        "placeholder": "",
+        "placeholder": "e.g. art/reference/dusk_board.kra: the warm low light, not its colours",
         "multiline": True,
     },
     {
@@ -143,8 +143,10 @@ def write_from_answers_file(project: Path, preset: str | None = None) -> Path | 
 
     The Project Manager cannot pass multi-line text as command arguments
     comfortably, so it writes a small JSON file beside the project and this
-    consumes it. The file may name a preset under `_preset`; an explicit
-    `preset` argument wins. Returns None when there is nothing to do.
+    consumes it. The file may name a preset under `_preset`: that is the
+    user's choice in the wizard, so it wins; `preset` (usually the
+    blueprint's) is used when the file names none. Returns None when there is
+    nothing to do.
     """
     source = project / ANSWERS_FILE
     if not source.is_file():
@@ -165,6 +167,5 @@ def write_from_answers_file(project: Path, preset: str | None = None) -> Path | 
         for k, v in raw.items()
         if isinstance(v, str | int | float) and not isinstance(v, bool)
     }
-    chosen = preset or answers.pop(PRESET_KEY, "") or None
-    answers.pop(PRESET_KEY, None)
+    chosen = answers.pop(PRESET_KEY, "") or preset or None
     return write_bible(project, answers, chosen)

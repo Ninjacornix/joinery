@@ -84,3 +84,27 @@ def test_godot_plumbing_is_not_an_asset(tmp_path: Path) -> None:
     (project / "art" / "door.blend.import").write_text("[remap]")
     assert write_lock(project) == []
     assert check_assets(project, load_catalog()) == []
+
+
+def test_first_model_export_keeps_textures_embedded(tmp_path: Path) -> None:
+    from joinery.locking import GLB_IMPORT
+
+    project = project_with(tmp_path, asset="art/models/hammer.glb", claimed=True)
+    assert write_lock(project) == []
+    settings = project / "art/models/hammer.glb.import"
+    assert "gltf/embedded_image_handling=3" in settings.read_text()
+    assert settings.read_text() == GLB_IMPORT
+    # Settings the user changed later are theirs.
+    settings.write_text(
+        '[remap]\nimporter="scene"\n[params]\ngltf/embedded_image_handling=1\n'
+    )
+    write_lock(project)
+    assert "embedded_image_handling=1" in settings.read_text()
+    # The import settings are project plumbing, not an asset needing a lock entry.
+    assert "hammer.glb.import" not in (project / "joinery.lock").read_text()
+
+
+def test_unclaimed_or_non_model_outputs_get_no_import_settings(tmp_path: Path) -> None:
+    project = project_with(tmp_path, asset="art/props/crate.blend", claimed=True)
+    write_lock(project)
+    assert not list(project.rglob("*.import"))

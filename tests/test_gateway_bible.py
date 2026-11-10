@@ -129,11 +129,15 @@ def test_other_assets_still_need_an_approved_bible(
     (tx.stage / "art/props").mkdir(parents=True)
     (tx.stage / "art/reference/quarry.png").write_bytes(b"my photo")
     (tx.stage / "art/props/crate.png").write_bytes(b"texture")
-    with pytest.raises(PermissionError, match="Approve the project art bible"):
-        finish(gateway, tx)
+    gate = finish(gateway, tx)
+    assert gate is not None and gate["kind"] == "art_gate"
+    assert gate["needs_art_approval"] is True and "how your game should look" in gate["message"]
+    assert tx.state == "rejected", "Nothing is applied while the art gate is open"
 
 
-@pytest.mark.parametrize("path", ["ui/fonts/body.ttf", "sounds/click.mp3", "ui/icons/gem.webp"])
+@pytest.mark.parametrize(
+    "path", ["ui/fonts/body.ttf", "sounds/click.mp3", "ui/icons/gem.webp"]
+)
 def test_asset_files_outside_art_still_need_an_approved_bible(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, path: str
 ) -> None:
@@ -141,8 +145,8 @@ def test_asset_files_outside_art_still_need_an_approved_bible(
     gateway, tx = begin(root)
     (tx.stage / path).parent.mkdir(parents=True)
     (tx.stage / path).write_bytes(b"not code")
-    with pytest.raises(PermissionError, match="Approve the project art bible"):
-        finish(gateway, tx)
+    gate = finish(gateway, tx)
+    assert gate is not None and gate["needs_art_approval"] is True
 
 
 def approved_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:

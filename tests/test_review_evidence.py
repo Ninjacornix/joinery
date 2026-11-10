@@ -21,3 +21,88 @@ def test_recipe_snapshots_are_not_reviewed_as_assets(tmp_path: Path) -> None:
     ]
     media = asyncio.run(evidence(tx, changes))
     assert [item["path"] for item in media] == ["art/textures/hammer/Head.png"]
+
+
+def test_a_texture_target_adds_a_texture_view_before_the_full_model(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from joinery import review
+    from joinery.runner import Result
+
+    (tmp_path / "project.godot").write_text("config_version=5\n")
+    for path in ("art/sources/hammer.blend", "art/textures/hammer/steel_rough.png"):
+        (tmp_path / path).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / path).write_bytes(b"before")
+    tx = FileTransaction(tmp_path)
+    tx.begin("Make the steel rougher")
+    for path in ("art/sources/hammer.blend", "art/textures/hammer/steel_rough.png"):
+        (tx.stage / path).write_bytes(b"after")
+    scripts: list[str] = []
+
+    async def render(argv: list[str], root: Path, *_args: object) -> Result:
+        scripts.append(argv[-1])
+        output = argv[-1].split("\n", 1)[0].split("=", 1)[1].strip("'")
+        target = root / output.removeprefix("/work/")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"png")
+        return Result(True, "", "", 0.0)
+
+    monkeypatch.setattr(review, "run_offline", render)
+    target = {
+        "id": "res://art/models/hammer.glb#material=Steel&image=steel_rough",
+        "label": "Roughness · Steel",
+        "part_kind": "texture",
+        "owner_source": "art/sources/hammer.blend",
+        "material": "Steel",
+        "image": "steel_rough",
+        "object": "Head.001",
+    }
+    changes = [
+        {"path": "art/sources/hammer.blend"},
+        {"path": "art/textures/hammer/steel_rough.png"},
+    ]
+    media = asyncio.run(evidence(tx, changes, [target]))
+    # Map before/after, then the map on the model, then the full model.
+    assert [m["path"] for m in media] == [
+        "art/textures/hammer/steel_rough.png",
+        "art/sources/hammer.blend",
+        "art/sources/hammer.blend",
+    ]
+    assert media[0]["before"].endswith("steel_rough.png")
+    assert media[1]["part"] == target["id"] and media[1]["label"] == "Roughness · Steel"
+    assert "part" not in media[2]
+    part_scripts = [s for s in scripts if "color_type = 'TEXTURE'" in s]
+    assert len(part_scripts) == 2, "Before and after each get the texture view"
+    assert "IMAGE='steel_rough'" in part_scripts[0]
+    assert "OBJECTS=['Head.001']" in part_scripts[0]
+    assert "tree.nodes.active = chosen" in part_scripts[0]
+    full = [s for s in scripts if "color_type = 'MATERIAL'" in s]
+    assert len(full) == 2
+
+
+def test_object_targets_and_other_sources_add_no_texture_view(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from joinery.review import _parts_in
+
+    targets = [
+        {
+            "id": "a",
+            "part_kind": "object",
+            "object": "Head",
+            "owner_source": "art/sources/h.blend",
+        },
+        {
+            "id": "b",
+            "part_kind": "material",
+            "material": "Steel",
+            "owner_source": "art/sources/x.blend",
+        },
+        {
+            "id": "c",
+            "part_kind": "material",
+            "material": "Steel",
+            "source": "res://art/sources/h.blend",
+        },
+    ]
+    assert [p["id"] for p in _parts_in("art/sources/h.blend", targets)] == ["c"]

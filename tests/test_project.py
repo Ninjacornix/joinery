@@ -122,3 +122,102 @@ def test_new_project_from_blueprint(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert not (tmp_path / "other").exists()
     with pytest.raises(ValueError, match="need a blueprint"):
         create_project(tmp_path / "third", "G", Selection(["godot"], []), load_catalog(), features=["net"])
+
+
+def _cli_new(tmp_path: Path, name: str, *args: str) -> tuple[int, Path]:
+    from joinery.cli import main
+
+    project = tmp_path / name
+    return main(["new", str(project), "--tools", "godot", *args]), project
+
+
+def test_new_blank_blueprint_is_the_wizard_project(tmp_path: Path) -> None:
+    code, project = _cli_new(tmp_path, "blank", "--blueprint", "blank", "--features", "")
+    assert code == 0
+    # The addon ships inside the game, so its MIT licence goes with it.
+    licence = (project / "addons/joinery/LICENSE").read_text()
+    assert licence.startswith("MIT License")
+    assert licence == (ROOT / "godot_addon/joinery/LICENSE").read_text()
+    assert (project / "addons/joinery/plugin.cfg").is_file()
+    godot = (project / "project.godot").read_text()
+    assert 'enabled=PackedStringArray("res://addons/joinery/plugin.cfg")' in godot
+    brief = (project / "design/brief.md").read_text()
+    assert "| Pause (`pause`) | Esc / P | — | — |" in brief
+    assert "{{" not in brief
+    assert (project / "art/bible.md").is_file()
+    assert check_assets(project, load_catalog()) == []
+
+
+def test_new_first_person_with_features(tmp_path: Path) -> None:
+    from joinery import blueprints
+
+    code, project = _cli_new(
+        tmp_path,
+        "fp",
+        "--blueprint",
+        "first-person-3d",
+        "--features",
+        "controller,save-load",
+    )
+    assert code == 0
+    assert (project / "addons/joinery/LICENSE").read_text().startswith("MIT License")
+    record = blueprints.read_record(project)
+    assert record is not None
+    assert record.blueprint == "first-person-3d"
+    assert record.features == ["controller", "save-load"]
+    # Controls come from the applied input map, controller buttons included.
+    brief = (project / "design/brief.md").read_text()
+    assert "| Jump (`jump`) | Space | A | — |" in brief
+    assert "| Pause (`pause`) | Esc / P | Start | — |" in brief
+    # The blueprint's bible preset filled the technical sections as suggestions.
+    bible = (project / "art/bible.md").read_text()
+    assert "_Suggested by the Stylised PBR 3D starting point; change freely._" in bible
+    assert "{{" not in bible
+    assert check_assets(project, load_catalog()) == []
+
+
+def test_new_without_features_flag_uses_the_blueprint_defaults(tmp_path: Path) -> None:
+    from joinery import blueprints
+
+    code, project = _cli_new(tmp_path, "td", "--blueprint", "top-down")
+    assert code == 0
+    record = blueprints.read_record(project)
+    expected = blueprints.describe("top-down")["default_features"]
+    assert record is not None and record.features == expected
+
+
+@pytest.mark.parametrize(
+    "features", ["controller,nope", "online-play,steam,translations,unknown"]
+)
+def test_bad_feature_mix_leaves_no_folder(
+    tmp_path: Path, features: str, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code, project = _cli_new(tmp_path, "bad", "--blueprint", "blank", "--features", features)
+    assert code == 1
+    assert "Unknown feature" in capsys.readouterr().err
+    assert not project.exists()
+
+
+def test_failed_apply_removes_the_half_made_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from joinery import blueprints
+
+    def refuse(*_: object, **__: object) -> None:
+        raise ValueError("game/level.tscn already exists")
+
+    monkeypatch.setattr(blueprints, "apply", refuse)
+    with pytest.raises(ValueError, match="already exists"):
+        create_project(
+            tmp_path / "half", "G", Selection(["godot"], []), load_catalog(), blueprint="blank"
+        )
+    assert not (tmp_path / "half").exists()
+
+
+def test_new_without_blueprint_stays_empty_but_has_the_addon(tmp_path: Path) -> None:
+    code, project = _cli_new(tmp_path, "empty")
+    assert code == 0
+    assert (project / "addons/joinery/LICENSE").is_file()
+    assert not (project / "game").exists()
+    assert not (project / "design/brief.md").exists()
+    assert "[game]" not in (project / "joinery.toml").read_text()

@@ -15,6 +15,7 @@ from typing import Any, cast
 
 from mcp.types import CallToolResult, TextContent
 
+from joinery import parts as part_targets
 from joinery import tools as tool_modules
 from joinery.art_approval import approved, review
 from joinery.art_approval import fingerprint as bible_fingerprint
@@ -52,14 +53,67 @@ PROTECTED = {
 #: approved art bible and passes the provenance gate, like art/ and audio/.
 ASSET_SUFFIXES = frozenset(
     {
-        ".blend", ".glb", ".gltf", ".fbx", ".obj", ".dae",
-        ".kra", ".xcf", ".psd", ".aseprite", ".ase", ".ptex",
-        ".png", ".jpg", ".jpeg", ".webp", ".svg", ".bmp", ".tga", ".gif",
-        ".exr", ".hdr", ".tif", ".tiff", ".dds", ".ktx", ".ktx2",
-        ".wav", ".ogg", ".mp3", ".flac", ".opus", ".aif", ".aiff",
-        ".ttf", ".otf", ".woff", ".woff2",
-        ".mp4", ".webm", ".ogv",
+        ".blend",
+        ".glb",
+        ".gltf",
+        ".fbx",
+        ".obj",
+        ".dae",
+        ".kra",
+        ".xcf",
+        ".psd",
+        ".aseprite",
+        ".ase",
+        ".ptex",
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".webp",
+        ".svg",
+        ".bmp",
+        ".tga",
+        ".gif",
+        ".exr",
+        ".hdr",
+        ".tif",
+        ".tiff",
+        ".dds",
+        ".ktx",
+        ".ktx2",
+        ".wav",
+        ".ogg",
+        ".mp3",
+        ".flac",
+        ".opus",
+        ".aif",
+        ".aiff",
+        ".ttf",
+        ".otf",
+        ".woff",
+        ".woff2",
+        ".mp4",
+        ".webm",
+        ".ogv",
     }
+)
+
+
+#: Native document operations: each saves, exports and records a recipe, and its
+#: result is imported into Godot before the next call can use it.
+NATIVE_OPS = frozenset(
+    {
+        "operate_document",
+        "transform_parts",
+        "operate_graph",
+        "operate_vector",
+        "set_material_value",
+        "adjust_map",
+        "bake_height_to_normal",
+    }
+)
+ART_GATE_MESSAGE = (
+    "Before Journeyman makes anything, agree how your game should look. "
+    "Review the look, then approve these rules."
 )
 
 
@@ -72,14 +126,20 @@ def _upstream_presentation(server: str) -> tuple[frozenset[str], dict[str, str]]
     catalog = load_catalog()
     notes: dict[str, str] = {}
     for entry in catalog.tool:
-        if entry.mcp and entry.mcp.server == server and entry.id in tool_modules.REGISTRY:
+        if (
+            entry.mcp
+            and entry.mcp.server == server
+            and entry.id in tool_modules.REGISTRY
+        ):
             notes.update(tool_modules.get(entry.id).mcp_notes)
     return frozenset(blocked_tools(catalog, server)), notes
 
 
 def _with_note(tool: dict[str, Any], note: str) -> dict[str, Any]:
     if note:
-        tool["description"] = (str(tool.get("description", "")).rstrip() + "\n\n" + note).strip()
+        tool["description"] = (
+            str(tool.get("description", "")).rstrip() + "\n\n" + note
+        ).strip()
     return tool
 
 
@@ -196,6 +256,10 @@ class ProjectGateway:
         self.live_edit_pending = False
         self.request_summary = ""
         self.editor_context: dict[str, str] = {}
+        #: The prompt's selection targets; part targets scope typed part edits.
+        self.target_context: tuple[dict[str, str], ...] = ()
+        #: Set when a call needed an approved art bible; finish() reports it.
+        self.art_gate: dict[str, Any] | None = None
         self.runtime_owned = False
         self.runtime_config: str | None = None
         self.runtime_injected: str | None = None
@@ -231,7 +295,10 @@ class ProjectGateway:
             if (
                 self._discovery_cache
                 and time.monotonic() - self._discovery_cache[0] < 15
-                and all(connection.readiness.connected for connection in self.connections.values())
+                and all(
+                    connection.readiness.connected
+                    for connection in self.connections.values()
+                )
             ):
                 return self._discovery_cache[1]
             with self.timing.span("discovery") if self.timing else nullcontext():
@@ -337,8 +404,18 @@ class ProjectGateway:
             and not approved(self.project)
             and not _reference_only(arguments)
         ):
-            raise PermissionError(
-                "Approve the project art bible before creative asset work."
+            # Not an error the agent should work around: the user decides. The
+            # sidebar shows the art gate card when the turn finishes.
+            gate = self._art_gate()
+            return CallToolResult(
+                content=[
+                    TextContent(
+                        type="text",
+                        text=gate["message"] + " Stop here and tell the user.",
+                    )
+                ],
+                structured_content={k: v for k, v in gate.items() if k != "kind"},
+                is_error=True,
             )
         if not readonly and self.transaction is None:
             self.transaction = FileTransaction(self.project)
@@ -393,12 +470,14 @@ class ProjectGateway:
             if custom is not None and self.transaction is not None
             else set()
         )
-        if tool in {
-            "operate_document",
-            "transform_parts",
-            "operate_graph",
-            "operate_vector",
-        }:
+        if (
+            server.startswith("joinery-")
+            and not readonly
+            and self.transaction is not None
+        ):
+            # The tool server of this stage reads the prompt's part targets.
+            part_targets.write_targets(self.transaction.stage, self.target_context)
+        if tool in NATIVE_OPS:
             owner = str(arguments.get("tool", server.removeprefix("joinery-")))
             self.progress("Working in " + owner.replace("-", " ").capitalize() + "…")
         result = await connection.call(
@@ -410,13 +489,7 @@ class ProjectGateway:
             raise PolicyStop(result_text(result))
         if (
             server.startswith("joinery-")
-            and tool
-            in {
-                "operate_document",
-                "transform_parts",
-                "operate_graph",
-                "operate_vector",
-            }
+            and tool in NATIVE_OPS
             and not result.is_error
             and self.transaction is not None
         ):
@@ -519,7 +592,34 @@ class ProjectGateway:
         self.runtime_config = None
         self.runtime_injected = None
 
+    def _art_gate(self) -> dict[str, Any]:
+        """The art gate result: the sidebar asks the user to approve, then resumes."""
+        self.art_gate = {
+            "kind": "art_gate",
+            "needs_art_approval": True,
+            "resume": self.request_summary,
+            "message": ART_GATE_MESSAGE,
+        }
+        return self.art_gate
+
     async def finish(self) -> dict[str, Any] | None:
+        """The review of this turn's changes, or the art gate when it stopped there.
+
+        Returns a ``file_preview``, an ``art_gate`` result
+        ``{needs_art_approval, resume, message}`` when asset work needs an
+        approved art bible first (nothing is applied), or None.
+        """
+        gate, self.art_gate = self.art_gate, None
+        preview = await self._finish()
+        if preview is not None and preview.get("kind") == "art_gate":
+            return preview
+        if gate is not None:
+            if preview is None:
+                return gate
+            preview["art_gate"] = {k: v for k, v in gate.items() if k != "kind"}
+        return preview
+
+    async def _finish(self) -> dict[str, Any] | None:
         tx = self.transaction
         if tx is None:
             return None
@@ -554,9 +654,11 @@ class ProjectGateway:
         if asset_changes:
             # Reference boards come before the bible; they still need a lock entry.
             if not bible_ok and not all(_is_reference(p) for p in asset_changes):
-                raise PermissionError(
-                    "Approve the project art bible before asset work."
-                )
+                # Nothing is applied: the stage is dropped and the user is asked.
+                gate = self._art_gate()
+                self.art_gate = None
+                await self.cancel()
+                return gate
             problems = check_assets(tx.stage, load_catalog())
             if problems:
                 raise ValueError("Asset validation failed: " + "; ".join(problems))
@@ -634,7 +736,11 @@ class ProjectGateway:
             "transaction_id": tx.id,
             "summary": tx.summary,
             "changes": tx.review(),
-            "media": await evidence(tx, changes),
+            "media": await evidence(
+                tx,
+                changes,
+                [dict(t) for t in self.target_context if t.get("part_kind")],
+            ),
         }
 
     async def decide(self, identifier: str, accept: bool) -> dict[str, Any]:
@@ -664,7 +770,7 @@ class ProjectGateway:
             and not approved(self.project)
         ):
             event["message"] = (
-                "Art direction draft saved. Review it and click Approve this version "
+                "Art direction draft saved. Review it and click Approve these rules "
                 "to allow asset work."
             )
             event["art_review"] = review(self.project)

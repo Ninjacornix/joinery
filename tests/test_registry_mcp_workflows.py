@@ -108,3 +108,74 @@ def test_art_direction_remains_unapproved_and_has_no_model_approval_tool(
             assert not any("approve" in t.name or "accept" in t.name for t in tools)
 
     asyncio.run(schema())
+
+
+def hammer_with_parts(project: Path) -> None:
+    from joinery import parts
+
+    for relative in ("art/sources/hammer.blend", "art/models/hammer.glb"):
+        path = project / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"opaque native unit fixture")
+    (project / "recipes/op.py").write_text("# source operation\n")
+    (project / "recipes/asset.toml").write_text(
+        'tool="blender"\nscript="recipes/op.py"\n'
+        'outputs=["art/sources/hammer.blend", "art/models/hammer.glb"]\n'
+    )
+    inspection = json.loads(
+        (Path(__file__).parent / "fixtures/parts/parts.json").read_text()
+    )
+    digest = parts._sha256(project / "art/sources/hammer.blend")
+    cached = parts.cache_path(project, digest)
+    cached.parent.mkdir(parents=True, exist_ok=True)
+    cached.write_text(json.dumps({"sha256": digest, "inspection": inspection}))
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        {
+            "resource": "res://art/models/hammer.glb",
+            "part": {"material": "Steel", "image": "steel_rough"},
+        },
+        {"resource": "res://art/models/hammer.glb#material=Steel&image=steel_rough"},
+        {
+            "resource": "res://art/models/hammer.glb",
+            "part": {"object": "Head.001", "material": "Steel", "image": "steel_rough"},
+        },
+    ],
+    ids=["fields", "part-id", "picked-on-head"],
+)
+def test_a_selected_part_resolves_to_its_owning_tool(
+    project: Path, arguments: dict
+) -> None:
+    hammer_with_parts(project)
+    result = call(project, "resolve_source", arguments)
+    assert not result.is_error, result.content[0].text
+    asset = json.loads(result.content[0].text)
+    assert asset["path"] == "art/models/hammer.glb" and asset["tool"] == "blender"
+    part = asset["part"]
+    assert part["owner"] == "blender"
+    assert part["owner_source"] == "art/sources/hammer.blend"
+    assert part["role"] == "roughness" and part["image"] == "steel_rough"
+    assert part["texture"] == "art/textures/hammer/steel_rough.png"
+
+
+@pytest.mark.parametrize(
+    "part",
+    [
+        {"material": "Steel", "image": "steel_gloss"},
+        {"material": "Gold"},
+        {"object": "Handle", "material": "Steel", "image": "wood_orm"},
+    ],
+)
+def test_an_unknown_part_is_an_error_not_an_invented_owner(
+    project: Path, part: dict
+) -> None:
+    hammer_with_parts(project)
+    result = call(
+        project,
+        "resolve_source",
+        {"resource": "res://art/models/hammer.glb", "part": part},
+    )
+    assert result.is_error and "has no" in result.content[0].text

@@ -380,3 +380,138 @@ def test_load_refuses_unsafe_change_paths(tmp_path: Path) -> None:
     tx.journal.write_text(json.dumps(raw))
     with pytest.raises(ValueError, match="Unsafe"):
         FileTransaction.load(project, tx.id)
+
+
+# --- Game features as reviewed changes ------------------------------------------
+
+
+@pytest.fixture
+def blueprint_game(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    from joinery import blueprints
+    from joinery.catalog import load_catalog
+    from joinery.installer import Selection
+    from joinery.project import create_project
+    from tests.blueprints.conftest import build_catalogue
+
+    built = build_catalogue(tmp_path / "catalogue")
+    monkeypatch.setattr(blueprints, "BLUEPRINTS_DIR", built.blueprints)
+    monkeypatch.setattr(blueprints, "FEATURES_DIR", built.features)
+    project = tmp_path / "game"
+    create_project(
+        project, "G", Selection(["godot"], []), load_catalog(), blueprint="alpha"
+    )
+    return project
+
+
+def _tree(root: Path) -> dict[str, bytes]:
+    """Every project file with its bytes, the game manifest included.
+
+    Joinery's own bookkeeping under .joinery (journals, locks) is left out.
+    """
+    from joinery.blueprints import MANIFEST
+
+    return {
+        rel: p.read_bytes()
+        for p in sorted(root.rglob("*"))
+        if p.is_file()
+        and (
+            not (rel := p.relative_to(root).as_posix()).startswith(".joinery/")
+            or rel == MANIFEST
+        )
+    }
+
+
+def test_feature_add_accepted_carries_the_game_manifest(blueprint_game: Path) -> None:
+    from joinery import blueprints, game_setup
+
+    manifest = blueprint_game / blueprints.MANIFEST
+    before = manifest.read_bytes()
+    tx = game_setup.stage_feature(blueprint_game, "add", "net")
+    # The stage holds the new manifest; the project keeps the old one until accept.
+    assert (tx.stage / blueprints.MANIFEST).is_file()
+    assert manifest.read_bytes() == before
+    assert not any(c["path"].startswith(".joinery") for c in tx.changes)
+    tx.accept()
+    assert manifest.read_bytes() != before
+    data = json.loads(manifest.read_text())
+    assert "net" in data["units"] and data["features"] == ["net"]
+    journal = json.loads(tx.journal.read_text())
+    assert [c["path"] for c in journal["carried"]] == [blueprints.MANIFEST]
+    # The manifest now matches the files: removing the feature cleans up fully.
+    tx2 = game_setup.stage_feature(blueprint_game, "remove", "net")
+    tx2.accept()
+    assert not (blueprint_game / "features/net").exists()
+
+
+def test_feature_add_rejected_leaves_the_project_byte_identical(
+    blueprint_game: Path,
+) -> None:
+    from joinery import game_setup
+
+    before = _tree(blueprint_game)
+    tx = game_setup.stage_feature(blueprint_game, "add", "net")
+    tx.reject()
+    assert _tree(blueprint_game) == before
+    assert not tx.stage.exists()
+
+
+def test_revert_puts_the_earlier_manifest_back(blueprint_game: Path) -> None:
+    from joinery import blueprints, game_setup
+
+    manifest = blueprint_game / blueprints.MANIFEST
+    before = manifest.read_bytes()
+    tx = game_setup.stage_feature(blueprint_game, "add", "words")
+    tx.accept()
+    assert manifest.read_bytes() != before
+    reloaded = FileTransaction.load(blueprint_game, tx.id)
+    assert reloaded.carried and reloaded.carried[0]["before"]
+    reloaded.revert()
+    assert manifest.read_bytes() == before
+    assert not (blueprint_game / "features/words").exists()
+
+
+def test_revert_refuses_when_the_manifest_moved_on(blueprint_game: Path) -> None:
+    from joinery import blueprints, game_setup
+
+    first = game_setup.stage_feature(blueprint_game, "add", "net")
+    first.accept()
+    manifest = blueprint_game / blueprints.MANIFEST
+    moved = manifest.read_text().replace('"net"', '"net" ', 1)
+    manifest.write_text(moved)
+    with pytest.raises(ValueError, match="Revert that one first"):
+        FileTransaction.load(blueprint_game, first.id).revert()
+    # Nothing was restored: the feature's files and the newer manifest stay.
+    assert (blueprint_game / "features/net/net.gd").is_file()
+    assert manifest.read_text() == moved
+    # A later feature change also blocks the earlier revert.
+    game_setup.stage_feature(blueprint_game, "add", "words").accept()
+    with pytest.raises(ValueError, match="Cannot revert|Revert that one first"):
+        FileTransaction.load(blueprint_game, first.id).revert()
+
+
+def test_retention_keeps_the_saved_manifest(blueprint_game: Path) -> None:
+    from joinery import blueprints, game_setup
+
+    tx = game_setup.stage_feature(blueprint_game, "add", "net")
+    tx.accept()
+    apply_retention(blueprint_game)
+    assert (tx.snapshot / blueprints.MANIFEST).is_file()
+    assert tx.restore_bytes() > 0
+
+
+def test_recovery_restores_a_half_carried_manifest(blueprint_game: Path) -> None:
+    from joinery import blueprints, game_setup
+
+    manifest = blueprint_game / blueprints.MANIFEST
+    before = manifest.read_bytes()
+    project_before = (blueprint_game / "project.godot").read_bytes()
+    tx = game_setup.stage_feature(blueprint_game, "add", "net")
+    tx.accept()
+    # Simulate a crash after the copy: the journal still says committing.
+    raw = json.loads(tx.journal.read_text())
+    raw["state"] = "committing"
+    tx.journal.write_text(json.dumps(raw))
+    loaded = FileTransaction.load(blueprint_game, tx.id)
+    loaded.recover()
+    assert manifest.read_bytes() == before
+    assert (blueprint_game / "project.godot").read_bytes() == project_before

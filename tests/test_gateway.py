@@ -112,7 +112,7 @@ def test_accepting_art_draft_opens_review_without_silently_approving(
             gateway.transaction = tx
             decision = await gateway.decide(tx.id, True)
             assert decision["accepted"] is True
-            assert "click Approve this version" in decision["message"]
+            assert "click Approve these rules" in decision["message"]
             assert decision["art_review"]["text"] == "Technical fixture direction."
             assert decision["art_review"]["sha256"] == fingerprint(tmp_path)
             assert not approved(tmp_path)
@@ -196,7 +196,9 @@ def test_path_mapping_keeps_siblings_and_embedded_code_intact(tmp_path: Path) ->
     assert json.loads(json.dumps(mapped))["projectPath"] == str(stage)
 
 
-def test_windows_paths_map_case_slashes_and_drive_to_native_stage_and_posix_worker() -> None:
+def test_windows_paths_map_case_slashes_and_drive_to_native_stage_and_posix_worker() -> (
+    None
+):
     original = PureWindowsPath("C:/Game Project")
     stage = PureWindowsPath("D:/Private Stage")
     values = {
@@ -362,3 +364,115 @@ def test_partial_native_recipe_update_fails_before_touching_source(
     assert (tx.stage / "art/sources/fixture.blend").read_bytes() == b"existing source"
     assert not (tx.stage / "recipes/inputs").exists()
     assert tx.diff() == []
+
+
+class _FakeConnection:
+    def __init__(self, seen: list[object]) -> None:
+        self.spec = ServerSpec(
+            name="joinery-blender-ops", command="true", source="first-party"
+        )
+        self.tools: dict[str, object] = {"adjust_map": object()}
+        self.seen = seen
+
+    async def connect(self) -> None:
+        return None
+
+    async def close(self) -> None:
+        return None
+
+    async def call(
+        self, tool: str, arguments: dict, timeout: float = 60
+    ) -> CallToolResult:
+        self.seen.append((tool, arguments))
+        return CallToolResult(
+            content=[TextContent(type="text", text="refused")], is_error=True
+        )
+
+
+def test_unapproved_bible_gives_the_structured_art_gate_not_an_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[object] = []
+
+    async def run() -> None:
+        gateway = ProjectGateway(project(tmp_path, monkeypatch))
+        gateway.request_summary = "Make the steel rougher"
+        connection = _FakeConnection(seen)
+        monkeypatch.setattr(gateway, "connection", AsyncMock(return_value=connection))
+        try:
+            result = await gateway.call(
+                "joinery-blender-ops",
+                "adjust_map",
+                {"source": "art/sources/hammer.blend", "material": "Steel"},
+            )
+            assert result.is_error
+            assert result.structured_content == {
+                "needs_art_approval": True,
+                "resume": "Make the steel rougher",
+                "message": result.structured_content["message"],
+            }
+            assert "how your game should look" in result.content[0].text
+            assert gateway.transaction is None, "Nothing is staged behind the gate"
+            gate = await gateway.finish()
+            assert gate is not None and gate["kind"] == "art_gate"
+            assert (
+                gate["needs_art_approval"]
+                and gate["resume"] == "Make the steel rougher"
+            )
+            assert await gateway.finish() is None, "The gate is reported once"
+        finally:
+            await gateway.close()
+
+    asyncio.run(run())
+    assert seen == [], "The tool never ran"
+
+
+def test_part_targets_reach_the_stage_before_a_typed_part_edit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    seen: list[object] = []
+    root = project(tmp_path, monkeypatch)
+    monkeypatch.setattr("joinery.gateway.approved", lambda _project: True)
+    target = {
+        "id": "res://art/models/hammer.glb#material=Steel&image=steel_rough",
+        "label": "Roughness · Steel",
+        "part_kind": "texture",
+        "owner_source": "art/sources/hammer.blend",
+        "material": "Steel",
+        "image": "steel_rough",
+    }
+
+    async def run() -> None:
+        gateway = ProjectGateway(root)
+        gateway.target_context = (
+            target,
+            {"id": "res://main.tscn::Door", "label": "Door"},
+        )
+        connection = _FakeConnection(seen)
+
+        async def staged_call(
+            tool: str, arguments: dict, timeout: float = 60
+        ) -> CallToolResult:
+            stage = gateway.transaction.stage
+            written = json.loads((stage / ".joinery/part_targets.json").read_text())
+            seen.append(written)
+            return CallToolResult(
+                content=[TextContent(type="text", text="refused")], is_error=True
+            )
+
+        connection.call = staged_call  # type: ignore[method-assign]
+        monkeypatch.setattr(gateway, "connection", AsyncMock(return_value=connection))
+        monkeypatch.setattr(
+            "joinery.gateway.MCPConnection", lambda *_a, **_k: connection
+        )
+        try:
+            await gateway.call(
+                "joinery-blender-ops",
+                "adjust_map",
+                {"source": "art/sources/hammer.blend"},
+            )
+        finally:
+            await gateway.close()
+
+    asyncio.run(run())
+    assert seen == [[target]], "Only part targets, and only this prompt's"

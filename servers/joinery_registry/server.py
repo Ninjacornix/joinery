@@ -24,7 +24,7 @@ from typing import Any, cast
 from mcp.server import MCPServer
 from mcp.types import ToolAnnotations
 
-from joinery import brief
+from joinery import brief, parts
 from joinery.art_approval import approved, fingerprint
 from joinery.workspace import index
 from servers.errors import tool_errors
@@ -267,18 +267,37 @@ def make_server(project: Path) -> MCPServer[Any]:
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
-    async def resolve_source(resource: str) -> dict[str, Any]:
-        """Resolve a Godot resource path to its native source and owning application."""
-        relative = resource.removeprefix("res://").split("::", 1)[0]
+    async def resolve_source(
+        resource: str, part: dict[str, str] | None = None
+    ) -> dict[str, Any]:
+        """Resolve a Godot resource path to its native source and owning application. With a part (a selection target, or the fields object/material/image/bone/shape_key; a part id after '#' in the resource works too), also check that part exists in the source and return which tool owns it."""
+        base, _, fragment = resource.partition("#")
+        relative = base.removeprefix("res://").split("::", 1)[0]
         if not (project / relative).resolve().is_relative_to(project):
             raise ValueError("Resource is outside this project.")
+        wanted = {str(k): str(v) for k, v in (part or {}).items()}
+        if fragment:
+            wanted = {**parts.parse_part_id("#" + fragment)[1], **wanted}
         data = index(project)
         for asset in data.get("assets", []):
             if asset["path"] == relative:
-                return dict(asset)
+                found = dict(asset)
+                if any(wanted.get(key) for key in parts.ID_FIELDS):
+                    found["part"] = await _resolve_part(relative, wanted)
+                return found
         raise ValueError(
             "The resource is not registered in this project. Use list_assets to find existing sources; do not inspect a document before creating it."
         )
+
+    async def _resolve_part(relative: str, wanted: dict[str, str]) -> dict[str, str]:
+        report = parts.cached_report(project, relative)
+        if report is None:
+            report = await parts.report(project, relative)
+        target = report.find(wanted).target()
+        if wanted.get("object") and not target["object"]:
+            # A map picked on a surface keeps the object it was picked on.
+            target["object"] = wanted["object"]
+        return target
 
     return server
 

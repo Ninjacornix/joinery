@@ -110,6 +110,7 @@ ENGINE_KEYS = frozenset(
         "game/blueprint",
         "game/hooks/level_scene",
         "game/hooks/player_scene",
+        "game/hooks/spawnable_scenes",
     }
 )
 CORE_ROOTS = ("core/", "tests/support/", "default_bus_layout.tres")
@@ -137,6 +138,13 @@ PAD_AXES = {
     "3-": "Right stick up", "3+": "Right stick down",
     "4+": "Left trigger", "5+": "Right trigger",
 }
+#: The wizard card's screenshot, taken by Godot running the blueprint itself
+#: (release/capture_blueprints.py), and its provenance note. They sit beside
+#: the overlay and are never copied into a game.
+CAPTURE_IMAGE = "capture.png"
+CAPTURE_NOTE = "capture.toml"
+CAPTURE_FILES = frozenset({CAPTURE_IMAGE, CAPTURE_NOTE})
+CAPTURE_FIELDS = ("origin", "tool", "engine_version", "command", "frame", "sha256")
 _SKIP = frozenset({".DS_Store", "__pycache__", ".godot", "Thumbs.db"})
 _ID = re.compile(r"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 _AUTOLOAD = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
@@ -265,13 +273,14 @@ class Blueprint(_Strict):
 
 
 class External(_Strict):
-    """Something a feature can use but Joinery never installs."""
+    """Something a feature uses that lives outside Joinery."""
 
     name: str
     source: str
     version: str
     install: str
     required: bool = False
+    licence: str | None = None
 
 
 class Feature(_Strict):
@@ -511,8 +520,9 @@ def list_features() -> list[Feature]:
 
 
 def _pad_labels(spec: InputSpec) -> list[str]:
-    return [PAD_BUTTONS.get(b, f"Button {b}") for b in spec.pad_buttons] + [
-        PAD_AXES.get(a, f"Axis {a}") for a in spec.pad_axes
+    # Sticks first, like the in-game prompts.
+    return [PAD_AXES.get(a, f"Axis {a}") for a in spec.pad_axes] + [
+        PAD_BUTTONS.get(b, f"Button {b}") for b in spec.pad_buttons
     ]
 
 
@@ -537,6 +547,8 @@ def _describe(catalogue: _Catalogue, blueprint: Blueprint) -> dict[str, Any]:
                     pad = actions[action]["pad"]
                     pad += [p for p in _pad_labels(spec) if p not in pad]
     data["input"] = actions
+    image = blueprint.dir / CAPTURE_IMAGE
+    data["capture"] = str(image) if image.is_file() and (blueprint.dir / CAPTURE_NOTE).is_file() else None
     data["features_supported"] = sorted(
         f.id for f in catalogue.features.values() if f.supports(blueprint.id)
     )
@@ -890,6 +902,13 @@ def read_record(target: Path) -> GameRecord | None:
     game = data.get("game")
     if game is None:
         return None
+    # Sub-tables such as [game.steam] hold a feature's own settings; they sit
+    # beside the record and record_text() leaves them alone.
+    game = {
+        key: value
+        for key, value in game.items()
+        if key in GameRecord.model_fields or not isinstance(value, dict)
+    }
     try:
         return GameRecord.model_validate(game)
     except ValidationError as exc:
@@ -961,9 +980,17 @@ def _apply_append(
     ours = [v for v in dict.fromkeys(values) if v in existing and v in previous] + new
     if new:
         work.config.set(section, name, to_variant(existing + new))
-    if ours:
-        created = bool(recorded["created"]) if recorded else current is None
-        entry["append"][key] = {"values": ours, "created": created}
+    if not ours:
+        return
+    prior = entry["append"].get(key)
+    if prior is not None:
+        # An earlier merge of the same unit appended to this key already: keep
+        # its values and its `created`, so removal takes back all of them.
+        values_union = list(dict.fromkeys([*prior["values"], *ours]))
+        entry["append"][key] = {"values": values_union, "created": prior["created"]}
+        return
+    created = bool(recorded["created"]) if recorded else current is None
+    entry["append"][key] = {"values": ours, "created": created}
 
 
 def _apply_input(
@@ -1106,6 +1133,8 @@ def _engine_settings(resolution: Resolution) -> dict[str, str]:
         settings["game/hooks/level_scene"] = to_variant(blueprint.hooks.level_scene)
     if blueprint.hooks.player_scene:
         settings["game/hooks/player_scene"] = to_variant(blueprint.hooks.player_scene)
+    if blueprint.hooks.spawnable_scenes:
+        settings["game/hooks/spawnable_scenes"] = to_variant(list(blueprint.hooks.spawnable_scenes))
     return settings
 
 
@@ -1572,11 +1601,21 @@ def _res_to_overlay(path: str) -> str | None:
     return path[len("res://"):] if path.startswith("res://") else None
 
 
-def _check_files(unit_id: str, directory: Path, files: dict[str, Path], roots: Sequence[str], errors: list[str], uids: dict[str, str]) -> None:
+def _check_files(
+    unit_id: str,
+    directory: Path,
+    files: dict[str, Path],
+    roots: Sequence[str],
+    errors: list[str],
+    uids: dict[str, str],
+    extras: frozenset[str] = frozenset(),
+) -> None:
     for path in sorted(directory.rglob("*")):
         if not path.is_file() or _SKIP.intersection(path.parts):
             continue
         rel_path = path.relative_to(directory)
+        if len(rel_path.parts) == 1 and rel_path.name in extras:
+            continue
         suffix = path.suffix.lower()
         if suffix in BANNED_SUFFIXES:
             errors.append(
@@ -1619,6 +1658,36 @@ def _check_files(unit_id: str, directory: Path, files: dict[str, Path], roots: S
                     errors.append(f"{unit_id}: {rel} header has no uid")
             else:
                 _claim(uids, match.group(1), f"{unit_id}:{rel}", errors)
+
+
+def check_capture(directory: Path) -> list[str]:
+    """Problems with a blueprint's screenshot and its provenance note.
+
+    Both files are optional, but they come as a pair: the note must say Godot
+    made the picture and hold the picture's sha256.
+    """
+    image, note = directory / CAPTURE_IMAGE, directory / CAPTURE_NOTE
+    if not image.is_file() and not note.is_file():
+        return []
+    if not image.is_file():
+        return [f"{CAPTURE_NOTE} has no {CAPTURE_IMAGE} beside it"]
+    if not note.is_file():
+        return [f"{CAPTURE_IMAGE} has no {CAPTURE_NOTE} saying how it was made"]
+    try:
+        data = tomllib.loads(note.read_text(encoding="utf-8"))
+    except (OSError, tomllib.TOMLDecodeError) as exc:
+        return [f"{CAPTURE_NOTE} cannot be read: {exc}"]
+    problems = [f"{CAPTURE_NOTE} has no {name}" for name in CAPTURE_FIELDS if name not in data]
+    if data.get("origin", "tool-created") != "tool-created":
+        problems.append(f"{CAPTURE_NOTE}: origin must be tool-created")
+    if data.get("tool", "godot") != "godot":
+        problems.append(f"{CAPTURE_NOTE}: tool must be godot")
+    picture = image.read_bytes()
+    if not picture.startswith(b"\x89PNG\r\n\x1a\n"):
+        problems.append(f"{CAPTURE_IMAGE} is not a PNG")
+    if "sha256" in data and data["sha256"] != _sha(picture):
+        problems.append(f"{CAPTURE_IMAGE} does not match the sha256 in {CAPTURE_NOTE}")
+    return problems
 
 
 def _claim(uids: dict[str, str], uid: str, owner: str, errors: list[str]) -> None:
@@ -1684,7 +1753,8 @@ def validate_catalogue() -> list[str]:
         if not blueprint.pitch.strip():
             errors.append(f"{where}: needs a one-line pitch")
         files = _overlay(blueprint.dir / "overlay")
-        _check_files(blueprint.id, blueprint.dir, files, BLUEPRINT_ROOTS, errors, uids)
+        _check_files(blueprint.id, blueprint.dir, files, BLUEPRINT_ROOTS, errors, uids, CAPTURE_FILES)
+        errors += [f"{where}: {p}" for p in check_capture(blueprint.dir)]
         _check_inputs(blueprint.id, [blueprint.merge], errors)
         if {"dash", "crouch"} <= set(blueprint.merge.input):
             errors.append(f"{where}: dash and crouch share a pad button; use one")

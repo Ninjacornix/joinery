@@ -5,6 +5,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import contextlib
+import json
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -102,6 +103,40 @@ def validate_arguments(arguments: Any) -> None:
                 for module in modules:
                     if normalise(module.split(".")[0]) in denylist.packages:
                         raise PolicyStop(f"{module} is a denied generative package")
+
+
+def result_text(result: CallToolResult) -> str:
+    """The text blocks of a tool result, joined."""
+    return "\n".join(
+        str(getattr(block, "text", "")) for block in result.content if hasattr(block, "text")
+    ).strip()
+
+
+def probe_problem(name: str, result: CallToolResult) -> str:
+    """Why a read-only probe did not prove the app works, or "" when it did.
+
+    An error result fails. So does a capabilities answer that is false: the
+    offline worker did not start (`runtime_available: false`), the answer says
+    `ok: false`, or every listed tool reports its application missing.
+    """
+    text = result_text(result)
+    if result.is_error:
+        first = next((line.strip() for line in text.splitlines() if line.strip()), "")
+        return f"{name} failed: {first[:300] or 'no detail'}"
+    try:
+        data = json.loads(text)
+    except ValueError:
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    if data.get("runtime_available") is False:
+        return f"{name}: the offline worker did not start"
+    if data.get("ok") is False:
+        return f"{name}: {str(data.get('error') or data.get('detail') or 'not ready')[:300]}"
+    listed = [t for t in data.get("tools", []) if isinstance(t, dict)]
+    if listed and not any(t.get("application_installed", True) for t in listed):
+        return f"{name}: the application is missing from the worker"
+    return ""
 
 
 @dataclass
@@ -313,9 +348,18 @@ class MCPConnection:
             raise
 
     async def probe(self, tool: str, arguments: dict[str, Any]) -> CallToolResult:
-        """Only the caller's explicit read-only app probe can establish inspected."""
+        """Only the caller's explicit read-only app probe can establish inspected.
+
+        A probe fails, and the connection is not inspected, when the call
+        returns an error or its capabilities say the app is missing; the reason
+        goes into `readiness.detail`. The result is returned either way.
+        """
         result = await self.call(tool, arguments)
-        if not result.is_error:
+        problem = probe_problem(f"{self.spec.name}.{tool}", result)
+        if problem:
+            self.readiness.inspected = False
+            self.readiness.detail = problem
+        else:
             self.readiness.inspected = True
         return result
 

@@ -202,3 +202,58 @@ def test_an_invalid_rules_block_is_left_for_the_user() -> None:
     new = upgrade_text(old)
     assert "```toml\n[audio\n```" in new
     assert bible_schema.version(new) == 2
+
+
+def _v1_project(tmp_path: Path) -> Path:
+    project = tmp_path / "game"
+    (project / "art").mkdir(parents=True)
+    (project / "project.godot").write_text("config_version=5\n")
+    (project / "art/bible.md").write_text(v1_bible(FULL))
+    approve(project, "tester")
+    return project
+
+
+def test_cli_upgrade_is_a_reviewed_transaction_that_clears_approval(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import json
+
+    from joinery.art_approval import approved
+    from joinery.cli import main
+    from joinery.transactions import list_transactions
+
+    project = _v1_project(tmp_path)
+    old = (project / "art/bible.md").read_text()
+    # Staged and waiting: nothing changes until the user accepts.
+    assert main(["bible", "--project", str(project), "--upgrade", "--json"]) == 0
+    pending = json.loads(capsys.readouterr().out)
+    assert pending["state"] == "review"
+    assert [c["path"] for c in pending["changes"]] == ["art/bible.md"]
+    assert (project / "art/bible.md").read_text() == old
+    assert approved(project)
+    accept = ["transactions", "accept", "--project", str(project), "--id"]
+    assert main([*accept, pending["transaction_id"]]) == 0
+    assert json.loads(capsys.readouterr().out)["state"] == "accepted"
+    assert (project / "art/bible.md").read_text() == upgrade_text(old)
+    # The hash changed, so the user approves the new text again.
+    assert not approved(project)
+    approve(project, "tester")
+    assert approved(project)
+    [tx] = list_transactions(project)
+    assert tx.summary == "Upgrade the art bible" and tx.state == "accepted"
+
+
+def test_cli_upgrade_with_yes_and_when_already_current(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from joinery.art_approval import approved
+    from joinery.cli import main
+
+    project = _v1_project(tmp_path)
+    assert main(["bible", "--project", str(project), "--upgrade", "--yes"]) == 0
+    out = capsys.readouterr().out
+    assert "art/bible.md" in out and "approve it again" in out
+    assert not approved(project)
+    assert bible_schema.version((project / "art/bible.md").read_text()) == 2
+    assert main(["bible", "--project", str(project), "--upgrade", "--yes"]) == 1
+    assert "already up to date" in capsys.readouterr().err

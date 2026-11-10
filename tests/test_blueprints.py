@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import shutil
 import tomllib
@@ -11,6 +13,10 @@ from pathlib import Path
 import pytest
 
 from joinery import blueprints
+from joinery.catalog import load_catalog
+from joinery.godot_config import GodotConfig, packed_strings
+from joinery.installer import Selection
+from joinery.project import create_project
 from tests.blueprints.conftest import FixtureCatalogue, build_catalogue
 
 
@@ -299,3 +305,127 @@ def test_game_record_with_comments_stays_valid_toml(old: str) -> None:
         assert data["tools"] == {"x": 1}
         assert "# Tools\n[tools]" in new
     assert blueprints.record_text(new, record) == new
+
+
+def _game(tmp_path: Path, features: tuple[str, ...] = ()) -> Path:
+    project = tmp_path / "game"
+    create_project(
+        project, "Fixture Game", Selection(["godot"], []), load_catalog(),
+        blueprint="alpha", features=features,
+    )
+    return project
+
+
+def _translations(project: Path) -> list[str] | None:
+    config = GodotConfig.parse((project / "project.godot").read_text())
+    raw = config.get("internationalization", "locale/translations")
+    return None if raw is None else packed_strings(raw)
+
+
+def test_base_and_adapter_appends_are_both_taken_back(
+    fixture_catalogue: FixtureCatalogue, tmp_path: Path
+) -> None:
+    _edit(
+        fixture_catalogue.features / "words/feature.toml",
+        '[append]\n"internationalization/locale/translations" = ["res://locale/en.po"]\n',
+        '[append]\n"internationalization/locale/translations" = ["res://locale/en.po"]\n\n'
+        '[adapters.alpha.append]\n"internationalization/locale/translations" = '
+        '["res://locale/en.po", "res://locale/alpha.po"]\n',
+    )
+    assert blueprints.validate_catalogue() == []
+    project = _game(tmp_path, ("words",))
+    assert _translations(project) == ["res://locale/en.po", "res://locale/alpha.po"]
+    manifest = json.loads((project / blueprints.MANIFEST).read_text())
+    recorded = manifest["units"]["words"]["append"]["internationalization/locale/translations"]
+    assert recorded == {
+        "values": ["res://locale/en.po", "res://locale/alpha.po"],
+        "created": True,
+    }
+    blueprints.remove_feature(project, "words")
+    assert _translations(project) is None, "no value the feature added is left behind"
+
+
+def test_adapter_append_keeps_values_that_were_there_before(
+    fixture_catalogue: FixtureCatalogue, tmp_path: Path
+) -> None:
+    _edit(
+        fixture_catalogue.features / "words/feature.toml",
+        '[append]\n"internationalization/locale/translations" = ["res://locale/en.po"]\n',
+        '[append]\n"internationalization/locale/translations" = ["res://locale/en.po"]\n\n'
+        '[adapters.alpha.append]\n"internationalization/locale/translations" = ["res://locale/alpha.po"]\n',
+    )
+    project = _game(tmp_path)
+    godot = project / "project.godot"
+    godot.write_text(
+        godot.read_text()
+        + '\n[internationalization]\n\nlocale/translations=PackedStringArray("res://mine.po")\n'
+    )
+    blueprints.add_feature(project, "words")
+    assert _translations(project) == ["res://mine.po", "res://locale/en.po", "res://locale/alpha.po"]
+    blueprints.remove_feature(project, "words")
+    assert _translations(project) == ["res://mine.po"]
+
+
+def test_spawnable_scenes_hook_is_written(
+    fixture_catalogue: FixtureCatalogue, tmp_path: Path
+) -> None:
+    _edit(
+        fixture_catalogue.blueprints / "alpha/blueprint.toml",
+        "spawnable_scenes = []",
+        'spawnable_scenes = ["res://game/level.tscn"]',
+    )
+    project = _game(tmp_path)
+    text = (project / "project.godot").read_text()
+    assert 'hooks/spawnable_scenes=PackedStringArray("res://game/level.tscn")' in text
+
+
+def _capture(c: FixtureCatalogue, sha: str | None = None, origin: str = "tool-created") -> Path:
+    directory = c.blueprints / "alpha"
+    picture = b"\x89PNG\r\n\x1a\n" + b"\x00" * 32
+    (directory / blueprints.CAPTURE_IMAGE).write_bytes(picture)
+    digest = sha or hashlib.sha256(picture).hexdigest()
+    (directory / blueprints.CAPTURE_NOTE).write_text(
+        f'origin = "{origin}"\ntool = "godot"\nengine_version = "4.7.2.stable"\n'
+        'command = "godot --write-movie frame.png"\nframe = 149\n'
+        f'sha256 = "{digest}"\n'
+    )
+    return directory
+
+
+def test_capture_beside_the_overlay_is_accepted(fixture_catalogue: FixtureCatalogue) -> None:
+    directory = _capture(fixture_catalogue)
+    assert blueprints.validate_catalogue() == []
+    assert blueprints.describe("alpha")["capture"] == str(directory / blueprints.CAPTURE_IMAGE)
+    assert blueprints.describe("beta")["capture"] is None
+    assert blueprints.CAPTURE_IMAGE not in blueprints._overlay(directory / "overlay")
+
+
+@pytest.mark.parametrize(
+    ("breaks", "message"),
+    [
+        (lambda c: _capture(c, sha="0" * 64), "capture.png does not match the sha256"),
+        (lambda c: _capture(c, origin="human-import"), "origin must be tool-created"),
+        (
+            lambda c: (_capture(c) / blueprints.CAPTURE_NOTE).unlink(),
+            "capture.png has no capture.toml",
+        ),
+        (
+            lambda c: (_capture(c) / blueprints.CAPTURE_IMAGE).unlink(),
+            "capture.toml has no capture.png",
+        ),
+    ],
+)
+def test_capture_problems_are_reported(
+    breaks: Callable[[FixtureCatalogue], object],
+    message: str,
+    fixture_catalogue: FixtureCatalogue,
+) -> None:
+    breaks(fixture_catalogue)
+    problems = blueprints.validate_catalogue()
+    assert any(message in p for p in problems), problems
+
+
+def test_capture_elsewhere_is_still_an_asset(fixture_catalogue: FixtureCatalogue) -> None:
+    (fixture_catalogue.features / "net/capture.png").write_bytes(b"\x89PNG\r\n\x1a\n")
+    problems = blueprints.validate_catalogue()
+    assert any("capture.png is an asset file" in p for p in problems), problems

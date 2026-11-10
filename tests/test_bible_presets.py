@@ -11,7 +11,7 @@ from joinery.art_approval import approve
 from joinery.bible_rules import BibleRules, load_rules, parse_rules
 from joinery.catalog import ROOT
 
-TEMPLATE_V2 = ROOT / "templates" / "art_bible_v2.md"
+TEMPLATE = ROOT / "templates" / "art_bible.md"
 IDS = ["none", "cards-ui", "flat-2d", "lowpoly-3d", "pixel-2d", "stylised-pbr-3d"]
 ANSWERS = {
     "title": "Hollow Keep",
@@ -112,7 +112,7 @@ def test_presets_that_fill_taste_are_refused(tmp_path: Path) -> None:
 def test_rendered_v2_template_leaves_no_token_and_is_approvable(
     tmp_path: Path, preset: str
 ) -> None:
-    text = bible_presets.fill(TEMPLATE_V2.read_text(), ANSWERS, preset)
+    text = bible_presets.fill(TEMPLATE.read_text(), ANSWERS, preset)
     assert "{{" not in text
     assert bible_schema.REQUIRED_MARKER not in text
     (tmp_path / "art").mkdir()
@@ -125,7 +125,7 @@ def test_rendered_v2_template_leaves_no_token_and_is_approvable(
 def test_unanswered_required_sections_block_approval_and_open_ones_do_not(
     tmp_path: Path,
 ) -> None:
-    text = bible_presets.fill(TEMPLATE_V2.read_text(), {"title": "Sparse"}, None)
+    text = bible_presets.fill(TEMPLATE.read_text(), {"title": "Sparse"}, None)
     # One required marker per interview question, as in the first format.
     assert text.count("Not set yet") == 6
     assert text.count(bible_schema.OPEN_MARKER) == 12
@@ -133,3 +133,9 @@ def test_unanswered_required_sections_block_approval_and_open_ones_do_not(
     (tmp_path / "art/bible.md").write_text(text)
     with pytest.raises(ValueError, match="Finish the art direction"):
         approve(tmp_path, "tester")
+
+
+def test_pixel_preset_names_krita_for_pixel_art() -> None:
+    text = (ROOT / "templates" / "bible_presets" / "pixel-2d.toml").read_text()
+    assert "Krita" in text
+    assert "aseprite" not in text.lower()

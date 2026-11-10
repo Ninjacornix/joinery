@@ -46,6 +46,11 @@ TRANSACTIONS = ".joinery/transactions"
 NOT_REVERTIBLE = (
     "This change can no longer be reverted. Its restore data was cleared to save space."
 )
+#: Joinery's own records that a staged change may update. `.joinery` stays out
+#: of the stage and the review, but adding or removing a game feature in the
+#: stage rewrites the game manifest there. Accept carries it into the project,
+#: reject drops it with the stage, and revert puts the earlier one back.
+CARRIED = (".joinery/game-manifest.json",)
 
 
 class ProjectLease:
@@ -253,6 +258,8 @@ class FileTransaction:
         self.state = "new"
         self.base: dict[str, str] = {}
         self.changes: list[dict[str, str]] = []
+        #: CARRIED files this transaction replaced, with before and after hashes.
+        self.carried: list[dict[str, str]] = []
         self.summary = ""
         self.include_dirs = True
         self.revertible = True
@@ -303,6 +310,8 @@ class FileTransaction:
             data["base"] = self.base
         if self.changes:
             data["changes"] = self.changes
+        if self.carried:
+            data["carried"] = self.carried
         if self.decided:
             data["decided"] = self.decided
         if self.state == "accepted":
@@ -430,10 +439,12 @@ class FileTransaction:
                 else:
                     target.unlink()
                 applied.append(change)
+            self._carry()
             self.state = "accepted"
             self.decided = time.time()
             self._record(changes=changes)
         except BaseException:
+            self._uncarry()
             self._restore(applied)
             self.state = "failed"
             self._record(changes=changes)
@@ -442,6 +453,61 @@ class FileTransaction:
         self._discard(self.stage)
         self._housekeep()
         return changes
+
+    def _carry(self) -> None:
+        """Copy the stage's CARRIED records into the project, keeping the old ones.
+
+        The plan is journalled before the first copy, so recovery after a crash
+        knows which records to put back.
+        """
+        planned: list[dict[str, str]] = []
+        for path in CARRIED:
+            staged = self.stage / path
+            if not staged.is_file() or staged.is_symlink():
+                continue
+            target = self.project / path
+            before = _sha256(target) if target.is_file() else ""
+            after = _sha256(staged)
+            if before == after:
+                continue
+            if before:
+                copy_file(target, self.snapshot / path)
+            planned.append({"path": path, "before": before, "after": after})
+        if not planned:
+            return
+        self.carried = planned
+        self._record(changes=self.changes)
+        for entry in planned:
+            target = self.project / entry["path"]
+            target.parent.mkdir(parents=True, exist_ok=True)
+            descriptor, temp = tempfile.mkstemp(prefix=".joinery-", dir=target.parent)
+            os.close(descriptor)
+            try:
+                copy_file(self.stage / entry["path"], Path(temp))
+                os.replace(temp, target)
+            finally:
+                if os.path.exists(temp):
+                    os.unlink(temp)
+
+    def _uncarry(self) -> None:
+        """Put back each CARRIED record this transaction replaced."""
+        for entry in self.carried:
+            target = self.project / entry["path"]
+            if not target.is_file() or _sha256(target) != entry["after"]:
+                continue
+            saved = self.snapshot / entry["path"]
+            if entry["before"] and saved.is_file():
+                copy_file(saved, target)
+            elif not entry["before"]:
+                target.unlink()
+
+    def _carried_conflicts(self) -> list[str]:
+        return [
+            entry["path"]
+            for entry in self.carried
+            if (self.project / entry["path"]).is_file()
+            and _sha256(self.project / entry["path"]) != entry["after"]
+        ]
 
     def _restore(self, changes: list[dict[str, str]]) -> None:
         removing = {change["path"] for change in changes if not change["before"]}
@@ -534,8 +600,13 @@ class FileTransaction:
             for change in changes:
                 if current.get(change["path"], "") != change["after"]:
                     raise ValueError("Cannot revert over newer manual edits.")
-            self._check_snapshot(changes)
+            if self._carried_conflicts():
+                raise ValueError(
+                    "A later change updated this project's game features. Revert that one first."
+                )
+            self._check_snapshot([*changes, *self.carried])
             self._restore(changes)
+            self._uncarry()
             self.state = "reverted"
             self.decided = time.time()
             self._record(changes=changes)
@@ -549,6 +620,11 @@ class FileTransaction:
             raise ValueError("Invalid transaction journal.")
         transaction.base = raw.get("base", {})
         transaction.changes = list(raw.get("changes") or [])
+        transaction.carried = [
+            entry
+            for entry in raw.get("carried") or []
+            if isinstance(entry, dict) and entry.get("path") in CARRIED
+        ]
         transaction.state = raw["state"]
         transaction.summary = raw["summary"]
         transaction.include_dirs = raw.get("include_dirs", False)
@@ -578,6 +654,7 @@ class FileTransaction:
                 )
         self._check_snapshot(applied)
         self._restore(applied)
+        self._uncarry()
         self.state = "recovered"
         self.decided = time.time()
         self._record(changes=changes)
@@ -603,7 +680,7 @@ class FileTransaction:
     def _needed(self) -> set[str]:
         return {
             change["path"]
-            for change in self.changes
+            for change in [*self.changes, *self.carried]
             if change["before"] and change["before"] != DIRECTORY
         }
 

@@ -216,3 +216,17 @@ def test_store_preimage_is_content_addressed(tmp_path: Path) -> None:
     assert (tmp_path / "recipes/inputs/.gdignore").is_file()
     document.write_bytes(b"BLENDER later")
     assert store_preimage(tmp_path, document) != first
+
+
+def test_joinery_cli_dispatches_history(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    # The settings Storage row runs these through the main `joinery` command.
+    from joinery.cli import main as joinery
+
+    project = fixture(tmp_path)
+    assert joinery(["history", "usage", "--json", "--project", str(project)]) == 0
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert len(lines) == 1 and json.loads(lines[0])["total_bytes"] > 0
+    assert joinery(["history", "compact", "--project", str(project)]) == 0
+    assert capsys.readouterr().out.startswith("Freed ")

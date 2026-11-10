@@ -3,18 +3,30 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import json
+import shlex
 import shutil
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
-from joinery import __version__, connection, history, hook
+from joinery import (
+    __version__,
+    blueprints,
+    brief,
+    connection,
+    game_setup,
+    history,
+    hook,
+)
 from joinery.agents import all_agents
 from joinery.agents import get as get_agent
 from joinery.api_profiles import configure as configure_api
 from joinery.auth import for_agent
-from joinery.bible import grouped, write_from_answers_file
+from joinery.bible import BIBLE_PATH, grouped, write_from_answers_file
 from joinery.catalog import (
     CONFIG_PATH,
     ROOT,
@@ -42,9 +54,13 @@ from joinery.policy import load_denylist, normalise
 from joinery.project import create_project
 from joinery.recipe import rebuild_all, recipe_paths, record
 from joinery.runner import pick
+from joinery.transactions import DIRECTORY, FileTransaction
 from joinery.vcs import ensure_lfs
 from joinery.wiring import unwireable, write_agent_wiring
 from joinery.workspace import index, open_asset, watch_stamp
+
+#: `joinery mcp status` states that mean a server cannot work yet.
+MCP_FAILURES = frozenset({"error", "not-installed", "runtime-missing"})
 
 
 def check_mcp_config(root: Path, config: Path = CONFIG_PATH) -> list[str]:
@@ -126,11 +142,383 @@ def _setup(tools: str | None, project: Path, custom_mcps: str | None = None) -> 
     return 0
 
 
-def _new(path: Path, name: str | None, tools: str | None) -> int:
-    selection = _choose(tools, path / "joinery.toml")
-    create_project(path, name or path.name, selection, load_catalog())
+def _feature_list(text: str | None) -> list[str] | None:
+    """`--features a,b`; None when the flag is absent (the blueprint's defaults)."""
+    if text is None:
+        return None
+    return [f.strip() for f in text.split(",") if f.strip()]
+
+
+def _defaults(blueprint: str, features: list[str] | None) -> list[str]:
+    if features is not None:
+        return features
+    return list(blueprints.describe(blueprint).get("default_features", []))
+
+
+def _print_step(step: dict[str, Any]) -> None:
+    stream = sys.stderr if step.get("state") == "failed" else sys.stdout
+    print(str(step.get("message", "")), file=stream)
+
+
+def _new(
+    path: Path,
+    name: str | None,
+    tools: str | None,
+    blueprint: str | None = None,
+    features: str | None = None,
+    steam_app_id: str | None = None,
+    connect: str | None = None,
+) -> int:
+    try:
+        chosen = _feature_list(features)
+        if blueprint is not None:
+            chosen = _defaults(blueprint, chosen)
+            game_setup.check_choices(blueprint, chosen, steam_app_id, connect)
+        selection = _choose(tools, path / "joinery.toml")
+        create_project(
+            path,
+            name or path.name,
+            selection,
+            load_catalog(),
+            blueprint=blueprint,
+            features=chosen or (),
+            steam_app_id=steam_app_id,
+            connect=connect,
+            report=_print_step,
+            wizard=True,
+        )
+    except (TypeError, ValueError) as exc:
+        print(f"new: {exc}", file=sys.stderr)
+        return 1
     print(f"Created {path} with: {', '.join(selection.tools)}")
+    print("Open it with: " + shlex.join(["joinery", "launch", "--project", str(path)]))
     return 0
+
+
+def _game_apply(args: argparse.Namespace) -> int:
+    """The wizard's game step: one JSON line per finished step."""
+
+    def emit(step: dict[str, Any]) -> None:
+        print(json.dumps(step), flush=True)
+
+    try:
+        chosen = _defaults(args.blueprint, _feature_list(args.features))
+        game_setup.apply_choices(
+            args.project.resolve(),
+            args.blueprint,
+            chosen,
+            args.steam_app_id,
+            args.connect,
+            addon=not args.no_addon,
+            report=emit,
+        )
+    except (OSError, ValueError, RuntimeError) as exc:
+        emit({"step": "error", "state": "failed", "message": str(exc)})
+        return 1
+    emit({"step": "finished", "state": "done", "message": "Your game is ready."})
+    return 0
+
+
+def _blueprints(args: argparse.Namespace) -> int:
+    try:
+        if args.action == "describe":
+            if not args.id:
+                raise ValueError("Name the blueprint to describe.")
+            print(json.dumps(game_setup.describe(args.id), indent=2))
+            return 0
+        if args.json:
+            print(json.dumps(game_setup.wizard_catalogue(), indent=2))
+            return 0
+    except ValueError as exc:
+        print(json.dumps({"error": str(exc)}))
+        return 1
+    for blueprint in blueprints.list_blueprints():
+        print(f"  {blueprint.id:<18} {blueprint.name}: {blueprint.pitch}")
+    return 0
+
+
+def _features(as_json: bool) -> int:
+    listed = blueprints.catalogue_json()["features"]
+    if as_json:
+        print(json.dumps({"features": listed}, indent=2))
+        return 0
+    for feature in listed:
+        print(f"  {feature['id']:<14} {feature['name']}: {feature['summary']}")
+    return 0
+
+
+def _show_review(tx: FileTransaction, changes: list[dict[str, str]]) -> None:
+    print(tx.summary)
+    for change in changes:
+        if DIRECTORY not in {change["before"], change["after"]}:
+            print(f"  {change['change']:<9} {change['path']}")
+
+
+def _decide(
+    tx: FileTransaction,
+    changes: list[dict[str, str]],
+    *,
+    yes: bool,
+    as_json: bool,
+    after: Callable[[], list[dict[str, Any]]] | None = None,
+) -> int:
+    """Accept on --yes or a typed yes; otherwise leave the change for review."""
+    project = tx.project
+    if as_json and not yes:
+        print(
+            json.dumps(
+                {
+                    "transaction_id": tx.id,
+                    "summary": tx.summary,
+                    "state": tx.state,
+                    "changes": changes,
+                }
+            )
+        )
+        return 0
+    if not as_json:
+        _show_review(tx, changes)
+    if not yes:
+        if not sys.stdin.isatty():
+            print(
+                "Waiting for your review. Accept with: joinery transactions accept "
+                f"--project {project} --id {tx.id}"
+            )
+            return 0
+        answer = input("Apply these changes? [y/N] ").strip().lower()
+        if answer not in {"y", "yes"}:
+            tx.reject()
+            print("Nothing changed.")
+            return 0
+    tx.accept()
+    steps = after() if after is not None else []
+    if as_json:
+        print(
+            json.dumps(
+                {
+                    "transaction_id": tx.id,
+                    "state": tx.state,
+                    "changes": changes,
+                    "steps": steps,
+                }
+            )
+        )
+    else:
+        print("Done.")
+        for step in steps:
+            _print_step(step)
+            if step.get("offer"):
+                print("  " + shlex.join(step["offer"]))
+    return 0
+
+
+def _feature(args: argparse.Namespace) -> int:
+    project = args.project.resolve()
+    try:
+        if args.action == "list":
+            game = blueprints.project_game(project)
+            if args.json:
+                print(json.dumps({"game": game}))
+            elif game is None:
+                print("This project was not started from a blueprint.")
+            else:
+                print(
+                    f"{game.get('blueprint')}: {', '.join(game.get('features', [])) or 'no features'}"
+                )
+            return 0
+        if not args.id:
+            raise ValueError("Name the feature.")
+        if args.plan:
+            print(
+                json.dumps(
+                    game_setup.plan_feature(project, args.action, args.id), indent=2
+                )
+            )
+            return 0
+        if game_setup.steam_missing(project, args.action, args.id):
+            # Steam is already on but its download failed or was skipped:
+            # adding it again fetches the extension, with nothing to review.
+            step = game_setup.install_steam(project)
+            if args.json:
+                print(json.dumps({"steps": [step]}))
+            else:
+                _print_step(step)
+            return 1 if step["state"] == "failed" else 0
+        tx = game_setup.stage_feature(project, args.action, args.id)
+    except (OSError, ValueError) as exc:
+        if args.json:
+            print(json.dumps({"error": str(exc)}))
+        else:
+            print(f"feature: {exc}", file=sys.stderr)
+        return 1
+    task = game_setup.follow_up(tx)
+    return _decide(
+        tx,
+        tx.changes,
+        yes=args.yes,
+        as_json=args.json,
+        after=lambda: game_setup.after_accept(project, task),
+    )
+
+
+def _bible_upgrade(project: Path, yes: bool, as_json: bool) -> int:
+    """Upgrade art/bible.md to the second format as a reviewed change."""
+
+    def edit(stage: Path) -> None:
+        path = stage / BIBLE_PATH
+        if not path.is_file():
+            raise ValueError("The project has no art bible.")
+        text = path.read_text(encoding="utf-8")
+        from joinery.bible_upgrade import upgrade_text
+
+        upgraded = upgrade_text(text)
+        if upgraded == text:
+            raise ValueError("The art bible is already up to date.")
+        path.write_text(upgraded, encoding="utf-8")
+
+    try:
+        tx = game_setup.stage_change(project.resolve(), "Upgrade the art bible", edit)
+    except (OSError, ValueError) as exc:
+        if as_json:
+            print(json.dumps({"error": str(exc)}))
+        else:
+            print(f"bible: {exc}", file=sys.stderr)
+        return 1
+
+    def after() -> list[dict[str, Any]]:
+        # The bible's bytes changed, so its approval no longer matches.
+        return [
+            {
+                "step": "bible",
+                "state": "done",
+                "message": "The art bible changed. Review it and approve it again.",
+            }
+        ]
+
+    return _decide(tx, tx.changes, yes=yes, as_json=as_json, after=after)
+
+
+def _transaction_decision(project: Path, identifier: str, accept: bool) -> int:
+    try:
+        if not identifier:
+            raise ValueError("Choose the change with --id.")
+        tx = FileTransaction.load(project.resolve(), identifier)
+        if accept:
+            changes = tx.accept()
+            steps = game_setup.after_accept(tx.project, game_setup.follow_up(tx))
+        else:
+            tx.reject()
+            changes, steps = [], []
+    except (OSError, ValueError, KeyError) as exc:
+        print(json.dumps({"error": str(exc)}))
+        return 1
+    print(
+        json.dumps(
+            {
+                "transaction_id": tx.id,
+                "state": tx.state,
+                "changes": changes,
+                "steps": steps,
+            }
+        )
+    )
+    return 0
+
+
+def _brief(project: Path, questions: bool, as_json: bool = False) -> int:
+    if questions:
+        print(json.dumps({"pages": brief.grouped()}, indent=2))
+        return 0
+    if as_json:
+        try:
+            game = blueprints.project_game(project)
+        except ValueError as exc:
+            print(json.dumps({"error": str(exc)}))
+            return 1
+        print(json.dumps(brief.summary(project, game), indent=2))
+        return 0
+    try:
+        record = blueprints.read_record(project)
+        described = blueprints.describe(record.blueprint) if record else None
+        features = record.features if record else []
+        written = brief.write_from_answers_file(project, described, features)
+        if written is None and (project / brief.BRIEF_PATH).exists():
+            print("brief: design/brief.md already exists; nothing written")
+            return 0
+        if written is None and record is not None:
+            # No setup answers: draft it from the starting point alone.
+            written = brief.write_brief(project, {}, described, features)
+    except (ValueError, FileExistsError) as exc:
+        print(f"brief: {exc}", file=sys.stderr)
+        return 1
+    if written is None:
+        print("brief: no answers file and no starting point; nothing written")
+        return 0
+    print(f"brief: wrote {written}")
+    return 0
+
+
+def _bible(project: Path) -> int:
+    try:
+        record = blueprints.read_record(project)
+        preset = (
+            blueprints.describe(record.blueprint).get("bible_preset")
+            if record
+            else None
+        )
+        written = write_from_answers_file(project, preset or None)
+    except (ValueError, FileExistsError) as exc:
+        print(f"bible: {exc}", file=sys.stderr)
+        return 1
+    if written is None:
+        print("bible: no answers file to read; nothing written")
+        return 0
+    print(f"bible: wrote {written}")
+    return 0
+
+
+def _check_bible(project: Path) -> int:
+    try:
+        # Imported here: the rules engine is heavy and the hook imports this module.
+        from joinery import bible_lint
+
+        summary = bible_lint.summary(project)
+    except (OSError, ValueError) as exc:
+        print(json.dumps({"error": str(exc)}))
+        return 1
+    print(json.dumps(summary, indent=2))
+    return 1 if summary["problems"] else 0
+
+
+def _check_catalogue() -> int:
+    problems = blueprints.validate_catalogue()
+    for problem in problems:
+        print(problem)
+    print(f"check catalogue: {'FAILED' if problems else 'ok'}")
+    return 1 if problems else 0
+
+
+def _status(args: argparse.Namespace) -> int:
+    from joinery import readiness
+
+    argv: list[str] = []
+    if args.project is not None:
+        argv += ["--project", str(args.project)]
+    if args.tool:
+        argv += ["--tool", args.tool]
+    for flag in ("catalog", "refresh", "fill", "deep", "background", "agents", "text"):
+        if getattr(args, flag):
+            argv.append(f"--{flag}")
+    # JSON is the default; --json only says so explicitly.
+    return readiness.main(argv)
+
+
+def _parts() -> Any:
+    """The parts commands, when that module is present."""
+    try:
+        return importlib.import_module("joinery.parts")
+    except ImportError:
+        return None
 
 
 def _agents() -> int:
@@ -217,7 +605,7 @@ def _rebuild(project: Path, prefer: str, record_mode: bool, timeout: int) -> int
     return 1 if failed else 0
 
 
-def main() -> int:
+def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="joinery")
     parser.add_argument("--version", action="version", version="Joinery " + __version__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -258,9 +646,12 @@ def main() -> int:
     )
     delivery.add_argument("--project", type=Path, required=True)
     tx_cmd = commands.add_parser(
-        "transactions", help="inspect, recover or revert durable project transactions"
+        "transactions",
+        help="inspect, accept, reject, recover or revert project changes",
     )
-    tx_cmd.add_argument("action", choices=["list", "recover", "revert"])
+    tx_cmd.add_argument(
+        "action", choices=["list", "accept", "reject", "recover", "revert"]
+    )
     tx_cmd.add_argument("--project", type=Path, required=True)
     tx_cmd.add_argument("--id", default="")
     hook_cmd = commands.add_parser(
@@ -275,6 +666,54 @@ def main() -> int:
     new.add_argument("path", type=Path)
     new.add_argument("--name")
     new.add_argument("--tools", help="comma-separated ids; skips the menu")
+    new.add_argument("--blueprint", help="start from this playable blueprint")
+    new.add_argument(
+        "--features",
+        help="comma-separated feature ids; without it, the blueprint's defaults",
+    )
+    new.add_argument("--steam-app-id", help="Steam app ID (digits); empty to add later")
+    new.add_argument(
+        "--connect",
+        choices=list(game_setup.CONNECT_CHOICES),
+        help="with Online play and Steam: connect players through Steam or direct IP",
+    )
+    game_cmd = commands.add_parser(
+        "game", help="apply the new-project wizard's game choices to a project"
+    )
+    game_cmd.add_argument("action", choices=["apply"])
+    game_cmd.add_argument("--project", type=Path, required=True)
+    game_cmd.add_argument("--blueprint", required=True)
+    game_cmd.add_argument("--features")
+    game_cmd.add_argument("--steam-app-id")
+    game_cmd.add_argument("--connect", choices=list(game_setup.CONNECT_CHOICES))
+    game_cmd.add_argument(
+        "--no-addon", action="store_true", help="the addon is already in place"
+    )
+    blueprints_cmd = commands.add_parser(
+        "blueprints", help="list the playable blueprints a project can start from"
+    )
+    blueprints_cmd.add_argument("action", nargs="?", choices=["describe"])
+    blueprints_cmd.add_argument("id", nargs="?")
+    blueprints_cmd.add_argument(
+        "--json", action="store_true", help="the wizard's catalogue, for a UI front end"
+    )
+    features_cmd = commands.add_parser(
+        "features", help="list the features a game project can add"
+    )
+    features_cmd.add_argument("--json", action="store_true")
+    feature_cmd = commands.add_parser(
+        "feature", help="add or remove a game feature as a reviewed change"
+    )
+    feature_cmd.add_argument("action", choices=["add", "remove", "list"])
+    feature_cmd.add_argument("id", nargs="?")
+    feature_cmd.add_argument("--project", type=Path, required=True)
+    feature_cmd.add_argument(
+        "--plan", action="store_true", help="show what would change; write nothing"
+    )
+    feature_cmd.add_argument("--json", action="store_true")
+    feature_cmd.add_argument(
+        "--yes", action="store_true", help="accept the reviewed change without asking"
+    )
     setup = commands.add_parser("setup", help="change a project's tools")
     setup.add_argument("--tools", help="comma-separated ids; skips the menu")
     setup.add_argument("--project", type=Path, default=ROOT)
@@ -310,6 +749,38 @@ def main() -> int:
         "doctor", help="check the programs this project's tools need"
     )
     doctor.add_argument("--project", type=Path, default=ROOT)
+    doctor_mode = doctor.add_mutually_exclusive_group()
+    doctor_mode.add_argument(
+        "--workers",
+        action="store_true",
+        help="run the checks the cache cannot answer in the workers (the default)",
+    )
+    doctor_mode.add_argument(
+        "--cached", action="store_true", help="answer from the cache only"
+    )
+    doctor.add_argument("--refresh", action="store_true", help="run every check again")
+    status = commands.add_parser(
+        "status", help="what each tool can do in this project, as JSON or text"
+    )
+    status.add_argument("--project", type=Path)
+    status.add_argument("--tool")
+    status.add_argument("--catalog", action="store_true", help="every catalog tool")
+    status.add_argument("--refresh", action="store_true", help="run every check now")
+    status.add_argument(
+        "--fill", action="store_true", help="run only the checks the cache lacks"
+    )
+    status.add_argument("--deep", action="store_true", help="include the slow checks")
+    status.add_argument(
+        "--agents", action="store_true", help="add each agent's connection"
+    )
+    status.add_argument(
+        "--background",
+        action="store_true",
+        help="answer from the cache and refresh missing checks in the background",
+    )
+    status_format = status.add_mutually_exclusive_group()
+    status_format.add_argument("--text", action="store_true", help="plain text")
+    status_format.add_argument("--json", action="store_true", help="JSON (the default)")
     rebuild = commands.add_parser(
         "rebuild", help="replay every recipe and check the assets come back"
     )
@@ -341,13 +812,39 @@ def main() -> int:
         action="store_true",
         help="print the interview questions as JSON, for a UI front end",
     )
+    bible.add_argument(
+        "--upgrade",
+        action="store_true",
+        help="bring a first-format bible up to date, as a reviewed change",
+    )
+    bible.add_argument("--yes", action="store_true", help="accept the upgrade")
+    bible.add_argument("--json", action="store_true")
+    brief_cmd = commands.add_parser(
+        "brief", help="write a project's game brief from the setup answers"
+    )
+    brief_cmd.add_argument("--project", type=Path, required=True)
+    brief_cmd.add_argument(
+        "--questions",
+        action="store_true",
+        help="print the setup questions as JSON, for a UI front end",
+    )
+    brief_cmd.add_argument(
+        "--json",
+        action="store_true",
+        help="print the brief's summary and suggestions as JSON",
+    )
     auth = commands.add_parser("auth", help="show how to sign an agent in")
     auth.add_argument(
         "agent", nargs="?", choices=[a.id for a in all_agents()], default=None
     )
     connect = commands.add_parser("connect", help="connect a local agent account")
-    connect.add_argument("action", choices=["status", "login", "use-key", "configure"])
+    connect.add_argument(
+        "action", choices=["status", "login", "use-key", "configure", "verify"]
+    )
     connect.add_argument("--agent", choices=[a.id for a in all_agents()])
+    connect.add_argument(
+        "--project", type=Path, help="project to send the test message from (verify)"
+    )
     chat = commands.add_parser("chat", help="connect the editor to an agent over stdio")
     chat.add_argument("--project", type=Path, required=True)
     chat.add_argument("--agent", choices=[a.id for a in all_agents()], required=True)
@@ -365,13 +862,29 @@ def main() -> int:
         help="run the server's read-only inspection probe",
     )
     check = commands.add_parser("check", help="run policy checks")
-    check.add_argument("target", choices=["all", "catalog", "deps", "mcp", "assets"])
+    check.add_argument(
+        "target",
+        choices=["all", "catalog", "deps", "mcp", "assets", "bible", "catalogue"],
+    )
     check.add_argument("--project", type=Path, default=ROOT / "testbed")
     history.register(commands)
-    args = parser.parse_args()
+    parts = _parts()
+    if parts is not None:
+        parts.register(commands)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _parser().parse_args(argv)
 
     if args.command == "history":
         return history.run(args)
+
+    if args.command == "parts":
+        parts = _parts()
+        assert parts is not None  # The parser only offers it when present.
+        result: int = parts.run(args)
+        return result
 
     if args.command == "diagnostics":
         from joinery.diagnostics import report as diagnostic_report
@@ -398,6 +911,9 @@ def main() -> int:
         except (OSError, ValueError) as exc:
             print(json.dumps({"error": str(exc)}))
             return 1
+
+    if args.command == "transactions" and args.action in {"accept", "reject"}:
+        return _transaction_decision(args.project, args.id, args.action == "accept")
 
     if args.command in {"bootstrap", "update-addon", "transactions"}:
         from joinery.bootstrap import setup as setup_runtime
@@ -455,12 +971,7 @@ def main() -> int:
                     inspect_servers(args.project.resolve(), args.probe)
                 )
                 print(json.dumps({"servers": server_states}))
-                return int(
-                    any(
-                        item["state"] in {"error", "not-installed"}
-                        for item in server_states
-                    )
-                )
+                return int(any(item["state"] in MCP_FAILURES for item in server_states))
         except (OSError, ValueError, RuntimeError) as exc:
             print(json.dumps({"error": str(exc)}))
             return 1
@@ -485,23 +996,27 @@ def main() -> int:
     if args.command == "connect":
         try:
             if args.action == "status":
-                result = connection.all_statuses()
+                result_data: Any = connection.all_statuses()
             elif args.action == "configure":
                 try:
                     payload = json.loads(sys.stdin.readline())
                 except ValueError:
                     raise ValueError("Could not read connection settings.") from None
-                result = {"profile": configure_api(payload)}
+                result_data = {"profile": configure_api(payload)}
             elif args.agent is None:
                 raise ValueError("Choose an agent first.")
+            elif args.action == "verify":
+                verified = connection.verify(args.agent, args.project or Path.cwd())
+                print(json.dumps(verified))
+                return 0 if verified.get("state") == "ok" else 1
             elif args.action == "login":
-                result = connection.login(args.agent)
+                result_data = connection.login(args.agent)
             else:
-                result = connection.use_key(args.agent)
+                result_data = connection.use_key(args.agent)
         except (TypeError, ValueError, OSError) as exc:
             print(json.dumps({"error": str(exc)}))
             return 1
-        print(json.dumps(result))
+        print(json.dumps(result_data))
         return 0
 
     if args.command in ("workspace", "open"):
@@ -513,10 +1028,10 @@ def main() -> int:
                 )
                 print(json.dumps({**data, "stamp": stamp}))
             else:
-                argv = open_asset(
+                argv_out = open_asset(
                     args.project, args.asset, args.tool, dry_run=args.dry_run
                 )
-                print(json.dumps({"command": argv, "opened": not args.dry_run}))
+                print(json.dumps({"command": argv_out, "opened": not args.dry_run}))
         except (ValueError, OSError) as exc:
             print(json.dumps({"error": str(exc)}))
             return 1
@@ -524,10 +1039,28 @@ def main() -> int:
     if args.command == "hook":
         return hook.main(args.agent)
     if args.command == "new":
-        return _new(args.path, args.name, args.tools)
+        return _new(
+            args.path,
+            args.name,
+            args.tools,
+            args.blueprint,
+            args.features,
+            args.steam_app_id,
+            args.connect,
+        )
+    if args.command == "game":
+        return _game_apply(args)
+    if args.command == "blueprints":
+        return _blueprints(args)
+    if args.command == "features":
+        return _features(args.json)
+    if args.command == "feature":
+        return _feature(args)
+    if args.command == "status":
+        return _status(args)
     if args.command == "setup":
         try:
-            payload = (
+            payload_text = (
                 args.custom_mcps_file.read_text()
                 if args.custom_mcps_file is not None
                 else args.custom_mcps
@@ -535,7 +1068,7 @@ def main() -> int:
         except OSError as exc:
             print(f"setup: {exc}", file=sys.stderr)
             return 1
-        return _setup(args.tools, args.project, payload)
+        return _setup(args.tools, args.project, payload_text)
     if args.command == "agents":
         if args.json:
             print(
@@ -546,7 +1079,11 @@ def main() -> int:
             return 0
         return _agents()
     if args.command == "doctor":
-        text, code = doctor_report(args.project / "joinery.toml")
+        text, code = doctor_report(
+            args.project / "joinery.toml",
+            workers=not args.cached,
+            refresh=args.refresh,
+        )
         print(text)
         return code
     if args.command == "rebuild":
@@ -555,16 +1092,11 @@ def main() -> int:
         if args.questions:
             print(json.dumps({"pages": grouped()}, indent=2))
             return 0
-        try:
-            written = write_from_answers_file(args.project)
-        except (ValueError, FileExistsError) as exc:
-            print(f"bible: {exc}", file=sys.stderr)
-            return 1
-        if written is None:
-            print("bible: no answers file to read; nothing written")
-            return 0
-        print(f"bible: wrote {written}")
-        return 0
+        if args.upgrade:
+            return _bible_upgrade(args.project, args.yes, args.json)
+        return _bible(args.project)
+    if args.command == "brief":
+        return _brief(args.project, args.questions, args.json)
     if args.command == "lock":
         problems = write_lock(args.project)
         for problem in problems:
@@ -587,8 +1119,13 @@ def main() -> int:
             # Project Manager screen in the fork reads this, so the catalog
             # stays the single source of truth instead of being duplicated in
             # C++ where it would drift.
-            print(json.dumps(tool_menu(catalog, current), indent=2))
+            project = args.project.resolve() if config.is_file() else None
+            print(json.dumps(tool_menu(catalog, current, project=project), indent=2))
             return 0
         print(render(catalog, set(selection_ids(catalog, current)), current.custom))
         return 0
+    if args.target == "bible":
+        return _check_bible(args.project)
+    if args.target == "catalogue":
+        return _check_catalogue()
     return _check(args.target, args.project)

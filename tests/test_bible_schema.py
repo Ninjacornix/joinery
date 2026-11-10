@@ -8,7 +8,7 @@ from joinery import bible_schema
 from joinery.bible import QUESTIONS
 from joinery.catalog import ROOT
 
-TEMPLATE_V2 = ROOT / "templates" / "art_bible_v2.md"
+TEMPLATE = ROOT / "templates" / "art_bible.md"
 
 
 def test_tokens_are_unique_and_title_first() -> None:
@@ -22,13 +22,13 @@ def test_sections_are_numbered_in_order() -> None:
 
 
 def test_v2_template_carries_every_token_once() -> None:
-    text = TEMPLATE_V2.read_text()
+    text = TEMPLATE.read_text()
     found = re.findall(r"\{\{(\w+)\}\}", text)
     assert sorted(found) == sorted(bible_schema.tokens())
 
 
 def test_v2_template_headings_follow_the_schema() -> None:
-    text = TEMPLATE_V2.read_text()
+    text = TEMPLATE.read_text()
     headings = [line for line in text.splitlines() if line.startswith("## ")]
     sections = [bible_schema.find_section(h) for h in headings]
     assert [s.number for s in sections if s] == [
@@ -43,7 +43,7 @@ def test_v2_template_headings_follow_the_schema() -> None:
 
 
 def test_v2_template_declares_its_version() -> None:
-    text = TEMPLATE_V2.read_text()
+    text = TEMPLATE.read_text()
     assert bible_schema.version(text) == 2
     assert text.splitlines()[1] == bible_schema.VERSION_MARKER
     assert bible_schema.version("# Art Bible\n\nNo marker.\n") == 1
@@ -88,3 +88,4 @@ def test_relevance_uses_known_dimensions() -> None:
         assert set(section.relevant_for) <= set(bible_schema.DIMENSIONS)
         if section.required is not None:
             assert section.moment
+

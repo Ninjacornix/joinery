@@ -100,7 +100,39 @@ def record_lock(project: Path) -> tuple[str, list[str]]:
     return "\n".join(lines) + "\n", problems
 
 
+#: Import settings for a model Joinery exports. Godot's default extracts each
+#: embedded texture to ``<model>_<image>.png`` beside the GLB, a file no recipe
+#: makes, so the lock could not record it and the next edit would fail. Keeping
+#: textures embedded (3) also keeps the Blender image name on the texture.
+GLB_IMPORT = """[remap]
+
+importer="scene"
+
+[params]
+
+gltf/embedded_image_handling=3
+"""
+
+
+def write_model_imports(project: Path) -> list[str]:
+    """Write import settings beside each recipe-made GLB that has none yet.
+
+    Only the first export gets them: settings the user changes later stay theirs.
+    """
+    written: list[str] = []
+    for out in sorted(claimed_outputs(project)):
+        if Path(out).suffix.lower() not in {".glb", ".gltf"}:
+            continue
+        model = project / out
+        settings = model.with_name(model.name + ".import")
+        if model.is_file() and not settings.exists():
+            settings.write_text(GLB_IMPORT)
+            written.append(settings.relative_to(project).as_posix())
+    return written
+
+
 def write_lock(project: Path) -> list[str]:
+    write_model_imports(project)
     text, problems = record_lock(project)
     if not problems:
         (project / LOCK_NAME).write_text(text)

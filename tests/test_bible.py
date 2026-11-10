@@ -55,6 +55,7 @@ def test_setup_asks_one_short_look_and_sound_page() -> None:
     assert isinstance(questions, list)
     assert [q["key"] for q in questions] == [
         "vision",
+        "references",
         "look",
         "palette",
         "sound",
@@ -64,11 +65,10 @@ def test_setup_asks_one_short_look_and_sound_page() -> None:
     assert all(str(q["placeholder"]).startswith("e.g. ") for q in questions)
 
 
-def test_references_stay_in_the_bible_but_are_not_asked() -> None:
-    keys = {str(q["key"]) for q in QUESTIONS}
+def test_setup_asks_for_references() -> None:
+    # The second-format bible needs References before approval, so setup asks.
     asked = {str(q["key"]) for page in grouped() for q in page["questions"]}  # type: ignore[attr-defined]
-    assert "references" in keys
-    assert "references" not in asked
+    assert "references" in asked
 
 
 def test_vision_hint_is_only_about_the_feel() -> None:
@@ -115,6 +115,17 @@ def test_answers_file_is_consumed(tmp_path: Path) -> None:
     assert not (tmp_path / ANSWERS_FILE).exists()
 
 
+def test_null_answer_stays_unanswered(tmp_path: Path) -> None:
+    # `null` is "not answered", never the word "None" passing for an answer.
+    (tmp_path / ANSWERS_FILE).write_text(json.dumps({"title": "T", "vision": None, "look": "toon"}))
+    written = write_from_answers_file(tmp_path)
+    assert written is not None
+    text = written.read_text()
+    assert "None" not in text
+    assert "toon" in text
+    assert text.count("Not set yet") == len(QUESTIONS) - 1
+
+
 def test_no_answers_file_is_not_an_error(tmp_path: Path) -> None:
     assert write_from_answers_file(tmp_path) is None
 
@@ -132,3 +143,18 @@ def test_bible_is_not_treated_as_an_asset(tmp_path: Path) -> None:
 
     write_bible(tmp_path, FULL)
     assert asset_files(tmp_path) == set()
+
+
+def test_the_wizard_preset_choice_beats_the_blueprint_default(tmp_path: Path) -> None:
+    # The user picked other starting rules than the blueprint suggests.
+    (tmp_path / ANSWERS_FILE).write_text(json.dumps({"_preset": "pixel-2d"}))
+    written = write_from_answers_file(tmp_path, "stylised-pbr-3d")
+    assert written is not None
+    text = written.read_text()
+    assert "Pixel 2D starting point" in text
+    assert "Stylised PBR 3D" not in text
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / ANSWERS_FILE).write_text(json.dumps({"look": "toon"}))
+    written = write_from_answers_file(other, "stylised-pbr-3d")
+    assert written is not None and "Stylised PBR 3D starting point" in written.read_text()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -12,6 +13,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from joinery import readiness
 from joinery.catalog import ROOT, load_catalog, load_project_tools, selection_ids
 from joinery.platform_support import bash_script_argv, editor_running
 from joinery.server_install import install
@@ -27,7 +29,61 @@ def _run(argv: list[str], timeout: int = 1800) -> None:
         raise ValueError("Setup command failed: " + argv[0])
 
 
+def _docker_build(tag: str, dockerfile: str, revision: str) -> None:
+    """Build one worker image, stamped with the sandbox revision it came from."""
+    _run(
+        [
+            "docker",
+            "build",
+            "--platform",
+            "linux/amd64",
+            "--label",
+            f"{readiness.SETUP_LABEL}={revision}",
+            "-t",
+            tag,
+            "-f",
+            "sandbox/" + dockerfile,
+            "sandbox",
+        ]
+    )
+
+
+def _stamp_runtime(tag: str, revision: str) -> None:
+    """Add the revision label to an image sandbox/build.sh made.
+
+    A one-line build on top of the image: no new layers, nothing downloaded,
+    and the previous image is left as it is (nothing is pruned).
+    """
+    result = subprocess.run(
+        [
+            "docker",
+            "build",
+            "--platform",
+            "linux/amd64",
+            "--label",
+            f"{readiness.SETUP_LABEL}={revision}",
+            "-t",
+            tag,
+            "-",
+        ],
+        input=f"FROM {tag}\n",
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=600,
+    )
+    if result.returncode:
+        raise ValueError("Setup command failed: docker build (label " + tag + ")")
+
+
 def setup(project: Path) -> dict[str, Any]:
+    """Build the offline workers and install the pinned servers for a project.
+
+    While it builds, `~/.cache/joinery/setup.json` names the image in progress,
+    so every readiness screen says "Downloading…" instead of "Not available".
+    Each image is labelled with the sandbox revision, and a readiness refresh
+    starts once the build is done. No image or build cache is ever removed.
+    """
     selected = selection_ids(
         load_catalog(), load_project_tools(project / "joinery.toml")
     )
@@ -38,67 +94,57 @@ def setup(project: Path) -> dict[str, Any]:
     result = subprocess.run(["docker", "info"], capture_output=True, check=False)
     if result.returncode:
         raise ValueError("Start Docker, then run Joinery setup again.")
-    image = subprocess.run(
-        ["docker", "image", "inspect", "joinery-sandbox-runtime"],
-        capture_output=True,
-        check=False,
-    )
-    if image.returncode:
-        _run(
-            [
-                str(ROOT / "sandbox/build.sh"),
-                "--all",
-                "--tag",
-                "joinery-sandbox-runtime",
-            ],
-            3600,
-        )
-    for dockerfile, tag in [
-        ("mcp.Dockerfile", "joinery-mcp-worker"),
-        ("creative.Dockerfile", "joinery-creative-worker"),
-    ]:
-        _run(
-            [
-                "docker",
-                "build",
-                "--platform",
-                "linux/amd64",
-                "-t",
-                tag,
-                "-f",
-                "sandbox/" + dockerfile,
-                "sandbox",
-            ]
-        )
+    revision = readiness.sandbox_revision()
+    os.environ["JOINERY_SANDBOX_REV"] = revision
     ready = []
     unavailable = []
-    for tool in selected:
-        entry = load_catalog().get(tool)
-        if entry.mcp is None:
-            continue
-        try:
-            install(tool)
-            worker = {"blender": "blender", "inkscape": "inkscape"}.get(tool)
-            if worker:
-                _run(
-                    [
-                        "docker",
-                        "build",
-                        "--platform",
-                        "linux/amd64",
-                        "-t",
-                        "joinery-" + worker + "-worker",
-                        "-f",
-                        "sandbox/" + worker + ".Dockerfile",
-                        "sandbox",
-                    ]
-                )
-            ready.append(tool)
-        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
-            unavailable.append({"tool": tool, "reason": str(exc)})
+    try:
+        image = subprocess.run(
+            ["docker", "image", "inspect", "joinery-sandbox-runtime"],
+            capture_output=True,
+            check=False,
+        )
+        if image.returncode:
+            readiness.mark_setup("build", "joinery-sandbox-runtime")
+            _run(
+                [
+                    str(ROOT / "sandbox/build.sh"),
+                    "--all",
+                    "--tag",
+                    "joinery-sandbox-runtime",
+                ],
+                3600,
+            )
+            _stamp_runtime("joinery-sandbox-runtime", revision)
+        for dockerfile, tag in [
+            ("mcp.Dockerfile", "joinery-mcp-worker"),
+            ("creative.Dockerfile", "joinery-creative-worker"),
+        ]:
+            readiness.mark_setup("build", tag)
+            _docker_build(tag, dockerfile, revision)
+        for tool in selected:
+            entry = load_catalog().get(tool)
+            if entry.mcp is None:
+                continue
+            try:
+                install(tool)
+                worker = {"blender": "blender", "inkscape": "inkscape"}.get(tool)
+                if worker:
+                    tag = "joinery-" + worker + "-worker"
+                    readiness.mark_setup("build", tag)
+                    _docker_build(tag, worker + ".Dockerfile", revision)
+                ready.append(tool)
+            except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as exc:
+                unavailable.append({"tool": tool, "reason": str(exc)})
+    finally:
+        readiness.clear_setup()
+    # Check the new images now, in the background, so screens update by themselves.
+    refreshing = readiness.spawn_refresh(project, full=True, catalog=True)
     return {
         "installed": ready,
         "unavailable": unavailable,
+        "revision": revision,
+        "refreshing": refreshing,
         "note": "Run joinery mcp status --probe for actual connected operation readiness.",
     }
 

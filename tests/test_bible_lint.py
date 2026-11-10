@@ -12,7 +12,7 @@ from joinery import bible_lint, bible_presets
 from joinery.catalog import ROOT
 from tests.test_bible_upgrade import v1_bible
 
-TEMPLATE_V2 = ROOT / "templates" / "art_bible_v2.md"
+TEMPLATE = ROOT / "templates" / "art_bible.md"
 
 BOARD = """
 | R1 | Hob (game) | game | chunky silhouettes, flat lighting | its saturated greens | |
@@ -29,7 +29,7 @@ def write(project: Path, text: str) -> None:
 
 
 def rendered(answers: dict[str, str], preset: str | None = None) -> str:
-    return bible_presets.fill(TEMPLATE_V2.read_text(), answers, preset)
+    return bible_presets.fill(TEMPLATE.read_text(), answers, preset)
 
 
 def with_board(text: str, rows: str = BOARD) -> str:

@@ -6,7 +6,7 @@ import shutil
 from collections.abc import Sequence
 from pathlib import Path
 
-from joinery import blueprints
+from joinery import game_setup
 from joinery.catalog import ROOT, Catalog
 from joinery.installer import Selection, write_mcp_config, write_selection
 from joinery.wiring import write_agent_wiring
@@ -23,29 +23,57 @@ def create_project(
     *,
     blueprint: str | None = None,
     features: Sequence[str] = (),
+    steam_app_id: str | None = None,
+    connect: str | None = None,
+    report: game_setup.Report | None = None,
+    wizard: bool = False,
 ) -> None:
     """Scaffold a project. Refuses a non-empty folder so nothing is overwritten.
 
     The creation-only gate is wired for every supported agent (Claude Code,
     Codex, Gemini CLI, opencode), so Rule Zero holds whichever one the user runs.
     With `blueprint`, the project starts as that playable greybox game with the
-    chosen features; without, it stays an empty Godot project.
+    chosen features, its game brief and the art bible draft with the
+    blueprint's preset; without, it stays an empty Godot project.
+
+    With `wizard` (what `joinery new` does) it is exactly the project the
+    new-project wizard makes (`game_setup.apply_choices`): the Joinery addon
+    goes in with its MIT licence and the plugin on, and with Steam its
+    settings are written and the pinned GodotSteam extension is downloaded.
+    Harnesses that only boot the game leave these out.
     """
     if path.exists() and any(path.iterdir()):
-        raise ValueError(f"{path} is not empty")
+        raise ValueError(f"{path} is not empty. Pick a new or empty folder.")
     if '"' in name or "\n" in name:
-        raise ValueError("project name cannot contain quotes or newlines")
+        raise ValueError("The project name cannot contain quotes or line breaks.")
     if blueprint is None and features:
-        raise ValueError("features need a blueprint to build on")
+        raise ValueError(
+            "Features need a blueprint. Add --blueprint (see joinery blueprints)."
+        )
     if blueprint is not None:
         # Refuse an unknown blueprint or a bad feature mix before any file exists.
-        problems = blueprints.resolve(blueprint, features).problems
-        if problems:
-            raise ValueError("\n".join(problems))
+        game_setup.check_choices(blueprint, features, steam_app_id, connect)
+    elif steam_app_id or connect:
+        raise ValueError(
+            "Steam settings need a blueprint. Add --blueprint and --features steam."
+        )
     existed = path.exists()
     path.mkdir(parents=True, exist_ok=True)
     try:
-        _scaffold(path, name, selection, blueprint, features)
+        _scaffold(path, name, selection)
+        if wizard:
+            game_setup.install_addon(path, report)
+        if blueprint is not None:
+            game_setup.apply_choices(
+                path,
+                blueprint,
+                features,
+                steam_app_id,
+                connect,
+                addon=False,
+                steam_setup=wizard,
+                report=report,
+            )
     except BaseException:
         # The folder was empty or absent, so everything in it is ours: leave
         # no half-made project behind (a blueprint can still refuse at apply).
@@ -60,13 +88,7 @@ def create_project(
         raise
 
 
-def _scaffold(
-    path: Path,
-    name: str,
-    selection: Selection,
-    blueprint: str | None,
-    features: Sequence[str],
-) -> None:
+def _scaffold(path: Path, name: str, selection: Selection) -> None:
     for directory in ASSET_DIRS:
         (path / directory).mkdir()
         (path / directory / ".gitkeep").touch()
@@ -83,5 +105,3 @@ def _scaffold(
     write_agent_wiring(path)
     write_selection(selection, path / "joinery.toml")
     write_mcp_config(selection, path)
-    if blueprint is not None:
-        blueprints.apply(path, blueprint, features)
