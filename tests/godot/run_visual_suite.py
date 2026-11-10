@@ -86,6 +86,8 @@ EDITOR_SCREENS = (
     "review-applying",
     "review-error",
     "focus-review",
+    "review-list",
+    "review-list-empty",
     "review-image",
     "review-image-before",
     "review-audio",

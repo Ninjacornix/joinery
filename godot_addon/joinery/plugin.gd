@@ -18,6 +18,7 @@ const CHAT_SCRIPT := preload("res://addons/joinery/chat_bridge.gd")
 const CONNECT_SCRIPT := preload("res://addons/joinery/agent_connect.gd")
 const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
 const UI_COMPONENTS := preload("res://addons/joinery/ui_components.gd")
+const REVIEW_TAB_SCRIPT := preload("res://addons/joinery/review_tab.gd")
 
 ## Focus mode is remembered, so a user who wants the stripped-back layout gets
 ## it on every launch instead of re-toggling it each session.
@@ -55,6 +56,7 @@ var _file_accept_live_id := ""
 ## reloads exactly the scenes it restored.
 var _accepted_changes: Dictionary = {}
 var _review_panel: Control
+var _review_tab: Control
 var _review_button: Button
 var _review_open := false
 ## True while a file decision is on its way to the gateway; an error message arriving
@@ -89,9 +91,13 @@ func _enter_tree() -> void:
 	# Right column, lower slot: alone in Joinery's layout, below the Inspector in the classic one.
 	add_control_to_dock(DOCK_SLOT_RIGHT_BL, _dock)
 	_review_panel = _dock.take_review_panel()
-	_review_panel.name = "Review"
-	_review_button = add_control_to_bottom_panel(_review_panel, "Review")
-	_set_review_tab(false)
+	_review_tab = REVIEW_TAB_SCRIPT.new()
+	_review_tab.set_detail(_review_panel)
+	_review_tab.changes_applied.connect(_on_review_row_applied)
+	_review_tab.art_requested.connect(func() -> void: _dock.art_review_requested.emit())
+	_review_button = add_control_to_bottom_panel(_review_tab, "Review")
+	# Revert runs the sidebar's own, so the chat's change card follows.
+	_review_tab.attach(_dock.get("_slash"), _review_button)
 	_dock.review_requested.connect(_show_edit_review_panel)
 	_dock.review_closed.connect(_hide_edit_review_panel)
 	if _review_panel.has_signal("show_requested"):
@@ -147,7 +153,7 @@ func _restore_focus() -> void:
 	_shell.apply(get_editor_interface().get_base_control(), settings, _joinery_layout)
 	_shell.watch_file_tree(get_editor_interface().get_file_system_dock())
 	# The saved layout has been applied by now; put the Review tab back in front.
-	_set_review_tab(_review_open)
+	_review_tab.pin_first()
 	var navigation := get_editor_interface().get_base_control().find_child(
 		"JoineryNavigation", true, false
 	)
@@ -165,7 +171,7 @@ func _restore_focus() -> void:
 	# Godot's classic layout opens as Godot arranges it; Focus mode stays one command away.
 	var focus := settings.has_setting(FOCUS_SETTING) and bool(settings.get_setting(FOCUS_SETTING))
 	if _joinery_layout and focus:
-		if _focus.apply(get_editor_interface().get_base_control(), _review_panel):
+		if _focus.apply(get_editor_interface().get_base_control(), _review_tab):
 			_focus.show_review(_review_open)
 	_offer_setup_if_pending()
 	if not startup_prompt.is_empty() and _dock.has_method("_on_submit"):
@@ -267,9 +273,9 @@ func _offer_setup_if_pending() -> void:
 
 
 func _exit_tree() -> void:
-	if _review_panel != null:
-		remove_control_from_bottom_panel(_review_panel)
-		_review_panel.queue_free()
+	if _review_tab != null:
+		remove_control_from_bottom_panel(_review_tab)
+		_review_tab.queue_free()
 	if _edits != null:
 		_edits.reject()
 	if _workspace != null:
@@ -299,50 +305,34 @@ func _exit_tree() -> void:
 # --- Review panel ----------------------------------------------------------------------------
 
 
-## The Review tab is the first bottom tab, and hidden while no review is pending. On editors
-## whose bottom panel is not a tab container, the legacy button opens and closes it instead.
-func _set_review_tab(shown: bool) -> void:
-	var dock := _review_panel.get_parent() as Control if _review_panel != null else null
-	var tabs := dock.get_parent() as TabContainer if dock != null else null
-	if tabs == null:
-		if _review_button != null:
-			_review_button.visible = shown
-		return
-	var index := tabs.get_tab_idx_from_control(dock)
-	if index < 0:
-		return
-	if shown and index != 0:
-		tabs.move_child(dock, 0)
-		index = tabs.get_tab_idx_from_control(dock)
-	if not shown and tabs.current_tab == index:
-		hide_bottom_panel()
-	tabs.set_tab_hidden(index, not shown)
-
-
 ## Show the Review panel: reveal its tab, open the bottom panel on it, and in Focus mode bring
 ## the bottom panel back with only this tab.
 func _show_edit_review_panel() -> void:
 	_review_open = true
-	_set_review_tab(true)
+	_review_tab.show_detail()
 	if _focus != null and _focus.is_active():
 		_focus.show_review(true)
-	var dock := _review_panel.get_parent() as Control
+	var dock := _review_tab.get_parent() as Control
 	if dock != null and dock.get_parent() is Control:
 		(dock.get_parent() as Control).show()
-	make_bottom_panel_item_visible(_review_panel)
+	make_bottom_panel_item_visible(_review_tab)
 
 
+## The review was decided or dropped: a bottom panel that opened by itself for it closes.
 func _hide_edit_review_panel() -> void:
 	if not _review_open:
 		return
 	_review_open = false
-	_set_review_tab(false)
+	if _review_tab.review_closed():
+		hide_bottom_panel()
 	if _focus != null and _focus.is_active():
 		_focus.show_review(false)
 
 
 func _open_review(summary: String) -> void:
 	_call_dock("show_edit_review", [summary, _edits.changes.size()])
+	if _file_review.is_empty():
+		_review_tab.set_live({"id": "scene-edit", "summary": summary, "tools": ["godot"]})
 	_show_edit_review_panel()
 
 
@@ -362,6 +352,7 @@ func _review_applying(on: bool) -> void:
 func _review_failed(message: String) -> void:
 	_deciding = false
 	_review_applying(false)
+	_review_tab.live_failed(message)
 	if not _call_dock("show_review_error", [message]):
 		_call_dock("show_agent_message", [message])
 
@@ -376,6 +367,12 @@ func _on_chat_message(text: String) -> void:
 func _on_chat_state(state: String, detail: String) -> void:
 	if _deciding and state == "error":
 		_review_failed(detail)
+
+
+## A change accepted from the Review tab wrote files: rescan them, like any accepted change.
+func _on_review_row_applied(id: String, paths: PackedStringArray, changes: Array) -> void:
+	_accepted_changes[id] = changes
+	_on_files_changed(id, paths)
 
 
 # --- Main screen and selection ---------------------------------------------------------------
@@ -464,7 +461,7 @@ func _on_toggle_focus() -> void:
 		# "Panels hidden" line, so the footer never claims panels are hidden once they are
 		# back, and a pending review gets its own line again.
 		_status("" if _review_open else "Panels shown")
-	elif _focus.apply(editor.get_base_control(), _review_panel):
+	elif _focus.apply(editor.get_base_control(), _review_tab):
 		_focus.show_review(_review_open)
 		# A pending review keeps its footer line: review status wins over this note.
 		if _review_open:
@@ -862,6 +859,7 @@ func _apply_changes() -> void:
 
 func _on_file_preview(event: Dictionary) -> void:
 	_file_review = event.duplicate(true)
+	_review_tab.show_live(event)
 	_call_dock(
 		"show_file_review",
 		[
@@ -879,7 +877,9 @@ func _on_art_review(event: Dictionary) -> void:
 		_dock,
 		event,
 		UI_THEME.dialog_size(_dock, "doc"),
-		func() -> void: _chat.approve_art(str(event.get("sha256", "")))
+		func() -> void:
+			_chat.approve_art(str(event.get("sha256", "")))
+			get_tree().create_timer(1.0).timeout.connect(_review_tab.refresh)
 	)
 
 

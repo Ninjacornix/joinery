@@ -270,11 +270,12 @@ func _review_in_focus(plugin: EditorPlugin) -> void:
 	plugin._open_review("Layout check")
 	await get_tree().create_timer(0.3).timeout
 	var review: Control = plugin._review_panel
-	var dock := review.get_parent() as Control
+	var dock := (plugin._review_tab as Control).get_parent() as Control
 	var tabs := dock.get_parent() as TabContainer
 	var index := tabs.get_tab_idx_from_control(dock)
 	_check(index == 0, "Review is the first bottom tab")
 	_check(not tabs.is_tab_hidden(index), "Review tab shows while a review is pending")
+	_check(review.is_visible_in_tree(), "A pending review opens on its full before and after")
 	var accept := _button_starting(review, "Accept")
 	_check(accept != null and accept.is_visible_in_tree(), "Accept stays visible in Focus mode")
 	for other: int in tabs.get_tab_count():
@@ -283,7 +284,11 @@ func _review_in_focus(plugin: EditorPlugin) -> void:
 	await _capture("/tmp/joinery-editor-focus-review.png")
 	plugin._close_review("", "info")
 	await get_tree().process_frame
-	_check(tabs.is_tab_hidden(tabs.get_tab_idx_from_control(dock)), "Review tab hides when done")
+	_check(
+		not tabs.is_tab_hidden(tabs.get_tab_idx_from_control(dock)),
+		"The Review tab is always there"
+	)
+	_check(not tabs.is_visible_in_tree(), "Focus mode hides the bottom panel once nothing waits")
 	plugin._on_toggle_focus()
 	_check(not plugin._focus.is_active(), "Focus mode turns off")
 	_check(tabs.is_visible_in_tree(), "Bottom panel returns after Focus mode")

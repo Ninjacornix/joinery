@@ -68,6 +68,7 @@ func _run() -> void:
 	await _shot("layout", [base])
 	await _sidebar(dock)
 	await _reviews(dock)
+	await _approvals()
 	await _tools()
 	await _panels(base, dock)
 	await _dialogs()
@@ -209,6 +210,67 @@ func _reviews(dock: Control) -> void:
 	await _shot("review-audio", [panel, dock])
 	await _before_after(panel, "review-audio-before")
 	dock.hide_edit_review()
+	await _frames()
+
+
+## The Review tab's list of approvals, with fixture changes, then with none.
+func _approvals() -> void:
+	var tab: Control = _plugin.get("_review_tab")
+	_check(tab != null, "The Review tab exists")
+	if tab == null:
+		return
+	var deadline := Time.get_ticks_msec() + 30000
+	while not (tab.get("_jobs") as Dictionary).is_empty() and Time.get_ticks_msec() < deadline:
+		await get_tree().process_frame
+	tab.set("cli_enabled", false)
+	tab.call("show_list")
+	_plugin.make_bottom_panel_item_visible(tab)
+	var now := Time.get_unix_time_from_system()
+	var row := func(
+		id: String, state: String, summary: String, ago: float, tools: Array
+	) -> Dictionary:
+		return {
+			"id": id,
+			"state": state,
+			"summary": summary,
+			"created": now - ago - 60,
+			"decided": 0.0 if state == "review" else now - ago,
+			"revertible": id != "old",
+			"tools": tools,
+			"file_count": 2,
+			"files":
+			[
+				{"path": "art/models/lamp.glb", "change": "created"},
+				{"path": "art/sources/lamp.blend", "change": "created"},
+			],
+		}
+	(
+		tab
+		. call(
+			"apply_listing",
+			{
+				"transactions":
+				[
+					row.call("lamp", "review", "Model a brass harbour lamp", 120, ["blender"]),
+					row.call("net", "review", "Add online play", 900, ["joinery"]),
+					row.call("door", "accepted", "Darken the door wood", 3000, ["krita"]),
+					row.call("floor", "rejected", "Make the floor blue", 7300, ["godot"]),
+					row.call("crate", "reverted", "Widen the crate", 90000, ["blender"]),
+					row.call("old", "accepted", "Add a mooring post", 400000, ["blender"]),
+				],
+				"art_bible": {"state": "needs_approval"},
+			}
+		)
+	)
+	var dock := tab.get_parent() as Control
+	var bottom: Control = dock.get_parent() as Control if dock != null else tab
+	await get_tree().create_timer(0.3).timeout
+	await _shot("review-list", [bottom])
+	var settled := {"state": "approved", "by": "creation"}
+	tab.call("apply_listing", {"transactions": [], "art_bible": settled})
+	await _shot("review-list-empty", [bottom])
+	tab.call("apply_listing", {"transactions": [], "art_bible": {"state": "missing"}})
+	_plugin.hide_bottom_panel()
 	await _frames()
 
 

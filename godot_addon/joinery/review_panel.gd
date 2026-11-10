@@ -225,6 +225,12 @@ func show_error(text: String) -> void:
 		UI_MOTION.fade_in(_error_row)
 
 
+## Decide from outside the panel (the Review tab's row buttons): the same optimistic
+## outcome and signal as pressing Accept or Discard here.
+func decide(accepted: bool) -> void:
+	_decide(accepted)
+
+
 ## Forget the review and show the empty state.
 func clear() -> void:
 	_next_serial()

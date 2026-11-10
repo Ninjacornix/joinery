@@ -112,9 +112,11 @@ func _review_layout(plugin: EditorPlugin) -> void:
 	for index: int in 6:
 		await get_tree().process_frame
 	_check(plugin._review_open, "A file review opens the Review panel")
-	var tabs := review.get_parent().get_parent() as TabContainer
+	var tab: Control = plugin._review_tab
+	var tabs := tab.get_parent().get_parent() as TabContainer
 	if tabs != null:
-		_check(tabs.get_tab_idx_from_control(review.get_parent()) == 0, "Review is the first tab")
+		_check(tabs.get_tab_idx_from_control(tab.get_parent()) == 0, "Review is the first tab")
+	_check(review.is_visible_in_tree(), "A file review opens on its full before and after")
 	_check_choices(plugin, "long diff")
 	await _capture("joinery-scroll-review.png")
 	# A model preview fills the panel; Accept and Discard stay below it.
