@@ -1,7 +1,7 @@
 @tool
 extends RefCounted
 ## Viewport controls have their own preference, independent of Focus mode, in Joinery's layout
-## (Godot's classic layout always shows them). Also keeps the
+## (Godot's classic layout always shows them). Scene tabs always show. Also keeps the
 ## FileSystem tree scrolled to its first row when the Files panel opens, and explains the
 ## Output tab's status mark (the engine's error or warning icon) in the tab's tooltip.
 
@@ -18,7 +18,7 @@ var _output_bar: TabBar
 
 
 ## [param joinery_layout] is false in Godot's classic layout, which always shows the viewport
-## toolbar and scene tabs as Godot does; the saved preference applies to Joinery's layout only.
+## toolbar as Godot does; the saved preference applies to Joinery's layout only.
 func apply(base: Control, settings: EditorSettings, joinery_layout := true) -> void:
 	_shown = (
 		bool(settings.get_setting(TOOLBAR_SETTING))
@@ -36,11 +36,10 @@ func apply(base: Control, settings: EditorSettings, joinery_layout := true) -> v
 			_toolbars.append(control)
 			_previous.append(control.visible)
 			control.visible = _shown
+	# Scene tabs stay visible in both layouts: they switch between open scenes and their
+	# "+" button makes a new one.
 	for node: Node in base.find_children("*", "EditorSceneTabs", true, false):
-		var control := node as Control
-		_toolbars.append(control)
-		_previous.append(control.visible)
-		control.visible = _shown
+		(node as Control).visible = true
 	var logs := base.find_children("*", "EditorLog", true, false)
 	if not logs.is_empty():
 		_output = logs[0] as Control
@@ -86,7 +85,7 @@ func _scroll_file_tree_top() -> void:
 	_file_tree.scroll_to_item(first)
 
 
-## True while the viewport toolbar and scene tabs are shown (the saved preference).
+## True while the viewport toolbar is shown (the saved preference).
 func is_shown() -> bool:
 	return _shown
 

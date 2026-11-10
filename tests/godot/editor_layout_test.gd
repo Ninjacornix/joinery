@@ -72,9 +72,13 @@ func _run() -> void:
 		_check(dock != null, "Missing dock: " + title)
 		if dock != null:
 			_check(dock.get_parent().is_class("EditorBottomPanel"), title + " must be at bottom")
-	_check(plugin._shell._toolbars.size() >= 2, "Toolbar and scene tabs must be discovered")
+	_check(plugin._shell._toolbars.size() >= 1, "The viewport toolbar must be discovered")
 	for control: Control in plugin._shell._toolbars:
 		_check(not control.visible, "Viewport controls must be hidden by default")
+	var scene_tabs := base.find_children("*", "EditorSceneTabs", true, false)
+	_check(not scene_tabs.is_empty(), "Scene tabs must exist")
+	for tabs: Node in scene_tabs:
+		_check((tabs as Control).is_visible_in_tree(), "Scene tabs (with their + button) must show")
 	var sidebar := base.find_child("DockSlotRightBL", true, false) as TabContainer
 	_check(not sidebar.tabs_visible, "Chat sidebar must not have a dock tab bar")
 	var bottom := base.find_child("*", true, false) as Control

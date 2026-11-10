@@ -10,9 +10,12 @@ Scene, FileSystem, Import, History and Inspector live in the bottom tab row;
 Journeyman stays on the right without a docking tab bar. Bottom panels open to
 roughly half the work area and can be resized by dragging their divider.
 
-Viewport controls and scene tabs are hidden by default. Type `/toolbar` in
-Journeyman, use the bottom rail icon, or choose **Joinery: Toggle viewport
-toolbar** from the editor's Tools menu to show them. The preference is saved.
+Scene tabs sit above the viewport: click a tab to switch between open scenes,
+or **+** at the end of the tabs to make a new scene (also **Scene > New Scene**,
+Ctrl+N or Cmd+N). The 3D viewport controls are hidden by default. Type
+`/toolbar` in Journeyman, use the bottom rail icon, or choose **Joinery: Toggle
+viewport toolbar** from the editor's Tools menu to show them. The preference is
+saved.
 
 ### Classic Godot view
 
