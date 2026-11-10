@@ -16,6 +16,7 @@ from bridge.instructions import GAME_GUIDE, REVIEW_GUIDE
 from bridge.protocol import Prompt
 from joinery.agents import get
 from joinery.catalog import ROOT
+from joinery.chat_attachments import listed
 from joinery.connection import status
 from joinery.provider_support import WINDOWS_BOUNDARY_REASON, require_supported
 from joinery.wiring import _command_str
@@ -38,7 +39,9 @@ INSTRUCTIONS = (
 )
 
 
-def prompt_text(prompt: Prompt) -> str:
+def prompt_text(prompt: Prompt, images_inline: bool = False) -> str:
+    """The turn as text. Attached images are listed by path unless the provider takes
+    them inline (`images_inline`)."""
     return (
         INSTRUCTIONS
         + "\n\nEditor context:\n"
@@ -47,6 +50,7 @@ def prompt_text(prompt: Prompt) -> str:
         + json.dumps(prompt.target_context)
         + "\n\nUser:\n"
         + prompt.text
+        + ("" if images_inline else listed(prompt.attachments))
     )
 
 

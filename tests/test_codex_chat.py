@@ -363,3 +363,31 @@ def test_editor_tool_missing_policy_returns_error(game: Path) -> None:
             await session.close()
 
     asyncio.run(asyncio.wait_for(run(), timeout=5))
+
+
+def test_attached_images_go_in_as_local_images(game: Path) -> None:
+    folder = game / ".joinery/attachments"
+    folder.mkdir(parents=True)
+    image = folder / "view.png"
+    image.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 32)
+
+    async def run() -> None:
+        session = CodexSession()
+        await session.connect(game)
+        try:
+            prompt = Prompt(
+                text="hello", project_dir=str(game), attachments=(str(image),)
+            )
+            _ = [e async for e in session.send(prompt)]
+        finally:
+            await session.close()
+        requests = [
+            json.loads(line)
+            for line in (game / "requests.jsonl").read_text().splitlines()
+        ]
+        turn = next(r for r in requests if r.get("method") == "turn/start")
+        assert turn["params"]["input"][1:] == [
+            {"type": "localImage", "path": str(image)}
+        ]
+
+    asyncio.run(run())

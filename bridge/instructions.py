@@ -8,6 +8,7 @@ and every agent writes those documents in the same plain, concrete way.
 from __future__ import annotations
 
 from joinery.bible_writing import AGENT_GUIDE
+from joinery.chat_attachments import NOTE as ATTACHMENT_NOTE
 
 #: Objects move as one piece. A chair built from loose boxes in the level selects
 #: a box, not the chair.
@@ -29,6 +30,8 @@ GAME_GUIDE = (
     "When their suggestions fit what the user is doing, offer one at a time, in one "
     "short line, and never act on a suggestion the user has not asked for. "
     "The user adds or removes features with /feature, and edits the brief with /brief. "
+    + ATTACHMENT_NOTE
+    + " "
     + OBJECT_GUIDE
     + AGENT_GUIDE
 )

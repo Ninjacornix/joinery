@@ -28,6 +28,7 @@ from bridge.provider_process import (
     stop_process,
 )
 from joinery.api_profiles import list_public, runtime
+from joinery.chat_attachments import encoded
 from joinery.mcp_runtime import PolicyStop, validate_arguments
 from joinery.platform_support import launch_argv
 
@@ -48,6 +49,9 @@ class ACPSession:
         self.current_model = ""
         self.profile_model = ""
         self.config_options: list[dict[str, Any]] = []
+        #: The agent takes image content blocks (ACP promptCapabilities.image); without it
+        #: attached images are listed by path in the prompt text.
+        self.image_input = False
 
     async def connect(self, project: Path, profile_id: str = "") -> None:
         executable = (
@@ -107,6 +111,9 @@ class ACPSession:
                 raise ValueError(
                     "This provider does not speak the supported ACP protocol version."
                 )
+            capabilities = initialized.get("agentCapabilities") or {}
+            prompts = capabilities.get("promptCapabilities") or {}
+            self.image_input = bool(prompts.get("image"))
             config = proxy_config(self.gateway_socket)
             config["name"] = "joinery-registry"
             config["env"] = [
@@ -326,6 +333,18 @@ class ACPSession:
             {"jsonrpc": "2.0", "id": data["id"], "result": {"outcome": outcome}}
         )
 
+    def prompt_blocks(self, prompt: Prompt) -> list[dict[str, Any]]:
+        """The ACP prompt: the text, then each attached image when the agent takes images."""
+        inline = self.image_input and bool(prompt.attachments)
+        blocks: list[dict[str, Any]] = [
+            {"type": "text", "text": prompt_text(prompt, images_inline=inline)}
+        ]
+        if inline:
+            for path in prompt.attachments:
+                media, data = encoded(Path(path))
+                blocks.append({"type": "image", "mimeType": media, "data": data})
+        return blocks
+
     async def send(self, prompt: Prompt) -> AsyncIterator[AgentEvent]:
         if not self.session_id:
             raise ValueError("The provider session is not connected.")
@@ -355,7 +374,7 @@ class ACPSession:
                 "session/prompt",
                 {
                     "sessionId": self.session_id,
-                    "prompt": [{"type": "text", "text": prompt_text(prompt)}],
+                    "prompt": self.prompt_blocks(prompt),
                 },
                 1800,
             )

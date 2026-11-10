@@ -27,7 +27,7 @@ from bridge.protocol import (
     ToolActivity,
 )
 from bridge.specialists import Specialists
-from joinery import bible_lint, blueprints, brief
+from joinery import bible_lint, blueprints, brief, chat_attachments
 from joinery.art_approval import approve, review
 from joinery.editor_ops import validate_edit
 from joinery.gateway import ProjectGateway
@@ -253,6 +253,9 @@ async def serve(project: Path, agent_id: str, profile_id: str = "") -> int:
                 target_context=targets,
                 editor_context={str(k): str(v) for k, v in editor.items()},
                 selection=Selection.model_validate(data.get("selection", {})),
+                attachments=chat_attachments.validate(
+                    project, data.get("attachments", [])
+                ),
             )
             gateway.editor_context = prompt.editor_context
             gateway.target_context = prompt.target_context

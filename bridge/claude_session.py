@@ -8,6 +8,7 @@ import os
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 from bridge.models import ModelChoice
 from bridge.protocol import (
@@ -27,8 +28,29 @@ from bridge.provider_process import (
     stop_process,
 )
 from joinery.catalog import ROOT
+from joinery.chat_attachments import encoded
 from joinery.platform_support import launch_argv
 from joinery.wiring import _command_str
+
+
+def user_input(prompt: Prompt) -> bytes:
+    """What goes to Claude's stdin: plain text, or with attached images one stream-json
+    user message whose content is the text and each image as a base64 block."""
+    if not prompt.attachments:
+        return prompt_text(prompt).encode()
+    content: list[dict[str, Any]] = [
+        {"type": "text", "text": prompt_text(prompt, images_inline=True)}
+    ]
+    for path in prompt.attachments:
+        media, data = encoded(Path(path))
+        content.append(
+            {
+                "type": "image",
+                "source": {"type": "base64", "media_type": media, "data": data},
+            }
+        )
+    message = {"type": "user", "message": {"role": "user", "content": content}}
+    return (json.dumps(message) + "\n").encode()
 
 
 class ClaudeSession:
@@ -115,6 +137,9 @@ class ClaudeSession:
         env = dict(os.environ, DISABLE_TELEMETRY="1", DISABLE_ERROR_REPORTING="1")
         if prompt.effort:
             args += ["--effort", prompt.effort]
+        if prompt.attachments:
+            # Images go in as content blocks, which only the stream-json input takes.
+            args += ["--input-format", "stream-json"]
         if self.inspection_only:
             env["JOINERY_INSPECTION_ONLY"] = "1"
             env["JOINERY_INSPECTION_ENDPOINT"] = str(self.gateway_socket)
@@ -130,7 +155,7 @@ class ClaudeSession:
             limit=16_000_000,
         )
         assert self.process.stdin and self.process.stdout and self.process.stderr
-        self.process.stdin.write(prompt_text(prompt).encode())
+        self.process.stdin.write(user_input(prompt))
         await self.process.stdin.drain()
         self.process.stdin.close()
         stderr = asyncio.create_task(self.process.stderr.read())

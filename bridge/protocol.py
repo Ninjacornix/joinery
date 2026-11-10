@@ -42,6 +42,8 @@ class Prompt(_Msg):
     selection: Selection = Selection()
     model: str = ""
     effort: str = ""
+    # Images the user attached (absolute paths under .joinery/attachments): context only.
+    attachments: tuple[str, ...] = ()
 
 
 class Decision(_Msg):

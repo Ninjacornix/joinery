@@ -405,7 +405,12 @@ class CodexSession:
                         {
                             "type": "text",
                             "text": prompt.text + "\n\nEditor context:\n" + context,
-                        }
+                        },
+                        # Attached images go in as the app server's local image input.
+                        *(
+                            {"type": "localImage", "path": path}
+                            for path in prompt.attachments
+                        ),
                     ],
                 },
             )
