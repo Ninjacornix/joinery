@@ -261,6 +261,7 @@ func _states(light: bool, width: int) -> void:
 	chat.set_chat_state("connected", "Codex connected")
 	host.queue_free()
 	await _frames(2)
+	await _images(light, width)
 	await _changes(light, width)
 	built = _build(light)
 	host = built[0]
@@ -288,6 +289,34 @@ func _states(light: bool, width: int) -> void:
 		_motion.set_enabled(false)
 	settings.call("set_open", false)
 
+	host.queue_free()
+	await _frames(2)
+
+
+## Images with a message: the shared view, a pasted screenshot and a chosen file in the
+## composer, then on the sent request's card.
+func _images(light: bool, width: int) -> void:
+	var built := _build(light)
+	var host: Control = built[0]
+	var chat: Control = built[1]
+	await _frames()
+	chat.set_chat_agent("codex")
+	chat.set_chat_state("connected", "Codex connected")
+	var composer: Control = chat.get("_composer")
+	composer.set("view_provider", _shared_view)
+	composer.call("share_view")
+	var screenshot := Image.create(480, 300, false, Image.FORMAT_RGBA8)
+	screenshot.fill(Color("2b2d30"))
+	screenshot.fill_rect(Rect2i(40, 40, 400, 220), Color("6cc38a"))
+	composer.get("prompt").call("paste_clipboard", "", screenshot)
+	composer.call("attach_files", PackedStringArray([_thumbnail()]))
+	var prompt: TextEdit = chat.get("_prompt")
+	prompt.text = "Match the door to my sketch and keep this lighting."
+	await _shot("attachments", light, width, chat)
+	prompt.text_submitted.emit(prompt.text)
+	chat.set_chat_busy(true)
+	chat.set_chat_state("working", "Looking at your view")
+	await _shot("image-sent", light, width, chat)
 	host.queue_free()
 	await _frames(2)
 

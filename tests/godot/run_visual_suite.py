@@ -50,6 +50,8 @@ SIDEBAR_STATES = (
     "empty",
     "chips",
     "shared-view",
+    "attachments",
+    "image-sent",
     "commands",
     "sending",
     "working",

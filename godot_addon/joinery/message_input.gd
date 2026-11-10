@@ -4,10 +4,18 @@ extends TextEdit
 ## composer box, so its own styleboxes are empty apart from a 2u left inset that puts the caret
 ## just before the placeholder. It grows with its text from two lines up to MAX_LINES, then
 ## scrolls, and shrinks back when the text is cleared or replaced (sending clears it).
+##
+## Pasting (Cmd/Ctrl+V) an image, or image files copied in the file manager, attaches them
+## instead of inserting text: [signal image_pasted] or [signal files_pasted].
 
 signal text_submitted(value: String)
+## An image was pasted from the clipboard.
+signal image_pasted(image: Image)
+## Image files were pasted (copied in the file manager): their absolute paths.
+signal files_pasted(paths: PackedStringArray)
 
 const UI_THEME := preload("ui_theme.gd")
+const IMAGE_EXTENSIONS: Array[String] = ["png", "jpg", "jpeg", "webp"]
 const MIN_LINES := 2
 const MAX_LINES := 5
 
@@ -37,6 +45,13 @@ func _notification(what: int) -> void:
 
 
 func _gui_input(event: InputEvent) -> void:
+	if event.is_action_pressed("ui_paste", false, true) and editable:
+		var image: Image = null
+		if DisplayServer.clipboard_has_image():
+			image = DisplayServer.clipboard_get_image()
+		if paste_clipboard(DisplayServer.clipboard_get(), image):
+			accept_event()
+			return
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode in [KEY_ENTER, KEY_KP_ENTER]:
 			if event.shift_pressed:
@@ -44,6 +59,58 @@ func _gui_input(event: InputEvent) -> void:
 			else:
 				text_submitted.emit(text)
 			accept_event()
+
+
+## Handle a paste of clipboard [param clip_text] and [param image] (null when none). Image
+## files take precedence, then an image with no text beside it; anything else pastes as text
+## (returns false).
+func paste_clipboard(clip_text: String, image: Image) -> bool:
+	var paths := image_paths(clip_text)
+	if not paths.is_empty():
+		files_pasted.emit(paths)
+		return true
+	if clip_text.strip_edges().is_empty() and image != null and not image.is_empty():
+		image_pasted.emit(image)
+		return true
+	return false
+
+
+## Image files dragged from the FileSystem dock onto the field attach like pasted ones; text
+## drops stay TextEdit's own.
+func _can_drop_data(_at: Vector2, data: Variant) -> bool:
+	return not dropped_images(data).is_empty()
+
+
+func _drop_data(_at: Vector2, data: Variant) -> void:
+	files_pasted.emit(dropped_images(data))
+
+
+## The image files in FileSystem dock drag [param data] ({type: "files", files}).
+static func dropped_images(data: Variant) -> PackedStringArray:
+	var images := PackedStringArray()
+	if data is Dictionary and data.get("type") == "files":
+		for path: Variant in data.get("files", []):
+			if str(path).get_extension().to_lower() in IMAGE_EXTENSIONS:
+				images.append(str(path))
+	return images
+
+
+## The image files [param clip_text] names, one per line (paths or file:// URLs), or none when
+## any line is something else.
+static func image_paths(clip_text: String) -> PackedStringArray:
+	var paths := PackedStringArray()
+	for raw: String in clip_text.strip_edges().split("\n", false):
+		var line := raw.strip_edges()
+		if line.begins_with("file://"):
+			line = line.trim_prefix("file://").uri_decode()
+		if (
+			not line.is_absolute_path()
+			or not line.get_extension().to_lower() in IMAGE_EXTENSIONS
+			or not FileAccess.file_exists(line)
+		):
+			return PackedStringArray()
+		paths.append(line)
+	return paths
 
 
 func _restyle() -> void:

@@ -34,6 +34,7 @@ CASES = {
     "sidebar_feature_test.gd": "sidebar features: ok",
     "art_review_test.gd": "art review: ok",
     "share_view_test.gd": "share view: ok",
+    "chat_images_test.gd": "chat images: ok",
 }
 #: Cases that need a game made from a blueprint (the real `joinery feature` CLI runs there).
 GAME_CASES = {"sidebar_feature_test.gd"}

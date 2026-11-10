@@ -142,6 +142,19 @@ read-only `view_editor` tool, which returns the same screenshot together with
 the editor camera's position and direction (zoom and visible area in 2D). The
 request shows the step "Looking at your view" when it does.
 
+To give Journeyman other pictures (a sketch, a reference, a screenshot of a
+bug), paste an image with Cmd+V or Ctrl+V, paste image files copied in your
+file manager, drop image files on the message box (from your file manager or
+the FileSystem dock), or click the paperclip to choose them. PNG, JPEG and
+WebP work. Each one is scaled to at most 2048 pixels on its long side, and up
+to five images go with one message. A file dropped anywhere else in the
+editor is imported into the project as before.
+
+How each agent receives them: Codex as images (`localImage` input), Claude
+Code as image blocks in its stream-json input, and Gemini CLI or opencode as
+images when the agent says it accepts them; otherwise the agent gets the
+images' file paths in the message and opens them itself.
+
 Screenshots and attached images are references for Journeyman only, never
 assets. They are saved in `.joinery/attachments/` in your project, which is
 kept out of git and out of Godot's import, and never under `art/`; Joinery

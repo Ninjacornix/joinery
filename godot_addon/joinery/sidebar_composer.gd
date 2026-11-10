@@ -12,10 +12,17 @@ extends PanelContainer
 ## Its border tweens to the accent while the field has focus.
 ##
 ## Images go with the message as thumbnails above the chips (sidebar_attachments.gd): the eye
-## button ("Share my view") adds a screenshot of the editor viewport the user is looking at.
+## button ("Share my view") adds a screenshot of the editor viewport the user is looking at;
+## the paperclip opens a file dialog; pasting an image (Cmd/Ctrl+V) or image files, and dropping
+## image files on the composer (from the file manager or the FileSystem dock), add them too.
 ## Images are reference context for Journeyman, never assets. They ride in the targets list
 ## ([method target_snapshot]), so a queued or retried message keeps them, and they leave the
 ## composer once the message is sent or queued.
+##
+## In the editor, Godot copies files dropped from the file manager into the project. Over the
+## composer that would turn a reference into a project file, so while the composer is in the
+## editor it takes the window's file drops first ([method _guard_drops]): drops on the composer
+## become attachments, and every other drop goes on to the editor as before.
 
 signal submitted(text: String)
 signal stop_pressed
@@ -42,6 +49,8 @@ var send: Button
 var stop: Button
 ## "Share my view": a screenshot of the editor viewport goes with the next message.
 var view: Button
+## Attach images from disk (a file dialog).
+var attach: Button
 ## Captures the editor viewport (editor_view.gd's result); tests replace it.
 var view_provider := Callable(EDITOR_VIEW, "capture")
 var _style: StyleBoxFlat
@@ -56,6 +65,9 @@ var _restyling := false
 var _targets: Array[Dictionary] = []
 ## The dock's placeholder for the current state ("Queue a message…"), "" for the default.
 var _waiting := ""
+var _dialog: FileDialog
+## The editor's own handlers of the window's file drops, while the composer takes them first.
+var _editor_drops: Array[Callable] = []
 
 
 func _init() -> void:
@@ -76,10 +88,20 @@ func _init() -> void:
 	prompt.focus_exited.connect(_set_focus.bind(false))
 	prompt.text_changed.connect(_sync_send)
 	prompt.text_set.connect(_sync_send)
+	prompt.image_pasted.connect(func(image: Image) -> void: attach_image(image, "Pasted image"))
+	prompt.files_pasted.connect(attach_files)
 	body.add_child(prompt)
 	var controls := HBoxContainer.new()
 	controls.theme_type_variation = "JoineryRowTight"
 	body.add_child(controls)
+	attach = UI.icon_button(
+		"attach", "Attach images (PNG, JPEG or WebP). You can also paste or drop them here."
+	)
+	attach.accessibility_name = "Attach images"
+	attach.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	UI_MOTION.press_feedback(attach)
+	attach.pressed.connect(open_file_dialog)
+	controls.add_child(attach)
 	view = UI.icon_button("view", "Share my view: Journeyman sees this viewport with your message")
 	view.accessibility_name = "Share my view"
 	view.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -123,6 +145,15 @@ func _init() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_THEME_CHANGED:
 		_restyle()
+
+
+func _enter_tree() -> void:
+	if Engine.is_editor_hint():
+		_guard_drops(true)
+
+
+func _exit_tree() -> void:
+	_guard_drops(false)
 
 
 ## Busy: Stop replaces Send; the field stays editable, but Enter waits until the reply ends.
@@ -199,6 +230,97 @@ func share_view() -> void:
 	prompt.grab_focus()
 
 
+## Attach [param image] (pasted), named [param label].
+func attach_image(image: Image, label: String) -> void:
+	if attachments.is_full():
+		notice.emit("Up to %d images go with one message." % ATTACHMENTS.MAX_IMAGES)
+		return
+	var entry := ATTACHMENTS.save(image, label)
+	if entry.is_empty():
+		notice.emit("Couldn't attach that image.")
+		return
+	attachments.add(entry)
+
+
+## Attach the image files at [param paths] (absolute or res://), up to the limit; files that
+## are not PNG, JPEG or WebP images are skipped with a note.
+func attach_files(paths: PackedStringArray) -> void:
+	var problem := ""
+	for path: String in paths:
+		if attachments.is_full():
+			problem = "Up to %d images go with one message." % ATTACHMENTS.MAX_IMAGES
+			break
+		var entry := ATTACHMENTS.from_file(ProjectSettings.globalize_path(path))
+		if entry.has("error"):
+			problem = str(entry["error"])
+			continue
+		attachments.add(entry)
+	if not problem.is_empty():
+		notice.emit(problem)
+
+
+## The paperclip: choose image files on disk.
+func open_file_dialog() -> void:
+	if _dialog == null:
+		_dialog = FileDialog.new()
+		_dialog.title = "Attach images"
+		_dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILES
+		_dialog.access = FileDialog.ACCESS_FILESYSTEM
+		_dialog.filters = PackedStringArray(["*.png, *.jpg, *.jpeg, *.webp ; Images"])
+		_dialog.use_native_dialog = true
+		_dialog.files_selected.connect(attach_files)
+		_dialog.file_selected.connect(
+			func(path: String) -> void: attach_files(PackedStringArray([path]))
+		)
+		add_child(_dialog)
+	_dialog.popup_centered_ratio(0.6)
+
+
+## Image files dragged from the FileSystem dock land as attachments (the message field takes
+## them the same way).
+func _can_drop_data(_at: Vector2, data: Variant) -> bool:
+	return not INPUT_SCRIPT.dropped_images(data).is_empty()
+
+
+func _drop_data(_at: Vector2, data: Variant) -> void:
+	attach_files(INPUT_SCRIPT.dropped_images(data))
+
+
+## Take the window's file drops before the editor does (see the class notes), or hand them back.
+func _guard_drops(on: bool) -> void:
+	var window := get_tree().root if is_inside_tree() else null
+	if window == null:
+		return
+	if on and not window.files_dropped.is_connected(_on_files_dropped):
+		for connection: Dictionary in window.files_dropped.get_connections():
+			var handler: Callable = connection["callable"]
+			_editor_drops.append(handler)
+			window.files_dropped.disconnect(handler)
+		window.files_dropped.connect(_on_files_dropped)
+	elif not on and window.files_dropped.is_connected(_on_files_dropped):
+		window.files_dropped.disconnect(_on_files_dropped)
+		for handler: Callable in _editor_drops:
+			if handler.is_valid() and not window.files_dropped.is_connected(handler):
+				window.files_dropped.connect(handler)
+		_editor_drops.clear()
+
+
+func _on_files_dropped(files: PackedStringArray) -> void:
+	var over := is_visible_in_tree() and get_global_rect().has_point(get_global_mouse_position())
+	route_drop(files, over)
+
+
+## Files dropped from the file manager: on the composer they are attached (never copied into the
+## project); anywhere else they go on to the editor.
+func route_drop(files: PackedStringArray, over_composer: bool) -> void:
+	if over_composer:
+		attach_files(files)
+		return
+	for handler: Callable in _editor_drops:
+		if handler.is_valid():
+			handler.call(files)
+
+
 func _sync_send() -> void:
 	send.disabled = _locked or _connection != "connected" or prompt.text.strip_edges().is_empty()
 	options.disabled = _busy or _connection != "connected"
@@ -244,6 +366,7 @@ func _match_heights() -> void:
 	options.custom_minimum_size.y = square.y
 	stop.custom_minimum_size = square
 	view.custom_minimum_size = square
+	attach.custom_minimum_size = square
 
 
 ## Put a queued message back: [param text] in the field and its [param targets] as chips. A
