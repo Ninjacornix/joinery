@@ -74,6 +74,30 @@ invalidates approval; use `/art` to review and approve the current version
 again. An agent cannot approve its own direction or file changes (ADR 0033).
 Use `/tools` for actual MCP connection/probe status; diagnostics stay in Output.
 
+### The Review tab
+
+**Review** is always the first tab of the bottom bar (in Godot's classic view
+too, beside Output). Its title counts what waits for you: **Review 2**.
+
+- **Waiting for you**: every change that needs a decision, one line each:
+  what it does, which app made it and when (`Blender · 3 min ago`), with
+  **Discard** and **Accept** on the row. Clicking the change Journeyman just
+  made opens its full before/after review; **All approvals** goes back.
+  Clicking any other waiting change (for example one made with
+  `joinery feature add` in a terminal) shows its files under the row.
+  With nothing waiting it says "Nothing waits for your review."
+- **Art bible**: one row, **Approved at creation** or **Approved by you**
+  with **Open**; when it changed since, it moves under Waiting for you as
+  "Needs your approval before new art or audio" with **Review** (`/art`).
+- **Decided**: accepted, discarded and reverted changes, newest first, with
+  **Revert** while the change can still be put back and **Too old to revert**
+  once its restore data is gone (the same Revert as in the chat).
+
+The list comes from `joinery transactions list --project <path>`, which
+prints each change's state, summary, apps, times, files and the art bible's
+approval as JSON. The tab reads it when it is shown, when you come back to
+the editor and whenever a change is staged or decided; it never polls.
+
 ### Sidebar commands
 
 - `/feature` or `/feature list` says what the game has and what can be added.
