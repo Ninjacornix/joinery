@@ -155,6 +155,18 @@ func _init(text := "", context: Array = []) -> void:
 	text_label.accessibility_name = "Your request"
 	text_label.text = request
 	_bubble.add_child(text_label)
+	# The theme's paragraph and line spacing both land under the last line; drop the first and
+	# match the second above the text, so the request sits in the middle of its bubble.
+	STYLE.on_theme_overrides(
+		text_label,
+		func() -> void:
+			text_label.add_theme_constant_override("paragraph_separation", 0)
+			var lead := text_label.get_theme_constant("line_separation")
+			var box := StyleBoxEmpty.new()
+			box.content_margin_top = lead
+			text_label.add_theme_stylebox_override("normal", box)
+			text_label.add_theme_stylebox_override("focus", box)
+	)
 	# The assistant's side sits on the shared transcript inset, SPACE.3 under the bubble.
 	_activity = MarginContainer.new()
 	_activity.theme_type_variation = "JoineryInset"

@@ -20,11 +20,14 @@ import hashlib
 import importlib
 import itertools
 import json
+import os
 import re
 import secrets
+import shutil
 import tomllib
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -62,6 +65,7 @@ PRESETS_DIR = ROOT / "templates" / "bible_presets"
 CORE_DIR_NAME = "_core"
 MANIFEST = ".joinery/game-manifest.json"
 MANIFEST_FORMAT = 1
+BACKUP_DIR = ".joinery/backup"
 
 #: Asset files never ship in blueprints or features: visuals are code-only
 #: greybox and blueprints are silent. Real assets come from the user's tools.
@@ -376,6 +380,9 @@ class Applied:
     preset_edits: list[str]
     notes: list[str]
     manifest: dict[str, Any]
+    #: Where the old project.godot, export_presets.cfg and joinery.toml were
+    #: copied before they were rewritten, relative to the project.
+    backup: str | None = None
 
 
 @dataclass(frozen=True)
@@ -1154,6 +1161,89 @@ def _engine_settings(resolution: Resolution) -> dict[str, str]:
     return settings
 
 
+#: Folders the existing-game check never looks in: version control, Godot's
+#: cache, Joinery's own state, and the addon the wizard copies in first.
+_NOT_THE_GAME = frozenset({".git", ".godot", ".joinery", ".import", "__pycache__"})
+_JOINERY_ADDON = "addons/joinery"
+#: C# and .NET project files: a Joinery blueprint never ships any.
+_DOTNET_SUFFIXES = frozenset({".cs", ".csproj", ".sln", ".fsproj", ".vbproj"})
+#: Scripts and scenes: a blueprint ships its own, so only others count.
+_GAME_SUFFIXES = frozenset({".gd", ".tscn", ".scn"})
+
+
+def _few(paths: Sequence[str], limit: int = 3) -> str:
+    shown = ", ".join(paths[:limit])
+    return shown + (f" and {len(paths) - limit} more" if len(paths) > limit else "")
+
+
+def _foreign_game(target: Path, ours: dict[str, Path], main_scene: str) -> list[str]:
+    """What shows that `target` already holds a game Joinery did not make.
+
+    `ours` are the files the starting point would write: a copy of one of them
+    (left by an earlier, interrupted run) is not someone else's game.
+    """
+    dotnet: list[str] = []
+    game: list[str] = []
+    for folder, dirs, files in os.walk(target):
+        base = Path(folder)
+        dirs[:] = sorted(
+            d for d in dirs
+            if d not in _NOT_THE_GAME
+            and (base / d).relative_to(target).as_posix() != _JOINERY_ADDON
+        )
+        for file_name in sorted(files):
+            path = base / file_name
+            name = path.relative_to(target).as_posix()
+            suffix = path.suffix.lower()
+            if suffix in _DOTNET_SUFFIXES:
+                dotnet.append(name)
+            elif suffix in _GAME_SUFFIXES:
+                source = ours.get(name)
+                if source is None or source.read_bytes() != path.read_bytes():
+                    game.append(name)
+    found: list[str] = []
+    godot_path = target / "project.godot"
+    if godot_path.is_file():
+        config = GodotConfig.parse(godot_path.read_text(encoding="utf-8"))
+        scene = config.get("application", "run/main_scene")
+        if scene is not None and scene != to_variant(main_scene):
+            found.append(f"project.godot already starts the scene {scene.strip(chr(34))}")
+        features = config.get("application", "config/features") or ""
+        if '"C#"' in features or "dotnet" in config.sections():
+            found.append("project.godot is set up for C#")
+    if dotnet:
+        found.append(f"C# code ({_few(dotnet)})")
+    if game:
+        found.append(f"scripts or scenes ({_few(game)})")
+    return found
+
+
+def _refusal(found: Sequence[str]) -> str:
+    return (
+        "This folder already holds a game Joinery didn't make: "
+        + "; ".join(found)
+        + ". Joinery won't change an existing game this way. "
+        "Open it from the project list, or start a new game in an empty folder."
+    )
+
+
+def existing_game(project: Path, blueprint_id: str, features: Sequence[str] = ()) -> str | None:
+    """Why `project` must not get a starting point, or None when it may.
+
+    A project with a Joinery game record or manifest is Joinery's own; any
+    other one is refused when it already has its own game: a main scene, C#,
+    or scripts and scenes the starting point does not ship.
+    """
+    if read_record(project) is not None or (project / MANIFEST).is_file():
+        return None
+    resolution = resolve(blueprint_id, list(features))
+    if resolution.blueprint is None:
+        return None
+    ours = {rel: path for unit in _units(resolution) for rel, path in unit.files.items()}
+    found = _foreign_game(project, ours, resolution.blueprint.main_scene)
+    return _refusal(found) if found else None
+
+
 def _plan(project: Path, target: Path, resolution: Resolution) -> Plan:
     conflicts = list(resolution.problems)
     if conflicts or resolution.blueprint is None:
@@ -1167,6 +1257,11 @@ def _plan(project: Path, target: Path, resolution: Resolution) -> Plan:
     presets_path = target / "export_presets.cfg"
     presets_text = presets_path.read_text(encoding="utf-8") if presets_path.is_file() else ""
     manifest_old = _read_manifest(target, project)
+    if not manifest_old and read_record(target) is None:
+        ours = {rel: path for unit in units for rel, path in unit.files.items()}
+        found = _foreign_game(target, ours, resolution.blueprint.main_scene)
+        if found:
+            return Plan(resolution, [], [], [], [], {}, [*conflicts, _refusal(found)])
     old_units: dict[str, Any] = manifest_old.get("units", {})
     work = _Work(target, GodotConfig.parse(godot_text), GodotConfig.parse(presets_text), old_units, conflicts)
     recorded_hashes: dict[str, str] = {}
@@ -1387,7 +1482,48 @@ def apply(
     return _commit(project, target, result)
 
 
+def _back_up(target: Path, rels: Iterable[str]) -> str | None:
+    """Copy the files about to be rewritten to `.joinery/backup/<time>/`.
+
+    Returns the folder, relative to the project, or None when none exist yet.
+    """
+    existing = [rel for rel in rels if (target / rel).is_file()]
+    if not existing:
+        return None
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    folder = f"{BACKUP_DIR}/{stamp}"
+    count = 1
+    while (target / folder).exists():
+        count += 1
+        folder = f"{BACKUP_DIR}/{stamp}-{count}"
+    # Copies for the user to recover from, not project history.
+    ignore = target / BACKUP_DIR / ".gitignore"
+    ignore.parent.mkdir(parents=True, exist_ok=True)
+    if not ignore.is_file():
+        ignore.write_text("*\n", encoding="utf-8")
+    for rel in existing:
+        copy = target / folder / rel
+        copy.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(target / rel, copy)
+    return folder
+
+
 def _commit(project: Path, target: Path, result: Plan) -> Applied:
+    # The first apply merges into project.godot, export_presets.cfg and
+    # joinery.toml that Joinery did not make, so their old text is kept first.
+    # After that the manifest records every merge and removing undoes it; a
+    # transaction stage (target != project) has its own full restore.
+    first = not _read_manifest(target, project) and read_record(target) is None
+    rewritten = [
+        rel
+        for rel, text in (
+            ("project.godot", result.project_text),
+            ("export_presets.cfg", result.presets_text),
+            ("joinery.toml", result.record_text),
+        )
+        if text is not None
+    ]
+    backup = _back_up(target, rewritten) if first and target == project else None
     written: list[str] = []
     for write in result.writes:
         if write.action != "same":
@@ -1425,6 +1561,7 @@ def _commit(project: Path, target: Path, result: Plan) -> Applied:
         preset_edits=result.preset_edits,
         notes=result.notes,
         manifest=result.manifest,
+        backup=backup,
     )
 
 

@@ -320,6 +320,11 @@ def apply_choices(
     chosen, app_id, how = check_choices(blueprint, features, steam_app_id, connect)
     if not (project / "project.godot").is_file():
         raise ValueError(f"No project.godot in {project}")
+    # Before the addon or anything else is written: never merge a starting
+    # point into a game someone already made.
+    refusal = blueprints.existing_game(project, blueprint, chosen)
+    if refusal:
+        raise ValueError(refusal)
     steps: list[dict[str, Any]] = []
     if addon:
         steps.append(install_addon(project, report))
@@ -327,7 +332,14 @@ def apply_choices(
     name = blueprints.describe(blueprint)["name"]
     message = f"Made the {name} game"
     message += f" with {_names(applied.features)}." if applied.features else "."
-    steps.append(_step(report, "blueprint", "done", message, features=applied.features))
+    if applied.backup:
+        message += f" The files it changed were copied to {applied.backup} first."
+    steps.append(
+        _step(
+            report, "blueprint", "done", message,
+            features=applied.features, backup=applied.backup,
+        )
+    )
     steps.append(write_brief(project, blueprint, applied.features, report))
     steps.append(write_bible(project, blueprint, report))
     if STEAM in applied.features and steam_setup:

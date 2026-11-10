@@ -275,3 +275,136 @@ def test_wizard_catalogue_lists_features_per_blueprint() -> None:
         p.startswith("features/controller/") for p in controller["adds"]["files"]
     )
     assert by_id["steam"]["external"][0]["name"] == "GodotSteam GDExtension"
+
+
+# --- A folder that already holds a game ---------------------------------------------
+
+_WIZARD_GODOT = (
+    "config_version=5\n\n[application]\n\n"
+    'config/name="New Game"\n'
+    'config/features=PackedStringArray("4.7", "Forward Plus")\n'
+    'config/icon="res://icon.svg"\n'
+)
+
+
+def _wizard_folder(tmp_path: Path) -> Path:
+    """What the new-project wizard has written when it runs `joinery game apply`."""
+    project = tmp_path / "wizard"
+    project.mkdir()
+    (project / "project.godot").write_text(_WIZARD_GODOT)
+    (project / "icon.svg").write_text("<svg/>\n")
+    (project / ".editorconfig").write_text("root = true\n")
+    (project / ".gitignore").write_text(".godot/\n")
+    return project
+
+
+def _existing_game(tmp_path: Path, language: str) -> Path:
+    """A Godot game someone else made: a main scene, its scripts and scenes."""
+    project = tmp_path / f"their-{language}-game"
+    (project / "scenes").mkdir(parents=True)
+    (project / "scripts").mkdir()
+    features = '"4.7", "C#", "Forward Plus"' if language == "cs" else '"4.7"'
+    (project / "project.godot").write_text(
+        "config_version=5\n\n[application]\n\n"
+        'config/name="Their Game"\n'
+        'run/main_scene="res://scenes/main.tscn"\n'
+        f"config/features=PackedStringArray({features})\n\n"
+        "[input]\n\njump={}\n"
+    )
+    (project / "scenes/main.tscn").write_text(
+        '[gd_scene format=3]\n\n[node name="Main" type="Node"]\n'
+    )
+    if language == "cs":
+        (project / "scripts/Player.cs").write_text("public partial class Player {}\n")
+        (project / "TheirGame.csproj").write_text('<Project Sdk="Godot.NET.Sdk/4.7.2" />\n')
+    else:
+        (project / "scripts/player.gd").write_text("extends Node\n")
+    (project / "export_presets.cfg").write_text('[preset.0]\n\nname="Linux"\n')
+    return project
+
+
+def _snapshot(project: Path) -> dict[str, bytes]:
+    return {
+        p.relative_to(project).as_posix(): p.read_bytes()
+        for p in sorted(project.rglob("*"))
+        if p.is_file()
+    }
+
+
+def test_game_apply_on_a_fresh_wizard_folder_keeps_a_copy(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from joinery.cli import main
+
+    project = _wizard_folder(tmp_path)
+    argv = ["game", "apply", "--project", str(project), "--blueprint", "blank"]
+    assert main([*argv, "--no-addon", "--features="]) == 0
+    lines = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    step = next(line for line in lines if line["step"] == "blueprint")
+    assert step["state"] == "done"
+    assert step["backup"].startswith(".joinery/backup/")
+    assert f"copied to {step['backup']}" in step["message"]
+    # The old project.godot is kept byte for byte; the new one has the game.
+    assert (project / step["backup"] / "project.godot").read_text() == _WIZARD_GODOT
+    assert "run/main_scene" in (project / "project.godot").read_text()
+    # Backups are for recovering, not for the project's history.
+    assert (project / ".joinery/backup/.gitignore").read_text() == "*\n"
+
+
+@pytest.mark.parametrize("language", ["cs", "gd"])
+def test_game_apply_refuses_an_existing_game_and_writes_nothing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], language: str
+) -> None:
+    from joinery.cli import main
+
+    project = _existing_game(tmp_path, language)
+    before = _snapshot(project)
+    argv = ["game", "apply", "--project", str(project), "--blueprint", "blank"]
+    assert main(argv) == 1
+    line = json.loads(capsys.readouterr().out.strip())
+    assert line["step"] == "error" and line["state"] == "failed"
+    message = line["message"]
+    assert message.startswith("This folder already holds a game Joinery didn't make: ")
+    assert "Joinery won't change an existing game this way." in message
+    assert "project.godot already starts the scene res://scenes/main.tscn" in message
+    if language == "cs":
+        assert "project.godot is set up for C#" in message
+        assert "C# code (TheirGame.csproj, scripts/Player.cs)" in message
+    else:
+        assert "scripts or scenes (scenes/main.tscn, scripts/player.gd)" in message
+    # Not the addon, not a backup, not one byte.
+    assert _snapshot(project) == before
+
+
+def test_apply_and_plan_refuse_an_existing_game(tmp_path: Path) -> None:
+    project = _existing_game(tmp_path, "gd")
+    before = _snapshot(project)
+    with pytest.raises(ValueError, match="won't change an existing game"):
+        blueprints.apply(project, "blank")
+    conflicts = blueprints.plan(project, "blank", []).conflicts
+    assert any("existing game" in c for c in conflicts)
+    assert _snapshot(project) == before
+
+
+def test_a_csharp_file_alone_is_an_existing_game(tmp_path: Path) -> None:
+    project = _wizard_folder(tmp_path)
+    (project / "Game.sln").write_text("\n")
+    refusal = blueprints.existing_game(project, "blank")
+    assert refusal is not None and "C# code (Game.sln)" in refusal
+
+
+def test_an_interrupted_apply_can_run_again(tmp_path: Path) -> None:
+    """Files left by an earlier run of the same starting point are not someone's game."""
+    project = _wizard_folder(tmp_path)
+    blueprints.apply(project, "blank")
+    # As if the run stopped before it recorded anything.
+    (project / blueprints.MANIFEST).unlink()
+    (project / "joinery.toml").unlink()
+    assert blueprints.existing_game(project, "blank") is None
+    assert blueprints.apply(project, "blank").blueprint == "blank"
+
+
+def test_a_project_joinery_made_is_not_refused(tmp_path: Path) -> None:
+    project = new(tmp_path, blueprint="blank")
+    assert blueprints.existing_game(project, "blank") is None
+    assert "controller" in blueprints.add_feature(project, "controller").features
