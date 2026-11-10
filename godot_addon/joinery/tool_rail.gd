@@ -42,7 +42,7 @@ const DOMAIN_ICONS := {"3d": "model", "2d": "image", "audio": "audio", "material
 const PREPARING_INTERVAL := 5.0
 const IDLE_INTERVAL := 60.0
 ## Seconds the card stays after the pointer and focus leave both the app and the card.
-const CARD_GRACE := 0.3
+const CARD_GRACE := 0.15
 ## The card's text width in multiples of the body font.
 const CARD_EM := 22
 
@@ -66,6 +66,8 @@ var _job: RefCounted
 var _action_job: RefCounted
 var _action_tool := ""
 var _since_check := 0.0
+## The app whose card a click dismissed; it stays hidden until the pointer enters again.
+var _card_dismissed := ""
 var _card: Card
 var _card_layer: Control
 var _card_tool := ""
@@ -309,8 +311,18 @@ func _add_tool(id: String, title: String, source: Dictionary) -> void:
 	var button := _button("AllAssets" if id == ALL_ASSETS else id, title)
 	button.button_group = _group
 	button.set_meta("title", title)
-	button.pressed.connect(func() -> void: tool_selected.emit(id))
-	button.mouse_entered.connect(_show_card.bind(id))
+	button.pressed.connect(
+		func() -> void:
+			# A click opens the app; its card has done its job until the pointer comes back.
+			_card_dismissed = id
+			_hide_card_now()
+			tool_selected.emit(id)
+	)
+	button.mouse_entered.connect(
+		func() -> void:
+			_card_dismissed = ""
+			_show_card(id)
+	)
 	button.focus_entered.connect(_show_card.bind(id))
 	var item := _item(button, source, true)
 	_tools.add_child(item)
@@ -519,7 +531,7 @@ func _build_card() -> void:
 
 ## Show the card beside [param id]'s rail item (hover or focus).
 func _show_card(id: String) -> void:
-	if not _readiness.has(id) or not _items.has(id):
+	if not _readiness.has(id) or not _items.has(id) or _card_dismissed == id:
 		return
 	if _card_tool != id:
 		_hide_card_now()
@@ -589,7 +601,11 @@ func _track_card(delta: float) -> void:
 	var item: RailItem = _items.get(_card_tool)
 	var focus := get_viewport().gui_get_focus_owner()
 	var inside := (
-		item != null and (item.button.is_hovered() or item.button.has_focus())
+		(
+			item != null
+			and _card_dismissed != _card_tool
+			and (item.button.is_hovered() or item.button.has_focus())
+		)
 		or _card.get_global_rect().has_point(_card.get_global_mouse_position())
 		or (focus != null and _card.is_ancestor_of(focus))
 	)
