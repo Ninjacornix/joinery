@@ -1,7 +1,9 @@
-# 0.1 alpha support matrix
+# Support matrix
 
-This matrix distinguishes measured local/hosted behavior from intended release targets.
-Native validation is recorded below; publishing requires the complete release workflow.
+What Joinery 0.2 can do, and the evidence for it. Measured behaviour is kept
+apart from intended targets. The platform rows below were measured on the
+0.1 alpha 1 candidate; 0.2 is checked by the same release workflow before it
+is published.
 
 ## Platforms and distribution
 
@@ -59,7 +61,7 @@ audit ran on macOS.
 | Material Maker 1.8 | Native `.ptex` graph and Godot material/texture export | Connected shader exports real red/blue texture pixels; roughness changes, replay and transaction lifecycle verified. An image input is recorded in the recipe's sources with a relative path; an unrecorded input is refused. Shutdown warnings remain |
 | Inkscape 1.4 | Editable SVG and PNG export | Stable element ID, actual exported pixels, replay and transaction lifecycle verified; the pinned MCP adds read-only analysis tools |
 | SuperCollider 3.13 | Editable `.scd` patches and offline NRT audio export | Audible WAV, native UTF-8 source recreation, update/replay and transaction lifecycle verified. A broken patch fails within a minute instead of hanging. Live audition records outside the project with no bundled samples; no live audio-device routing claim |
-| GIMP 3.0.4 | First-party adapter: native `.xcf` create, inspect (layer tree, channels, paths) and edit through Joinery's Python-Fu adapter in `joinery-paint`, run headless in the offline creative worker; per-layer or composite PNG exports, byte-identical on replay; readiness checks `gimp-console --version`, a Python-Fu batch probe and `document_capabilities`; desktop open/view | `joinery rebuild` replays GIMP recipes once `joinery/recipe.py` dispatches through the tool modules; wrapping an existing PNG into an `.xcf` does not yet record that PNG as a recipe input; the community gimp-mcp pin was dropped because it needs a live desktop GIMP |
+| GIMP 3.0.4 | First-party adapter: native `.xcf` create, inspect (layer tree, channels, paths) and edit through Joinery's Python-Fu adapter in `joinery-paint`, run headless in the offline creative worker; per-layer or composite PNG exports, byte-identical on replay; desktop open/view | `joinery rebuild` replays GIMP recipes through the GIMP tool module. Wrapping an existing PNG into an `.xcf` does not yet record that PNG as a recipe input. The community gimp-mcp pin was dropped because it needs a live desktop GIMP |
 | Surge XT 1.3.4 | Supported through `joinery-sound` | Offline render of named parameters and notes to WAV, exact replay; a one-parameter edit keeps the rest; an unknown parameter is refused. No factory `.fxp` loading or random sources yet ([ADR 0021](adr/0021-surge-xt.md)) |
 | Music (MIDI) | Songs written as MIDI sources (`compose_music`, `edit_music`, `render_music` in `joinery-sound`), rendered offline through FluidSynth (Debian FluidR3_GM SoundFont) and Surge XT patches | Piano and drums through FluidSynth with a Surge XT bass: exact sample count, loop tags, −16 LUFS; transpose and program edits; an imported `.mid` renders unchanged; four recipes replay byte-identically |
 | Audio edits | Typed ffmpeg operations (`process_audio`): trim silence, fade, loudness, loop points, format | On SuperCollider and Surge XT renders: trim, fade from silence, −18 LUFS under −1 dBTP, then a looping stereo 44.1 kHz Ogg with loop tags; edits chain, replay byte-identically, and refusals (imported file, empty fade, outside `audio/`, escaping path) change nothing |

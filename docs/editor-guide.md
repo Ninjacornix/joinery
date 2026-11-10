@@ -14,6 +14,19 @@ Viewport controls and scene tabs are hidden by default. Type `/toolbar` in
 Journeyman, use the bottom rail icon, or choose **Joinery: Toggle viewport
 toolbar** from the editor's Tools menu to show them. The preference is saved.
 
+### Classic Godot view
+
+If you prefer Godot's own layout, switch to it from **Editor > Switch to
+classic Godot view**, from the command palette, or in Journeyman settings under
+**Appearance > Layout** (Joinery or Classic Godot). In Classic Godot the
+docks go back to their stock places, the 2D, 3D and Script buttons return to
+the title bar, the run bar shows every button and Journeyman is an ordinary
+dock under the Inspector. **Switch to Joinery view** goes back. The switch
+applies after a restart; the dialog offers Restart or On next start. Each
+layout remembers its own docks, and the theme stays as you set it. The setting
+is `interface/joinery/editor_layout` in Editor Settings
+([ADR 0031](adr/0031-classic-godot-view.md)).
+
 Journeyman shows the selected object, audio, or resource in a compact context line above the input and
 attaches that target to submitted prompts. Type `/` for a command menu, which
 opens upward and supports filtering and arrow keys. Tab or a click completes a
@@ -167,6 +180,11 @@ uv run joinery check catalogue                      # every blueprint and featur
 The bible upgrade only adds sections and markers. It is a reviewed change, and
 because the bible's text changes you approve it again with `/art`.
 
+New bibles and briefs start with a short "How to write in this file" note. When
+a section uses filler words (stunning, immersive, seamless, vibrant, elevate,
+delve, tapestry, unleash, cutting-edge, game-changer), the bible check and the
+brief check suggest plainer words. It is only a suggestion and never blocks.
+
 ### Tools and agents
 
 `joinery status --project <path>` shows what each of the project's tools can do
@@ -199,7 +217,7 @@ hosts for one project are refused.
 state and transaction summaries without credentials. `package --output ...tar.gz`
 bundles the matching engine and source with measured file hashes;
 `package --desktop --output ...zip` adds the platform launcher/application layout.
-These alpha bundles contain source and a platform-specific editor, and use uv
+These bundles contain source and a platform-specific editor, and use uv
 for their Python runtime. They do not bundle agent subscriptions, Docker, or all
 optional desktop applications.
 

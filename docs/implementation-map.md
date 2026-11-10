@@ -1,8 +1,8 @@
 # Joinery implementation map
 
-Audited and implemented 2026-11-08 against the current working tree. The verified
-workflows and remaining external verification limits are listed first; the
-original audit and delivery criteria are retained below.
+Audited 2026-11-08 and updated for 0.2.0 on 2026-11-10. The verified workflows
+and remaining external verification limits are listed first; the original audit
+and delivery criteria are retained below.
 
 The objective is a complete request-to-result workflow: a user describes a
 change, the agent operates the owning application, Godot shows the result, and
@@ -30,6 +30,13 @@ implemented. See [ADR 0017](adr/0017-project-mcp-gateway.md) and the
 | Recovery/distribution | Review conflict and recovery tests, project lease, addon protocol/version checks, manifest bundle | Engine bundles target their built platform |
 | New game from a blueprint | `joinery new --blueprint` and `joinery game apply` (the wizard's step) share `joinery/game_setup.py`: addon with its MIT licence, blueprint and features, brief, bible preset, `[game.steam]` and the pinned GodotSteam download; made projects import and run in stock Godot and open in the patched editor without script errors | A failed GodotSteam download leaves Steam calls doing nothing until it is installed |
 | Feature add/remove | Staged in a file transaction and reviewed like any change; the game manifest is carried on accept, dropped on reject and restored on revert; `--plan` shows the before and after | Steam and translations follow-ups run only after accept |
+| Art bible v2 and game brief | 20-section bible from one schema, reference board, presets per starting point, ten checked rule families measured in Python or in the offline workers, lint and `bible --upgrade`; `design/brief.md` drafted from wizard answers and the real input map ([ADR 0022](adr/0022-art-bible-v2.md), [ADR 0023](adr/0023-game-brief.md)) | The brief suggests features; it never adds them |
+| Part selection | `joinery parts` from Blender's own inspection; names mapped back through export extras; typed per-part edits (`set_material_value`, `adjust_map`, `bake_height_to_normal`) ([ADR 0028](adr/0028-part-selection.md)) | Blender only; Alt+click on stock Godot needs the model root selected |
+| Change history | Copy-on-write stage, originals of changed files only, retention under `[history]`, `history usage\|compact` ([ADR 0026](adr/0026-change-history-storage.md)) | Compact gives up older reverts |
+| Tool readiness | One core (`joinery/readiness.py`) for CLI, wizard, rail, sidebar and agents; 21 of 21 tool probes pass offline ([results](../evals/results/tools-working.md)) | No authoring round trip in `status` or `doctor` |
+| Removed tools | Aseprite, REAPER, MuseScore and Audacity left the catalog; projects that list them keep opening with a notice ([ADR 0025](adr/0025-tool-removals.md)) | They can return only as user-added custom tools |
+| Classic Godot view | One editor setting, `interface/joinery/editor_layout` (Joinery or Classic Godot), switched from Editor > Switch to classic Godot view (or Switch to Joinery view), the command palette or Journeyman settings > Appearance > Layout; each layout keeps its own docks in `editor_layout.cfg`; `tests/godot/run_classic_view_test.py` checks docks, title bar, run bar, menu item and settings row in both layouts ([ADR 0031](adr/0031-classic-godot-view.md)) | Applies after a restart; nothing switches live |
+| Writing guidance | Bible, brief and agent instructions share `joinery/bible_writing.py`; bible lint and the brief check suggest plainer words for filler | A suggestion only, never a blocker |
 
 This table distinguishes implementation from live verification. Account quotas,
 missing optional licensed apps and unapproved art direction are not represented

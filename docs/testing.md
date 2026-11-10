@@ -103,6 +103,8 @@ uv run python tests/godot/run_parts_tests.py
 # The sidebar in a real editor window, and scene edits in the editor.
 uv run python tests/godot/run_assistant_ui_test.py
 uv run python tests/godot/run_scene_edit_test.py
+# Joinery's layout, Godot's classic one and back, in both themes (out/classic-view).
+uv run python tests/godot/run_classic_view_test.py
 # Design tokens: no literal sizes or palette colours outside ui_theme.gd.
 uv run pytest -q tests/test_ui_tokens.py
 ```
@@ -126,7 +128,8 @@ Screens:
 
 - `pm-*`: agent connection, sign-in, API form, project list, the app-list failure
   banner, each wizard step (What are you making?, Features and apps, Brief and
-  art direction), the Steam app ID error, a failed creation step with Try again,
+  art direction), the Steam app ID errors (letters, and too big), a failed
+  creation step with Try again,
   and creation in progress.
 - `sidebar-*`, at 480 and 1000 px: connecting, no assistant, empty, chips,
   command menu, a request sending, working (steps and timer), waiting for review
@@ -138,6 +141,9 @@ Screens:
   with a review open, image and audio reviews on After and on Before, the Tools
   workspace (all, Blender, SuperCollider), every tool readiness state on the rail,
   the bottom panel, Focus mode, Project apps and the art direction dialog.
+- `classic-view-*`: the editor, the Layout setting, its restart note and the
+  switch dialog, in Joinery's layout and in Godot's classic one
+  (`run_classic_view_test.py`).
 
 The older startup, assistant and scene-edit harnesses run too and write into the
 same directory unless `--skip-legacy`.
@@ -161,7 +167,8 @@ Disabled controls and content scrolled out of view are not judged. Two things
 are allowed on purpose: text trimmed with an ellipsis when the control or a near
 ancestor shows the full text as a tooltip (a long file name on a chip), and the
 `ALLOWED` list in `ui_checks.gd`, which names stock Godot controls Joinery does
-not restyle and why (the 3D viewport's "Perspective" menu, the Scene dock tree).
+not restyle and why (the 3D viewport's "Perspective" menu, and the Scene,
+FileSystem and Inspector docks, which draw into their dock margin by design).
 `ui_checks_selftest.gd` proves every rule, and both allowances, first.
 
 Output goes to `out/visual/` (`--out` to change): the PNGs, `report.json` (all
@@ -306,6 +313,27 @@ uv run joinery status --project testbed --refresh
 uv run joinery status --project testbed --text
 uv run joinery doctor --project testbed --cached
 ```
+
+## Secret scan
+
+[gitleaks](https://github.com/gitleaks/gitleaks) checks for credentials and
+private keys with its default rules, extended by `.gitleaks.toml`. The only
+allowlisted path is `godot_patches/godot-src/`, the local upstream Godot
+checkout: its test keys and third-party sources look like secrets but are not
+ours. With gitleaks 8.30.1 installed:
+
+```sh
+# Every commit on every branch.
+gitleaks git . --redact
+# The working tree, untracked and ignored files included.
+gitleaks dir . --redact
+```
+
+The CI `secrets` job runs the history scan on every push and pull request, and
+before a release. It downloads the gitleaks 8.30.1 Linux binary and refuses it
+unless its SHA-256 matches the one published with that release.
+`tests/test_ci_workflows.py` checks that pin, the allowlist, and that a release
+tag equals the package version.
 
 Tests cannot establish every operation exposed by a third-party application or
 MCP. These scenarios cover Joinery's implemented contracts and representative
