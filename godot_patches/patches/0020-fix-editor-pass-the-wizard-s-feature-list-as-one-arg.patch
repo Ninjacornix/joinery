@@ -1,0 +1,26 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Tue, 10 Nov 2026 15:14:36 +0100
+Subject: [PATCH] fix(editor): pass the wizard's feature list as one argument
+
+Windows drops an empty argument from a process command line, so an empty
+feature list left --features without a value and the CLI refused the call.
+---
+ editor/project_manager/project_dialog.cpp | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
+index 4bb927c..b7dbf46 100644
+--- a/editor/project_manager/project_dialog.cpp
++++ b/editor/project_manager/project_dialog.cpp
+@@ -3053,7 +3053,9 @@ bool ProjectDialog::_joinery_run_create_step(int p_step, String &r_output, Strin
+ 			}
+ 			// The addon is already in place (step 0), and --features is always
+ 			// passed: an empty list means none, not the starting point's defaults.
+-			Vector<String> args = { "game", "apply", "--project", path, "--blueprint", joinery_job_blueprint, "--no-addon", "--features", joinery_job_features };
++			// One "--features=" token, because Windows drops an empty argument
++			// from the command line and the flag would then lack its value.
++			Vector<String> args = { "game", "apply", "--project", path, "--blueprint", joinery_job_blueprint, "--no-addon", "--features=" + joinery_job_features };
+ 			if (!joinery_job_steam_id.is_empty()) {
+ 				args.push_back("--steam-app-id");
+ 				args.push_back(joinery_job_steam_id);
