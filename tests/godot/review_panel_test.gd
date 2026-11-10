@@ -56,6 +56,7 @@ func _run() -> void:
 	await _check_optimistic(panel)
 	await _check_motion(panel)
 	await _check_compact()
+	await _check_history_policy()
 	panel.clear()
 	_host.queue_free()
 	Engine.remove_meta("joinery_ui_config")
@@ -443,6 +444,64 @@ func _check_compact() -> void:
 		page._history_job != null and page._history_action == "compact",
 		"Compact runs joinery history compact"
 	)
+	page._cancel_history()
+	page.queue_free()
+	await _frames()
+
+
+## "Older versions" next to History: a choice that removes nothing applies at once; one that
+## removes restore data says what first, in place, and only "Keep fewer" applies it. Custom
+## checks its numbers before asking anything.
+func _check_history_policy() -> void:
+	var page: ScrollContainer = SETTINGS.new()
+	page.size = Vector2(600, 500)
+	_host.add_child(page)
+	await _frames()
+	var picker: OptionButton = page._policy_picker
+	_check(picker.disabled, "The choice waits until the CLI says what is kept")
+	page._policy = {"keep": 50, "max_mb": 2048, "preset": "keep-50", "label": "Last 50 changes"}
+	page._show_policy()
+	picker.disabled = false
+	_check(picker.get_item_text(picker.selected) == "Last 50 changes", "The saved choice shows")
+	picker.select(2)
+	picker.item_selected.emit(2)
+	_check(page._history_action == "policy-check", "A new choice is checked first (a dry run)")
+	_check(page._pending_policy == {"keep": 1, "max_mb": 1024}, "It checks Only the newest")
+	page._cancel_history()
+	page._policy_checked({"pruned": 3, "freed_bytes": 120000000})
+	await _frames()
+	var panel: Control = page._policy_panel
+	_check(panel.visible, "Removing restore data asks first, in place")
+	_check(
+		(
+			(panel.get("text") as Label).text
+			== "3 older changes can no longer be reverted. Frees 120 MB."
+		),
+		"The question says what it removes and frees"
+	)
+	_check((panel.get("apply") as Button).text == "Keep fewer", "The action says what it does")
+	_check(page.find_children("*", "ConfirmationDialog", true, false).is_empty(), "No dialog")
+	panel.emit_signal("cancelled")
+	_check(not panel.visible and page._history_job == null, "Cancel changes nothing")
+	_check(picker.selected == 0, "Cancel shows the saved choice again")
+	picker.select(3)
+	picker.item_selected.emit(3)
+	await _frames()
+	var keep: LineEdit = (panel.get("keep") as Control).get("control")
+	var space: LineEdit = (panel.get("space") as Control).get("control")
+	_check(
+		panel.visible and keep.text == "50" and space.text == "2", "Custom starts from the saved"
+	)
+	space.text = "none"
+	panel.emit_signal("applied")
+	var error: Label = (panel.get("space") as Control).get("error")
+	_check(error.visible and error.text.begins_with("Enter the space in GB"), "Bad numbers say why")
+	_check(page._history_job == null, "Nothing runs for bad numbers")
+	keep.text = "10"
+	space.text = "1.5"
+	panel.emit_signal("applied")
+	_check(page._pending_policy == {"keep": 10, "max_mb": 1536}, "Custom checks its numbers")
+	_check(page._history_action == "policy-check", "…with a dry run first")
 	page._cancel_history()
 	page.queue_free()
 	await _frames()

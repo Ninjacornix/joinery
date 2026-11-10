@@ -529,6 +529,7 @@ func _run_dialog() -> void:
 		await _check_actions(dialog)
 		await _check_features(dialog)
 		await _captures(dialog, "setup-features", dialog.find_child("Features", true, false))
+		await _check_history(dialog)
 	dialog.hide()
 	if not _failed:
 		await _check_rail(prefix)
@@ -699,6 +700,63 @@ func _check_features(dialog: AcceptDialog) -> void:
 		var row := section.find_child("Feature_online_play", true, false) as Control
 		return row != null and (row.get("switch_button") as CheckButton).button_pressed
 	_check(await _until(refreshed), "The applied feature stays on")
+
+
+## "Older versions": the saved choice, what a smaller one would remove (a dry run, before
+## Save), Custom's checked numbers, and Save passing the change to `joinery setup`.
+func _check_history(dialog: AcceptDialog) -> void:
+	var section := dialog.find_child("OlderVersions", true, false) as Control
+	var shown := func() -> bool: return section != null and section.is_visible_in_tree()
+	_check(await _until(shown), "Older versions shows what the project keeps")
+	if _failed:
+		return
+	_check(_called(["history", "policy", "--json"]), "It reads joinery history policy")
+	var picker := section.get("picker") as OptionButton
+	_check(picker.get_item_text(picker.selected) == "Last 50 changes", "The saved choice shows")
+	var items: Array[String] = []
+	for index: int in picker.item_count:
+		items.append(picker.get_item_text(index))
+	_check(
+		items == ["Last 50 changes", "Last 10 changes", "Only the newest", "Custom…"],
+		"Three plain choices and Custom: %s" % [items]
+	)
+	_check(picker.get_item_tooltip(1) == "Last 10 changes, up to 1 GB", "Tooltips give the space")
+	picker.select(2)
+	picker.item_selected.emit(2)
+	var note := section.get("note") as Label
+	var warned := func() -> bool: return note.is_visible_in_tree()
+	_check(await _until(warned), "A smaller choice says what Save removes")
+	_check(
+		note.text == "Saving frees 120 MB. 3 older changes can no longer be reverted.",
+		"The note says how much it frees: " + note.text
+	)
+	_check(_called(["history", "policy", "--dry-run", "--keep", "1"]), "The note is a dry run")
+	_check(not _called(["--history-keep"]), "Nothing is saved before Save")
+	picker.select(3)
+	picker.item_selected.emit(3)
+	var panel := section.get("panel") as Control
+	_check(panel.is_visible_in_tree(), "Custom shows its two fields")
+	var keep := (panel.get("keep") as Control).get("control") as LineEdit
+	var space := (panel.get("space") as Control).get("control") as LineEdit
+	_check(keep.text == "50" and space.text == "2", "Custom starts from the saved numbers")
+	keep.text = "none"
+	dialog.get_ok_button().pressed.emit()
+	var error := (panel.get("keep") as Control).get("error") as Label
+	_check(error.visible and error.text == "Enter a whole number, 1 or more", "Bad numbers say why")
+	_check(dialog.get("_save_job") == null, "Save waits for good numbers")
+	keep.text = "10"
+	keep.text_changed.emit("10")
+	space.text = "1"
+	space.text_changed.emit("1")
+	_check(await _until(warned), "Custom numbers are checked too")
+	await _captures(dialog, "setup-history", section)
+	var saved := [false]
+	dialog.connect("history_changed", func() -> void: saved[0] = true)
+	dialog.get_ok_button().pressed.emit()
+	var called := func() -> bool:
+		return _called(["setup", "--history-keep", "10", "--history-max-mb", "1024"])
+	_check(await _until(called), "Save passes the new choice to joinery setup")
+	_check(await _until(func() -> bool: return saved[0]), "Saving says history changed")
 
 
 func _label_texts(node: Node) -> Array[String]:

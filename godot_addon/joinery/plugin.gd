@@ -116,6 +116,7 @@ func _enter_tree() -> void:
 
 	_setup = SETUP_SCRIPT.new()
 	get_editor_interface().get_base_control().add_child(_setup)
+	_setup.history_changed.connect(_dock.refresh_revertible)
 
 	_focus = FOCUS_SCRIPT.new()
 	_shell = SHELL_SCRIPT.new()
@@ -260,9 +261,8 @@ func _engine_dir() -> String:
 
 func _offer_setup_if_pending() -> void:
 	## A project created through Joinery's Project Manager screen is marked
-	## `joinery/setup_pending`, because that screen's Next button hands the rest
-	## of setup here: the questionnaire lives in GDScript so it can change
-	## without rebuilding the engine. Clear the flag first, so a project cannot
+	## `joinery/setup_pending`: that screen hands the rest of setup here, in GDScript so it
+	## can change without rebuilding the engine. Clear the flag first, so a project cannot
 	## get stuck reopening the questionnaire if something below fails.
 	if not ProjectSettings.has_setting(SETUP_PENDING):
 		return

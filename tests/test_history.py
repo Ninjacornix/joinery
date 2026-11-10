@@ -335,3 +335,17 @@ def test_policy_refuses_nonsense_and_changes_nothing(
         keep=20, max_mb=4096
     )
     assert HistoryPolicy(keep=20, max_mb=4096).label == "Last 20 changes, up to 4 GB"
+
+
+def test_the_setup_screens_offer_the_cli_presets() -> None:
+    """The settings page, Project apps and the wizard name the CLI's presets exactly."""
+    from joinery.transactions import POLICY_LABELS, POLICY_PRESETS
+
+    root = Path(__file__).resolve().parents[1]
+    addon = (root / "godot_addon/joinery/history_policy.gd").read_text()
+    for name, policy in POLICY_PRESETS.items():
+        entry = re.search(r'\{\s*"id": "' + name + r'"[^}]*\}', addon)
+        assert entry, f"history_policy.gd offers {name}"
+        assert f'"keep": {policy.keep},' in entry[0]
+        assert f'"max_mb": {policy.max_mb}' in entry[0]
+        assert POLICY_LABELS[name].split(",")[0] in entry[0]

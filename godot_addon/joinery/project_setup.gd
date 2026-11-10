@@ -6,8 +6,11 @@ extends AcceptDialog
 ## choice. Readiness comes from `joinery status --catalog --background --json` (ADR 0030),
 ## asked again while it is still checking. Each row: checkbox and name, blurb, dot and wording
 ## with at most one action (Start Docker, Rebuild, Check again, Get it), and the reason below.
-## Connections sit under one collapsed "Advanced" section. Every command is a command_job.gd
-## job, so the editor never blocks.
+## "Older versions" (project_history.gd) goes with Save. Connections sit under one collapsed
+## "Advanced" section. Every command is a command_job.gd job, so the editor never blocks.
+
+## Saved with a new history policy: past changes may no longer revert.
+signal history_changed
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 const INDICATOR := preload("activity_indicator.gd")
@@ -15,6 +18,7 @@ const UI_THEME := preload("ui_theme.gd")
 const UI_COMPONENTS := preload("ui_components.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const FEATURES := preload("project_features.gd")
+const HISTORY := preload("project_history.gd")
 const GROUPS := ["engine", "3d", "2d", "audio", "other"]
 const GROUP_TITLES := {
 	"engine": "Engine", "3d": "3D", "2d": "2D", "audio": "Audio", "other": "Other apps"
@@ -60,6 +64,8 @@ var _save_indicator: Control
 var _rows: Array[Row] = []
 var _advanced: UI_COMPONENTS.Section
 var _features: FEATURES
+var _history: HISTORY
+var _history_saved := false
 var _catalog_job: RefCounted
 var _save_job: RefCounted
 var _status_job: RefCounted
@@ -274,6 +280,7 @@ func _load_catalog() -> void:
 		child.queue_free()
 	_rows.clear()
 	_features = null
+	_history = null
 	_loading.show()
 	(_loading.get_child(0) as Control).set("running", true)
 	_update_save()
@@ -344,6 +351,12 @@ func _build_rows(data: Dictionary) -> void:
 			UI_MOTION.pulse(_status)
 	)
 	_list.add_child(_features)
+	_history = HISTORY.new()
+	_history.cli_prefix = cli_prefix
+	_history.project = _project()
+	_history.panel.applied.connect(_on_save)
+	_list.add_child(_history)
+	_history.reload()
 	_advanced = UI_COMPONENTS.section("Advanced", true)
 	_advanced.header.tooltip_text = "Choose how Joinery connects to each app."
 	_advanced.body.theme_type_variation = "JoineryStack"
@@ -779,10 +792,16 @@ func _on_save() -> void:
 		first_problem.grab_focus()
 		_show_status("Check the connection under Advanced.", true)
 		return
+	var history: Variant = _history.save_args() if _history != null else []
+	if history == null:
+		_show_status("Check the numbers under Older versions.", true)
+		return
 	tools.sort()
 	var args := ["setup", "--project", _project(), "--tools", ",".join(tools)]
 	if not customs.is_empty():
 		args.append_array(["--custom-mcps", JSON.stringify(customs)])
+	args.append_array(history)
+	_history_saved = not (history as Array).is_empty()
 	_details.hide()
 	_show_status("", false)
 	_save_job = _start(args)
@@ -822,6 +841,8 @@ func _save_done(result: Dictionary) -> void:
 	if int(result.get("code", 1)) != 0:
 		_save_failed(_first_line(str(result.get("error", "")) + "\n" + output), output)
 		return
+	if _history_saved:
+		history_changed.emit()
 	var name_text := (_name_field.control as LineEdit).text.strip_edges()
 	if not name_text.is_empty():
 		ProjectSettings.set_setting("application/config/name", name_text)
@@ -884,16 +905,8 @@ func _process(delta: float) -> void:
 			_query_status()
 
 
-## Poll [param job]; when it has finished, call [param done] with its result and return null
-## (unless [param done] started a new job in the same slot), else return the job.
 func _poll(job: RefCounted, done: Callable) -> RefCounted:
-	if job == null:
-		return null
-	var result: Dictionary = job.call("poll")
-	if result.is_empty():
-		return job
-	done.call(result)
-	return null
+	return COMMAND_SCRIPT.finish(job, done)
 
 
 func _cancel_jobs() -> void:
@@ -921,22 +934,7 @@ func _project() -> String:
 
 ## Start the Joinery CLI with [param arguments] as a job; null when it can't start.
 func _start(arguments: Array) -> RefCounted:
-	var program := "uv"
-	var args := PackedStringArray()
-	if cli_prefix.is_empty():
-		var engine := OS.get_environment("JOINERY_HOME")
-		if engine.is_empty():
-			engine = ProjectSettings.globalize_path("res://").path_join("..").simplify_path()
-		args = PackedStringArray(["run", "--frozen", "--quiet", "--project", engine, "joinery"])
-	else:
-		program = cli_prefix[0]
-		args = cli_prefix.slice(1)
-	for argument: Variant in arguments:
-		args.append(str(argument))
-	var job: RefCounted = COMMAND_SCRIPT.new()
-	if job.call("start", program, args) != OK:
-		return null
-	return job
+	return COMMAND_SCRIPT.joinery(cli_prefix, arguments)
 
 
 static func _json(result: Dictionary) -> Variant:

@@ -282,6 +282,22 @@ func _states(light: bool, width: int) -> void:
 	settings.call("_ask_compact", true)
 	await _shot("settings-compact", light, width, chat)
 	settings.call("_ask_compact", false)
+	# Older versions: a smaller choice says what it removes; Custom asks for two numbers.
+	var saved := {"keep": 50, "max_mb": 2048, "preset": "keep-50", "label": "Last 50 changes"}
+	settings.set("_policy", saved)
+	(settings.get("_policy_picker") as OptionButton).select(2)
+	settings.set("_pending_policy", {"keep": 1, "max_mb": 1024})
+	settings.call("_policy_checked", {"pruned": 3, "freed_bytes": 120_000_000})
+	await _frames()
+	(settings as ScrollContainer).scroll_vertical = 100000
+	await _shot("settings-policy", light, width, chat)
+	(settings.get("_policy_picker") as OptionButton).select(3)
+	settings.call("_choose_policy", 3)
+	await _frames()
+	(settings as ScrollContainer).scroll_vertical = 100000
+	await _shot("settings-policy-custom", light, width, chat)
+	(settings as ScrollContainer).scroll_vertical = 0
+	settings.call("_close_policy")
 	if width == WIDTHS[0]:
 		_theme.set_pref("reduce_motion", "on")
 		await _shot("reduce-motion", light, width, chat)

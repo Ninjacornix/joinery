@@ -12,6 +12,7 @@ const UI := preload("ui_components.gd")
 const COMMAND_SCRIPT := preload("command_job.gd")
 const INDICATOR_SCRIPT := preload("activity_indicator.gd")
 const STYLE := preload("sidebar_style.gd")
+const POLICY := preload("history_policy.gd")
 const PATH := "Joinery/journeyman.cfg"
 const TEXT_SIZES := UI_THEME.TEXT_SIZES
 const MODES := ["Auto", "Fast", "Thorough"]
@@ -68,6 +69,15 @@ var _history_action := ""
 ## The inline "Compact history?" row with Compact and Cancel.
 var _compact_confirm: Control
 var _compact_button: Button
+## "Older versions": how much history the project keeps, as `joinery history usage` said.
+var _policy: Dictionary = {}
+var _policy_row: Control
+var _policy_picker: OptionButton
+## Inline under the row: the Custom fields, or what a smaller choice would remove. Nothing is
+## pruned without "Keep fewer"; Cancel changes nothing.
+var _policy_panel: POLICY.PolicyPanel
+## {keep, max_mb} waiting for "Keep fewer"; empty when nothing waits.
+var _pending_policy: Dictionary = {}
 
 
 ## Add the menu button to the sidebar header and the hidden settings page below it.
@@ -110,7 +120,8 @@ func set_open(open: bool) -> void:
 		UI_MOTION.stagger(_body.get_children())
 	else:
 		_compact_confirm.hide()
-		if _history_action != "compact":
+		_close_policy()
+		if _history_action not in ["compact", "policy"]:
 			# Reading the size can stop; a running Compact finishes even with the page closed.
 			_cancel_history()
 
@@ -409,6 +420,20 @@ func _build_project() -> void:
 	_history_row = UI.setting_row("History", tools)
 	section.body.add_child(_history_row)
 	section.body.add_child(_build_compact_confirm())
+	_policy_picker = UI.picker()
+	POLICY.fill(_policy_picker)
+	_flush_picker(_policy_picker)
+	_policy_picker.accessibility_name = "Keep older versions"
+	_policy_picker.tooltip_text = POLICY.HINT
+	# Known once `history usage` answers; until then there is nothing true to show.
+	_policy_picker.disabled = true
+	_policy_picker.item_selected.connect(_choose_policy)
+	_policy_row = UI.setting_row("Older versions", _policy_picker)
+	section.body.add_child(_policy_row)
+	_policy_panel = POLICY.panel()
+	_policy_panel.applied.connect(_apply_policy)
+	_policy_panel.cancelled.connect(_close_policy)
+	section.body.add_child(_policy_panel)
 
 
 ## Compact asks first, in place: no dialog, and Cancel leaves everything as it was.
@@ -449,6 +474,79 @@ func _ask_compact(open: bool) -> void:
 		UI_MOTION.enter(_compact_confirm)
 	else:
 		_compact_confirm.hide()
+
+
+## A choice in the "Older versions" picker: Custom opens its fields, a preset is checked first.
+func _choose_policy(index: int) -> void:
+	if index < POLICY.PRESETS.size():
+		var preset: Dictionary = POLICY.PRESETS[index]
+		_propose_policy(int(preset["keep"]), int(preset["max_mb"]))
+		return
+	_pending_policy = {}
+	_policy_panel.show_custom(_policy)
+	if not _policy_panel.visible:
+		UI_MOTION.enter(_policy_panel)
+	_policy_panel.keep.control.grab_focus()
+
+
+## Apply (Custom's numbers) or Keep fewer (a choice already checked).
+func _apply_policy() -> void:
+	if not _pending_policy.is_empty() and not _policy_panel.custom.visible:
+		_history("policy", _policy_args(_pending_policy))
+		return
+	var parsed := _policy_panel.values()
+	if parsed.is_empty():
+		return
+	_propose_policy(int(parsed["keep"]), int(parsed["max_mb"]))
+
+
+## Ask what [param keep] and [param max_mb] would remove; a choice that removes nothing applies
+## at once, one that would makes the panel ask first.
+func _propose_policy(keep: int, max_mb: int) -> void:
+	if keep == int(_policy.get("keep", -1)) and max_mb == int(_policy.get("max_mb", -1)):
+		_close_policy()
+		return
+	if _history_job != null and _history_action == "usage":
+		_cancel_history()
+	_pending_policy = {"keep": keep, "max_mb": max_mb}
+	var args := _policy_args(_pending_policy)
+	args.append("--dry-run")
+	_history("policy-check", args)
+
+
+static func _policy_args(policy: Dictionary) -> PackedStringArray:
+	return PackedStringArray(
+		["--keep", str(int(policy["keep"])), "--max-mb", str(int(policy["max_mb"]))]
+	)
+
+
+## Close the panel and show the saved choice again.
+func _close_policy() -> void:
+	_pending_policy = {}
+	if _policy_panel != null:
+		_policy_panel.hide()
+	_show_policy()
+
+
+func _show_policy() -> void:
+	if _policy_picker != null and not _policy.is_empty():
+		_policy_picker.select(POLICY.index_of(_policy))
+		_policy_picker.tooltip_text = "%s. %s." % [str(_policy.get("label", "")), POLICY.HINT]
+
+
+## The check came back: say what the smaller choice removes, or apply it when it removes nothing.
+func _policy_checked(data: Dictionary) -> void:
+	var pruned := int(data.get("pruned", 0))
+	if pruned == 0:
+		_history("policy", _policy_args(_pending_policy))
+		return
+	var freed := _human_size(float(data.get("freed_bytes", 0)))
+	var changes := "%d older change%s" % [pruned, "" if pruned == 1 else "s"]
+	_policy_panel.show_check("%s can no longer be reverted. Frees %s." % [changes, freed])
+	if not _policy_panel.visible:
+		UI_MOTION.enter(_policy_panel)
+	else:
+		UI_MOTION.fade_in(_policy_panel.text)
 
 
 func _build_troubleshooting() -> void:
@@ -670,15 +768,18 @@ func _refresh_rows() -> void:
 	_reconnect.visible = state != "connected"
 
 
-func _history(action: String) -> void:
+## Run `joinery history`: "usage", "compact", "policy-check" (a dry run) or "policy".
+func _history(action: String, extra := PackedStringArray()) -> void:
 	if _history_job != null:
 		return
 	var project := ProjectSettings.globalize_path("res://").rstrip("/")
+	var verb := "policy" if action.begins_with("policy") else action
 	var args := PackedStringArray(
-		["run", "--frozen", "--quiet", "--project", _engine_dir(), "joinery", "history", action]
+		["run", "--frozen", "--quiet", "--project", _engine_dir(), "joinery", "history", verb]
 	)
-	if action == "usage":
+	if verb != "compact":
 		args.append("--json")
+	args.append_array(extra)
 	args.append_array(["--project", project])
 	_history_job = COMMAND_SCRIPT.new()
 	if _history_job.start("uv", args) != OK:
@@ -687,9 +788,11 @@ func _history(action: String) -> void:
 		return
 	_history_action = action
 	_history_button.get_popup().set_item_disabled(0, true)
-	if action == "compact":
-		# Only a running Compact gets the dots; reading the size is quiet.
+	_policy_picker.disabled = action != "usage"
+	if action in ["compact", "policy"]:
+		# Only removing history gets the dots; reading the size is quiet.
 		_history_indicator.set("running", true)
+	if action == "compact":
 		_history_size.text = "Compacting…"
 	elif _history_size.text.is_empty():
 		_history_size.text = "Checking…"
@@ -706,6 +809,9 @@ func _process(_delta: float) -> void:
 	_history_job = null
 	set_process(false)
 	_history_indicator.set("running", false)
+	if _history_action.begins_with("policy"):
+		_policy_done(result)
+		return
 	if int(result.get("code", 1)) != 0:
 		if _history_action == "compact":
 			_history_button.get_popup().set_item_disabled(0, false)
@@ -730,12 +836,49 @@ func _process(_delta: float) -> void:
 	_history_button.disabled = false
 	_history_button.get_popup().set_item_disabled(0, false)
 	_history_button.tooltip_text = "Space used by restore data for past changes"
+	var policy: Variant = POLICY.last_json(str(result.get("output", ""))).get("policy")
+	if policy is Dictionary and not (policy as Dictionary).is_empty():
+		_policy = policy
+		_policy_picker.disabled = false
+		if not _policy_panel.visible:
+			_show_policy()
 	if _history_size.text.is_empty() or not _history_size.text[0].is_valid_int():
 		_history_size.text = ""
 	UI_MOTION.roll_number(_history_size, bytes, _human_size)
 
 
+## A policy check or change finished.
+func _policy_done(result: Dictionary) -> void:
+	var data := POLICY.last_json(str(result.get("output", "")))
+	if int(result.get("code", 1)) != 0 or not data.get("policy") is Dictionary:
+		_close_policy()
+		_policy_picker.disabled = _policy.is_empty()
+		_history_button.get_popup().set_item_disabled(0, false)
+		var reason := str(data.get("error", ""))
+		_status.text = (
+			reason
+			if not reason.is_empty()
+			else "Couldn't change how many older versions are kept. Details are in Output."
+		)
+		print("[Joinery] history policy: ", result.get("error", ""), result.get("output", ""))
+		UI_MOTION.fade_in(_status)
+		return
+	if _history_action == "policy-check":
+		_policy_picker.disabled = false
+		_policy_checked(data)
+		return
+	_policy = data["policy"]
+	_close_policy()
+	_status.hide()
+	UI_MOTION.pulse(_policy_row)
+	if int(data.get("pruned", 0)) > 0 and dock != null and dock.has_method("refresh_revertible"):
+		# Cards whose restore data is gone now say "Too old to revert".
+		dock.call("refresh_revertible")
+	_history("usage")
+
+
 func _history_unavailable() -> void:
+	_policy_picker.disabled = true
 	_history_indicator.set("running", false)
 	_history_size.text = "Unavailable"
 	_history_button.disabled = true
@@ -772,15 +915,7 @@ static func _usage_bytes(output: String) -> int:
 
 ## Bytes for people: "0 B", "512 KB", "340 MB", "1.2 GB".
 static func _human_size(bytes: float) -> String:
-	var units := ["B", "KB", "MB", "GB", "TB"]
-	var value := bytes
-	var index := 0
-	while value >= 1000.0 and index < units.size() - 1:
-		value /= 1000.0
-		index += 1
-	if index >= 3 and value < 10.0:
-		return "%.1f %s" % [value, units[index]]
-	return "%d %s" % [roundi(value), units[index]]
+	return POLICY.human_size(bytes)
 
 
 func _swatch(color_value: Color) -> ImageTexture:

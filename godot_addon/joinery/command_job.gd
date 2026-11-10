@@ -2,6 +2,8 @@
 extends RefCounted
 ## Native nonblocking pipes: no GDScript worker can race script reload or teardown.
 
+const _SELF := preload("command_job.gd")
+
 var _process: Dictionary = {}
 var _stdout := PackedByteArray()
 var _stderr := PackedByteArray()
@@ -100,3 +102,35 @@ func _close() -> void:
 			var pipe: FileAccess = _process[key]
 			pipe.close()
 	_process.clear()
+
+
+## Start the Joinery CLI with [param arguments]: [param cli_prefix] (a program and its leading
+## arguments, as tests set it) or, when empty, the engine checkout's `uv run … joinery`.
+## Returns the running job, or null when it can't start.
+static func joinery(cli_prefix: PackedStringArray, arguments: Array) -> RefCounted:
+	var program := "uv"
+	var args := PackedStringArray()
+	if cli_prefix.is_empty():
+		var engine := OS.get_environment("JOINERY_HOME")
+		if engine.is_empty():
+			engine = ProjectSettings.globalize_path("res://").path_join("..").simplify_path()
+		args = PackedStringArray(["run", "--frozen", "--quiet", "--project", engine, "joinery"])
+	else:
+		program = cli_prefix[0]
+		args = cli_prefix.slice(1)
+	for argument: Variant in arguments:
+		args.append(str(argument))
+	var job: RefCounted = _SELF.new()
+	return job if job.call("start", program, args) == OK else null
+
+
+## Poll [param job]; when it has finished, call [param done] with its result and return null
+## (unless [param done] started a new job in the same slot), else return the job.
+static func finish(job: RefCounted, done: Callable) -> RefCounted:
+	if job == null:
+		return null
+	var result: Dictionary = job.call("poll")
+	if result.is_empty():
+		return job
+	done.call(result)
+	return null

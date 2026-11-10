@@ -2,7 +2,7 @@
 
     uv run python tests/godot/run_setup_tests.py [--capture DIR]
 
-The fixture answers `joinery status`, `tools`, `feature` and `bootstrap` the way the
+The fixture answers `joinery status`, `tools`, `feature`, `history policy` and `bootstrap` the way the
 real CLI does, from the real readiness core (`joinery.readiness`) fed by the fake host
 the Python tests use, with a short delay so the test can see the editor keep drawing
 frames while a command runs. Every call is logged, so the test can prove that a feature
@@ -150,10 +150,33 @@ def fake_cli(state: Path, argv: list[str]) -> int:
         time.sleep(0.5)
         print(json.dumps({"installed": [], "unavailable": []}))
         return 0
+    if command == "history" and argv[1:2] == ["policy"]:
+        return _history_policy(argv)
     if command == "setup":
         return 0
     print(json.dumps({"error": "unknown command " + command}))
     return 2
+
+
+def _history_policy(argv: list[str]) -> int:
+    """`history policy`: the default is saved; anything smaller would remove 3 changes."""
+    from joinery.transactions import HistoryPolicy
+
+    time.sleep(0.2)
+
+    def data(policy: HistoryPolicy) -> dict[str, Any]:
+        return {**policy.model_dump(), "preset": policy.preset, "label": policy.label}
+
+    saved = HistoryPolicy()
+    chosen = saved
+    if "--keep" in argv:
+        keep = int(argv[argv.index("--keep") + 1])
+        chosen = HistoryPolicy(keep=keep, max_mb=int(argv[argv.index("--max-mb") + 1]))
+    pruned = 3 if chosen.keep < saved.keep else 0
+    print(json.dumps({"policy": data(chosen), "previous": data(saved), "changed": chosen != saved,
+                      "dry_run": "--dry-run" in argv, "pruned": pruned,
+                      "freed_bytes": 120_000_000 if pruned else 0}))
+    return 0
 
 
 # --- The runner ------------------------------------------------------------------------

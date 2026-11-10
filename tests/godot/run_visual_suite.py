@@ -68,6 +68,8 @@ SIDEBAR_STATES = (
     "art-gate",
     "settings",
     "settings-compact",
+    "settings-policy",
+    "settings-policy-custom",
 )
 # Captured at the wide width only: the art direction and game brief documents.
 SIDEBAR_WIDE = ("art-direction", "art-board", "brief")
