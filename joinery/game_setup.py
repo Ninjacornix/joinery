@@ -24,7 +24,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, Literal
 
-from joinery import bible, blueprints, brief, godotsteam
+from joinery import art_approval, bible, blueprints, brief, godotsteam
 from joinery.catalog import ROOT
 from joinery.transactions import FileTransaction, clone_tree, inventory
 
@@ -246,6 +246,9 @@ def write_bible(
     written = bible.write_from_answers_file(project, preset)
     if written is None:
         bible.write_bible(project, {}, preset)
+    # Drafted from the user's own answers: approved at creation, if complete.
+    if written is not None and art_approval.approve_at_creation(project):
+        return _step(report, "bible", "done", art_approval.APPROVED_AT_CREATION)
     return _step(
         report,
         "bible",

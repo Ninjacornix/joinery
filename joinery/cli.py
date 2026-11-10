@@ -473,6 +473,12 @@ def _bible(project: Path) -> int:
     if written is None:
         print("bible: no answers file to read; nothing written")
         return 0
+    from joinery.art_approval import APPROVED_AT_CREATION, approve_at_creation
+
+    # Drafted from the user's own answers: approved at creation, if complete.
+    if approve_at_creation(project):
+        print(f"bible: {APPROVED_AT_CREATION}")
+        return 0
     print(f"bible: wrote {written}")
     return 0
 

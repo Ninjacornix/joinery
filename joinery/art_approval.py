@@ -1,4 +1,12 @@
-"""Project art direction is approved by content hash, never inferred from existence."""
+"""Project art direction is approved by content hash, never inferred from existence.
+
+Two acts record an approval, both the user's: the Approve button in /art (or
+`joinery bible --approve`), and making the project from the user's own answers.
+A bible drafted from those answers counts as approved at creation, so art and
+audio work can start at once. Any later change to the bible's bytes lapses the
+approval and the user approves again with one click. Neither act is a model
+tool: the gateway and registry have no approval operation.
+"""
 
 from __future__ import annotations
 
@@ -58,3 +66,27 @@ def approve(project: Path, approved_by: str, expected_sha256: str = "") -> None:
             "approved_by": approved_by.strip(),
         },
     )
+
+
+#: Who approved a bible drafted from the user's answers when the project was made.
+AT_CREATION = "user (at project creation)"
+#: What the user is told when that happens.
+APPROVED_AT_CREATION = (
+    "Wrote the art bible from your answers. It counts as approved, so art and "
+    "audio work can start. If it changes later, approve it again in /art."
+)
+
+
+def approve_at_creation(project: Path) -> bool:
+    """Approve a bible just drafted from the user's own answers at project creation.
+
+    Called only by project setup right after it renders those answers, never
+    by a model tool. Records exactly what the Approve button records. A draft
+    with required sections still unset is left for the user to finish and
+    approve, as the button would refuse it too. Returns whether it is approved.
+    """
+    try:
+        approve(project, AT_CREATION)
+    except (OSError, ValueError):
+        return False
+    return True
