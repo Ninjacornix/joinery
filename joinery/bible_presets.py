@@ -40,7 +40,7 @@ _TOKEN = re.compile(r"\{\{(\w+)\}\}")
 
 
 def suggested_line(name: str) -> str:
-    return f"_Suggested by the {name} starting point; change freely._"
+    return f"_Suggested by the {name} preset for this starting point; change freely._"
 
 
 #: The default checked rules for a new bible. Empty maps are "not checked".

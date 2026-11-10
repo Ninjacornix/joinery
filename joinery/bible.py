@@ -27,6 +27,8 @@ import json
 from pathlib import Path
 
 from joinery.bible_presets import fill
+from joinery.bible_schema import TITLE_TOKEN
+from joinery.brief import project_name
 from joinery.catalog import ROOT
 
 TEMPLATE = ROOT / "templates" / "art_bible.md"
@@ -132,7 +134,13 @@ def write_bible(
             f"{destination} already exists; changing a bible is a reviewed edit, "
             "not something project setup should overwrite"
         )
-    text = render(answers, preset=preset)
+    filled = dict(answers)
+    if not str(filled.get(TITLE_TOKEN) or "").strip():
+        # The name the user typed for the game; setup asks nothing else for it.
+        name = project_name(project)
+        if name:
+            filled[TITLE_TOKEN] = name
+    text = render(filled, preset=preset)
     destination.parent.mkdir(parents=True, exist_ok=True)
     destination.write_text(text)
     return destination

@@ -3,9 +3,9 @@
 The checked rules measure assets; this module reads the bible: whether its
 rules block parses, whether its own palette meets its contrast and colour-blind
 rules, whether each reference says what to take, whether reference files exist
-and are locked, and which sections are still unset. It never blocks asset work
-by itself. The registry tool and the approval review show its report, and
-Journeyman turns `suggestions` into one-line offers, never into edits unasked.
+and are locked, which sections are still unset, and which filler words the
+user's sections use. It never blocks asset work by itself. The registry tool
+and the approval review show its report, and Journeyman turns `suggestions` into one-line offers, never into edits unasked.
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from joinery import bible_schema
+from joinery import bible_schema, bible_writing
 from joinery.bible_rules import BibleRules, palette_problems, parse_rules, rules_text
 from joinery.catalog import ROOT
 from joinery.lockfile import LOCK_NAME
@@ -61,6 +61,14 @@ class BibleReport(_Strict):
     gaps: list[Gap] = []
     references: list[ReferenceRow] = []
     rules: BibleRules | None = None
+    #: (filler word, section heading) pairs; a suggestion, never a problem.
+    filler: list[tuple[str, str]] = []
+
+
+#: Sections where naming a filler word is the point: the game's banned words,
+#: the hard bans, the measured rules.
+_FILLER_SKIP = ("writing tone", "never", "checked rules")
+_FILLER_INSTEAD = "a hex, a size, a shape or a named reference"
 
 
 def _cells(line: str) -> list[str]:
@@ -248,6 +256,7 @@ def lint_text(text: str, project: Path | None = None) -> BibleReport:
         gaps=_gaps(text),
         references=rows,
         rules=rules,
+        filler=bible_writing.filler(text, _FILLER_SKIP),
     )
 
 
@@ -344,6 +353,9 @@ def suggestions_for(report: BibleReport, dimension: str | None) -> list[str]:
     for _rank, _index, gap in open_gaps:
         grouped.setdefault(gap.moment, []).append(gap)
     out += [_sentence(moment, gaps, "open") for moment, gaps in grouped.items()]
+    wording = bible_writing.suggestion("bible", report.filler, _FILLER_INSTEAD)
+    if wording is not None:
+        out.append(wording)
     return out
 
 

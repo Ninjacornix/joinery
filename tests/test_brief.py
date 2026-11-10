@@ -319,6 +319,14 @@ def test_translations_add_an_open_question_and_online_asks_co_op_or_pvp() -> Non
     assert parse(draft({}, BLUEPRINTS[3], [])).open_questions == []
 
 
+def test_saving_mentions_the_host_only_for_online_games() -> None:
+    def saving(features: list[str]) -> str:
+        return dict(brief.sections(draft({}, BLUEPRINTS[3], features)))["Saving"]
+
+    assert "host" not in saving(["save-load"])
+    assert "Online, only the host saves." in saving(["save-load", "online-play"])
+
+
 def test_pad_column_needs_the_controller_feature() -> None:
     without = dict(brief.sections(draft({}, BLUEPRINTS[3], [])))["Controls per device"]
     with_pad = dict(brief.sections(draft({}, BLUEPRINTS[3], ["controller"])))[

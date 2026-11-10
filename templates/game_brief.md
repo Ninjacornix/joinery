@@ -3,6 +3,8 @@
 > One per game project, at `<project>/design/brief.md`. Written by you; Journeyman can draft it from your pitch and the starting point you picked.
 > The brief directs, it does not block: nothing waits for it to be complete. Journeyman reads it before suggesting work, and points out where it disagrees with how the game is set up.
 > Changing it is a reviewed edit like any other file. "_Not decided yet._" marks what is still open.
+> How to write in this file: one idea per line, plain words, and a number where one exists ("a run lasts 8 to 12 minutes", not "fast-paced"). Name real games and what to take from each. Leave a section not decided rather than guess.
+> Skip filler (stunning, immersive, seamless, vibrant, elevate, delve, tapestry, unleash, cutting-edge, game-changer), em-dash chains and "not just X but Y".
 
 ## 1. Pitch
 {{pitch}}

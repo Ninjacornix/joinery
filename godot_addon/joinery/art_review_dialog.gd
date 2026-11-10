@@ -233,14 +233,15 @@ static func decided(parts: Array) -> Dictionary:
 
 ## A small Markdown subset as BBCode: headings become bold lines (a leading top heading is
 ## dropped, the dialog already names the document), list markers become bullets and
-## **bold** stays bold. Everything else is plain text, with "[" escaped.
+## **bold** stays bold. HTML comments are notes for writers and are left out. Everything
+## else is plain text, with "[" escaped.
 static func to_bbcode(markdown: String) -> String:
 	var lines := PackedStringArray()
 	var heading := RegEx.create_from_string("^#{1,6}\\s+(.*)$")
 	var bullet := RegEx.create_from_string("^\\s*[-*+]\\s+(.*)$")
 	var bold := RegEx.create_from_string("\\*\\*(.+?)\\*\\*")
 	var first := true
-	for raw: String in markdown.replace("\r\n", "\n").split("\n"):
+	for raw: String in _without_comments(markdown.replace("\r\n", "\n")).split("\n"):
 		var line := raw.replace("[", "[lb]")
 		var found := heading.search(line)
 		if found != null:
@@ -258,6 +259,37 @@ static func to_bbcode(markdown: String) -> String:
 	while not lines.is_empty() and lines[0].strip_edges().is_empty():
 		lines.remove_at(0)
 	return "\n".join(lines)
+
+
+## [param markdown] without its "<!-- ... -->" comments. A line that held only a comment
+## is dropped; an unclosed comment runs to the end.
+static func _without_comments(markdown: String) -> String:
+	var out := PackedStringArray()
+	var inside := false
+	for raw: String in markdown.split("\n"):
+		var kept := ""
+		var rest := raw
+		var had := inside
+		while true:
+			if inside:
+				var close := rest.find("-->")
+				if close < 0:
+					rest = ""
+					break
+				rest = rest.substr(close + 3)
+				inside = false
+			var open := rest.find("<!--")
+			if open < 0:
+				kept += rest
+				break
+			had = true
+			kept += rest.left(open)
+			rest = rest.substr(open + 4)
+			inside = true
+		if had and kept.strip_edges().is_empty():
+			continue
+		out.append(kept)
+	return "\n".join(out)
 
 
 ## A lint suggestion as one short line for people: Journeyman's own hints ("Ask about it.")

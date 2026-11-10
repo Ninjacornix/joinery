@@ -86,7 +86,7 @@ def test_answers_win_over_preset_suggestions() -> None:
     )
     assert values["camera"] == "Fixed top-down."
     assert values["models"].startswith(
-        "_Suggested by the Low-poly 3D starting point; change freely._"
+        "_Suggested by the Low-poly 3D preset for this starting point; change freely._"
     )
     assert "vision" not in values
 

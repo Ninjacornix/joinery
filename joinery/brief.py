@@ -21,7 +21,8 @@ Nothing here invents taste. Whatever none of those three answers stays
 The last section holds the same decisions as a small TOML block (the facts), so
 Journeyman can compare the brief with the game as it is set up and offer one-
 line suggestions ("The brief says online play, but online play is not added").
-Suggestions never change anything; adding a feature is a user action.
+Suggestions never change anything; adding a feature is a user action. Filler
+words in the user's sections ("immersive", "seamless") are a suggestion too.
 
 This module never imports `joinery.blueprints`: callers pass the dict that
 `blueprints.describe(id)` returns and the `[game]` record of the project, so the
@@ -46,6 +47,7 @@ from pydantic import (
     model_validator,
 )
 
+from joinery import bible_writing
 from joinery.catalog import ROOT
 
 TEMPLATE = ROOT / "templates" / "game_brief.md"
@@ -799,11 +801,13 @@ def _online_text(facts: BriefFacts) -> str:
 
 def _saving_text(facts: BriefFacts, features: set[str]) -> str:
     if "save-load" in features:
-        return (
+        text = (
             "Save slots, and an autosave at each checkpoint. Save and load from "
-            "the pause menu; Continue on the main menu picks up the latest save. "
-            "Online, only the host saves."
+            "the pause menu; Continue on the main menu picks up the latest save."
         )
+        if "online-play" in features or facts.online != "none":
+            text += " Online, only the host saves."
+        return text
     if facts.save == "none":
         return "No saving. The save-load feature is not added."
     return {
@@ -959,7 +963,7 @@ def draft(
     return text.rstrip("\n") + "\n"
 
 
-def _project_name(project: Path) -> str:
+def project_name(project: Path) -> str:
     path = project / "project.godot"
     if not path.is_file():
         return ""
@@ -992,7 +996,7 @@ def write_brief(
         )
     filled = dict(answers)
     if not str(filled.get("title") or "").strip():
-        name = _project_name(project)
+        name = project_name(project)
         if name:
             filled["title"] = name
     text = draft(filled, blueprint, features, actions=input_actions(project) or None)
@@ -1130,9 +1134,20 @@ def consistency(project: Path, game: Mapping[str, Any] | None) -> list[str]:
         brief = load_brief(project)
     except FileNotFoundError:
         return []
-    if brief.facts is None:
-        return []
-    return _consistency(brief.facts, game)
+    found = [] if brief.facts is None else _consistency(brief.facts, game)
+    return found + _wording(brief.text)
+
+
+#: What to write in place of a filler word in the brief.
+_FILLER_INSTEAD = "what the player does, with a number where one exists"
+
+
+def _wording(text: str) -> list[str]:
+    """One suggestion naming the filler words in the brief, if any."""
+    line = bible_writing.suggestion(
+        "brief", bible_writing.filler(text, ("facts",)), _FILLER_INSTEAD
+    )
+    return [] if line is None else [line]
 
 
 def _consistency(facts: BriefFacts, game: Mapping[str, Any] | None) -> list[str]:
@@ -1232,6 +1247,7 @@ def summary(project: Path, game: Mapping[str, Any] | None) -> dict[str, Any]:
         suggestions += _consistency(brief.facts, game)
     suggestions += [f"Open question in the brief: {q}" for q in brief.open_questions]
     suggestions += _gap_prompts(brief.gaps)
+    suggestions += _wording(brief.text)
     return {
         "path": BRIEF_PATH.as_posix(),
         "exists": True,

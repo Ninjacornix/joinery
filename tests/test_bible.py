@@ -100,6 +100,17 @@ def test_write_bible_creates_the_file(tmp_path: Path) -> None:
     assert "Hollow Keep" in written.read_text()
 
 
+def test_write_bible_titles_it_with_the_game_name(tmp_path: Path) -> None:
+    (tmp_path / "project.godot").write_text('[application]\n\nconfig/name="Ember Arena"\n')
+    text = write_bible(tmp_path, {}).read_text()
+    assert text.startswith("# Art bible — Ember Arena\n")
+    # An answered title wins over the project name.
+    other = tmp_path / "other"
+    other.mkdir()
+    (other / "project.godot").write_text('[application]\n\nconfig/name="Ember Arena"\n')
+    assert write_bible(other, {"title": "Ash"}).read_text().startswith("# Art bible — Ash\n")
+
+
 def test_write_bible_refuses_to_overwrite(tmp_path: Path) -> None:
     # Changing a bible is a reviewed edit, not something setup may clobber.
     write_bible(tmp_path, FULL)
@@ -151,10 +162,10 @@ def test_the_wizard_preset_choice_beats_the_blueprint_default(tmp_path: Path) ->
     written = write_from_answers_file(tmp_path, "stylised-pbr-3d")
     assert written is not None
     text = written.read_text()
-    assert "Pixel 2D starting point" in text
+    assert "Pixel 2D preset for this starting point" in text
     assert "Stylised PBR 3D" not in text
     other = tmp_path / "other"
     other.mkdir()
     (other / ANSWERS_FILE).write_text(json.dumps({"look": "toon"}))
     written = write_from_answers_file(other, "stylised-pbr-3d")
-    assert written is not None and "Stylised PBR 3D starting point" in written.read_text()
+    assert written is not None and "Stylised PBR 3D preset for this starting point" in written.read_text()

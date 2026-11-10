@@ -1,5 +1,17 @@
-# Art Bible — {{title}}
+# Art bible — {{title}}
 <!-- joinery-bible: 2 -->
+<!-- How to write in this file
+Notes for you and Journeyman, not part of the bible.
+- One rule per line. Keep each section short.
+- Concrete nouns over adjectives: "chipped oak, iron bands", not "rustic and charming".
+- A number wherever one exists: hex colours, metres, triangles, px/m, ms, BPM, LUFS.
+- Name real references, what to take from each and what to leave.
+- Say what to avoid as plainly as what to do.
+- Only your taste. Leave a section Open rather than guess; Journeyman asks, it never fills one in for you.
+- No filler: stunning, immersive, seamless, vibrant, elevate, delve, tapestry, unleash, cutting-edge, game-changer.
+- No em-dash chains, no lists padded to three, no "not just X but Y".
+- Sentence case in headings, labels and table cells.
+-->
 
 > One per game project, at `<project>/art/bible.md`. Written by you, the master (Journeyman can interview you and draft it). Journeyman checks every change in this project against it.
 > Keep it short and concrete. "Gritty" is a mood; "palette below, roughness 0.6–0.9" is a rule.
@@ -137,7 +149,7 @@ Voice, person (you/we), reading level, longest UI sentence, humour, banned words
 ## 16. Audio
 - Overall: {{sound}}
 - SFX character: e.g. "dry, close, punchy; no cartoon boings".
-- Music: tempo range (BPM), keys and modes, instruments or Surge XT / SuperCollider patches, loop length (seamless, 60–120 s).
+- Music: tempo range (BPM), keys and modes, instruments or Surge XT / SuperCollider patches, loop length (60–120 s, no audible gap at the loop point).
 - Loudness and format (checked): music −16 LUFS, ambience −22 LUFS, peaks ≤ −1 dBTP; SFX as WAV, music as OGG.
 
 ## 17. Accessibility (checked)

@@ -2,11 +2,12 @@
 
 The upgrade only adds. Every existing line and heading stays, byte for byte and
 in order; what is added is the version marker, each missing section with the
-*open* marker, an empty reference board under References, and inside the
-checked-rules block `schema = 2` plus the new rule tables, commented out, so no
-existing value changes and nothing new is enforced until the user removes a
-`#`. Because only open markers are added, a bible that could be approved before
-can still be approved after.
+*open* marker, an empty reference board under References, the notes on how to
+write in the file (a comment under the marker), and inside the checked-rules
+block `schema = 2` plus the new rule tables, commented out, so no existing value
+changes and nothing new is enforced until the user removes a `#`. Because only
+open markers are added, a bible that could be approved before can still be
+approved after.
 
 Upgrading changes the bible's bytes, so its approval no longer matches: the user
 reviews the change and approves again. It is offered, never automatic.
@@ -20,6 +21,7 @@ from typing import Any
 
 from joinery import bible_schema
 from joinery.bible_presets import DEFAULT_RULES, KEY_TABLES, family_chunks
+from joinery.bible_writing import BIBLE_GUIDE
 
 _FENCE = re.compile(r"^```toml[ \t]*$")
 _BOARD = (
@@ -166,7 +168,8 @@ def upgrade_text(v1: str) -> str:
     lines = v1.splitlines()
     title = next((i for i, line in enumerate(lines) if line.startswith("# ")), None)
     at = 0 if title is None else title + 1
-    lines = lines[:at] + [bible_schema.VERSION_MARKER] + lines[at:]
+    notes = [] if "How to write in this file" in v1 else BIBLE_GUIDE.splitlines()
+    lines = lines[:at] + [bible_schema.VERSION_MARKER, *notes] + lines[at:]
 
     headings = _heading_index(lines)
     references = headings.get("references")

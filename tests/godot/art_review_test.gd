@@ -90,6 +90,17 @@ func _run() -> void:
 	await process_frame
 	chat.set_chat_state("connected", "")
 	var dialog_script: Script = load(DIALOG_PATH)
+	var shown := str(
+		(
+			dialog_script
+			. call(
+				"to_bbcode",
+				"# Brief\n<!-- How to write\nin this file -->\n## Pitch\nA calm <!-- no hype --> game.\n"
+			)
+		)
+	)
+	_check(not shown.contains("<!--") and not shown.contains("How to write"), "Comments are hidden")
+	_check(shown.contains("[b]Pitch[/b]") and shown.contains("A calm  game."), "Text around stays")
 	var approved := [0]
 	var approve := func() -> void: approved[0] += 1
 
