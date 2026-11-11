@@ -326,15 +326,11 @@ func _glance_reviews(
 		}
 	]
 	# The changed node is in the open scene, so the review offers to show it there.
-	var snapshot: GDScript = load("res://addons/joinery/review_snapshot.gd")
-	var scene_root := EditorInterface.get_edited_scene_root()
-	var crate := scene_root.get_node_or_null("Crate") if scene_root != null else null
-	if crate != null:
-		snapshot.set("nodes", [crate] as Array[Node])
+	var crate: Node = _animation.mark_changed("Crate")
 	panel.call("show_scene_review", "Warm up the workshop light", 2, frames)
 	await _shot("review-scene", [panel, dock])
 	_check(crate == null or panel.get("_open_link").is_visible_in_tree(), "Open in editor shows")
-	snapshot.set("nodes", [] as Array[Node])
+	_animation.mark_changed("")
 	dock.hide_edit_review()
 	await _frames()
 	var creak := ProjectSettings.globalize_path("res://audio/sfx/door_creak.wav")

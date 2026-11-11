@@ -239,3 +239,13 @@ static func hammer_glb(path: String, handle: float) -> void:
 	document.append_from_scene(root, state)
 	document.write_to_filesystem(state, path)
 	root.free()
+
+
+## Mark the open scene's node [param name] as changed by a live edit, so the review offers
+## Open in editor; "" forgets it. Returns the node, or null.
+static func mark_changed(name: String) -> Node:
+	var snapshot: GDScript = load("res://addons/joinery/review_snapshot.gd")
+	var scene_root := EditorInterface.get_edited_scene_root()
+	var node := scene_root.get_node_or_null(name) if scene_root and not name.is_empty() else null
+	snapshot.set("nodes", [node] as Array[Node] if node != null else [] as Array[Node])
+	return node
