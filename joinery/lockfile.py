@@ -218,6 +218,14 @@ def _parse(text: str) -> tuple[list[Entry], list[Extension]]:
     )
 
 
+def read_assets(project: Path) -> list[Entry]:
+    """The asset entries in the project's lock; [] without a lock."""
+    lock = project / LOCK_NAME
+    if not lock.is_file():
+        return []
+    return _parse(lock.read_text(encoding="utf-8"))[0]
+
+
 def read_extensions(project: Path) -> list[Extension]:
     """The `[[extensions]]` in the project's lock; [] without a lock."""
     lock = project / LOCK_NAME
