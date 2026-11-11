@@ -296,6 +296,9 @@ class Feature(_Strict):
     conflicts: list[str] = []
     enhances: list[str] = []
     blueprints: list[str] = ["*"]
+    #: Said to the user when they pick a blueprint this feature does not
+    #: support, after "<name> does not work with the <blueprint> blueprint".
+    unsupported: str = ""
     extra_roots: list[str] = []
     external: list[External] = []
     merge: ProjectMerge = Field(default=ProjectMerge(), exclude=True)
@@ -580,6 +583,7 @@ def _feature_json(feature: Feature) -> dict[str, Any]:
         "conflicts": list(feature.conflicts),
         "enhances": list(feature.enhances),
         "blueprints": list(feature.blueprints),
+        "unsupported": feature.unsupported,
         "external": [e.model_dump(mode="json") for e in feature.external],
     }
 
@@ -658,7 +662,8 @@ def _resolve(catalogue: _Catalogue, blueprint_id: str, features: Sequence[str]) 
                 reported.add(pair)
                 problems.append(f"{other_feature.name} conflicts with {feature.name}; choose one.")
         if blueprint is not None and not feature.supports(blueprint.id):
-            problems.append(f"{feature.name} does not work with the {blueprint.name} blueprint.")
+            why = f" {feature.unsupported.strip()}" if feature.unsupported.strip() else ""
+            problems.append(f"{feature.name} does not work with the {blueprint.name} blueprint.{why}")
     ordered: list[Feature] = []
     remaining = set(chosen)
     while remaining:

@@ -27,6 +27,7 @@ requires = []          # added automatically and reported
 conflicts = []         # refused, in either direction
 enhances = []          # informational
 blueprints = ["*"]     # or explicit ids; other blueprints are refused
+unsupported = ""       # why, in a sentence, added to the refusal (VR: "VR needs a 3D starting point: …")
 extra_roots = []       # only "locale" (translations)
 
 [[external]]           # used if present, never installed by Joinery
