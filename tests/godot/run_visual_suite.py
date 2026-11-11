@@ -28,6 +28,7 @@ from dataclasses import dataclass, field
 from functools import partial
 from pathlib import Path
 
+from music_fixture import plant as plant_music
 from run_classic_view_test import capture_names, theme_pass
 from run_startup_test import (
     crash,
@@ -36,6 +37,7 @@ from run_startup_test import (
     scratch_folder,
 )
 
+from joinery import mixer
 from joinery.distribution import engine_binary
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -129,6 +131,7 @@ EDITOR_SCREENS = (
     "review-image-before",
     "review-audio",
     "review-audio-before",
+    "review-music",
     "review-text",
     "review-scene",
     "review-filmstrip",
@@ -141,6 +144,8 @@ EDITOR_SCREENS = (
     "share-empty",
     "share-built",
     "share-publish",
+    "mixer-empty",
+    "mixer",
     "tools",
     "tools-blender",
     "tools-animation",
@@ -414,6 +419,10 @@ def editor(theme: str, capture: Path, logs: Path) -> Harness:
         )
         (project / "visual.tscn").write_text(FIXTURE_SCENE)
         blockout_fixture(project / "blockout_fixture")
+        # The Mixer's buses as the game core sets them up, and a track to mix.
+        layout = mixer.to_tres(mixer.standard_layout())
+        (project / "default_bus_layout.tres").write_text(layout)
+        plant_music(project)
         settings = (
             "config_version=5\n[application]\n"
             'config/name="Harbour Keeper"\nconfig/features=PackedStringArray("4.7")\n'

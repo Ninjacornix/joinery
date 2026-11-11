@@ -185,6 +185,14 @@ func _sync_loudness() -> void:
 				named = true
 		if not named and mix.is_empty():
 			mix = found.get_string()
+	# One column: once any layer has a loudness, every row keeps its place so waveforms align.
+	var any := false
+	for row: Node in _rows.get_children():
+		any = any or not (row.get_node("Loudness") as Label).text.is_empty()
+	for row: Node in _rows.get_children():
+		var loud := row.get_node("Loudness") as Label
+		loud.visible = any
+		loud.custom_minimum_size.x = UI_THEME.font_size(self, "body") * 6.0 if any else 0.0
 	var summary := TRACK.summary(track)
 	var title := str(track.get("name", "")).capitalize()
 	_title.text = " · ".join(

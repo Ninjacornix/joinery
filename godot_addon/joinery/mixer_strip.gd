@@ -13,7 +13,7 @@ const UI := preload("ui_components.gd")
 const BUSES := preload("mixer_buses.gd")
 const TRACK := preload("music_track.gd")
 ## Fader height in control heights.
-const FADER_ROWS := 3.0
+const FADER_ROWS := 2.5
 
 var state: Dictionary = {}
 var fader: VSlider
@@ -74,6 +74,7 @@ class Meter:
 func _init() -> void:
 	theme_type_variation = "JoineryCard"
 	size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var column := VBoxContainer.new()
 	column.theme_type_variation = "JoineryTight"
 	add_child(column)
@@ -84,7 +85,6 @@ func _init() -> void:
 	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(_title)
 	_value = UI.label("", "JoineryNumeric")
-	_value.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 	_value.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 	head.add_child(_value)
 	var body := HBoxContainer.new()
@@ -100,26 +100,35 @@ func _init() -> void:
 	fader.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	fader.value_changed.connect(func(value: float) -> void: _change("volume_db", value))
 	body.add_child(fader)
-	var toggles := VBoxContainer.new()
-	toggles.theme_type_variation = "JoineryTight"
-	toggles.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	body.add_child(toggles)
-	mute = _toggle("Mute", "mute")
+	# Beside the fader: Mute and Solo, then each effect as a check over its one amount.
+	var side := VBoxContainer.new()
+	side.theme_type_variation = "JoineryFlush"
+	side.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	body.add_child(side)
+	var toggles := HBoxContainer.new()
+	toggles.theme_type_variation = "JoineryRowTight"
+	side.add_child(toggles)
+	mute = _toggle("M", "mute")
 	toggles.add_child(mute)
-	solo = _toggle("Solo", "solo")
+	solo = _toggle("S", "solo")
 	toggles.add_child(solo)
 	reverb = _check("Reverb", "reverb")
+	side.add_child(reverb)
 	reverb_amount = _amount(0.0, 1.0, 0.01, "reverb", "wet")
-	column.add_child(_effect_row(reverb, reverb_amount))
+	side.add_child(reverb_amount)
 	compressor = _check("Compress", "compressor")
+	side.add_child(compressor)
 	compressor_amount = _amount(BUSES.MIN_THRESHOLD, 0.0, 0.5, "compressor", "threshold")
-	column.add_child(_effect_row(compressor, compressor_amount))
+	side.add_child(compressor_amount)
 
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_THEME_CHANGED:
 		fader.custom_minimum_size.y = UI_THEME.control_h(self, "lg") * FADER_ROWS
-		custom_minimum_size.x = UI_THEME.font_size(self, "body") * 12
+		custom_minimum_size.x = UI_THEME.font_size(self, "body") * 10
+		fader.custom_minimum_size.x = UI_THEME.control_h(self, "sm")
+		for button: Button in [mute, solo]:
+			button.custom_minimum_size.x = UI_THEME.control_h(self, "sm")
 
 
 ## Show [param bus] ({name, volume_db, mute, solo, …} from mixer_buses.gd) without emitting.
@@ -171,18 +180,9 @@ func _amount(low: float, high: float, step: float, key: String, field: String) -
 	slider.max_value = high
 	slider.step = step
 	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	UI.bind_height(slider, "sm")
 	slider.value_changed.connect(func(value: float) -> void: _set_effect(key, field, value))
 	return slider
-
-
-func _effect_row(check: CheckBox, slider: HSlider) -> HBoxContainer:
-	var row := HBoxContainer.new()
-	row.theme_type_variation = "JoineryRowTight"
-	check.custom_minimum_size.x = UI_THEME.font_size(self, "body") * 6.5
-	row.add_child(check)
-	row.add_child(slider)
-	return row
 
 
 func _show_effect(check: CheckBox, slider: HSlider, effect: Variant, field: String) -> void:
@@ -245,5 +245,7 @@ func _sync_words() -> void:
 	compressor.tooltip_text = "Compressor: threshold %s" % TRACK.db_text(threshold)
 	compressor_amount.tooltip_text = compressor.tooltip_text
 	compressor_amount.accessibility_name = "%s compressor threshold" % name
-	mute.tooltip_text = "Silence the %s bus" % name
-	solo.tooltip_text = "Hear only the %s bus" % name
+	mute.tooltip_text = "Mute: silence the %s bus" % name
+	solo.tooltip_text = "Solo: hear only the %s bus" % name
+	mute.accessibility_name = mute.tooltip_text
+	solo.accessibility_name = solo.tooltip_text

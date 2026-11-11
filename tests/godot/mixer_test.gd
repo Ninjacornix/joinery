@@ -82,7 +82,8 @@ func _run() -> void:
 	await _check_save(tab, bridge)
 	tab.queue_free()
 	bridge.queue_free()
-	await _frames()
+	# Stopped players hand their streams back on the audio thread a moment later.
+	await create_timer(0.3).timeout
 	print("mixer: ", "FAILED" if _failed else "ok")
 	quit(1 if _failed else 0)
 

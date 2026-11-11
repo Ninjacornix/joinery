@@ -38,7 +38,8 @@ var _snapshot: AudioBusLayout
 var _strips: Dictionary = {}
 var _status: HBoxContainer
 var _note: Label
-var _strip_row: HFlowContainer
+var _strip_row: HBoxContainer
+var _content: HFlowContainer
 var _missing: PanelContainer
 var _sent := false
 
@@ -87,7 +88,6 @@ func _init() -> void:
 	UI_MOTION.press_feedback(save_button)
 	bar.add_child(save_button)
 	var scroll := ScrollContainer.new()
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	UI_MOTION.rubber_band(scroll)
 	add_child(scroll)
@@ -95,8 +95,9 @@ func _init() -> void:
 	gutter.theme_type_variation = "JoineryGutter"
 	gutter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(gutter)
-	var content := VBoxContainer.new()
-	content.theme_type_variation = "JoineryStack"
+	# Buses and music side by side where the panel is wide, stacked where it is not.
+	_content = HFlowContainer.new()
+	var content := _content
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	gutter.add_child(content)
 	content.add_child(_build_buses())
@@ -111,6 +112,9 @@ func _ready() -> void:
 
 
 func _notification(what: int) -> void:
+	if what == NOTIFICATION_THEME_CHANGED and _content != null:
+		_content.add_theme_constant_override("h_separation", UI_THEME.space(self, 6))
+		_content.add_theme_constant_override("v_separation", UI_THEME.space(self, 5))
 	if what != NOTIFICATION_VISIBILITY_CHANGED:
 		return
 	var shown := is_visible_in_tree()
@@ -239,6 +243,7 @@ func revert() -> void:
 func _build_buses() -> VBoxContainer:
 	var group := VBoxContainer.new()
 	group.name = "Buses"
+	group.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	group.theme_type_variation = "JoineryTight"
 	var head := HBoxContainer.new()
 	head.theme_type_variation = "JoineryRow"
@@ -283,7 +288,8 @@ func _build_buses() -> VBoxContainer:
 	_missing.name = "Missing"
 	(_missing.find_child("Action", true, false) as Button).pressed.connect(add_missing_buses)
 	group.add_child(_missing)
-	_strip_row = HFlowContainer.new()
+	_strip_row = HBoxContainer.new()
+	_strip_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_strip_row.name = "Strips"
 	_strip_row.theme_type_variation = "JoineryRow"
 	group.add_child(_strip_row)

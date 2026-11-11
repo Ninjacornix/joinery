@@ -79,7 +79,7 @@ func _init() -> void:
 	intensity_slider.tick_count = TRACK.STATES.size()
 	intensity_slider.ticks_on_borders = true
 	intensity_slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	intensity_slider.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	UI.bind_height(intensity_slider, "sm")
 	intensity_slider.accessibility_name = "Intensity"
 	intensity_slider.tooltip_text = "Hear the music at each intensity, as the game plays it"
 	intensity_slider.value_changed.connect(
@@ -106,7 +106,8 @@ func _init() -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_THEME_CHANGED:
-		intensity_slider.custom_minimum_size.x = UI_THEME.font_size(self, "body") * 14
+		intensity_slider.custom_minimum_size.x = UI_THEME.font_size(self, "body") * 10
+		custom_minimum_size.x = UI_THEME.font_size(self, "body") * 34
 		_intensity_label.custom_minimum_size.x = UI_THEME.font_size(self, "body") * 5
 	elif what == NOTIFICATION_EXIT_TREE:
 		stop()
@@ -268,7 +269,7 @@ func _layer_row(layer: String, role: String) -> HBoxContainer:
 	fader.max_value = BUSES.MAX_DB
 	fader.step = 0.5
 	fader.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	fader.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	UI.bind_height(fader, "sm")
 	fader.accessibility_name = layer.capitalize() + " level"
 	fader.value_changed.connect(func(value: float) -> void: set_layer(layer, "volume_db", value))
 	row.add_child(fader)
@@ -378,9 +379,11 @@ func _sync_rows() -> void:
 		var plays := row.get_node("Plays") as Label
 		plays.text = TRACK.gain_text(float(gains.get(layer, 0.0)))
 		plays.tooltip_text = "How loud %s plays at %s" % [layer, intensity]
-		(row.get_node("Name") as Label).modulate.a = (
-			0.55 if float(gains.get(layer, 0.0)) <= 0.0001 else 1.0
-		)
+		var title := row.get_node("Name") as Label
+		if float(gains.get(layer, 0.0)) <= 0.0001:
+			title.add_theme_color_override("font_color", UI_THEME.color(title, "text_muted"))
+		else:
+			title.remove_theme_color_override("font_color")
 
 
 func _render() -> void:
