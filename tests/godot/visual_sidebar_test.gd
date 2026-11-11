@@ -226,6 +226,7 @@ func _states(light: bool, width: int) -> void:
 	for index: int in 2:
 		queue.call("remove", queue.call("first"))
 	await _parallel(light, width, chat)
+	await _playtest(light, width, chat)
 
 	chat.append_agent_text("I widened **Door** by 20% in Blender and darkened the wood.", true)
 	chat.finish_agent_response(true)
@@ -429,6 +430,55 @@ func _debugging(light: bool, width: int, chat: Control, tasks: Node, backend: No
 	watcher.call("_drop_offer")
 	tasks.call("_remove", "d1")
 	backend.set("_connected", false)
+
+
+## The playtester: its card while the bot plays, then the findings with one opened.
+func _playtest(light: bool, width: int, chat: Control) -> void:
+	var tasks: Node = chat.get("_tasks")
+	var event := {"kind": "playtest", "playtest_id": "pt", "state": "playing", "seconds": 120}
+	event["elapsed"] = 42.0
+	tasks.call("on_playtest", event)
+	await _shot("playtest", light, width, chat)
+	var items: Array = [
+		{
+			"severity": "high",
+			"title": "Softlock",
+			"detail": "The player couldn't move for 15 s while the bot held movement keys.",
+			"where": "res://game/player/player.gd:88",
+			"t": 65.0,
+			"seed": 4821,
+			"repro": "Run `joinery playtest --project . --seed 4821 --seconds 120`.",
+			"shot": _thumbnail(),
+		},
+		{
+			"severity": "medium",
+			"title": "Frame hitches",
+			"detail": "3 frames took far longer than usual (worst 310 ms; typical 2.10 ms).",
+			"t": 4.0,
+			"seed": 4821,
+		},
+		{
+			"severity": "note",
+			"title": "Balance",
+			"detail": "The bot died or respawned 9 times in 2:00 without finishing.",
+			"seed": 4821,
+		},
+	]
+	event["state"] = "done"
+	event["report"] = {
+		"counts": {"critical": 0, "high": 1, "medium": 1, "low": 0, "note": 1},
+		"items": items,
+		"seed": 4821,
+		"played_seconds": 120.0,
+	}
+	tasks.call("on_playtest", event)
+	var card: Control = tasks.get("playtest")
+	var first: Control = (card.call("item_rows") as Array)[0]
+	(first.find_children("", "Button", true, false)[0] as Button).button_pressed = true
+	await _shot("playtest-report", light, width, chat)
+	card.free()
+	tasks.set("playtest", null)
+	tasks.hide()
 
 
 func _images(light: bool, width: int) -> void:

@@ -64,6 +64,8 @@ SIDEBAR_STATES = (
     "parallel",
     "parallel-stop",
     "debugging",
+    "playtest",
+    "playtest-report",
     "review-waiting",
     "review-waiting-big",
     "accepted",
