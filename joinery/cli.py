@@ -23,6 +23,7 @@ from joinery import (
     game_setup,
     history,
     hook,
+    playtest,
     references,
     timeline,
 )
@@ -852,6 +853,10 @@ def _parser() -> argparse.ArgumentParser:
     feature_cmd.add_argument(
         "--yes", action="store_true", help="accept the reviewed change without asking"
     )
+    playtest_cmd = commands.add_parser(
+        "playtest", help="play the game headless with a bot and report what goes wrong"
+    )
+    playtest.add_arguments(playtest_cmd)
     setup = commands.add_parser("setup", help="change a project's tools")
     setup.add_argument("--tools", help="comma-separated ids; skips the menu")
     setup.add_argument("--project", type=Path, default=ROOT)
@@ -1215,6 +1220,8 @@ def main(argv: list[str] | None = None) -> int:
         return _blueprints(args)
     if args.command == "features":
         return _features(args.json)
+    if args.command == "playtest":
+        return playtest.main(args)
     if args.command == "feature":
         return _feature(args)
     if args.command == "status":

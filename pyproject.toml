@@ -42,4 +42,5 @@ testpaths = ["tests"]
 pythonpath = ["."]
 markers = [
     "blueprint_matrix: every blueprint x feature set played in stock Godot (slow; JOINERY_BLUEPRINT_MATRIX=1 or -m blueprint_matrix)",
+    "playtest_slow: two-minute headless playtests of every blueprint with every feature (slow; JOINERY_PLAYTEST_SLOW=1)",
 ]
