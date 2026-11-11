@@ -26,6 +26,9 @@ static func folder(project := "") -> String:
 static func list(project := "") -> Array[Dictionary]:
 	var chats: Array[Dictionary] = []
 	var directory := folder(project)
+	# A project with no saved chat yet has no folder; reading it would log an error.
+	if not DirAccess.dir_exists_absolute(directory):
+		return chats
 	for file_name: String in DirAccess.get_files_at(directory):
 		if not file_name.ends_with(".jsonl"):
 			continue
