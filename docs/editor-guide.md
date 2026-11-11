@@ -808,6 +808,11 @@ the SHA-256 recorded in the repo and listed in `joinery.lock`. If the download
 fails, the project is still made: the game runs, and Steam calls do nothing
 until the extension is there. Set `JOINERY_NO_DOWNLOADS=1` to skip the download
 (tests, offline machines). Joinery never publishes anything to Steam.
+The app ID is optional, so you can plan for Steam before you have a Steamworks
+page. Without one Steam stays off in the game (`SteamService.status` is
+`no app id`) and everything else works. Add or change it any time:
+`uv run joinery steam --project /path/to/game --app-id 480` (`--app-id 0`
+clears it, `--connect` changes how players meet, no flags shows what is set).
 `--connect` only matters with Online play: players meet through Steam (the
 default) or by direct IP.
 
@@ -975,7 +980,7 @@ The new-project wizard has three steps in one fixed window. **What are you
 making?** shows the starting points as cards with a screenshot, then the name,
 folder and the game in one sentence (the renderer is under Advanced).
 **Features and apps** has a switch per feature: Steam asks for the Steam app ID
-inline (digits only, empty to add it later) and, with Online play on, how players
+inline (optional: digits only, or empty to add it later with `joinery steam`) and, with Online play on, how players
 connect (Steam or Direct IP). The apps sit behind one line with **Change…**;
 preferred MCPs are on by default, and other candidates can be set up as custom
 tools with a command and arguments. The step ends with **Keep older

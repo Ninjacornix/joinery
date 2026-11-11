@@ -21,7 +21,7 @@ written, in case it changed after it was picked.
  1 file changed, 51 insertions(+)
 
 diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
-index b7dbf46..688dfc0 100644
+index e51d118..611086a 100644
 --- a/editor/project_manager/project_dialog.cpp
 +++ b/editor/project_manager/project_dialog.cpp
 @@ -160,6 +160,41 @@ static bool is_zip_file(Ref<DirAccess> p_d, const String &p_path) {

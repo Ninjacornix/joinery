@@ -18,11 +18,11 @@ Step 1 puts the name, folder and one-sentence pitch above the starting
 point cards, so the Name field is never half hidden under the bottom
 fade at the dialog's default size.
 ---
- editor/project_manager/project_dialog.cpp | 28 ++++++++++++++++++++---
- 1 file changed, 25 insertions(+), 3 deletions(-)
+ editor/project_manager/project_dialog.cpp | 32 +++++++++++++++++++----
+ 1 file changed, 27 insertions(+), 5 deletions(-)
 
 diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
-index 70bf057..4bb927c 100644
+index 70bf057..2f5844f 100644
 --- a/editor/project_manager/project_dialog.cpp
 +++ b/editor/project_manager/project_dialog.cpp
 @@ -1248,6 +1248,15 @@ void ProjectDialog::_joinery_load_thread_func(void *p_userdata) {
@@ -49,6 +49,24 @@ index 70bf057..4bb927c 100644
  		int exit_code = -1;
  		if (OS::get_singleton()->execute("uv", args, &self->joinery_load_output[p_slot], &exit_code, true) != OK) {
  			exit_code = -1;
+@@ -2296,7 +2304,7 @@ void ProjectDialog::_joinery_build_features() {
+ 			steam_frame->add_child(joinery_steam_box);
+ 			Label *id_label = memnew(Label);
+ 			id_label->set_theme_type_variation(SNAME("JoineryLabel"));
+-			id_label->set_text(TTR("Steam app ID"));
++			id_label->set_text(TTR("Steam app ID (optional)"));
+ 			id_label->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
+ 			joinery_steam_box->add_child(id_label);
+ 			joinery_steam_app_id = memnew(LineEdit);
+@@ -2317,7 +2325,7 @@ void ProjectDialog::_joinery_build_features() {
+ 			joinery_steam_error->set_accessibility_live(AccessibilityServerEnums::LIVE_POLITE);
+ 			joinery_steam_error->hide();
+ 			joinery_steam_box->add_child(joinery_steam_error);
+-			joinery_steam_box->add_child(_joinery_caption(TTR("From your Steamworks account. Leave empty to add it later.")));
++			joinery_steam_box->add_child(_joinery_caption(TTR("From your Steamworks account. Leave it empty if you do not have one yet: Steam stays off until you add it later.")));
+ 			joinery_steam_box->add_child(_joinery_caption(TTR("When you create the project, Joinery downloads a checked copy of GodotSteam, the add-on that connects your game to Steam.")));
+ 
+ 			joinery_connect_box = memnew(VBoxContainer);
 @@ -2470,7 +2478,8 @@ bool ProjectDialog::_joinery_steam_id_valid() const {
  			return false;
  		}

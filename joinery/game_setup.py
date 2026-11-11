@@ -406,7 +406,8 @@ def apply_choices(
                 "done",
                 f"Set up Steam with app ID {app_id}."
                 if app_id
-                else "Set up Steam without an app ID. Add it later as "
+                else "Set up Steam without an app ID. Steam stays off in the game "
+                "until you add one with `joinery steam --app-id` or "
                 "steam/app_id in Project Settings.",
                 app_id=app_id,
                 connect=how,

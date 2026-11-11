@@ -461,3 +461,31 @@ def test_steam_table_does_not_break_the_lock_check(project: Path, cache: Path) -
     release = _release(data)
     install(project, cache=cache, release=release, opener=_opener(data))
     assert install(project, cache=cache, release=release, opener=_never).already
+
+
+def test_steam_command_adds_the_app_id_later(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from joinery.cli import main
+
+    game = tmp_path / "game"
+    (game / "features" / "steam").mkdir(parents=True)
+    (game / "project.godot").write_text("config_version=5\n", encoding="utf-8")
+    godotsteam.configure(game, None)
+    assert main(["steam", "--project", str(game)]) == 0
+    assert "No Steam app ID yet" in capsys.readouterr().out
+    assert main(["steam", "--project", str(game), "--app-id", "480"]) == 0
+    assert godotsteam.read_steam(game) == {"app_id": 480, "connect": "steam"}
+    assert "app_id=480" in (game / "project.godot").read_text(encoding="utf-8")
+    assert main(["steam", "--project", str(game), "--connect", "direct", "--json"]) == 0
+    assert '"app_id": 480' in capsys.readouterr().out.splitlines()[-1]
+    assert main(["steam", "--project", str(game), "--app-id", "4x"]) == 1
+    assert main(["steam", "--project", str(game), "--app-id", "0"]) == 0
+    assert godotsteam.read_steam(game)["app_id"] == 0
+
+
+def test_steam_command_needs_the_feature(tmp_path: Path) -> None:
+    from joinery.cli import main
+
+    (tmp_path / "project.godot").write_text("config_version=5\n", encoding="utf-8")
+    assert main(["steam", "--project", str(tmp_path), "--app-id", "480"]) == 1

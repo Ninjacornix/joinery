@@ -21,6 +21,7 @@ from joinery import (
     claims,
     connection,
     game_setup,
+    godotsteam,
     history,
     hook,
     kit_share_cli,
@@ -466,6 +467,45 @@ def _decide(
             _print_step(step)
             if step.get("offer"):
                 print("  " + shlex.join(step["offer"]))
+    return 0
+
+
+def _steam(args: argparse.Namespace) -> int:
+    """Show or set the Steam app ID; Steam works without one until it is set."""
+    project = Path(args.project).resolve()
+    if not (project / "features" / "steam").is_dir():
+        print(
+            "steam: this project has no Steam feature. Add it first with "
+            "`joinery feature add steam`.",
+            file=sys.stderr,
+        )
+        return 1
+    current = godotsteam.read_steam(project)
+    if args.app_id is not None or args.connect is not None:
+        try:
+            if args.app_id is not None:
+                app = int(game_setup.check_app_id(args.app_id) or 0)
+            else:
+                app = int(str(current.get("app_id", 0)) or 0)
+            connect = args.connect or str(current.get("connect", "steam"))
+            if connect not in godotsteam.CONNECT_CHOICES:
+                connect = "steam"
+            godotsteam.configure(project, app or None, connect)  # type: ignore[arg-type]
+        except (ValueError, godotsteam.SteamSetupError) as exc:
+            print(f"steam: {exc}", file=sys.stderr)
+            return 1
+        current = godotsteam.read_steam(project)
+    app_id = int(str(current.get("app_id", 0)) or 0)
+    connect = str(current.get("connect", "steam"))
+    if args.json:
+        print(json.dumps({"app_id": app_id, "connect": connect}))
+    elif app_id:
+        print(f"Steam app ID {app_id}, players connect through {connect}.")
+    else:
+        print(
+            "No Steam app ID yet. Steam stays off in the game until you set one: "
+            "joinery steam --project <path> --app-id <digits>."
+        )
     return 0
 
 
@@ -967,6 +1007,13 @@ def _parser() -> argparse.ArgumentParser:
         "match", help="audit the project against the art bible; list what drifts"
     )
     match_cli.add_arguments(match_cmd)
+    steam_cmd = commands.add_parser(
+        "steam", help="show or set the Steam app ID (it can be added any time)"
+    )
+    steam_cmd.add_argument("--project", type=Path, required=True)
+    steam_cmd.add_argument("--app-id", help="Steam app ID (digits); 0 clears it")
+    steam_cmd.add_argument("--connect", choices=["steam", "direct"])
+    steam_cmd.add_argument("--json", action="store_true")
     playtest_cmd = commands.add_parser(
         "playtest", help="play the game headless with a bot and report what goes wrong"
     )
@@ -1366,6 +1413,8 @@ def main(argv: list[str] | None = None) -> int:
         return kit_share_cli.main(args)
     if args.command == "feature":
         return _feature(args)
+    if args.command == "steam":
+        return _steam(args)
     if args.command == "status":
         return _status(args)
     if args.command == "setup":

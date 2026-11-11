@@ -28,7 +28,7 @@ point), which checks and copies each file.
  3 files changed, 382 insertions(+), 5 deletions(-)
 
 diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
-index 0659601..1876a3d 100644
+index edbafae..294113d 100644
 --- a/editor/project_manager/project_dialog.cpp
 +++ b/editor/project_manager/project_dialog.cpp
 @@ -41,9 +41,11 @@

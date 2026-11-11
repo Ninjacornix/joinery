@@ -17,7 +17,7 @@ joinery.toml. Custom numbers are set later in the editor's Settings.
  2 files changed, 59 insertions(+), 2 deletions(-)
 
 diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
-index 688dfc0..0659601 100644
+index 611086a..edbafae 100644
 --- a/editor/project_manager/project_dialog.cpp
 +++ b/editor/project_manager/project_dialog.cpp
 @@ -794,7 +794,7 @@ Label *ProjectDialog::_joinery_caption(const String &p_text) const {

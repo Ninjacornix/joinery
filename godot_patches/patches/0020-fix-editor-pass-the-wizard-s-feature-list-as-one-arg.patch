@@ -13,7 +13,7 @@ feature list left --features without a value and the CLI refused the call.
  1 file changed, 3 insertions(+), 1 deletion(-)
 
 diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
-index 4bb927c..b7dbf46 100644
+index 2f5844f..e51d118 100644
 --- a/editor/project_manager/project_dialog.cpp
 +++ b/editor/project_manager/project_dialog.cpp
 @@ -3053,7 +3053,9 @@ bool ProjectDialog::_joinery_run_create_step(int p_step, String &r_output, Strin
