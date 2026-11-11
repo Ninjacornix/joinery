@@ -54,6 +54,9 @@ signal playtest_event(event: Dictionary)
 ## "Make it match" (ADR 0045): {state: auditing|fixing|done|failed|stopped, tasks: [{key, title,
 ## area, apps, task_id, state, message}], audit?, message?}. Its changes are tasks.
 signal match_event(event: Dictionary)
+## The accessibility and performance checks (ADR 0049, 0050), tagged kind "access" or "perf":
+## {state: auditing|fixing|done|failed|stopped|checked, tasks, audit?, message?}.
+signal check_event(event: Dictionary)
 ## A request tried several ways (ADR 0042), tagged with its group_id: the group itself
 ## ({kind: "variants", state, picked, ways}) or the host refusing a pick ({kind: "notice"}).
 ## Each way's own events come as task events, tagged with variant_group.
@@ -244,6 +247,25 @@ func send_match(areas: Array, findings: Array, stop := false) -> bool:
 	return true
 
 
+## A check's fixes: with [param stop] false the chat host plans what [param check] ("access"
+## or "perf") found in [param areas] (all when empty), or only [param findings], and makes the
+## changes as parallel tasks; with [param stop] it stops them. False when not connected.
+func send_check(check: String, areas: Array, findings: Array, stop := false, target := "") -> bool:
+	if _job == null or not _connected:
+		return false
+	var line := {"kind": "check_cancel", "check": check}
+	if not stop:
+		line = {
+			"kind": "check_fix",
+			"check": check,
+			"areas": areas,
+			"findings": findings,
+			"target": target
+		}
+	_job.send_line(JSON.stringify(line))
+	return true
+
+
 ## Show a task's change in the Review tab.
 func show_task_review(transaction_id: String) -> void:
 	task_review.emit(transaction_id)
@@ -350,6 +372,8 @@ func _handle(event: Dictionary) -> void:
 			suggestions.emit(event.get("items", []))
 		"match":
 			match_event.emit(event)
+		"access", "perf":
+			check_event.emit(event)
 		"chat":
 			chat_id = str(event.get("chat_id", ""))
 			chat_changed.emit(event)

@@ -34,6 +34,10 @@ signal bible_upgraded(ok: bool, message: String)
 signal playtest_requested(focus: String)
 ## "/match", or Make it match elsewhere: audit the project against the art bible.
 signal match_requested
+## "/access": check the game's accessibility (ADR 0049).
+signal access_requested
+## "/perf [target]": measure the game against a target machine (ADR 0050).
+signal perf_requested(target: String)
 ## "/variants [N] <request>": make the request a few ways side by side (sidebar_variants.gd).
 signal variants_requested(words: String)
 
@@ -46,6 +50,8 @@ const COMMANDS := {
 	"/feature": ["Add or remove a game feature", "cli"],
 	"/playtest": ["Play the game and report bugs", "ui"],
 	"/match": ["Make everything match the bible", "ui"],
+	"/access": ["Check the game's accessibility", "ui"],
+	"/perf": ["Measure the game's performance", "ui"],
 	"/variants": ["Try a few ways side by side", "ui"],
 	"/setup": ["Change project apps", "ui"],
 	"/focus": ["Toggle focus mode", "ui"],
@@ -135,6 +141,10 @@ func run(entry: String) -> bool:
 			playtest_requested.emit(" ".join(arguments(entry)))
 		elif command == "/match":
 			match_requested.emit()
+		elif command == "/access":
+			access_requested.emit()
+		elif command == "/perf":
+			perf_requested.emit(" ".join(arguments(entry)).strip_edges())
 		elif command == "/variants":
 			variants_requested.emit(" ".join(arguments(entry)))
 		else:
@@ -161,6 +171,14 @@ func run(entry: String) -> bool:
 ## Make it match from outside the sidebar (the Review tab's art bible row).
 func request_match() -> void:
 	match_requested.emit()
+
+
+## A check from outside the sidebar (the Review tab): "access" or "perf".
+func request_check(check: String) -> void:
+	if check == "access":
+		access_requested.emit()
+	elif check == "perf":
+		perf_requested.emit("")
 
 
 ## The CLI check in progress ("/doctor"), or "".

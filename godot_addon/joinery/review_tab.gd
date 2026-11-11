@@ -170,6 +170,8 @@ func attach(slash: Variant, legacy_button: Button = null) -> void:
 		_slash = slash as Object
 		if _slash.has_signal("reverted"):
 			_slash.connect("reverted", revert_finished)
+		# Accessibility and performance (ADR 0049, 0050): last scores, and their cards.
+		preload("review_checks.gd").attach(_bible_decided, _slash)
 	_show_count()
 
 

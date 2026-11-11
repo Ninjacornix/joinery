@@ -18,7 +18,8 @@ extends VBoxContainer
 ## a finding puts a ready request in the composer ([method on_playtest]).
 ##
 ## "Make it match" (ADR 0045) has its card here too (sidebar_match.gd): the project's scores
-## against the art bible, while its fixes run as tasks with cards of their own.
+## against the art bible, while its fixes run as tasks with cards of their own. So do the
+## accessibility and performance checks (ADR 0049, ADR 0050), with the same card.
 
 const CARD := preload("sidebar_task_card.gd")
 const DEBUG := preload("sidebar_debug.gd")
@@ -52,6 +53,9 @@ var bridge: Object:
 var playtest: Control
 ## The match card (match_card.gd), while there is one.
 var match_card: Control
+## The accessibility and performance cards (match_card.gd), while there are.
+var access_card: Control
+var perf_card: Control
 ## Requests tried several ways (sidebar_variants.gd): their ways' events go there.
 var variants: Node
 var _cards: Dictionary = {}
@@ -71,6 +75,9 @@ static func attach(sidebar: Control, content: Control, before: Control) -> VBoxC
 	DEBUG.attach(sidebar, tasks)
 	# "/match" and Make it match: the project against the art bible.
 	MATCH.attach(sidebar, tasks)
+	# "/access" and "/perf": the game's accessibility and performance.
+	MATCH.attach(sidebar, tasks, "access")
+	MATCH.attach(sidebar, tasks, "perf")
 	tasks.variants = VARIANTS.attach(sidebar, tasks)
 	var slash: Object = sidebar.get("_slash")
 	if slash != null and slash.has_signal("playtest_requested"):
@@ -344,6 +351,8 @@ func sync_visible() -> void:
 		not _cards.is_empty()
 		or is_instance_valid(playtest)
 		or is_instance_valid(match_card)
+		or is_instance_valid(access_card)
+		or is_instance_valid(perf_card)
 		or _has_variants()
 	)
 

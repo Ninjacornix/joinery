@@ -6,12 +6,18 @@ extends PanelContainer
 ## Fix on one area. The fixes run as parallel tasks with their own cards; each change is
 ## reviewed in the Review tab. While they run the card counts what is ready to review, and
 ## after each accept the project is checked again so the scores rise in place.
+##
+## The same card shows the accessibility and performance checks (ADR 0049, ADR 0050) with
+## [member kind] "access" or "perf": their own headline, the finding's own words on each
+## row, and for performance the target machine to judge against.
 
 signal fix_requested(areas: Array)
 signal recheck_requested
 signal stop_pressed
 signal close_pressed
 signal review_pressed
+## Performance only: the target machine was changed ("steam-deck").
+signal target_changed(target: String)
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
@@ -23,6 +29,21 @@ const DOTS := {"high": "attention", "medium": "working", "low": "off"}
 ## Findings shown before "Show all".
 const FIRST_FINDINGS := 3
 const FINAL := ["accepted", "discarded", "done", "failed", "stopped"]
+## Per kind: [title while checking, step while checking, accessible name].
+const WORDS := {
+	"match":
+	["Checking against the art bible", "Measuring every asset, scene and theme…", "Make it match"],
+	"access":
+	["Checking accessibility", "Playing the game and reading its menus…", "Accessibility check"],
+	"perf": ["Measuring performance", "Playing the game to measure it…", "Performance check"],
+}
+const TARGETS := {
+	"high": "High-end PC",
+	"mid": "Mid-range PC",
+	"low": "Low-end PC",
+	"steam-deck": "Steam Deck",
+	"web": "Web browser",
+}
 
 
 ## A thin score bar: the share that matches, filled in the accent colour (success at 100%).
@@ -59,8 +80,12 @@ class ScoreBar:
 		)
 
 
+## "match", "access" or "perf".
+var kind := "match"
 ## checking, ready, fixing, done or failed.
 var state := "checking"
+## Performance only: the target machine to judge against.
+var target_picker: OptionButton
 var audit: Dictionary = {}
 var title_label: Label
 var close: Button
@@ -81,9 +106,11 @@ var _kept: Label
 var _run: Array = []
 
 
-func _init() -> void:
+func _init(card_kind := "match") -> void:
+	kind = card_kind if WORDS.has(card_kind) else "match"
+	var words: Array = WORDS[kind]
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	accessibility_name = "Make it match"
+	accessibility_name = str(words[2])
 	STYLE.on_theme_overrides(
 		self,
 		func() -> void:
@@ -100,12 +127,15 @@ func _init() -> void:
 	var head := HBoxContainer.new()
 	head.theme_type_variation = "JoineryRowTight"
 	column.add_child(head)
-	title_label = UI.label("Checking against the art bible")
+	title_label = UI.label(str(words[0]))
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	title_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	head.add_child(title_label)
-	stop = _small_icon("stop", "Stop making it match")
+	if kind == "perf":
+		target_picker = _target_picker()
+		head.add_child(target_picker)
+	stop = _small_icon("stop", "Stop making it match" if kind == "match" else "Stop the fixes")
 	stop.pressed.connect(_on_stop)
 	stop.hide()
 	head.add_child(stop)
@@ -122,7 +152,7 @@ func _init() -> void:
 	_status = UI.status_icon("done")
 	_status.hide()
 	line.add_child(_status)
-	_step = UI.label("Measuring every asset, scene and theme…", "JoineryCaption")
+	_step = UI.label(str(words[1]), "JoineryCaption")
 	_step.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_step.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_step.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
@@ -177,7 +207,7 @@ func _init() -> void:
 ## Measuring again: the scores stay while the dots run.
 func set_checking() -> void:
 	state = "checking"
-	_working("Measuring every asset, scene and theme…")
+	_working(str(WORDS[kind][1]))
 	_again.hide()
 	_review.hide()
 	fix_all.disabled = true
@@ -191,18 +221,21 @@ func show_audit(data: Dictionary) -> void:
 	stop.hide()
 	fix_all.disabled = false
 	var findings: Array = data.get("findings", [])
-	title_label.text = headline(data)
+	title_label.text = headline(data) if kind == "match" else check_headline(kind, data)
 	title_label.tooltip_text = title_label.text
 	var fixable := _fixable(findings)
 	var serious := 0
 	for item: Variant in findings:
 		if str((item as Dictionary).get("severity", "")) == "high":
 			serious += 1
+	show_target(str((data.get("facts", {}) as Dictionary).get("target", "")))
 	var errors: Array = data.get("errors", [])
 	if not errors.is_empty():
 		_settle("warning", "%d couldn't be measured. Details are in Output." % errors.size())
 	elif findings.is_empty():
-		_settle("done", "Checked against the art bible's rules")
+		_settle(
+			"done", "Checked against the art bible's rules" if kind == "match" else facts_line(data)
+		)
 	else:
 		_settle("warning" if serious > 0 else "done", severity_line(findings))
 	_again.visible = true
@@ -289,6 +322,37 @@ static func headline(data: Dictionary) -> String:
 			else "Nothing to check against the art bible yet"
 		)
 	return "%d %s from the art bible" % [count, "thing drifts" if count == 1 else "things drift"]
+
+
+## The headline of an accessibility or performance check.
+static func check_headline(check: String, data: Dictionary) -> String:
+	var count := (data.get("findings", []) as Array).size()
+	var facts: Dictionary = data.get("facts", {})
+	if check == "perf":
+		var machine := str(facts.get("target_label", "the target"))
+		if count == 0:
+			return "Runs within a %s's budget" % machine
+		return "%d %s on a %s" % [count, "problem" if count == 1 else "problems", machine]
+	if count == 0:
+		return "No accessibility problems found"
+	return "%d accessibility %s" % [count, "problem" if count == 1 else "problems"]
+
+
+## What a clean check measured: "9.3 ms a frame here · 134 draw calls", "102 controls…".
+static func facts_line(data: Dictionary) -> String:
+	var facts: Dictionary = data.get("facts", {})
+	var measured: Dictionary = facts.get("measured", {})
+	if measured.is_empty():
+		return (
+			"Checked %d controls on %d screens"
+			% [int(facts.get("controls", 0)), (facts.get("pages", []) as Array).size() + 1]
+		)
+	var windowed := bool(measured.get("windowed", false))
+	var frame: Dictionary = measured.get("frame_ms" if windowed else "cpu_frame_ms", {})
+	var line := "p95 %.1f ms a frame here" % float(frame.get("p95", 0.0))
+	if windowed:
+		line += " · %d draw calls" % int(measured.get("draw_calls", 0))
+	return line
 
 
 ## "3 high · 5 medium": how serious what drifts is, at a glance.
@@ -466,10 +530,13 @@ func _finding_row(item: Dictionary) -> HBoxContainer:
 	var dot := UI.status_dot(str(DOTS.get(severity, "off")))
 	row.add_child(dot)
 	var name := str(item.get("path", "")).get_file()
-	var words := UI.label(
-		"%s  %s → %s" % [name, str(item.get("measured", "")), str(item.get("target", ""))],
-		"JoineryCaption"
-	)
+	var shown := "%s  %s → %s" % [name, str(item.get("measured", "")), str(item.get("target", ""))]
+	if kind != "match":
+		# A check's finding reads best in its own words: what was seen, and where.
+		shown = str(item.get("message", ""))
+		if name != "project.godot":
+			shown = "%s: %s" % [name, shown]
+	var words := UI.label(shown, "JoineryCaption")
 	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	words.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	words.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
@@ -582,6 +649,33 @@ func _on_stop() -> void:
 	stop.disabled = true
 	_step.text = "Stopping…"
 	stop_pressed.emit()
+
+
+func _target_picker() -> OptionButton:
+	var picker := OptionButton.new()
+	picker.accessibility_name = "Target machine"
+	picker.tooltip_text = "Judge frame times and budgets for this machine"
+	picker.flat = true
+	picker.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	picker.fit_to_longest_item = false
+	for index: int in TARGETS.size():
+		var id: String = TARGETS.keys()[index]
+		picker.add_item(str(TARGETS[id]), index)
+		picker.set_item_metadata(index, id)
+	UI.bind_height(picker, "xs")
+	picker.item_selected.connect(
+		func(index: int) -> void: target_changed.emit(str(picker.get_item_metadata(index)))
+	)
+	return picker
+
+
+## Show [param target] as the picked machine, without asking to measure again.
+func show_target(target: String) -> void:
+	if target_picker == null:
+		return
+	for index: int in target_picker.item_count:
+		if str(target_picker.get_item_metadata(index)) == target:
+			target_picker.select(index)
 
 
 func _small_icon(icon_name: String, tooltip: String) -> Button:
