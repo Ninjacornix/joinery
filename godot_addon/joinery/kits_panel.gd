@@ -6,7 +6,8 @@ extends VBoxContainer
 ## from a model made with a kit (edit_button), it changes that model's set instead.
 ##
 ## The workspace places [member switch] (Assets | Kits) and [member list] (the kits) in its
-## browser and swaps this panel in for the asset view while the Kits tab is on.
+## browser and swaps this panel in for the asset view while the Kits tab is on. Shared kits
+## (kit_share.gd) sit at the top: Import kit…, Export kit… and the kits imported here.
 
 ## The Kits tab was turned on (true) or off.
 signal toggled(on: bool)
@@ -20,6 +21,7 @@ const PARTS_SCRIPT := preload("res://addons/joinery/parts_panel.gd")
 const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
 const UI_COMPONENTS := preload("res://addons/joinery/ui_components.gd")
 const UI_MOTION := preload("res://addons/joinery/ui_motion.gd")
+const SHARE_SCRIPT := preload("res://addons/joinery/kit_share.gd")
 ## Seconds after the last change before Blender draws the preview.
 const PREVIEW_DELAY := 0.45
 const VARIATIONS := 10
@@ -27,7 +29,13 @@ const VARIATIONS := 10
 const PREVIEW_EM := 18.0
 
 ## The command that runs Joinery's CLI (tests use a Python interpreter); empty runs uv.
-var cli_prefix := PackedStringArray()
+var cli_prefix := PackedStringArray():
+	set(value):
+		cli_prefix = value
+		if share != null:
+			share.cli_prefix = value
+## Import kit…, Export kit… and the imported kits.
+var share: SHARE_SCRIPT
 var switch: HBoxContainer
 var list: LIST_SCRIPT
 var edit_button: Button
@@ -107,6 +115,13 @@ func _tab(text: String, tip: String) -> Button:
 
 
 func _build_body() -> void:
+	share = SHARE_SCRIPT.new()
+	share.changed.connect(
+		func(result: Dictionary) -> void:
+			catalogue = []
+			made.emit(result)
+	)
+	add_child(share)
 	var heading := VBoxContainer.new()
 	heading.theme_type_variation = "JoineryTight"
 	add_child(heading)
@@ -211,6 +226,7 @@ func set_open(on: bool) -> void:
 		_editing = {}
 	elif catalogue.is_empty() and _list_job == null:
 		_list_job = _start(PackedStringArray(["kits", "list", "--json"]))
+		share.refresh()
 	toggled.emit(on)
 
 
