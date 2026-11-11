@@ -5,7 +5,8 @@ extends VBoxContainer
 ## cannot carry, such as height, are listed too). Click a row, or the model in the preview, to
 ## make a part the message target; drag a row onto the message to add it. A picked map shows
 ## beside the model in [member map_view] (the workspace places it), and the surfaces of the
-## picked material are tinted in the preview.
+## picked material are tinted in the preview. The model's actions are listed and played by
+## [member animations] (animation_browser.gd), which the workspace places under the preview.
 
 ## The user picked a part: a message target from target_chip.for_part (label, tooltip, ids).
 signal part_selected(target: Dictionary)
@@ -15,6 +16,7 @@ signal parts_loaded(report: Dictionary)
 const COMMAND_SCRIPT := preload("command_job.gd")
 const INDICATOR_SCRIPT := preload("activity_indicator.gd")
 const CHIP_SCRIPT := preload("target_chip.gd")
+const ANIMATIONS_SCRIPT := preload("animation_browser.gd")
 const UI_COMPONENTS := preload("ui_components.gd")
 const UI_THEME := preload("ui_theme.gd")
 const IMAGES := ["png", "jpg", "jpeg", "webp", "bmp", "tga", "svg"]
@@ -33,6 +35,8 @@ const MAP_EM := 12.0
 var tree: Tree
 ## The picked map beside the model; hidden unless a map is picked.
 var map_view: VBoxContainer
+## The model's animations under the preview; hidden when it has none.
+var animations: ANIMATIONS_SCRIPT
 var _map_picture: TextureRect
 var _map_caption: Label
 var _viewer: Control
@@ -90,6 +94,8 @@ func _init() -> void:
 	_map_caption = UI_COMPONENTS.label("", "JoineryCaption", true)
 	_map_caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	map_view.add_child(_map_caption)
+	animations = ANIMATIONS_SCRIPT.new()
+	animations.part_selected.connect(part_selected.emit)
 
 
 func _notification(what: int) -> void:
@@ -103,8 +109,9 @@ func _notification(what: int) -> void:
 		_job.cancel()
 		_job = null
 	elif what == NOTIFICATION_PREDELETE and is_instance_valid(map_view):
-		if map_view.get_parent() == null:
-			map_view.free()
+		for view: Control in [map_view, animations]:
+			if is_instance_valid(view) and view.get_parent() == null:
+				view.free()
 
 
 ## Show the parts of [param asset] (an index entry) when it is a model made in Blender;
@@ -123,6 +130,7 @@ func attach(viewer: Control) -> void:
 	_viewer = viewer
 	viewer.connect("part_clicked", _on_model_clicked)
 	viewer.call("highlight", str(_target.get("material", "")))
+	animations.attach(viewer)
 
 
 ## List the parts of [param asset] (a model or its source, project-relative or res://).
@@ -194,6 +202,7 @@ func set_report(report: Dictionary) -> void:
 			item.set_metadata(0, part)
 			_items[str(part.get("id", ""))] = item
 	_update_state()
+	animations.set_report(report)
 	parts_loaded.emit(report)
 
 

@@ -233,6 +233,7 @@ func _build_body(split: HSplitContainer) -> void:
 	_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	stage.add_child(_preview)
+	body.add_child(_parts_panel.animations)
 	body.add_child(_parts_panel)
 	_status = UI_COMPONENTS.label("", "JoineryError", true)
 	_status.hide()
@@ -701,8 +702,7 @@ func _describe(asset: Dictionary) -> String:
 	return " · ".join(words)
 
 
-## Parts: a segment per file (the source, then each derived part), so each can be previewed
-## and opened on its own.
+## Parts: a segment per file (the source, then each derived part), each previewed and opened.
 func _show_parts(owner: Dictionary, viewing: String) -> void:
 	for child: Node in _parts.get_children():
 		_parts.remove_child(child)
