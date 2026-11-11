@@ -34,6 +34,7 @@ func setup(plugin: Object, chat: Node) -> void:
 		"review_media": _on_review_media,
 		"task_event": _on_task_event,
 		"task_review": _on_task_review,
+		"review_notes": _on_review_notes,
 	}
 	for signal_name: String in links:
 		if chat.has_signal(signal_name):
@@ -126,7 +127,33 @@ func _on_file_preview(event: Dictionary) -> void:
 			]
 		)
 	)
+	_glance(event)
 	_plugin.call("_show_edit_review_panel")
+
+
+## The review panel (review_panel.gd) held by the Review tab, or null.
+func _panel() -> Object:
+	var tab: Variant = _plugin.get("_review_tab")
+	var panel: Variant = (tab as Object).call("detail") if tab is Object else null
+	return panel as Object if panel is Object else null
+
+
+## The event's facts, checks and reviewer notes join the review on show.
+func _glance(event: Dictionary) -> void:
+	var panel := _panel()
+	if panel != null and panel.has_method("show_glance"):
+		panel.call("show_glance", event)
+
+
+## The reviewer's notes arrived after the review opened.
+func _on_review_notes(event: Dictionary) -> void:
+	var review: Dictionary = _plugin.get("_file_review")
+	if review.get("transaction_id") != event.get("transaction_id"):
+		return
+	for key: String in ["review_notes", "reviewer_status", "reviewer"]:
+		if event.has(key):
+			review[key] = event[key]
+	_glance(event)
 
 
 ## The renders finished: the review panel and the request's card take the pictures.
@@ -136,10 +163,10 @@ func _on_review_media(event: Dictionary) -> void:
 		return
 	var media: Array = event.get("media", [])
 	review["media"] = media
-	var tab: Variant = _plugin.get("_review_tab")
-	var panel: Variant = (tab as Object).call("detail") if tab is Object else null
-	if panel is Object and (panel as Object).has_method("update_media"):
-		(panel as Object).call("update_media", media)
+	var panel := _panel()
+	if panel != null and panel.has_method("update_media"):
+		panel.call("update_media", media)
+	_glance(event)
 	var dock: Variant = _plugin.get("_dock")
 	var card: Variant = (
 		(dock as Object).call("_card")

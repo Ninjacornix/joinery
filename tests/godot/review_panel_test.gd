@@ -1,6 +1,7 @@
 extends SceneTree
-## The Review panel, headless: counts, Before/After only with pairs, a real image preview,
-## loading and failure, details, optimistic Accept/Discard with rollback, and results. Also
+## The Review panel, headless: counts, Before/After only with pairs, a split picture for a
+## texture pair, loading and failure, the changed lines of text, details, optimistic
+## Accept/Discard with rollback, and results. Also
 ## the settings page's Compact history, which asks in place before it runs.
 
 const PANEL := preload("res://addons/joinery/review_panel.gd")
@@ -139,18 +140,34 @@ func _check_image_pair(panel: PANEL) -> void:
 	_check(shown[0] == 1, "Showing a review asks to bring the panel into view")
 	_check(panel.pending, "A shown review is pending")
 	_check(panel._title.text == "Darken the door wood", "The title is just the summary")
-	_check(panel._counts.text == "1 image · 2 files", "Counts caption: " + panel._counts.text)
+	var facts: String = panel._summary.facts_text()
+	_check(facts == "Door wood darker, 64×48 → 80×40 px · 1 image · 2 files", "Facts line: " + facts)
 	_check(panel._segment.visible, "Before/After shows when a pair exists")
 	_check(not panel._new_chip.visible, "A changed asset is not marked new")
-	_check(panel._after.button_pressed and not panel._before.button_pressed, "After is the default")
+	_check(
+		not panel._after.button_pressed and not panel._before.button_pressed,
+		"A texture pair opens as a split picture, neither side pressed"
+	)
+	var swipe: Control = panel._media.swipe()
+	_check(swipe.visible and is_equal_approx(swipe.split, 0.5), "The split starts in the middle")
+	_check(swipe.before != null and swipe.after != null, "Both sides are in the split")
 	var texture: Texture2D = panel._media.texture()
 	_check(texture != null and texture.get_size() == Vector2(80, 40), "The After image renders")
-	_check(panel._media.file_name() == "door_wood.png", "The file name sits above the preview")
+	_check(panel._media.file_name() == "door_wood.png", "The shown file is named")
 	_check(not panel._details_scroll.visible, "Details start closed when there is media")
 	panel._before.button_pressed = true
 	await _frames()
 	texture = panel._media.texture()
 	_check(texture != null and texture.get_size() == Vector2(64, 48), "Before swaps the image")
+	_check(is_equal_approx(swipe.split, 1.0), "Before slides the line all the way")
+	panel._before.button_pressed = false
+	await _frames()
+	_check(
+		panel._media.side == "compare" and is_equal_approx(swipe.split, 0.5),
+		"Unpressing the side goes back to the split"
+	)
+	panel._before.button_pressed = true
+	await _frames()
 	_check(panel._media.texture().get_width() > 0, "Headless image has a real size")
 	_check(panel._media.size.y > panel.size.y * 0.4, "The preview takes most of the height")
 	_check(
@@ -173,7 +190,7 @@ func _check_new_asset(panel: PANEL) -> void:
 		panel
 		. show_file_review(
 			"Create a low-poly hammer",
-			"+ art/sources/hammer.blend\n+ recipes/hammer.toml",
+			"",
 			[{"path": "art/models/hammer.glb", "media": "image", "after": still}],
 		)
 	)
@@ -181,7 +198,9 @@ func _check_new_asset(panel: PANEL) -> void:
 	_check(not panel._segment.visible, "Before/After hides without a pair")
 	_check(panel._new_chip.visible, "A new asset shows the New chip")
 	_check(panel._media.texture() != null, "A new model render shows")
-	_check(panel._counts.text == "1 model", "Counts without changes: " + panel._counts.text)
+	_check(not panel._media.filmstrip().visible, "One item has no filmstrip")
+	var facts: String = panel._summary.facts_text()
+	_check(facts == "1 model", "Counts without changes: " + facts)
 
 
 func _check_audio(panel: PANEL) -> void:
@@ -334,8 +353,20 @@ func _check_details(panel: PANEL) -> void:
 		)
 	)
 	await _frames()
-	_check(not panel._media.visible, "No media hides the preview")
-	_check(panel._details_scroll.visible, "Details open by default without media")
+	_check(panel._media.visible, "Text changes are the preview")
+	_check(panel._media.current_kind() == "text", "The preview is the changed lines")
+	var shown: String = panel._media.diff_view().shown_text()
+	_check(shown.contains("+var b := 3") and shown.contains("-var a := 1"), "Changed lines show")
+	_check(not shown.contains("@@"), "No hunk headers in the preview")
+	_check(not panel._segment.visible, "Text has no Before/After switch")
+	_check(
+		panel._summary.facts_text() == "+2 −1 lines · 1 model · 1 script",
+		"Text facts: " + panel._summary.facts_text()
+	)
+	_check(not panel._details_scroll.visible, "Details stay closed with a preview")
+	panel._details_button.button_pressed = true
+	await _frames()
+	_check(panel._details_scroll.visible, "The Details button opens them")
 	_check(panel._details.rows().size() == 2, "One row per changed file")
 	_check(panel._details.row_counts(0) == "+2 −1", "Line counts: " + panel._details.row_counts(0))
 	_check(panel._details.row_counts(1) == "", "A binary file has no line counts")
@@ -350,6 +381,16 @@ func _check_details(panel: PANEL) -> void:
 	)
 	await _frames()
 	_check(not panel._details_scroll.visible, "Details stay closed with media")
+	_check(panel._media.filmstrip().visible, "A picture and text make a filmstrip")
+	_check(panel._media.filmstrip().tiles().size() == 2, "One tile per item")
+	_check(panel._media.current_kind() == "image", "The picture comes first")
+	panel._media.select_item(1)
+	await _frames()
+	_check(panel._media.current_kind() == "text", "A tile shows its item")
+	panel.show_file_review("Only a model went", "", [], [{"path": "a.glb", "change": "deleted"}])
+	await _frames()
+	_check(not panel._media.visible, "Nothing to preview hides the stage")
+	_check(panel._details_scroll.visible, "Details open when there is nothing to preview")
 	panel.set_details_open(true)
 	await _frames()
 	_check(panel._details_scroll.visible, "The preference opens details")
@@ -362,15 +403,13 @@ func _check_details(panel: PANEL) -> void:
 	await _frames()
 	_check(panel._details_scroll.visible, "The details preference holds for the next review")
 	panel.set_details_open(false)
-	panel._details_button.button_pressed = true
-	await _frames()
-	_check(panel._details_scroll.visible, "The Details button opens them")
 
 
 func _check_scene(panel: PANEL) -> void:
 	panel.show_scene_review("Move the lamp up", 4)
 	await _frames()
-	_check(panel._counts.text == "4 scene nodes", "Scene counts: " + panel._counts.text)
+	var facts: String = panel._summary.facts_text()
+	_check(facts == "4 scene nodes", "Scene counts: " + facts)
 	_check(
 		not panel._media.visible and panel._scene_note.visible, "Scene edits point at the viewport"
 	)
@@ -380,6 +419,21 @@ func _check_scene(panel: PANEL) -> void:
 		panel._footer.get_global_rect().end.y >= panel.get_global_rect().end.y - 2,
 		"Buttons stay at the bottom without media"
 	)
+	# With the viewport's before and after, a scene edit is one split picture.
+	var frames := [
+		{
+			"path": "scenes/room.tscn",
+			"media": "image",
+			"label": "Viewport",
+			"before": _image("room-before.png", Color(0.2, 0.2, 0.25), Vector2i(160, 90)),
+			"after": _image("room-after.png", Color(0.5, 0.45, 0.3), Vector2i(160, 90)),
+		}
+	]
+	panel.show_scene_review("Light the room", 2, frames)
+	await _frames()
+	_check(panel._media.visible and not panel._scene_note.visible, "The viewport frames show")
+	_check(panel._media.swipe().visible, "A scene edit compares in one frame")
+	_check(panel._segment.visible, "The scene's sides can be flipped")
 
 
 func _check_applying(panel: PANEL) -> void:
@@ -459,8 +513,7 @@ func _check_motion(panel: PANEL) -> void:
 	panel._details_button.button_pressed = false
 	panel._details_button.button_pressed = true
 	await create_timer(0.6).timeout
-	_check(panel._counts.text == "3 images", "Counts roll to their value: " + panel._counts.text)
-	_check(panel._counts.visible_characters == -1, "The roll finishes")
+	_check(panel._summary.facts_text() == "3 images", "Facts: " + panel._summary.facts_text())
 	_check(is_equal_approx(panel._header.modulate.a, 1.0), "The header lands from the card")
 	_check(is_equal_approx(panel.modulate.a, 1.0), "The panel finishes fading in")
 	panel._accept.pressed.emit()

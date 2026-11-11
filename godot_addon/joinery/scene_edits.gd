@@ -7,6 +7,7 @@ extends RefCounted
 signal accepted(scene_path: String, summary: String)
 
 const NODE_OPERATIONS := preload("node_operations.gd")
+const SNAPSHOT := preload("review_snapshot.gd")
 
 var root: Node
 var transaction_id := ""
@@ -102,6 +103,8 @@ func preview(scene: Node, payload: Dictionary, expected: Dictionary, targets: Ar
 	var batch: Dictionary = _generic.validate_batch(_generic_plans)
 	if not batch["success"]:
 		return _error(str(batch["message"]))
+	# The viewport before the edit, for the review's before/after.
+	SNAPSHOT.take_before()
 	root = scene
 	operations = ops.duplicate(true)
 	summary = str(payload.get("summary", "Scene edit")).left(160)

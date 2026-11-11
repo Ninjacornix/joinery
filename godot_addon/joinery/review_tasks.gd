@@ -60,6 +60,7 @@ func open(id: String) -> bool:
 				preview.get("changes", []),
 			)
 		)
+		panel.call("show_glance", preview)
 	return true
 
 
@@ -100,6 +101,14 @@ func on_event(event: Dictionary) -> String:
 				_previews[id]["media_pending"] = false
 			if showing == id:
 				panel.call("update_media", event.get("media", []))
+				panel.call("show_glance", event)
+			return ""
+		"review_notes":
+			for key: String in ["review_notes", "reviewer_status", "reviewer"]:
+				if _previews.has(id) and event.has(key):
+					_previews[id][key] = event[key]
+			if showing == id:
+				panel.call("show_glance", event)
 			return ""
 		"file_decision":
 			_previews.erase(id)

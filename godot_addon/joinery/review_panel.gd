@@ -1,10 +1,16 @@
 @tool
 extends VBoxContainer
-## The Review panel: the one place to decide on a change. Top to bottom: the request as the
-## title with a counts caption and a Before/After switch, a large preview that takes the
-## remaining height, the Details toggle with the changed files below it, and Discard / Accept
-## at the bottom right. Discard only throws the proposed change away: the user's files were
-## never touched, and the panel says so.
+## The Review panel: answers "is this right?" in one look. Top to bottom: the request as the
+## title with a Before/After switch, one before/after view that takes the remaining height
+## (review_media.gd: a split picture, a model from two angles, A/B audio, the changed lines; a
+## filmstrip when there are several items), one line of facts, the checks as one quiet status,
+## the reviewer's notes as one line when there are any (review_summary.gd), and the Details
+## disclosure beside Discard / Accept on the last row. Details hold the files with their
+## diffs, the checks that ran and every note; they stay closed unless asked for. Discard only
+## throws the proposed change away: the user's files were never touched, and the panel says so.
+##
+## Keyboard, with focus anywhere in the review: Enter accepts, Backspace or Delete discards,
+## A or B flips between before and after.
 ##
 ## Deciding is optimistic: pressing Accept or Discard collapses the review into one line
 ## ("Change accepted", with dots while the commit runs) at once. [method show_result] confirms
@@ -17,6 +23,8 @@ signal accept_pressed
 signal reject_pressed
 ## A review is ready: bring the panel into view.
 signal show_requested
+## What the review shows at a glance changed (a render arrived, notes came in).
+signal glance_changed
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
@@ -24,10 +32,12 @@ const UI := preload("ui_components.gd")
 const INDICATOR := preload("activity_indicator.gd")
 const MEDIA := preload("review_media.gd")
 const DETAILS := preload("review_details.gd")
+const SUMMARY := preload("review_summary.gd")
+const SNAPSHOT := preload("review_snapshot.gd")
 const ACCEPTED := "Change accepted"
 const REJECTED := "Discarded. Your files were not touched."
 const SCENE_NOTE := "The change is shown in the viewport."
-## Minimum width of Accept and Discard, in em.
+## Minimum width of Accept and Discard, in em; narrow panels shrink them to their text.
 const BUTTON_EM := 8.0
 ## Open Details grow with their rows up to this many control heights, then scroll; the
 ## scroll bar shows only past that.
@@ -42,7 +52,6 @@ var _serial := 0
 var _details_pref := false
 var _header: HBoxContainer
 var _title: Label
-var _counts: Label
 var _new_chip: PanelContainer
 var _segment: HBoxContainer
 var _before: Button
@@ -51,8 +60,8 @@ var _stage: MarginContainer
 var _body: VBoxContainer
 var _media: MEDIA
 var _scene_note: Label
+var _summary: SUMMARY
 var _details_button: Button
-var _details_row: HBoxContainer
 var _details_scroll: ScrollContainer
 var _gutter: MarginContainer
 var _details: DETAILS
@@ -82,6 +91,8 @@ func _init() -> void:
 	theme_type_variation = "JoineryStack"
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
+	# A click anywhere in the review gives it focus, so its keys work.
+	focus_mode = Control.FOCUS_CLICK
 	accessibility_name = "Review the proposed change"
 	_build_header()
 	_stage = MarginContainer.new()
@@ -102,6 +113,8 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_THEME_CHANGED:
 		_queue_sizes()
 		_tint_outcome()
+	elif what == NOTIFICATION_RESIZED:
+		_queue_sizes()
 
 
 ## Called by UI_THEME.watch after a live re-theme.
@@ -120,46 +133,87 @@ func _queue_sizes() -> void:
 	_apply_sizes.call_deferred()
 
 
-## Review a live scene edit: no media, the caption points at the viewport, and the counts
-## read "4 scene nodes".
-func show_scene_review(summary: String, count: int) -> void:
+## Review a live scene edit: the viewport before and after as one split picture when the
+## editor could take both frames ([param media], or review_snapshot.gd), else a line pointing
+## at the viewport. The facts read "4 scene nodes".
+func show_scene_review(summary: String, count: int, media: Array = []) -> void:
 	var arriving := _begin(summary)
-	_media.clear_media()
-	_media.hide()
+	var frames := media if not media.is_empty() else SNAPSHOT.media()
+	_media.show_media(frames)
 	_details.clear_changes()
-	_details_button.hide()
-	_details_row.hide()
-	_details_scroll.hide()
-	_scene_note.show()
-	_spacer.show()
-	_roll_counts(DETAILS.scene_text(count), count)
+	_summary.show_review({"scene_count": count})
+	_scene_note.visible = not _media.visible
+	_sync_details()
+	_set_details(false, false)
 	_sync_sides()
 	_present(arriving)
 
 
-## Review file changes: [param media] items ({path, media: "image"|"audio", before?,
-## after?}) fill the preview, [param diff] and [param changes] ({path, change}) fill Details.
-## Details start open when there is no media or the preference is on.
+## Review file changes: [param media] items ({path, media: "image"|"audio", before?, after?})
+## and the changed lines of [param diff] fill the preview; [param changes] ({path, change})
+## and the diff fill Details. Details start closed unless there is nothing to preview or the
+## preference is on. [method show_glance] adds the event's facts, checks and notes.
 func show_file_review(
 	summary: String, diff: String, media: Array = [], changes: Array = []
 ) -> void:
 	var arriving := _begin(summary)
 	_scene_note.hide()
-	_media.show_media(media)
 	var listed := changes if not changes.is_empty() else DETAILS.changes_from(diff, media)
+	var items := media.duplicate()
+	var text := _text_item(diff, listed)
+	if not text.is_empty():
+		items.append(text)
+	_media.show_media(items)
 	_details.show_changes(diff, listed)
-	_details_button.visible = _details.has_content()
-	_details_row.visible = _details_button.visible
-	_roll_counts(DETAILS.counts_text(listed), listed.size())
+	_summary.show_review({"changes": listed, "diff": diff})
+	_measure()
+	_sync_details()
 	_sync_sides()
 	_set_details(_details_pref or not _media.visible, false)
 	_present(arriving)
 
 
+## The review event's extra fields: the agent's "facts", the "checks" that ran, the reviewer's
+## "review_notes" and "reviewer_status". Missing keys keep what is shown.
+func show_glance(extra: Dictionary) -> void:
+	if _state == "empty":
+		return
+	_summary.update(extra)
+	_sync_details()
+	glance_changed.emit()
+
+
 ## The before/after renders of the change on screen arrived ({path, before?, after?, error?}).
 func update_media(media: Array) -> void:
 	_media.update_media(media)
+	_measure()
 	_sync_sides()
+	glance_changed.emit()
+
+
+## The review as the chat card shows it: {line, simple, thumbnail}. "simple" changes can be
+## decided from the card; others open this panel.
+func glance() -> Dictionary:
+	if not pending:
+		return {}
+	return {
+		"line": _summary.facts_text(),
+		"simple": _summary.simple(_media.asset_count()),
+		"thumbnail": _media.thumbnail(),
+		"title": _title.text,
+	}
+
+
+## Bring the panel into view (the chat card's Review link).
+func request_show() -> void:
+	show_requested.emit()
+
+
+## Flip the preview between before and after (A or B). Returns the side now on show.
+func flip() -> String:
+	var shown := _media.flip()
+	_sync_sides()
+	return shown
 
 
 ## Disable both buttons while the decision is applied; Accept shows dots and "Applying…".
@@ -174,10 +228,12 @@ func set_applying(on: bool) -> void:
 	_accept.tooltip_text = (
 		"Applying the change…"
 		if on
-		else ("Try keeping this change again" if _failed else "Keep this change")
+		else ("Try keeping this change again (Enter)" if _failed else "Keep this change (Enter)")
 	)
 	_reject.tooltip_text = (
-		"Applying the change…" if on else "Throw this change away. Your files stay as they are."
+		"Applying the change…"
+		if on
+		else "Throw this change away. Your files stay as they are. (Delete)"
 	)
 	# A disabled Discard keeps its fill and height, only dimmed, so the pair still reads as two
 	# buttons (the theme's disabled secondary has no fill).
@@ -231,8 +287,8 @@ func show_error(text: String) -> void:
 		UI_MOTION.fade_in(_error_row)
 
 
-## Decide from outside the panel (the Review tab's row buttons): the same optimistic
-## outcome and signal as pressing Accept or Discard here.
+## Decide from outside the panel (the Review tab's row buttons, the chat card): the same
+## optimistic outcome and signal as pressing Accept or Discard here.
 func decide(accepted: bool) -> void:
 	_decide(accepted)
 
@@ -245,18 +301,18 @@ func clear() -> void:
 	_reset_stage()
 	_media.clear_media()
 	_details.clear_changes()
+	_summary.clear()
 	_title.text = ""
-	_counts.text = ""
 	_set_error("")
 
 
-## The Details preference: open by default for every review. Without media they are always
-## open. Applies to the review on show as well.
+## The Details preference: open by default for every review. Without a preview they are
+## always open. Applies to the review on show as well.
 func set_details_open(open: bool) -> void:
 	if open == _details_pref:
 		return
 	_details_pref = open
-	if _state == "review" and _details.has_content():
+	if _state == "review" and _details_button.visible:
 		_set_details(open or not _media.visible, true)
 
 
@@ -303,6 +359,39 @@ func arrive_from(card_rect: Rect2) -> void:
 	tween.tween_callback(ghost.queue_free)
 
 
+# --- Keyboard ----------------------------------------------------------------------------------
+
+
+func _input(event: InputEvent) -> void:
+	var key := event as InputEventKey
+	if key == null or not key.pressed or key.echo or _state != "review":
+		return
+	if key.ctrl_pressed or key.alt_pressed or key.meta_pressed or key.shift_pressed:
+		return
+	if not _has_focus_inside():
+		return
+	match key.keycode:
+		KEY_ENTER, KEY_KP_ENTER:
+			_decide(true)
+		KEY_BACKSPACE, KEY_DELETE:
+			_decide(false)
+		KEY_A, KEY_B:
+			flip()
+		_:
+			return
+	get_viewport().set_input_as_handled()
+
+
+## True when the focus is on the panel or inside it, and not in a field that takes text.
+func _has_focus_inside() -> bool:
+	if not is_visible_in_tree():
+		return false
+	var focused := get_viewport().gui_get_focus_owner()
+	if focused == null or not (focused == self or is_ancestor_of(focused)):
+		return false
+	return not (focused is LineEdit or focused is TextEdit)
+
+
 # --- Building ----------------------------------------------------------------------------------
 
 
@@ -310,15 +399,10 @@ func _build_header() -> void:
 	_header = HBoxContainer.new()
 	_header.theme_type_variation = "JoineryRow"
 	add_child(_header)
-	var titles := VBoxContainer.new()
-	titles.theme_type_variation = "JoineryTight"
-	titles.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_header.add_child(titles)
 	_title = UI.label("", "JoineryBodyLarge")
+	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_title.mouse_filter = Control.MOUSE_FILTER_PASS
-	titles.add_child(_title)
-	_counts = UI.label("", "JoineryNumeric")
-	titles.add_child(_counts)
+	_header.add_child(_title)
 	var chip := UI.chip("New")
 	chip.label.theme_type_variation = "JoineryCaption"
 	chip.tooltip_text = "This file is new; there is no earlier version to compare"
@@ -332,8 +416,10 @@ func _build_header() -> void:
 	_segment.hide()
 	_header.add_child(_segment)
 	var group := ButtonGroup.new()
-	_before = _side_button("before", "Show the version before the change", group)
-	_after = _side_button("after", "Show the proposed version", group)
+	# Neither pressed is the split picture of a texture.
+	group.allow_unpress = true
+	_before = _side_button("before", "Show the original (A or B flips)", group)
+	_after = _side_button("after", "Show the change (A or B flips)", group)
 	_after.set_pressed_no_signal(true)
 
 
@@ -352,6 +438,9 @@ func _side_button(side: String, hint: String, group: ButtonGroup) -> Button:
 		func(on: bool) -> void:
 			if on:
 				_media.set_side(side)
+			elif not _before.button_pressed and not _after.button_pressed:
+				_media.set_side("compare")
+			_sync_sides()
 	)
 	_segment.add_child(button)
 	return button
@@ -364,34 +453,19 @@ func _build_body() -> void:
 	_stage.add_child(_body)
 	_media = MEDIA.new()
 	_media.item_changed.connect(_sync_sides)
+	_media.side_changed.connect(_sync_sides)
 	_media.hide()
 	_body.add_child(_media)
 	_scene_note = UI.label(SCENE_NOTE, "JoineryCaption", true)
 	_scene_note.hide()
 	_body.add_child(_scene_note)
-	# The Details toggle sits on its own row with the changed files directly below it, so they
-	# open downwards; Discard / Accept stay the last row.
-	_details_row = HBoxContainer.new()
-	_details_row.theme_type_variation = "JoineryRow"
-	_details_row.hide()
-	_body.add_child(_details_row)
-	# A flat disclosure, not a tab-like button: no fill open or closed, muted ink that
-	# brightens on hover, and no padding, so its chevron sits on the content edge.
-	_details_button = UI.quiet("Details")
-	_details_button.theme_type_variation = "JoinerySectionButton"
-	_details_button.toggle_mode = true
-	_details_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	_details_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	_details_button.accessibility_name = "Show or hide the changed files"
-	UI.bind_icon(_details_button, "disclosure_closed")
-	UI.bind_height(_details_button)
-	_details_button.toggled.connect(func(open: bool) -> void: _set_details(open, true))
-	_details_row.add_child(_details_button)
+	_summary = SUMMARY.new()
+	_body.add_child(_summary)
 	_details_scroll = ScrollContainer.new()
 	_details_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_details_scroll.size_flags_vertical = Control.SIZE_FILL
 	_details_scroll.follow_focus = true
-	_details_scroll.accessibility_name = "Changed files"
+	_details_scroll.accessibility_name = "Details"
 	_details_scroll.hide()
 	UI_MOTION.rubber_band(_details_scroll)
 	_body.add_child(_details_scroll)
@@ -402,8 +476,12 @@ func _build_body() -> void:
 	_gutter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_gutter.minimum_size_changed.connect(_fit_details)
 	_details_scroll.add_child(_gutter)
+	var details_box := VBoxContainer.new()
+	details_box.theme_type_variation = "JoineryStack"
+	_gutter.add_child(details_box)
+	details_box.add_child(_summary.info())
 	_details = DETAILS.new()
-	_gutter.add_child(_details)
+	details_box.add_child(_details)
 	# Keeps the buttons at the bottom when there is neither a preview nor open details.
 	_spacer = Control.new()
 	_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -430,6 +508,19 @@ func _build_footer() -> void:
 	_footer = HBoxContainer.new()
 	_footer.theme_type_variation = "JoineryStack"
 	_body.add_child(_footer)
+	# A flat disclosure, not a tab-like button: no fill open or closed, muted ink that
+	# brightens on hover, and no padding, so its chevron sits on the content edge.
+	_details_button = UI.quiet("Details")
+	_details_button.theme_type_variation = "JoinerySectionButton"
+	_details_button.toggle_mode = true
+	_details_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	_details_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_details_button.accessibility_name = "Show or hide the files, checks and notes"
+	_details_button.tooltip_text = "Files, checks and notes"
+	UI.bind_icon(_details_button, "disclosure_closed")
+	UI.bind_height(_details_button)
+	_details_button.toggled.connect(func(open: bool) -> void: _set_details(open, true))
+	_footer.add_child(_details_button)
 	var push := Control.new()
 	push.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	push.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -540,7 +631,11 @@ func _present(arriving: bool) -> void:
 	if arriving:
 		UI_MOTION.fade_in(self)
 		UI_MOTION.reveal(self, "down")
+	# Keys work at once unless the user is busy elsewhere (typing in the chat).
+	if is_visible_in_tree() and get_viewport().gui_get_focus_owner() == null:
+		grab_focus()
 	show_requested.emit()
+	glance_changed.emit()
 
 
 func _decide(accepted: bool) -> void:
@@ -574,8 +669,46 @@ func _clear_if_current(serial: int) -> void:
 		clear()
 
 
+## A text item for the preview: the changed lines of the text files in [param diff], named
+## "2 text files" (or the one file), shown with its file type on the filmstrip.
+static func _text_item(diff: String, changes: Array) -> Dictionary:
+	var files := DETAILS.split_diff(diff).keys().filter(
+		func(path: String) -> bool: return path != DETAILS.LOOSE_GROUP
+	)
+	var lines := 0
+	for section: Variant in DETAILS.split_diff(diff).values():
+		var counts := DETAILS.line_counts(section as Array)
+		lines += counts[0] + counts[1]
+	if lines == 0:
+		return {}
+	var name := (
+		str(files[0]).get_file() if files.size() == 1 else DETAILS.plural(files.size(), "text file")
+	)
+	if files.is_empty():
+		name = DETAILS.counts_text(changes) if not changes.is_empty() else "Text changes"
+	var extension := str(files[0]).get_extension() if files.size() == 1 else ""
+	return {
+		"path": name,
+		"media": "text",
+		"diff": diff,
+		"word": "." + extension if not extension.is_empty() else "Aa",
+	}
+
+
+## Take what the media can measure into the facts line.
+func _measure() -> void:
+	_summary.set_measured(_media.measured_facts())
+
+
+## Details show when there is anything behind them: files, checks or notes.
+func _sync_details() -> void:
+	_details_button.visible = _details.has_content() or _summary.has_info()
+	if not _details_button.visible:
+		_details_scroll.hide()
+
+
 func _set_details(open: bool, animate: bool) -> void:
-	var shown := open and _details.has_content()
+	var shown := open and _details_button.visible
 	_details_button.set_pressed_no_signal(shown)
 	UI.bind_icon(_details_button, "disclosure_open" if shown else "disclosure_closed")
 	_details_scroll.visible = shown
@@ -586,25 +719,18 @@ func _set_details(open: bool, animate: bool) -> void:
 	if shown:
 		_details_scroll.scroll_vertical = 0
 		if animate:
-			UI_MOTION.reveal(_details)
+			UI_MOTION.reveal(_gutter)
 			UI_MOTION.stagger(_details.rows())
 
 
 func _sync_sides() -> void:
-	var pairs := _media.visible and _media.has_pairs()
+	var pairs := _media.visible and _media.current_paired() and _media.current_kind() != "text"
 	_segment.visible = pairs
-	_new_chip.visible = _media.visible and not pairs and _media.current_is_new()
-	var on_after := _media.side == "after"
-	_after.set_pressed_no_signal(on_after)
-	_before.set_pressed_no_signal(not on_after)
-
-
-## Set the counts caption, rolling its numbers. When the words change too (a fresh review,
-## "1 model" after "2 images") the numbers roll up from zero ("3 files" from "0 files").
-func _roll_counts(text: String, total: int) -> void:
-	if _counts.text.is_empty() or _shape(_counts.text) != _shape(text):
-		_counts.text = _zeroed(text)
-	UI_MOTION.roll_number(_counts, total, func(_value: float) -> String: return text)
+	_new_chip.visible = (
+		_media.visible and not pairs and _media.current_is_new() and _media.current_kind() != "text"
+	)
+	_after.set_pressed_no_signal(_media.side == "after")
+	_before.set_pressed_no_signal(_media.side == "before")
 
 
 ## A short label that keeps its full width in a row (no ellipsis collapsing it to "…").
@@ -612,24 +738,6 @@ static func _fixed(label: Label) -> Label:
 	label.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 	label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	return label
-
-
-## The text with every number replaced by "#", to tell whether two captions only differ in
-## their numbers.
-static func _shape(text: String) -> String:
-	return RegEx.create_from_string("\\d+").sub(text, "#", true)
-
-
-static func _zeroed(text: String) -> String:
-	var digits := RegEx.create_from_string("\\d+")
-	var result := text
-	var found := digits.search_all(text)
-	found.reverse()
-	for number: RegExMatch in found:
-		var start := number.get_start()
-		var span := number.get_end() - start
-		result = result.substr(0, start) + "0".lpad(span) + result.substr(number.get_end())
-	return result
 
 
 func _set_error(text: String) -> void:
@@ -650,7 +758,8 @@ func _tint_outcome() -> void:
 		_error_icon.self_modulate = get_theme_color("danger", "Joinery")
 
 
-## Accept and Discard share one width: at least 8em, and wide enough for "Applying…".
+## Accept and Discard share one width: 8em, and wide enough for "Applying…"; a narrow panel
+## shrinks them towards that text so Details, Discard and Accept stay on one row.
 func _apply_sizes() -> void:
 	_sizes_queued = false
 	if _accept == null or not is_inside_tree():
@@ -661,7 +770,12 @@ func _apply_sizes() -> void:
 	var busy := font.get_string_size("Applying…", HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
 	busy += _applying_dots.get_combined_minimum_size().x + UI_THEME.space(self, 1)
 	busy += box.get_margin(SIDE_LEFT) + box.get_margin(SIDE_RIGHT)
-	var width := ceilf(maxf(BUTTON_EM * UI_THEME.font_size(self, "body"), busy))
+	var width := maxf(BUTTON_EM * UI_THEME.font_size(self, "body"), busy)
+	if size.x > 0.0:
+		var gaps := _footer.get_theme_constant("separation") * 3.0
+		var room := (size.x - _details_button.get_combined_minimum_size().x - gaps) / 2.0
+		width = maxf(busy, minf(width, room))
+	width = ceilf(width)
 	var height := UI_THEME.control_h(self, "md")
 	for button: Button in [_accept, _reject]:
 		button.custom_minimum_size = Vector2(width, height)
