@@ -47,7 +47,11 @@ ran with full network access, and a host build could drift from what the worker 
    worker can't mount read-only (Blender, SuperCollider, Joinery's own servers) answer
    audited reads from the staged connection. A path into the gateway's own stage is
    read as the project path it stages; a path into any `.joinery/transactions/`
-   folder is refused, so no agent reads another task's stage.
+   folder is refused, so no agent reads another task's stage. The provider's own shell and
+   file tools are held to the same rule: each session starts with `JOINERY_STAGE` (the change
+   it may read, or `none`), and the shared policy hook refuses any other
+   `.joinery/transactions/` folder for every provider (`joinery.stage_access`); a read-only
+   role may not write there at all.
 
 ## Consequences
 
