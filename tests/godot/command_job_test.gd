@@ -75,6 +75,15 @@ func _run() -> void:
 	quit(1 if _failed else 0)
 
 
+## True once a drained pipe says it is closed, reading past its end if it hasn't yet.
+static func _reads_eof(pipe: FileAccess) -> bool:
+	if pipe.get_error() != ERR_FILE_EOF:
+		var extra := pipe.get_buffer(1)
+		if not extra.is_empty():
+			return false
+	return pipe.get_error() == ERR_FILE_EOF
+
+
 func _exited_writer_eof(python: String) -> void:
 	# Stay below the native pipe buffer so the writer can exit before any read.
 	# This exercises queued tail bytes followed by a closed writer, not a timing
@@ -114,10 +123,12 @@ func _exited_writer_eof(python: String) -> void:
 		_check(received == expected, "Drain exact Unicode tail bytes after process exit")
 		_check(stdout_pipe.get_length() == 0, "Drained stdout has zero available bytes")
 		if OS.get_name() == "Windows":
-			_check(stdout_pipe.get_error() == ERR_FILE_EOF, "Closed Windows stdout reports EOF")
+			# A pipe only learns it is closed when a read reaches past the last byte; whether
+			# the drain above already did depends on timing, so read once more.
+			_check(_reads_eof(stdout_pipe), "Closed Windows stdout reports EOF")
 		_check(stderr_pipe.get_length() == 0, "Short EOF writer has no stderr output")
 		if OS.get_name() == "Windows":
-			_check(stderr_pipe.get_error() == ERR_FILE_EOF, "Closed Windows stderr reports EOF")
+			_check(_reads_eof(stderr_pipe), "Closed Windows stderr reports EOF")
 	stdout_pipe.close()
 	stderr_pipe.close()
 	_check(not stdout_pipe.is_open() and not stderr_pipe.is_open(), "Close owned EOF fixture pipes")
