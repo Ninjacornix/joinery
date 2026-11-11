@@ -1188,9 +1188,10 @@ class HostTest:
         class FakeBridge:
             handle = ""
 
-            def __init__(self, _agent: str) -> None:
+            def __init__(self, _agent: str, role: str = "") -> None:
                 self.model_choices: list[Any] = []
                 self.lane: ProjectGateway | None = None
+                self.role = role
 
             async def resume(self, _handle: str) -> bool:
                 return False
@@ -1205,6 +1206,11 @@ class HostTest:
                 return None
 
             async def send(self, prompt: Prompt) -> AsyncIterator[Any]:
+                if self.role == "reviewer":
+                    # The reviewer agent reads the change and finds nothing.
+                    yield Message(text='{"notes": []}')
+                    yield Done(ok=True)
+                    return
                 key = next(k for k in test.scripts if k in prompt.text)
                 lane = self.lane or test.gateway
                 assert lane is not None
@@ -1225,11 +1231,15 @@ class HostTest:
             return self.gateway
 
         class FakeRPC:
-            def __init__(self, gateway: Any, stop: Any, worker: bool = False) -> None:
+            def __init__(
+                self, gateway: Any, stop: Any, worker: bool = False, role: str = ""
+            ) -> None:
                 self.gateway = gateway
-                self.worker = worker
-                self.path = gateway if worker else Path("gateway.sock")
+                self.worker = worker or bool(role)
+                self.path = gateway if self.worker else Path("gateway.sock")
                 self.stop_reason = ""
+                self.reports: list[dict[str, Any]] = []
+                self.reproduce = None
 
             async def start(self) -> None:
                 return None

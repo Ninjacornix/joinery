@@ -282,6 +282,9 @@ class FileTransaction:
         self.tools: list[str] = []
         #: What adding the last decision to the git timeline did (timeline.record).
         self.timeline: dict[str, str] = {}
+        #: The reviewer agent's notes ([{severity, text, file?}]) and how its review went.
+        self.review_notes: list[dict[str, str]] = []
+        self.reviewer: dict[str, Any] = {}
 
     @property
     def original(self) -> Path:
@@ -332,6 +335,10 @@ class FileTransaction:
         }
         if self.tools:
             data["tools"] = self.tools
+        if self.review_notes:
+            data["review_notes"] = self.review_notes
+        if self.reviewer:
+            data["reviewer"] = self.reviewer
         if self.state in PENDING:
             # The full inventory is only needed until the decision.
             data["base"] = self.base
@@ -697,6 +704,17 @@ class FileTransaction:
         transaction.tools = [
             str(tool) for tool in raw.get("tools") or [] if isinstance(tool, str)
         ]
+        transaction.review_notes = [
+            {
+                str(k): str(v)
+                for k, v in note.items()
+                if k in {"severity", "text", "file"}
+            }
+            for note in raw.get("review_notes") or []
+            if isinstance(note, dict)
+        ]
+        reviewer = raw.get("reviewer")
+        transaction.reviewer = dict(reviewer) if isinstance(reviewer, dict) else {}
         # Never accept journal paths outside this project, even after local tampering.
         for path in transaction.base:
             _safe(path)

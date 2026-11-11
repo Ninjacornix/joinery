@@ -22,11 +22,13 @@ from bridge.crew import Crew
 from bridge.host import Bridge
 from bridge.models import Selection
 from bridge.protocol import Done, EditorAction, Message, Prompt
+from bridge.reviewer import Debugger, ReviewAgent
 from bridge.specialists import Specialists
 from bridge.turn_runner import run_turn, settle_compaction
 from joinery import bible_lint, blueprints, brief, chat_attachments, chats
 from joinery.art_approval import approve, review
 from joinery.claims import parallel_limit
+from joinery.debugging import debug_request
 from joinery.editor_ops import validate_edit
 from joinery.gateway import ProjectGateway
 from joinery.gateway_rpc import GatewayRPC
@@ -436,6 +438,32 @@ async def _serve(
         await bridge.connect(project, profile_id)
         specialists = Specialists(gateway, agent_id, profile_id, policy_stop)
 
+        def role_bridge(agent: str, role: str) -> Bridge:
+            return Bridge(agent, role=role)
+
+        def role_endpoint(lane: ProjectGateway, role: str) -> GatewayRPC:
+            return GatewayRPC(lane, policy_stop, role=role)
+
+        def reviewer_for(lane: ProjectGateway, turn: TurnController) -> ReviewAgent:
+            """The reviewer agent that reads ``turn``'s submitted changes."""
+            agent = ReviewAgent(
+                lane,
+                agent=agent_id,
+                profile=profile_id,
+                bridge=role_bridge,
+                endpoint=role_endpoint,
+            )
+            agent.equip(turn)
+            return agent
+
+        reviewer_for(gateway, controller)
+        debugger = Debugger(
+            agent=agent_id,
+            profile=profile_id,
+            bridge=role_bridge,
+            endpoint=role_endpoint,
+        )
+
         async def delegate(jobs: list[dict[str, str]]) -> list[dict[str, str]]:
             assert specialists is not None
             if active is None or active.done():
@@ -449,10 +477,12 @@ async def _serve(
             agent=agent_id,
             profile=profile_id,
             limit=parallel_limit(project),
-            bridge=lambda agent: Bridge(agent),
-            endpoint=lambda lane, stop: GatewayRPC(lane, stop, worker=True),
+            bridge=lambda agent: Bridge(agent, role="worker"),
+            endpoint=lambda lane, stop: GatewayRPC(lane, stop, role="worker"),
             on_stop=policy_stop,
             live=live_edit,
+            reviewer=reviewer_for,
+            debugger=debugger.diagnose,
         )
 
         async def lead_start(request: dict[str, Any]) -> dict[str, Any]:
@@ -602,6 +632,9 @@ async def _serve(
                         origin="user",
                         prompt=task_prompt(data),
                     )
+                elif data.get("kind") == "debug_start":
+                    # /debug, or Debug on the offer after a new error in Output.
+                    await crew.debug(debug_request(data), task_prompt(data))
                 elif data.get("kind") == "prompt":
                     if active is not None and not active.done():
                         emit(

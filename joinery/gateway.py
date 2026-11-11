@@ -852,6 +852,34 @@ class ProjectGateway:
         checked.problems[:0] = moved
         return checked
 
+    def text_diff(self) -> list[str]:
+        """The staged change's text files as unified diff lines."""
+        tx = self.transaction
+        if tx is None:
+            return []
+        lines: list[str] = []
+        for change in tx.diff():
+            if Path(change["path"]).suffix not in TEXT_SUFFIXES:
+                continue
+            old = tx.original / change["path"]
+            new = tx.stage / change["path"]
+            before = (
+                old.read_text(errors="replace").splitlines() if old.is_file() else []
+            )
+            after = (
+                new.read_text(errors="replace").splitlines() if new.is_file() else []
+            )
+            lines.extend(
+                difflib.unified_diff(
+                    before,
+                    after,
+                    fromfile=change["path"],
+                    tofile=change["path"],
+                    lineterm="",
+                )
+            )
+        return lines
+
     def open_review(self, summary: str) -> dict[str, Any]:
         """Put the checked stage in review and return its ``file_preview``.
 
@@ -864,27 +892,7 @@ class ProjectGateway:
             raise ValueError("Nothing is staged for review.")
         if summary.strip():
             tx.summary = summary.strip()[:160]
-        text_diffs: list[str] = []
-        for change in tx.diff():
-            if Path(change["path"]).suffix not in TEXT_SUFFIXES:
-                continue
-            old = tx.original / change["path"]
-            new = tx.stage / change["path"]
-            before = (
-                old.read_text(errors="replace").splitlines() if old.is_file() else []
-            )
-            after = (
-                new.read_text(errors="replace").splitlines() if new.is_file() else []
-            )
-            text_diffs.extend(
-                difflib.unified_diff(
-                    before,
-                    after,
-                    fromfile=change["path"],
-                    tofile=change["path"],
-                    lineterm="",
-                )
-            )
+        text_diffs = self.text_diff()
         reviewed = tx.review()
         media, jobs = plan(
             tx, reviewed, [dict(t) for t in self.target_context if t.get("part_kind")]

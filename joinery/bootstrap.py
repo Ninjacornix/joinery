@@ -340,6 +340,9 @@ def transactions(
                 "created": tx.created,
                 "decided": tx.decided,
                 "tools": tx.tools,
+                # The reviewer agent's notes and how its review went.
+                "review_notes": tx.review_notes,
+                "reviewer": tx.reviewer,
                 "file_count": len(tx.changes),
                 "files": [
                     {"path": change["path"], "change": _change_kind(change)}

@@ -21,16 +21,20 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 
-from bridge.instructions import TASK_PROMPT
+from bridge.instructions import DEBUG_FIX_PROMPT, TASK_PROMPT
 from bridge.protocol import Prompt
 from bridge.turn_runner import run_turn
 from joinery import agents
 from joinery.claims import refusal
+from joinery.debugging import DebugRequest, Diagnosis
 from joinery.gateway import ProjectGateway
+from joinery.peer_review import Reviewer
 from joinery.timing import TurnTiming
 from joinery.turn import TurnController
 
 Emit = Callable[[dict[str, Any]], None]
+#: The debugger agent: (its lane, the error, the model choice) -> the cause and the fix.
+Diagnose = Callable[[ProjectGateway, DebugRequest, Any], Awaitable[Diagnosis]]
 #: The chat host's live edit: (lane, its turn, the edit, the task id) -> the editor's answer.
 LiveEdit = Callable[
     [ProjectGateway, TurnController, dict[str, Any], str],
@@ -72,9 +76,15 @@ class Task:
     id: str
     title: str
     request: str
-    origin: Literal["user", "lead"]
+    origin: Literal["user", "lead", "debug"]
     gateway: ProjectGateway
     controller: TurnController
+    #: The agent role at work now (joinery.roles): a debug task is a debugger, then
+    #: the worker that makes its fix.
+    role: str = "worker"
+    #: The error a debug task is about, and the cause its debugger found.
+    error: str = ""
+    cause: str = ""
     state: str = WORKING
     step: str = ""
     #: Joinery's or the agent's last line, shown on the task's card.
@@ -96,6 +106,9 @@ class Task:
             "title": self.title,
             "request": self.request,
             "origin": self.origin,
+            "role": self.role,
+            "error": self.error,
+            "cause": self.cause,
             "state": self.state,
             "step": self.step,
             "message": self.message,
@@ -109,6 +122,14 @@ class Task:
             "context_used": meter.used,
             "context_window": meter.window,
         }
+
+
+def _reserved(targets: list[str] | tuple[str, ...]) -> list[str]:
+    """Project paths a task reserves, relative to the project."""
+    return sorted(
+        {str(t).replace("\\", "/").removeprefix("res://").strip("/") for t in targets}
+        - {""}
+    )
 
 
 class Crew:
@@ -128,6 +149,9 @@ class Crew:
         ],
         on_stop: Callable[[str], Awaitable[None]],
         live: LiveEdit | None = None,
+        reviewer: Callable[[ProjectGateway, TurnController], Reviewer | None]
+        | None = None,
+        debugger: Diagnose | None = None,
     ) -> None:
         self.gateway = gateway
         self.emit = emit
@@ -139,6 +163,9 @@ class Crew:
         self._endpoint = endpoint
         self._on_stop = on_stop
         self._live = live
+        #: Gives each task's turn its reviewer agent (bridge.reviewer.ReviewAgent.equip).
+        self._reviewer = reviewer
+        self._debugger = debugger
         self.tasks: dict[str, Task] = {}
         #: A provider's own live edit waiting for the editor: {request id: task}.
         self._editor: dict[str, Task] = {}
@@ -210,13 +237,29 @@ class Crew:
                 f"{len(self.working())} tasks are already running, as many as this "
                 "project allows at once. Wait for one to finish, or do this yourself."
             )
-        reserved = sorted(
-            {
-                str(t).replace("\\", "/").removeprefix("res://").strip("/")
-                for t in targets
+        task = self._open(title, request, origin, prompt, targets)
+        work = prompt.model_copy(
+            update={
+                "text": TASK_PROMPT.format(request=request),
+                "primer": "",
             }
-            - {""}
         )
+        task.job = asyncio.create_task(self._run(task, work))
+        return task
+
+    def _open(
+        self,
+        title: str,
+        request: str,
+        origin: Literal["user", "lead", "debug"],
+        prompt: Prompt,
+        targets: list[str] | tuple[str, ...] = (),
+        *,
+        error: str = "",
+    ) -> Task:
+        """A new task's lane, turn and card; its claims on ``targets`` first. A task
+        about an ``error`` starts as its debugger."""
+        reserved = _reserved(targets)
         claims = self.gateway.claims
         path, held_by = claims.first_conflict(set(reserved), "")
         if path:
@@ -231,8 +274,12 @@ class Crew:
         controller = TurnController(
             lane, lambda event: self._emit(holder[0], event), self.agent
         )
+        if self._reviewer is not None:
+            controller.reviewer = self._reviewer(lane, controller)
         task = Task(task_id, title, request, origin, lane, controller)
         task.step = f"Starting {self.provider}…"
+        if error:
+            task.role, task.error, task.step = "debugger", error, "Reading the error…"
         holder.append(task)
         lane.progress = lambda text: self._progress(task, text)
         live = self._live
@@ -241,14 +288,86 @@ class Crew:
             lane.edit_scene = lambda payload: live(lane, controller, payload, task_id)
         self.tasks[task_id] = task
         self.emit(task.event())
+        return task
+
+    # --- Debugging ----------------------------------------------------------------------
+
+    def debugging(self) -> Task | None:
+        """The debug task still working, if any: one error is debugged at a time."""
+        return next(
+            (t for t in self.working() if t.origin == "debug"),
+            None,
+        )
+
+    async def debug(self, request: DebugRequest, prompt: Prompt) -> Task:
+        """Debug one error: a debugger finds the cause, then a worker makes the fix
+        as a normal staged change, checked and reviewed like any other. One card
+        follows both ("Debugging: <error>")."""
+        if self._debugger is None:
+            raise ValueError("Debugging isn't available with this agent.")
+        if self.debugging() is not None:
+            raise ValueError("Journeyman is already debugging an error; wait for it.")
+        task = self._open(
+            request.title, request.error, "debug", prompt, error=request.error
+        )
+        task.job = asyncio.create_task(self._debug(task, request, prompt))
+        return task
+
+    async def _debug(self, task: Task, request: DebugRequest, prompt: Prompt) -> None:
+        assert self._debugger is not None
+        try:
+            found = await self._debugger(task.gateway, request, prompt.selection)
+        except asyncio.CancelledError:
+            task.state = "stopped"
+            await self._settle(task)
+            return
+        except (
+            OSError,
+            RuntimeError,
+            ValueError,
+            TypeError,
+            KeyError,
+            TimeoutError,
+            NotImplementedError,
+        ) as exc:
+            task.state = "failed"
+            task.message = str(exc) or "The debugger stopped unexpectedly."
+            await self._settle(task)
+            return
+        task.cause = found.cause
+        if not found.fix:
+            task.state = "done"
+            task.message = "Cause: " + found.cause[:280]
+            await self._settle(task)
+            return
+        reserved = _reserved(found.targets)
+        path, held_by = task.gateway.claims.first_conflict(set(reserved), task.id)
+        if path:
+            task.state = "failed"
+            task.message = refusal(path, held_by)
+            await self._settle(task)
+            return
+        task.gateway.claims.claim(task.id, reserved)
+        # The fix is made by a worker, in this task's own staged change.
+        task.role = "worker"
+        task.step = "Making the fix…"
+        self.emit(task.event())
         work = prompt.model_copy(
             update={
-                "text": TASK_PROMPT.format(request=request),
+                "text": DEBUG_FIX_PROMPT.format(
+                    error=request.error, cause=found.cause, fix=found.fix
+                ),
                 "primer": "",
             }
         )
-        task.job = asyncio.create_task(self._run(task, work))
-        return task
+        await self._run(task, work)
+
+    async def _settle(self, task: Task) -> None:
+        """A task that ends before any turn of its own ran."""
+        task.ended = time.time()
+        task.step = ""
+        await self._finish(task)
+        self.emit(task.event())
 
     # --- Running ------------------------------------------------------------------------
 

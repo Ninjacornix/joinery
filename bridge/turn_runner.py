@@ -50,6 +50,7 @@ PLAIN = {
     "godot_import": "Godot couldn't import it",
     "tests": "the project's tests failed",
     "conflict": "another accepted change touched the same file",
+    "reviewer": "the reviewer found problems",
 }
 
 
@@ -187,6 +188,8 @@ async def run_turn(
     if controller.primer and controller.primer_chat == chat_id:
         prompt = prompt.model_copy(update={"primer": controller.primer})
     controller.primer = controller.primer_chat = ""
+    # The reviewer reads the change with the same model choice.
+    controller.selection = prompt.selection.model_dump()
     controller.begin(request or prompt.text)
     controller.gateway.progress("Thinking through your request…")
     ok = await stream(controller, bridge, prompt, emit, timing)

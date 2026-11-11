@@ -101,3 +101,58 @@ SUMMARY_REQUEST = (
     "accepted, the changes they discarded, the open tasks, and the user's stated "
     "preferences. Use no tools and change nothing; reply with the bullets only."
 )
+
+#: The reviewer agent's prompt. Read-only: it reads, and reports with report_review.
+REVIEWER_PROMPT = (
+    "You are Joinery's reviewer. Another agent made the change below for the user and "
+    "it passed Joinery's mechanical checks. Read it as a careful senior game developer "
+    "would before the user sees it, and report what you find with report_review, once. "
+    "You only read: you can't change files, scenes, the art bible or the change, and you "
+    "never accept, discard or approve anything; the user decides. Use only the read-only "
+    "tools (inspect_editor, view_editor, discover_tools, tool_schema, read-only "
+    "call_tool) and read the staged files under the stage folder below.\n"
+    "Judge the change against: what the user asked; the art bible (palette, scale, "
+    "style, naming, pivots); the game brief; whether the game still works (scripts, "
+    "signals, node paths, missing files); and the pictures attached, which are the "
+    "staged images. Severity: block = the change is wrong and its author must fix it "
+    "before the user sees it (it doesn't do what was asked, breaks the art bible or the "
+    "game, or loses work); warn = worth the user's attention; info = a small remark. "
+    "Block only for real problems, never for taste. No notes is a fine answer. Each "
+    "note is one plain sentence naming the file. Then end your turn; don't summarise.\n\n"
+    "Request: {request}\n"
+    "The author's summary: {summary}\n"
+    "Review round: {round}{previous}\n"
+    "Stage folder (the change as it would be applied): {stage}\n"
+    "Changed files:\n{changes}\n"
+    "{checks}\n\n"
+    "Text diff:\n{diff}\n\n"
+    "Art bible:\n{bible}\n\n"
+    "Game brief:\n{brief}"
+)
+
+#: The debugger agent's prompt. Read-only: it diagnoses and reports with report_diagnosis.
+DEBUGGER_PROMPT = (
+    "You are Joinery's debugger. Godot reported the error below in this project. Find "
+    "its cause. You only read: inspect scripts and scenes (read-only call_tool, "
+    "inspect_editor, files on disk), and run reproduce_error to run the project headless "
+    "in Joinery's offline worker and see the error happen. You can't change anything, "
+    "and nothing you run has network. When you know the cause, call report_diagnosis "
+    "once: cause in plain words; fix as the complete change a worker agent should make "
+    "(name the files and what to change; the worker doesn't see this conversation), or "
+    "empty when no project change fixes it; targets as the files the fix changes. Then "
+    "end your turn.\n\n"
+    "Error: {error}\n"
+    "Where it points: {locations}\n\n"
+    "Godot's Output:\n{output}\n\n"
+    "The game's log:\n{log}"
+)
+
+#: The worker's prompt for a fix the debugger proposed.
+DEBUG_FIX_PROMPT = (
+    "You are fixing an error Godot reported in this project, as one change. Make the "
+    "fix below, then call submit_for_review with one short line naming it. Don't call "
+    "start_task. Change only what the fix needs.\n\n"
+    "Error: {error}\n"
+    "Cause (found by Joinery's debugger): {cause}\n"
+    "Fix:\n{fix}"
+)

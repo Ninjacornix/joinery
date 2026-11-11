@@ -18,6 +18,7 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
 from joinery.claims import LEAD_BUSY, live_refusal
+from joinery.peer_review import PeerReview, Reviewer, request_for
 from joinery.transactions import inventory
 
 if TYPE_CHECKING:
@@ -39,6 +40,10 @@ class TurnState(StrEnum):
 MAX_SUBMITS = 3
 #: Times Joinery asks the agent to fix a change it submitted on its behalf.
 MAX_CONTINUATIONS = 1
+#: Times the reviewer agent may send a change back before it opens with notes.
+MAX_REVIEW_ROUNDS = 2
+#: Seconds past the reviewer's own time box before Joinery stops waiting for it.
+REVIEW_GRACE = 15
 #: Share of the context window at which Joinery summarises the session.
 COMPACT_AT = 0.8
 
@@ -168,6 +173,16 @@ NEXT_NOTHING = (
     "your turn if nothing needed changing."
 )
 NEXT_ART = "Stop here and tell the user: they approve the art direction first (/art)."
+NEXT_REVIEWER = (
+    "Joinery's reviewer read your change and found the problems listed. Fix each one "
+    "in the same change, then call submit_for_review again. If one is wrong, leave it "
+    "and say why in one line; the user sees the reviewer's notes with the change."
+)
+#: The checks a change passed before the reviewer reads it, in plain words.
+PASSED = (
+    "Joinery's checks passed: protected files, missing files, asset provenance, "
+    "dependencies, art bible rules, Godot import"
+)
 
 
 class TurnController:
@@ -219,6 +234,22 @@ class TurnController:
         self._passed: dict[str, list[str]] = {}
         #: The agent's plain words on what visibly changed, for the review.
         self._facts: list[str] = []
+        #: The reviewer agent that reads each submitted change (None: no reviewer).
+        self.reviewer: Reviewer | None = None
+        #: Times the reviewer may send a change back this turn.
+        self.max_review_rounds = MAX_REVIEW_ROUNDS
+        #: The reviewer's time box, seconds.
+        self.review_seconds = 90
+        #: Send-backs so far this turn.
+        self.review_rounds = 0
+        #: The request's model choice ({mode, model, effort}), which the reviewer shares.
+        self.selection: dict[str, Any] = {}
+        #: The last review this turn, and the stage it read.
+        self._peer: PeerReview | None = None
+        self._peer_print: tuple[dict[str, str], int] | None = None
+        self._reviewing: asyncio.Task[PeerReview] | None = None
+        #: Joinery's own last submit: the reviewer's notes no longer send it back.
+        self._last_chance = False
         gateway.turn = self
 
     # --- State -----------------------------------------------------------------------
@@ -248,6 +279,8 @@ class TurnController:
         self.last_result = None
         self._checked = None
         self._facts = []
+        self.review_rounds = 0
+        self._peer = self._peer_print = None
         self.request = request
         self.requests = [*self.requests, request.strip()[:160]][-10:]
         if not self.review_open:
@@ -411,6 +444,10 @@ class TurnController:
         if checks is not None and not checks.done():
             checks.cancel()
             await asyncio.wait({checks})
+        reviewing, self._reviewing = self._reviewing, None
+        if reviewing is not None and not reviewing.done():
+            reviewing.cancel()
+            await asyncio.wait({reviewing})
 
     def _stopped(self) -> SubmitResult:
         return self._result(
@@ -440,11 +477,13 @@ class TurnController:
         if self.state is not TurnState.SUBMITTING:
             return self._stopped()
         gate: dict[str, Any] | None = None
+        skipped: list[str] = []
         error = checks.exception()
         if error is None:
             checked = checks.result()
             found, problems, gate = checked.changes, checked.problems, checked.gate
             self._passed = {"ran": checked.ran, "skipped": checked.skipped}
+            skipped = checked.skipped
         elif isinstance(error, (OSError, RuntimeError, ValueError, TimeoutError)):
             tx = self.gateway.transaction
             found = tx.diff() if tx is not None and tx.state == "staging" else []
@@ -497,8 +536,32 @@ class TurnController:
             self._to(TurnState.WORKING)
             self.attempts -= 1
             return self._result("nothing_to_review", False, next=NEXT_NOTHING)
+        peer = await self._peer_review(summary, found, skipped)
+        if self.turn_id != turn or self.state is not TurnState.SUBMITTING:
+            return self._stopped()
+        blocks = peer.blocking() if peer is not None else []
+        if (
+            blocks
+            and self.review_rounds < self.max_review_rounds
+            and not (self._last_chance)
+        ):
+            # A send-back costs no submit attempt: the reviewer's rounds are bounded.
+            self.review_rounds += 1
+            self.attempts -= 1
+            self._to(TurnState.WORKING)
+            self.gateway.progress("Fixing what the reviewer found…")
+            return self._result(
+                "failed",
+                False,
+                changes=changes,
+                problems=[
+                    Problem("reviewer", note.text, [note.file] if note.file else [])
+                    for note in blocks
+                ],
+                next=NEXT_REVIEWER,
+            )
         try:
-            preview = await self._open(summary, found, origin)
+            preview = await self._open(summary, found, origin, peer)
         except Exception as exc:  # noqa: BLE001 - never leave the turn submitting.
             await self._drop("failed")
             return self._result(
@@ -527,15 +590,109 @@ class TurnController:
             next=NEXT_REVIEW,
         )
 
+    async def _peer_review(
+        self, summary: str, found: list[dict[str, str]], skipped: list[str]
+    ) -> PeerReview | None:
+        """The reviewer agent's notes on the staged change (None: no reviewer).
+
+        A stage unchanged since the last review keeps that review. The reviewer
+        never fails the submit: on a timeout or an error the change opens without
+        its notes, and the review says so.
+        """
+        tx = self.gateway.transaction
+        if self.reviewer is None or not found or tx is None:
+            return None
+        printed = self._fingerprint()
+        if (
+            self._peer is not None
+            and printed is not None
+            and printed == self._peer_print
+        ):
+            return self._peer
+        checks = PASSED + (
+            "; the project has no GUT tests"
+            if "tests" in skipped
+            else "; the project's tests passed"
+        )
+        request = request_for(
+            project=self.gateway.project,
+            stage=tx.stage,
+            request=self.request,
+            summary=summary,
+            changes=found,
+            diff="\n".join(self.gateway.text_diff()),
+            checks=checks + ".",
+            selection=self.selection,
+            round=self.review_rounds + 1,
+            previous=tuple(self._peer.blocking()) if self._peer is not None else (),
+        )
+        if getattr(self.reviewer, "active", True):
+            self.gateway.progress("Reviewing the change…")
+        job: asyncio.Task[PeerReview] = asyncio.ensure_future(self.reviewer(request))
+        self._reviewing = job
+        try:
+            done, _ = await asyncio.wait(
+                {job}, timeout=self.review_seconds + REVIEW_GRACE
+            )
+        except asyncio.CancelledError:
+            job.cancel()
+            await asyncio.wait({job})
+            raise
+        finally:
+            if self._reviewing is job:
+                self._reviewing = None
+        if not done:
+            job.cancel()
+            await asyncio.wait({job})
+            peer = PeerReview(
+                "timeout",
+                message="The reviewer ran out of time, so this opened without its notes.",
+                elapsed_s=float(self.review_seconds + REVIEW_GRACE),
+            )
+        elif job.cancelled():
+            return None
+        elif job.exception() is not None:
+            peer = PeerReview(
+                "error",
+                message="The reviewer couldn't run, so this opened without its notes.",
+            )
+        else:
+            peer = job.result()
+        async with self.gateway.call_lock:
+            # Apps the reviewer's reads started in the stage close again.
+            for connection in list(self.gateway.staged.values()):
+                await connection.close()
+            self.gateway.staged.clear()
+        self._peer, self._peer_print = peer, printed
+        return peer
+
     async def _open(
-        self, summary: str, found: list[dict[str, str]], origin: str
+        self,
+        summary: str,
+        found: list[dict[str, str]],
+        origin: str,
+        peer: PeerReview | None = None,
     ) -> dict[str, Any] | None:
         """The checked change's ``file_preview``; None for a live edit alone."""
         if not found:
             if self.gateway.transaction is not None:
                 await self.gateway.cancel()  # an empty stage beside a live edit
             return None
+        notes = [note.as_dict() for note in peer.notes] if peer is not None else []
+        reviewer = (
+            peer.status_dict(self.review_rounds)
+            if peer is not None
+            else {"status": "off" if self.reviewer is None else "skipped"}
+        )
+        tx = self.gateway.transaction
+        if tx is not None:
+            # Recorded with the change, so `joinery transactions list` shows them.
+            tx.review_notes, tx.reviewer = notes, reviewer
         preview = self.gateway.open_review(summary.strip() or self.request)
+        # The review panel's notes line reads review_notes and reviewer_status.
+        preview["review_notes"] = notes
+        preview["reviewer"] = reviewer
+        preview["reviewer_status"] = reviewer["status"]
         gate, self.gateway.art_gate = self.gateway.art_gate, None
         if gate is not None:
             preview["art_gate"] = {k: v for k, v in gate.items() if k != "kind"}
@@ -572,9 +729,19 @@ class TurnController:
             self._to(TurnState.IN_REVIEW)
             return None
         if self._staged() or self.live_edits:
-            result = self._unchanged_failure() or await self.submit(
-                self.request[:160], "joinery"
-            )
+            unchanged = self._unchanged_failure()
+            if (
+                unchanged is not None
+                and last
+                and all(p.check == "reviewer" for p in unchanged.problems)
+            ):
+                # The reviewer's notes never drop a change: it opens with them.
+                unchanged = None
+            self._last_chance = last
+            try:
+                result = unchanged or await self.submit(self.request[:160], "joinery")
+            finally:
+                self._last_chance = False
             if result.status == "failed" and not result.final and last:
                 await self._drop("failed")
                 result.final = True
