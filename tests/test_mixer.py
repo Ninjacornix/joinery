@@ -134,6 +134,11 @@ def test_ducking_sets_and_clears_the_music_sidechain() -> None:
     bare = mixer.BusLayout(buses=[mixer.Bus(name="Master"), mixer.Bus(name="Music")])
     mixer.set_ducking(bare, "Voice")
     assert mixer.ducking(bare) == "Voice"
+    # A compressor that only squeezes the music itself is not ducking: Off leaves it on.
+    plain = bare.buses[1].effects[0]
+    plain.sidechain = ""
+    mixer.set_ducking(bare, "")
+    assert plain.enabled
     with pytest.raises(ValueError, match="Voice or SFX"):
         mixer.set_ducking(bare, "Ambience")
 

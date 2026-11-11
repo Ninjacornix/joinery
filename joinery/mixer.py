@@ -369,8 +369,9 @@ def ducking(layout: BusLayout) -> str:
 
 
 def set_ducking(layout: BusLayout, source: str) -> None:
-    """Duck music under ``source`` with the Music compressor; "" turns ducking off
-    (the compressor is switched off and keeps its settings)."""
+    """Duck music under ``source`` with the Music compressor. "" turns ducking off:
+    a compressor keyed to another bus is switched off (it keeps its settings); one
+    that only compresses the music itself stays as it is."""
     if source and source not in DUCK_SOURCES:
         raise ValueError(f"Music ducks under Voice or SFX, not {source}.")
     music = layout.bus("Music")
@@ -379,7 +380,7 @@ def set_ducking(layout: BusLayout, source: str) -> None:
             return
         raise ValueError("The project has no Music bus to duck.")
     effect = music.first(COMPRESSOR)
-    if effect is None:
+    if effect is None or not (source or effect.sidechain):
         if not source:
             return
         effect = compressor()
