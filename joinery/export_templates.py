@@ -122,7 +122,9 @@ def available(
     """True when a build needs no download: every file is ready, installed or in the archive."""
     pin = pin or load_pin()
     users = _users_templates(pin)
-    rest = [n for n in missing(needed, cache, pin) if not _good(users / n, pin.files[n])]
+    rest = [
+        n for n in missing(needed, cache, pin) if not _good(users / n, pin.files[n])
+    ]
     return not rest or archive_ready(cache, pin)
 
 
