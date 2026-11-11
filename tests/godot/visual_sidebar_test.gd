@@ -350,6 +350,13 @@ func _parallel(light: bool, width: int, chat: Control) -> void:
 	var backend: Node = load("res://addons/joinery/chat_bridge.gd").new()
 	backend.set("parallel", 4)
 	tasks.set("bridge", backend)
+	# A task just started: its card names the provider until its first step.
+	var starting := {"kind": "task", "task_id": "t0", "title": "Make a side table"}
+	starting["state"] = "working"
+	starting["step"] = "Starting Codex CLI…"
+	tasks.call("on_event", starting)
+	await _shot("parallel-starting", light, width, chat)
+	tasks.call("_remove", "t0")
 	var lamp := {"kind": "task", "task_id": "t1", "title": "Make a desk lamp", "state": "working"}
 	lamp["apps"] = ["blender"]
 	tasks.call("on_event", lamp)

@@ -308,6 +308,34 @@ func _approvals() -> void:
 	var bottom: Control = dock.get_parent() as Control if dock != null else tab
 	await get_tree().create_timer(0.3).timeout
 	await _shot("review-list", [bottom])
+	# A parallel task's change, opened from its row: the same full review.
+	var cache := OS.get_cache_dir().path_join("joinery-visual")
+	var task := {
+		"kind": "file_preview",
+		"task_id": "t1",
+		"transaction_id": "planks",
+		"summary": "Weather the dock planks",
+		"diff": "~ art/textures/dock_planks.kra\n~ art/textures/dock_planks.png",
+		"changes":
+		[
+			{"path": "art/textures/dock_planks.kra", "change": "modified"},
+			{"path": "art/textures/dock_planks.png", "change": "modified"},
+		],
+		"media":
+		[
+			{
+				"path": "art/textures/dock_planks.png",
+				"media": "image",
+				"before": cache.path_join("wood-before.png"),
+				"after": cache.path_join("wood-after.png"),
+			}
+		],
+	}
+	tab.call("_on_task_event", task)
+	tab.call("show_task", "planks")
+	await get_tree().create_timer(0.6).timeout
+	await _shot("review-task", [bottom])
+	tab.call("show_list")
 	tab.call("clear_live")
 	var settled := {"state": "approved", "by": "creation"}
 	tab.call("apply_listing", {"transactions": [], "art_bible": settled})
