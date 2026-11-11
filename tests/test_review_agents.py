@@ -131,6 +131,8 @@ def test_a_block_goes_back_to_the_author_who_fixes_it_then_the_review_opens(
                 {"severity": "info", "text": "Scale now matches."}
             ]
             assert preview["reviewer"]["status"] == "reviewed"
+            # The glanceable review reads reviewer_status for its status line.
+            assert preview["reviewer_status"] == "reviewed"
             assert preview["reviewer"]["rounds"] == 1
             progress = [e["text"] for e in events if e.get("kind") == "progress"]
             assert "Reviewing the change…" in progress
