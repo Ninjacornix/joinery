@@ -33,6 +33,7 @@ from blender_rig import BUILD
 
 from joinery import parts
 from joinery.authoring import edit_document, run_offline
+from joinery.bible_rules import check_rules
 from joinery.locking import write_lock
 from joinery.tools import blender_anim
 from servers.blender_ops import animation
@@ -99,6 +100,18 @@ async def make_project(folder: Path, started: float) -> tuple[Path, dict[str, st
     (stage / "project.godot").write_text("config_version=5\n")
     await edit_document(stage, "blender", HERO, BUILD, [HERO_GLB], "the hero")
     await animation.make_cycle(stage, HERO, "run", None, "", None)
+    # The hero stands in for one that passed review, so it must pass the
+    # project's art bible as built; the request's checks then judge only the edit.
+    shutil.copy(project / "art/bible.md", stage / "art/bible.md")
+    found = await check_rules(
+        stage,
+        [HERO, HERO_GLB],
+        lambda argv, root: run_offline(argv, root, 300, readonly=True),
+    )
+    for line in found:
+        mark(started, "hero breaks the art bible: " + line)
+    if found:
+        raise RuntimeError("the hero as built does not pass the art bible's checks")
     for folder_name in ("art", "recipes"):
         shutil.copytree(stage / folder_name, project / folder_name, dirs_exist_ok=True)
     write_lock(project)
@@ -147,6 +160,7 @@ async def chat(
         writer.write((json.dumps(line) + "\n").encode())
 
     accepted = None
+    rounds = 0
     try:
         async with asyncio.timeout(TIMEOUT):
             while accepted is None:
@@ -177,6 +191,10 @@ async def chat(
                     mark(started, "step: " + str(event.get("text", "")))
                 elif kind == "file_preview":
                     mark(started, "in review: " + str(event.get("summary", "")))
+                    mark(
+                        started,
+                        f"rounds: {rounds + 1} ({rounds} sent back by the checks)",
+                    )
                     mark(started, "facts: " + json.dumps(event.get("facts", [])))
                     send(
                         {
@@ -192,6 +210,18 @@ async def chat(
                 elif kind == "done" and accepted is None:
                     mark(started, f"turn done before a review (ok={event.get('ok')})")
                     return 1
+                elif kind == "check_problems":
+                    rounds += 1
+                    end = "final" if event.get("final") else "sent back to the agent"
+                    mark(
+                        started,
+                        f"checks failed (attempt {event.get('attempt')}, {end}):",
+                    )
+                    for problem in event.get("problems", []):
+                        mark(
+                            started,
+                            f"  [{problem.get('check')}] {problem.get('message')}",
+                        )
                 elif kind == "timing":
                     mark(started, "timing: " + json.dumps(event.get("phases_ms", {})))
                 elif kind == "message" and event.get("level") == "warn":
