@@ -209,7 +209,8 @@ static func _area(id: String, label: String, score: int, checked: int, failing: 
 		"score": score,
 		"checked": checked,
 		"failing": failing,
-		"fixable": failing,
+		# Frame time is fixed by the other areas' changes, not its own.
+		"fixable": failing if id != "frames" else 0,
 	}
 
 
