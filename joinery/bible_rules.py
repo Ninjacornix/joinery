@@ -65,6 +65,9 @@ METAL_THRESHOLD = 0.05
 #: Never part of an asset check: prose and sidecars.
 _NOT_CHECKED = {"art/bible.md"}
 _SIDECARS = {".import", ".uid"}
+#: Recipe bookkeeping: preimages under recipes/inputs/ are the document as it was
+#: before an edit, kept so the recipe replays, never an asset of the game.
+_RECIPES = "recipes/"
 
 
 class _Strict(BaseModel):
@@ -1573,6 +1576,7 @@ async def check_rules(
             for p in changed
             if (stage / p).is_file()
             and p not in _NOT_CHECKED
+            and not p.startswith(_RECIPES)
             and _suffix(p) not in _SIDECARS
             and not PurePosixPath(p).name.startswith(".")
             and not _excluded(p, rules)

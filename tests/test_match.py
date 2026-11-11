@@ -772,3 +772,20 @@ def test_edit_image_refuses_anything_but_a_krita_painting(tmp_path: Path) -> Non
 @pytest.fixture
 def crew_project_path(crew_project: Path) -> Path:  # noqa: F811
     return crew_project
+
+
+def test_recipe_preimages_are_not_asset_checks(tmp_path: Path) -> None:
+    """A fix's recipe keeps the document as it was; that copy is never judged."""
+    from joinery.bible_rules import check_rules
+
+    (tmp_path / "art").mkdir()
+    (tmp_path / "art/bible.md").write_text(
+        '```toml\n[textures.max_size]\n"" = 64\n```\n'
+    )
+    (tmp_path / "recipes/inputs").mkdir(parents=True)
+    (tmp_path / "recipes/inputs/old.png").write_bytes(png(128, 128))
+    (tmp_path / "art/new.png").write_bytes(png(128, 128))
+    found = asyncio.run(
+        check_rules(tmp_path, ["recipes/inputs/old.png", "art/new.png"], FakeWorker())
+    )
+    assert found == ["art/new.png: 128x128, over the art bible's 64 px limit"]
