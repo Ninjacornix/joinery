@@ -110,6 +110,19 @@ fingerprinted against the recipe.
    when the vertex count differs per key). The saved source keeps its
    modifiers. Measured: 14 517 exported vertices instead of 21 833, 209 joints,
    8 morph targets kept; the crate keeps `Dent`.
+6. **Rigify control shapes reached the GLB and failed the art bible.** A
+   generated rig keeps ~280 face-less `WGT-` meshes as bone custom shapes,
+   unparented and scaled to their bones. The GLB carried each as an empty node,
+   and the art bible's name and applied-scale rules judged them as the model, so
+   every MPFB2 + Rigify character failed its submit checks (the live "bouncier
+   run" smoke: two sent-back rounds, about 10 minutes). The export now removes
+   face-less custom shapes after the save, and the `.blend` measure flags them so
+   the checks skip them (`joinery/tools/blender_export.py`,
+   `joinery/bible_blend.py`, `joinery/bible_rules.py`). Measured: 282 widgets
+   left out, 493 → 211 GLB nodes (209 deform bones, body, rig). The body is
+   still judged: MPFB2's mesh data name `base` fails a bible naming pattern,
+   so the test hero names its mesh. Smoke after: one round, review 175 s after
+   sending, checks 3.6 s. Tests: `blender_rig.py`, `tests/test_rig_checks.py`.
 
 Also corrected: `tests/test_authoring_mcp.py` still expected `joinery-sound` to
 expose only the three generic tools; it now lists the six typed sound

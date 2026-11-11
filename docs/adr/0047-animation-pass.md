@@ -74,3 +74,10 @@ GLB under names Godot keeps.
   20–40 s per motion in the worker.
 - The GLB carries every deform bone's channels for every action (about 600 channels
   on an MPFB2 human).
+- An edit to a Rigify character is judged on what ships: Rigify's control shapes
+  stay out of the GLB and out of the art bible checks (ADR 0022 addendum). Before,
+  the bouncier-run smoke failed its checks twice on `WGT-` names and scales and
+  reached review after about 10 minutes; now it reaches review in one round,
+  175 s after sending, with the checks taking under 4 s.
+- Review clips fill the review frame at their own shape, captions as tags over
+  them; strips are 384 px a frame.

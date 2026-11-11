@@ -90,3 +90,17 @@ policy refuses `joinery references add` and the `--reference` and
 `art_direction` lists every reference image and sends up to 8 (4 MB each) as
 image content after its JSON, so agents that take images can look at them.
 
+## Addendum: rig internals are not the model (2026-11)
+A generated Rigify rig keeps its control shapes in the `.blend`: face-less
+meshes (`WGT-…`, about 280 on an MPFB2 human) used as bone custom shapes,
+unparented and scaled to their bones. The checks judge what ships, so the
+`.blend` measure flags exactly those objects (a bone's custom shape with no
+faces, by use, not by name) and scale, pivot, triangle, texel and name rules
+skip them; the GLB export removes them after the save, so they never reach the
+game either. ORG-/MCH- and control bones were already outside the bone budget,
+which counts deform bones in the `.blend` and skin joints in the GLB (only
+`DEF-` bones are exported from a Rigify rig). Everything else stays strict: a
+mesh merely named `WGT-`, a widget left in a GLB, the body's mesh data name
+(MPFB2 calls it `base`), its scale, its triangles and the deform-bone count all
+fail as before. Name problems list each kind ("object names …; mesh data names
+…"), and each finding is its own problem for the author.
