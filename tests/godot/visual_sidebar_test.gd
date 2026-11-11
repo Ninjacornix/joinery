@@ -228,6 +228,7 @@ func _states(light: bool, width: int) -> void:
 	await _parallel(light, width, chat)
 	await _playtest(light, width, chat)
 	await _match(light, width, chat)
+	await _check_cards(light, width, chat)
 
 	chat.append_agent_text("I widened **Door** by 20% in Blender and darkened the wood.", true)
 	chat.finish_agent_response(true)
@@ -907,3 +908,33 @@ func _match(light: bool, width: int, chat: Control) -> void:
 	card.free()
 	tasks.set("match_card", null)
 	tasks.call("sync_visible")
+
+
+## The accessibility and performance checks: each card at a glance, the fixes as tasks.
+func _check_cards(light: bool, width: int, chat: Control) -> void:
+	var tasks: Node = chat.get("_tasks")
+	var fixture: GDScript = load(
+		get_script().resource_path.get_base_dir().path_join("checks_fixture.gd")
+	)
+	for check: String in ["access", "perf"]:
+		var checker: Node = tasks.get_node("Access" if check == "access" else "Perf")
+		checker.set(
+			"audit_runner", func(_args: PackedStringArray) -> Dictionary: return fixture.call(check)
+		)
+		checker.call("open")
+		var card: Control = tasks.get("%s_card" % check)
+		_check(card != null, "The %s card shows" % check)
+		await _shot(check, light, width, chat)
+		if check == "access":
+			var rows: Array = fixture.call("run_rows")
+			card.call("apply_run", {"state": "fixing", "tasks": rows})
+			for row: Dictionary in rows:
+				var event := {"kind": "task", "task_id": row["task_id"], "title": row["title"]}
+				event.merge({"state": "working", "apps": ["godot"], "origin": "user"})
+				tasks.call("on_event", event)
+			await _shot("access-fixing", light, width, chat)
+			for row: Dictionary in rows:
+				tasks.call("_remove", row["task_id"])
+		card.free()
+		tasks.set("%s_card" % check, null)
+		tasks.call("sync_visible")
