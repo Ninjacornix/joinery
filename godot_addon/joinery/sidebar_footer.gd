@@ -21,7 +21,6 @@ var _leaving := false
 
 
 func _init() -> void:
-	theme_type_variation = "JoineryInset"
 	visible = false
 	var row := HBoxContainer.new()
 	row.theme_type_variation = "JoineryRow"

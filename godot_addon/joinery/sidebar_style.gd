@@ -24,6 +24,12 @@ static func boxed(control: Control, variation: String, step := 2) -> void:
 	)
 
 
+## How far an icon button's glyph sits inside its square (CONTROL_H.md around an ICON.sm
+## glyph): a row of them reaches this far past the gutter, so the glyphs end on it.
+static func icon_inset(control: Control) -> int:
+	return roundi((UI_THEME.control_h(control, "md") - UI_THEME.icon_px(control, "sm")) / 2.0)
+
+
 ## Move a flat button's text onto the content edge: its left padding becomes an outward
 ## expansion of the hover fill, the same treatment the theme gives JoineryPicker.
 static func hug_left(button: Button) -> void:
@@ -175,6 +181,68 @@ static func set_glyph(picture: TextureRect, icon_name: String, role := "text_mut
 	if not picture.has_meta("_joinery_glyph_bound"):
 		picture.set_meta("_joinery_glyph_bound", true)
 		picture.theme_changed.connect(_apply_glyph.bind(picture))
+
+
+## Put [param scroller]'s always-reserved scrollbar in the sidebar's right gutter, SPACE.1 off
+## the content: each time its column lays it out on the content edges, it grows by the room
+## the bar takes (at most the gutter), so its content keeps the right edge every other row has.
+static func scroll_in_gutter(scroller: ScrollContainer) -> void:
+	scroller.set_meta("joinery_gutter", true)
+	# The editor theme pads the bar on both sides (6u each); without it the bar is only as
+	# wide as its track, and fits in the gutter.
+	var bar := scroller.get_v_scroll_bar()
+	bar.add_theme_constant_override("padding_left", 0)
+	bar.add_theme_constant_override("padding_right", 0)
+	on_theme_overrides(
+		scroller,
+		func() -> void:
+			var gap := UI_THEME.space(scroller, 1)
+			scroller.add_theme_constant_override("scrollbar_h_separation", gap)
+	)
+	# The room ScrollContainer keeps for the bar: its width plus the separation.
+	var widen := func() -> void:
+		var column := scroller.get_parent() as Control
+		var reserve := float(bar.get_minimum_size().x)
+		reserve += scroller.get_theme_constant("scrollbar_h_separation")
+		scroller.size.x = column.size.x + minf(reserve, UI_THEME.gutter(scroller))
+	var attach := func() -> void:
+		var column := scroller.get_parent() as Container
+		if column != null and not column.sort_children.is_connected(widen):
+			column.sort_children.connect(widen)
+	if scroller.is_inside_tree():
+		attach.call()
+	scroller.tree_entered.connect(attach)
+	scroller.tree_exiting.connect(
+		func() -> void:
+			var column := scroller.get_parent() as Container
+			if column != null and column.sort_children.is_connected(widen):
+				column.sort_children.disconnect(widen)
+	)
+
+
+## In Joinery's layout the sidebar is alone in its dock slot, which hides its tabs. There the
+## slot's own padding goes, so [param dock]'s gutter is measured from the edge you see and its
+## header row sits level with the editor's tab row. A slot that shows tabs (Godot's classic
+## layout) keeps its look, and the slot gets its padding back when the dock leaves.
+static func own_slot(dock: Control) -> void:
+	dock.resized.connect(func() -> void: _fit_slot(dock, true))
+	dock.tree_exiting.connect(func() -> void: _fit_slot(dock, false))
+
+
+static func _fit_slot(dock: Control, present: bool) -> void:
+	var wrapper := dock.get_parent()
+	var slot := wrapper.get_parent() as TabContainer if wrapper != null else null
+	if slot == null:
+		return
+	var flush := present and not slot.tabs_visible
+	if flush == slot.has_meta("_joinery_flush"):
+		return
+	if flush:
+		slot.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+		slot.set_meta("_joinery_flush", true)
+	else:
+		slot.remove_theme_stylebox_override("panel")
+		slot.remove_meta("_joinery_flush")
 
 
 ## Run [param apply] now when [param control] is in the tree, and after every theme change.

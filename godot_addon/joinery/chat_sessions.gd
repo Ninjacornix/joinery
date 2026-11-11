@@ -92,7 +92,6 @@ func _build(header_row: Control, content: Control) -> void:
 	page.rename_requested.connect(rename)
 	content.add_child(page)
 	past_bar = MarginContainer.new()
-	past_bar.theme_type_variation = "JoineryInset"
 	past_bar.accessibility_name = "Earlier chat"
 	past_bar.hide()
 	var row := HBoxContainer.new()

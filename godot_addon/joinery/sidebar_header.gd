@@ -52,11 +52,20 @@ var _state := "connected"
 
 func _init() -> void:
 	theme_type_variation = "JoineryRow"
+	var stack := VBoxContainer.new()
+	stack.theme_type_variation = "JoineryTight"
+	add_child(stack)
+	# The row's trailing icon buttons pad their glyphs; reach past the gutter by that padding,
+	# so the last glyph ends on the same edge as the text and boxes below.
 	var inset := MarginContainer.new()
-	inset.theme_type_variation = "JoineryInset"
-	add_child(inset)
+	STYLE.on_theme_overrides(
+		inset,
+		func() -> void: inset.add_theme_constant_override("margin_right", -STYLE.icon_inset(inset))
+	)
+	stack.add_child(inset)
 	row = HBoxContainer.new()
 	row.theme_type_variation = "JoineryRow"
+	row.set_meta("joinery_gutter", true)
 	inset.add_child(row)
 	_dot = UI.status_dot("off")
 	row.add_child(_dot)
@@ -67,7 +76,7 @@ func _init() -> void:
 	row.add_child(_name)
 	usage = USAGE_SCRIPT.new()
 	row.add_child(usage)
-	_build_readiness(inset)
+	_build_readiness(stack)
 	# The gap around the banner comes and goes with it, so the idle header stays tight.
 	_banner_gap = MarginContainer.new()
 	_banner_gap.hide()
@@ -186,12 +195,7 @@ func readiness_text() -> String:
 	return _readiness_text.text if _readiness.visible else ""
 
 
-func _build_readiness(inset: MarginContainer) -> void:
-	var column := VBoxContainer.new()
-	column.theme_type_variation = "JoineryTight"
-	inset.remove_child(row)
-	column.add_child(row)
-	inset.add_child(column)
+func _build_readiness(column: VBoxContainer) -> void:
 	_readiness = HBoxContainer.new()
 	_readiness.theme_type_variation = "JoineryRowTight"
 	_readiness.accessibility_name = "App status"

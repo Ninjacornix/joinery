@@ -17,6 +17,11 @@ const _BUILD := preload("ui_theme_build.gd")
 
 ## Spacing scale in logical pixels, multiplied by [method unit]. Read with [method space].
 const SPACE := {1: 4, 2: 8, 3: 12, 4: 16, 5: 24, 6: 32}
+## The Journeyman sidebar's gutter, a SPACE step: every row (header, status lines, messages,
+## bubbles, cards, the review row and the composer) starts and ends this far from the sidebar's
+## edges. The dock's panel (JoineryDock) holds it; nothing inside adds a second inset. Read
+## with [method gutter].
+const GUTTER := 4
 ## Corner radii in logical pixels, multiplied by [method unit]. Read with [method radius].
 const RADIUS := {"xs": 4, "sm": 6, "md": 8, "lg": 12, "xl": 16, "full": 999}
 ## Type scale as factors of the editor font size. Read with [method font_size].
@@ -197,6 +202,11 @@ static func unit(context: Node) -> float:
 ## A spacing step (1–6) in pixels: 4, 8, 12, 16, 24 or 32 × unit.
 static func space(context: Node, step: int) -> int:
 	return roundi(int(SPACE.get(step, 0)) * unit(context))
+
+
+## The sidebar gutter in pixels (SPACE[GUTTER] × unit).
+static func gutter(context: Node) -> int:
+	return space(context, GUTTER)
 
 
 ## A corner radius ("xs", "sm", "md", "lg", "xl", "full") in pixels.
@@ -488,7 +498,9 @@ static func watch(root: Control) -> void:
 ## Inputs: JoineryLineEditError, JoineryTextEditError.
 ## Panels (PanelContainer): JoineryCard, JoineryCardSelected, JoineryBanner, JoineryChip,
 ## JoineryPopup, JoineryHoverCard, JoineryComposer, JoineryComposerFocused, JoineryBubble,
-## JoineryChangeCard, JoineryMediaFrame, JoineryLoadingFrame, JoineryIconTile, JoineryDock.
+## JoineryChangeCard, JoineryMediaFrame, JoineryLoadingFrame, JoineryIconTile, JoineryDock
+## (the sidebar: GUTTER on the sides and bottom, SPACE.1 on top so its header row lines up
+## with the editor's tab row).
 ## Containers: JoineryFlush (0), JoineryTight (4), JoineryRowTight (4), JoineryRow (8),
 ## JoineryStack (12), JoinerySections (24) for Box containers; HSplitContainer keeps a 12
 ## gutter between its columns; JoineryInset (side margins 8), JoineryPage

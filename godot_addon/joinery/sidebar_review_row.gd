@@ -21,7 +21,7 @@ var _review: Object
 var _frame: PanelContainer
 var _thumb: TextureRect
 var _line: Label
-var _actions: HBoxContainer
+var _actions: HFlowContainer
 var _discard: Button
 var _accept: Button
 var _open: Button
@@ -49,8 +49,15 @@ func _init() -> void:
 	_line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_line.mouse_filter = Control.MOUSE_FILTER_PASS
 	column.add_child(_line)
-	_actions = HBoxContainer.new()
-	_actions.theme_type_variation = "JoineryRowTight"
+	# The actions wrap in a narrow sidebar instead of pushing it wider than its gutters.
+	_actions = HFlowContainer.new()
+	STYLE.on_theme_overrides(
+		_actions,
+		func() -> void:
+			var gap := UI_THEME.space(_actions, 1)
+			_actions.add_theme_constant_override("h_separation", gap)
+			_actions.add_theme_constant_override("v_separation", gap)
+	)
 	column.add_child(_actions)
 	_discard = UI.secondary("Discard")
 	_discard.accessibility_name = "Discard this change"

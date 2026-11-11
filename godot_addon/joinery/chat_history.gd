@@ -7,8 +7,9 @@ extends ScrollContainer
 ## state, and notices sit SPACE.2 below the reply.
 ## Message rows keep their plain source text; streaming redraws at most once a frame.
 ##
-## The transcript fills its slot exactly, sharing the right edge of the header and composer.
-## The scrollbar's gutter is always reserved inside it, so bubbles keep one right edge with or
+## The transcript's content spans the sidebar's gutter to gutter (UI_THEME.GUTTER), sharing
+## the left and right edges of the header and composer. Its scrollbar is always reserved and
+## sits in the dock's right gutter, past that edge, so bubbles keep one right edge with or
 ## without a bar. The bottom edge fades instead of cutting messages. Bold text is the body
 ## family at a semibold weight and the same size, never a separate display font.
 ##
@@ -87,6 +88,7 @@ func _ready() -> void:
 	get_v_scroll_bar().value_changed.connect(_on_scroll)
 	UI_MOTION.rubber_band(self)
 	STYLE.on_theme_overrides(self, _apply_fade)
+	STYLE.scroll_in_gutter(self)
 	resized.connect(_on_resized)
 	_build_caption()
 
@@ -128,7 +130,6 @@ func _on_resized() -> void:
 
 func _build_empty() -> void:
 	var inset := MarginContainer.new()
-	inset.theme_type_variation = "JoineryInset"
 	_body.add_child(inset)
 	# Two groups: what this is (title and hint, SPACE.1 apart) and the prompts you can click
 	# (SPACE.1 apart), with a SPACE.4 group gap between them.
@@ -488,12 +489,12 @@ func _on_queue_added(card: Control) -> void:
 	_dirty = true
 
 
-## Replies and notices sit on the shared SPACE.2 text inset; cards are boxes on the outer edge.
+## The column replies and notices share in a turn. Like cards and bubbles, it spans the
+## sidebar's gutter to gutter (UI_THEME.GUTTER): there is no second, inner text edge.
 func _inset(turn: VBoxContainer) -> VBoxContainer:
 	if turn.get_child_count() > 0 and turn.get_child(-1).has_meta("joinery_inset"):
 		return turn.get_child(-1).get_child(0)
 	var inset := MarginContainer.new()
-	inset.theme_type_variation = "JoineryInset"
 	inset.set_meta("joinery_inset", true)
 	turn.add_child(inset)
 	var column := VBoxContainer.new()
@@ -675,14 +676,14 @@ func _build_caption() -> void:
 	row.add_child(_caption_action)
 
 
-## Bottom of the visible transcript, on the text inset, left of the scrollbar gutter.
+## Bottom of the visible transcript, on the content's left edge, left of the scrollbar.
 func _place_caption() -> void:
 	var inset := float(UI_THEME.space(self, 2))
-	var width := maxf(0.0, size.x - gutter() - inset * 2.0)
+	var width := maxf(0.0, size.x - gutter())
 	var wanted := _caption.get_combined_minimum_size()
 	_caption.size = Vector2(minf(maxf(wanted.x, 0.0), width), wanted.y)
 	var origin := get_global_rect().position
-	_caption.global_position = origin + Vector2(inset, size.y - _caption.size.y - inset)
+	_caption.global_position = origin + Vector2(0.0, size.y - _caption.size.y - inset)
 
 
 func _hide_caption() -> void:

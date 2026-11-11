@@ -542,7 +542,15 @@ static func _panels(t: Theme, c: Dictionary, m: Dictionary) -> void:
 		"JoineryLoadingFrame":
 		[c["surface_raised"], Color.TRANSPARENT, 0.0, "md", _sp(m, 3), _sp(m, 3)],
 		"JoineryIconTile": [c["surface_raised"], Color.TRANSPARENT, 0.0, "xs", tile_pad, tile_pad],
-		"JoineryDock": [c["surface"], Color.TRANSPARENT, 0.0, "", _sp(m, 3), _sp(m, 3)],
+		"JoineryDock":
+		[
+			c["surface"],
+			Color.TRANSPARENT,
+			0.0,
+			"",
+			_sp(m, UI_THEME.GUTTER),
+			_sp(m, UI_THEME.GUTTER)
+		],
 	}
 	for type_name: String in panels:
 		var spec: Array = panels[type_name]
@@ -551,6 +559,8 @@ static func _panels(t: Theme, c: Dictionary, m: Dictionary) -> void:
 		t.set_stylebox(
 			"panel", type_name, _box(spec[0], spec[1], spec[2], corner, spec[4], spec[5])
 		)
+	# The sidebar's header row sits right under its top edge, level with the editor's tab row.
+	t.get_stylebox("panel", "JoineryDock").content_margin_top = _sp(m, 1)
 	t.set_stylebox("panel", "ScrollContainer", StyleBoxEmpty.new())
 	t.set_stylebox("focus", "ScrollContainer", StyleBoxEmpty.new())
 

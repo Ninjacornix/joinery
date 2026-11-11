@@ -58,8 +58,8 @@ const QUEUE_WAIT := "Queue a message…"
 const PERSONA := "Journeyman"
 const DISCARDED := "Discarded. Your files were not touched."
 const BRIEF_PATH := "res://design/brief.md"
-## Minimum dock width in multiples of the font size.
-const MIN_EM := 24
+## Minimum dock width in font sizes: in Joinery's layout, the whole visible sidebar.
+const MIN_EM := 26
 ## The same below the Inspector (classic layout): a wider shared column crowds a laptop screen.
 const SHARED_MIN_EM := 19
 
@@ -123,6 +123,7 @@ func _init() -> void:
 func _ready() -> void:
 	UI_THEME.watch(self)
 	theme_type_variation = "JoineryDock"
+	preload("res://addons/joinery/sidebar_style.gd").own_slot(self)
 	custom_minimum_size.x = get_theme_default_font_size() * min_em
 	_content = VBoxContainer.new()
 	_content.theme_type_variation = "JoineryRow"

@@ -3,7 +3,7 @@
 extends VBoxContainer
 ## One request in the transcript, kept as a change card so the session reads as a history you
 ## can trace and revert. The user's bubble holds only the request text. Under it, on the
-## transcript inset, Journeyman's side: the apps at work and a quiet timer, the live
+## same edges, Journeyman's side: the apps at work and a quiet timer, the live
 ## steps, the change when it is ready, and inline errors. A ready change shows a tiny picture,
 ## one line of what changed and Discard / Accept (sidebar_review_row.gd), so a small change is
 ## decided right here; a bigger one offers Review, which opens the Review panel. Either way the
@@ -180,9 +180,8 @@ func _init(text := "", context: Array = []) -> void:
 			text_label.add_theme_stylebox_override("normal", box)
 			text_label.add_theme_stylebox_override("focus", box)
 	)
-	# The assistant's side sits on the shared transcript inset, SPACE.3 under the bubble.
+	# The assistant's side shares the bubble's edges, SPACE.3 under it.
 	_activity = MarginContainer.new()
-	_activity.theme_type_variation = "JoineryInset"
 	add_child(_activity)
 	_column = VBoxContainer.new()
 	_column.theme_type_variation = "JoineryStack"

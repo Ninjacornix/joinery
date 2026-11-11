@@ -30,9 +30,8 @@ func _init() -> void:
 	theme_type_variation = "JoineryTight"
 	accessibility_name = "Queued messages"
 	hide()
-	# The caption sits on the transcript's text inset, like notices.
+	# The caption sits on the sidebar's gutter, like notices.
 	var inset := MarginContainer.new()
-	inset.theme_type_variation = "JoineryInset"
 	add_child(inset)
 	var head := HBoxContainer.new()
 	head.theme_type_variation = "JoineryRow"
