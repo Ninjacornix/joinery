@@ -68,6 +68,10 @@ FAMILIES = {
         "render_music",
         "process_audio",
         "set_surge_parameters",
+        # Adaptive music (servers/sound/tracks.py).
+        "inspect_track",
+        "compose_track",
+        "edit_track",
     },
     "joinery-materialmaker": {
         "inspect_document",
@@ -107,6 +111,7 @@ def test_discovery_exposes_only_real_family_capabilities(
                 "inspect_music",
                 "kit_list",
                 "audit_animations",
+                "inspect_track",
             }
             for name in readers & set(tools):
                 assert tools[name].annotations.read_only_hint is True

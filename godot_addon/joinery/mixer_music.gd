@@ -380,10 +380,10 @@ func _sync_rows() -> void:
 		plays.text = TRACK.gain_text(float(gains.get(layer, 0.0)))
 		plays.tooltip_text = "How loud %s plays at %s" % [layer, intensity]
 		var title := row.get_node("Name") as Label
-		if float(gains.get(layer, 0.0)) <= 0.0001:
-			title.add_theme_color_override("font_color", UI_THEME.color(title, "text_muted"))
-		else:
-			title.remove_theme_color_override("font_color")
+		# A silent layer reads quieter: the body size in the muted role.
+		title.theme_type_variation = (
+			"JoineryMuted" if float(gains.get(layer, 0.0)) <= 0.0001 else ""
+		)
 
 
 func _render() -> void:

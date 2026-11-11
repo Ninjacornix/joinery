@@ -149,6 +149,7 @@ static func _text_types(t: Theme, c: Dictionary, m: Dictionary, context: Node) -
 		"JoineryTitle": [roundi(size * float(UI_THEME.TYPE["title"])), c["text"], bold],
 		"JoineryDisplay": [roundi(size * float(UI_THEME.TYPE["display"])), c["text"], bold],
 		"JoineryError": [size, c["danger"], null],
+		"JoineryMuted": [size, c["text_muted"], null],
 		"JoineryNumeric": [caption, c["text_muted"], UI_THEME.numeric_font(context)],
 		"JoinerySection": [caption, c["text_muted"], bold],
 		"JoineryMono": [size, c["text"], UI_THEME.mono_font(context)],
