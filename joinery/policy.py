@@ -117,6 +117,13 @@ _USER_PUBLISH = re.compile(
 )
 
 
+#: Sharing kits between projects is the user's own act: Export kit… and Import
+#: kit… in the Kits section, or their terminal. Agents use imported kits only.
+_USER_KITS = re.compile(
+    r"\bjoinery(?:[\\/]cli\.py|\.cli)?\b(?:\s+\S+)*?\s+kit\s+(?:import|export|remove)\b"
+)
+
+
 def user_only_violation(command: str) -> Verdict | None:
     """Refuse commands only the user runs, from the editor."""
     for segment in _SEGMENTS.split(command):
@@ -132,6 +139,13 @@ def user_only_violation(command: str) -> Verdict | None:
                 "Restoring a file from the Timeline, or starting one, is the user's "
                 "choice in the Timeline tab. Ask the user, or make the change as a "
                 "reviewed edit.",
+            )
+        if _USER_KITS.search(segment):
+            return Verdict(
+                Severity.DENY,
+                "Importing, exporting and removing shared kits is the user's choice: "
+                "Export kit… and Import kit… in the asset workspace's Kits section. "
+                "Use the kits already in the project (kit_list) instead.",
             )
         if _USER_IMPORT.search(segment):
             return Verdict(
