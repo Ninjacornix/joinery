@@ -193,7 +193,10 @@ async def make_project(folder: Path) -> Path:
     if await process.wait() != 0:
         raise RuntimeError("joinery new failed")
     bible = project / "art/bible.md"
-    bible.write_text(bible.read_text() + RULES)
+    bible.parent.mkdir(exist_ok=True)
+    bible.write_text(
+        "# Art bible (match smoke)\n\nTechnical fixture.\n" + RULES, encoding="utf-8"
+    )
     approve(project, "match smoke fixture")
     (project / "env").mkdir()
     (project / "env/world.tres").write_text(WORLD)

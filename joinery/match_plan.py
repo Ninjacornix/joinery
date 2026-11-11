@@ -127,6 +127,7 @@ def _merge(fixes: list[Fix], project: Path) -> list[Step]:
             for fix in group:
                 properties.update(fix.arguments["properties"])
             arguments["properties"] = properties
+            labels = ["Set " + ", ".join(properties) + " in Godot"]
         elif tool == "process_audio":
             normalise = [
                 f for f in group if f.arguments["steps"][0].get("op") == "normalise"

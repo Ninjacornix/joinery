@@ -83,6 +83,12 @@ func check() -> void:
 ## Fix all ([param areas] empty) or the areas named, as reviewed changes.
 func fix(areas: Array) -> void:
 	_listen()
+	var audit: Dictionary = card.get("audit") if is_instance_valid(card) else {}
+	if not bool(audit.get("approved", true)):
+		# Fixes change art and audio: the rules they follow must be the user's first.
+		dock.call("show_status", "Approve the art direction first.", 3.0)
+		dock.call("run_command", "/art")
+		return
 	if _bridge == null or not _bridge.has_method("send_match"):
 		dock.call("show_status", "Journeyman isn't connected.", 3.0)
 		return
