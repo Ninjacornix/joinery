@@ -33,8 +33,11 @@ from joinery.claims import (
 from joinery.lockfile import asset_files
 from joinery.locking import record_custom_outputs
 from joinery.mcp_runtime import (
+    CHANGE_FOLDERS,
     MCPConnection,
     PolicyStop,
+    godot_relative,
+    names_changes,
     rewrite_root,
     validate_arguments,
 )
@@ -97,6 +100,8 @@ OP_APPS: dict[str, tuple[str, ...]] = {
     "kit_edit": ("blender",),
 }
 NATIVE_OPS = frozenset(OP_APPS)
+#: Key prefix of a read-only agent's connection on the stage, beside the staged ones.
+VIEW = "view:"
 
 
 def op_apps(tool: str, arguments: dict[str, Any]) -> tuple[str, ...]:
@@ -414,14 +419,62 @@ class ProjectGateway:
         return {"servers": states, "tools": tools}
 
     async def call(
-        self, server: str, tool: str, arguments: dict[str, Any]
+        self,
+        server: str,
+        tool: str,
+        arguments: dict[str, Any],
+        *,
+        view: bool = False,
     ) -> CallToolResult:
+        """Run one tool call. ``view`` serves an agent that only reads (a reviewer,
+        a debugger, a specialist): an audited read, answered from a read-only view
+        of this gateway's staged change while there is one (ADR 0037, 0041)."""
         async with self._call_lock:
             with self.timing.span("tools") if self.timing else nullcontext():
-                return await self._call(server, tool, arguments)
+                return await self._call(server, tool, arguments, view=view)
+
+    def _project_arguments(
+        self, server: str, arguments: dict[str, Any]
+    ) -> dict[str, Any]:
+        """The call's arguments in this project's own terms.
+
+        A path into this gateway's own stage names the project file it stages; a
+        path into any change folder is refused, so no agent reads another task's
+        stage. The pinned Godot MCP joins its file arguments onto the project
+        folder itself, so a ``res://`` there is made project-relative.
+        """
+        tx = self.transaction
+        if tx is not None:
+            arguments = _map_paths(arguments, tx.stage, self.project)
+        if names_changes(arguments):
+            raise ValueError(CHANGE_FOLDERS)
+        return godot_relative(arguments) if server == "godot" else arguments
+
+    def _view(self, server: str) -> MCPConnection | None:
+        """A read-only connection on this gateway's stage; None for an app whose
+        worker can't mount it read-only (its reads use the staged connection)."""
+        tx = self.transaction
+        assert tx is not None
+        key = VIEW + server
+        view = self.staged.get(key)
+        if view is None:
+            if server == "godot":
+                spec = godot_worker(tx.stage, readonly=True)
+            elif server == "inkscape":
+                spec = inkscape_worker(tx.stage, readonly=True)
+            else:
+                return None
+            view = MCPConnection(spec, self.project)
+            self.staged[key] = view
+        return view
 
     async def _call(
-        self, server: str, tool: str, arguments: dict[str, Any]
+        self,
+        server: str,
+        tool: str,
+        arguments: dict[str, Any],
+        *,
+        view: bool = False,
     ) -> CallToolResult:
         custom = next(
             (
@@ -434,6 +487,11 @@ class ProjectGateway:
         if custom is None:
             validate_arguments(arguments)
         readonly = read_only(server, tool)
+        if view and not readonly:
+            raise ValueError(
+                "This agent only reads: call one of the project tools' read-only tools."
+            )
+        arguments = self._project_arguments(server, arguments)
         if not readonly and self.turn is not None:
             self.turn.admit_mutation()
         scene = str(arguments.get("scenePath", "") or "")
@@ -490,7 +548,9 @@ class ProjectGateway:
                     if tool in NATIVE_OPS
                     else server.removeprefix("joinery-")
                 )
-            staged = self.staged.get(server)
+            staged = self._view(server) if view else None
+            if staged is None:
+                staged = self.staged.get(server)
             if staged is None:
                 spec = connection.spec.model_copy(deep=True)
                 if spec.source != "first-party":
@@ -557,7 +617,9 @@ class ProjectGateway:
                 if server == "blender" or server.startswith("joinery-")
                 else 60,
             )
-        if self.transaction is not None and connection is self.staged.get(server):
+        if self.transaction is not None and any(
+            connection is self.staged.get(key) for key in (server, VIEW + server)
+        ):
             # The agent asked about project paths; answer in them, not the stage's.
             stage = self.transaction.stage
             for staged_root in dict.fromkeys((str(stage), str(stage.resolve()))):

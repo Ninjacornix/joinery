@@ -70,6 +70,57 @@ def map_paths(value: Any, project: PurePath, stage: PurePath) -> Any:
     return value
 
 
+#: Where every staged change lives inside the project (transactions.TRANSACTIONS).
+_CHANGES = re.compile(r"(?:^|[/\\])\.joinery[/\\]+transactions(?:[/\\]|$)")
+CHANGE_FOLDERS = (
+    "Name project files by their project path (res://… or the project folder): the "
+    "project tools already read this change as staged, and no agent reads another "
+    "change's folder."
+)
+
+
+def names_changes(value: Any) -> bool:
+    """Some string in `value` points into the project's staged-change folders."""
+    if isinstance(value, dict):
+        return any(names_changes(v) for v in value.values())
+    if isinstance(value, list | tuple):
+        return any(names_changes(v) for v in value)
+    return isinstance(value, str) and bool(_CHANGES.search(value))
+
+
+#: The pinned Godot MCP's arguments that it joins onto ``projectPath`` on the host
+#: side (path.join), where a ``res://`` prefix names a folder called "res:".
+GODOT_FILE_ARGUMENTS = frozenset(
+    {
+        "filePath",
+        "scenePath",
+        "scriptPath",
+        "shaderPath",
+        "texturePath",
+        "directoryPath",
+        "newPath",
+        "subdirectory",
+    }
+)
+
+
+def godot_relative(arguments: dict[str, Any]) -> dict[str, Any]:
+    """``res://a/b.gd`` -> ``a/b.gd`` in the Godot MCP's file arguments.
+
+    Its Godot side adds ``res://`` back where it loads a resource, so the same
+    file is meant either way; without this the server answers "File does not
+    exist" for a file that is there.
+    """
+    return {
+        key: value.removeprefix("res://")
+        if key in GODOT_FILE_ARGUMENTS
+        and isinstance(value, str)
+        and value.startswith("res://")
+        else value
+        for key, value in arguments.items()
+    }
+
+
 def worker_root(spec: ServerSpec) -> Path | None:
     """The host folder a worker server sees as /work, or None for a host server."""
     if spec.command != "docker":

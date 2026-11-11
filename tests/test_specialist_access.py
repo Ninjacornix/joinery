@@ -54,7 +54,8 @@ def test_read_only_specialist_endpoint_cannot_mutate_or_delegate(
 def test_specialist_endpoint_allows_only_audited_reads(tmp_path: Path):
     called = []
 
-    async def call(server, tool, arguments):
+    async def call(server, tool, arguments, *, view=False):
+        assert view  # specialists read through the stage's read-only view
         called.append((server, tool))
         return CallToolResult(content=[TextContent(type="text", text="read evidence")])
 

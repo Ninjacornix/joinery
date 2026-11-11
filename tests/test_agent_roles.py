@@ -270,7 +270,10 @@ def test_the_endpoint_refuses_what_the_role_may_not_do(
 def test_the_reviewer_reports_through_its_endpoint_and_reads_audited_tools() -> None:
     called: list[tuple[str, str]] = []
 
-    async def call(server: str, tool: str, _arguments: Any) -> CallToolResult:
+    async def call(
+        server: str, tool: str, _arguments: Any, *, view: bool = False
+    ) -> CallToolResult:
+        assert view  # a read-only role reads through the stage's read-only view
         called.append((server, tool))
         return CallToolResult(content=[TextContent(type="text", text="scene")])
 

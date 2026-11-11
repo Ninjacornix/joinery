@@ -270,7 +270,10 @@ class GatewayRPC:
                 if not isinstance(arguments, dict):
                     raise ValueError("Tool arguments must be an object.")
                 result = await self.gateway.call(
-                    str(params["server"]), str(params["tool"]), arguments
+                    str(params["server"]),
+                    str(params["tool"]),
+                    arguments,
+                    view=self.inspection_only,
                 )
                 data = self.gateway.serialise(result)
                 if str(params["server"]) == "godot" and (
