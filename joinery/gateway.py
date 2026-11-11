@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, cast
 from mcp.types import CallToolResult, TextContent
 
 from joinery import parts as part_targets
-from joinery import references, submission
+from joinery import references, sound_kit, submission
 from joinery import tools as tool_modules
 from joinery.art_approval import approved, review
 from joinery.authoring import run_offline
@@ -105,6 +105,8 @@ OP_APPS: dict[str, tuple[str, ...]] = {
     # Adaptive music: every stem of a track through FluidSynth and Surge XT.
     "compose_track": ("surge-xt",),
     "edit_track": ("surge-xt",),
+    # The sound kit: SuperCollider or Surge XT, by the kind of sound.
+    "make_sound": (),
 }
 NATIVE_OPS = frozenset(OP_APPS)
 #: Key prefix of a read-only agent's connection on the stage, beside the staged ones.
@@ -118,6 +120,8 @@ def op_apps(tool: str, arguments: dict[str, Any]) -> tuple[str, ...]:
         apps.append(str(arguments.get("tool") or ""))
     elif tool == "make_map_editable":
         apps.append(str(arguments.get("editor") or "krita"))
+    elif tool == "make_sound":
+        apps.append(sound_kit.app_for(arguments))
     return tuple(dict.fromkeys(app for app in apps if app))
 
 

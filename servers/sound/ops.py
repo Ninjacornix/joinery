@@ -631,9 +631,11 @@ async def render_music(
 
 def register(server: MCPServer[Any], project: Path) -> None:
     """Add the typed sound operations to the joinery-sound server."""
-    from servers.sound import tracks  # it builds on the helpers here
+    # Built on the helpers here: adaptive tracks and the sound kit.
+    from servers.sound import make, tracks
 
     tracks.register(server, project)
+    make.register(server, project)
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
