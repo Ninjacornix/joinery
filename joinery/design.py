@@ -117,7 +117,7 @@ class Report(_Model):
     read: list[str] = []
     #: What couldn't be read or checked, and why.
     skipped: list[str] = []
-    #: `[design] check_every` in joinery.toml (0: off).
+    #: `[agents] design_check_every` in joinery.toml (0: off).
     check_every: int = 0
 
 
@@ -533,32 +533,36 @@ EVERY_CHOICES = (0, 1, 3, 5, 10)
 
 
 def check_every(project: Path) -> int:
-    """``[design] check_every`` in joinery.toml: check after every N accepted changes."""
+    """``[agents] design_check_every`` in joinery.toml: check after every N accepted
+    changes (0: off), beside the other checks' ``access_check_every`` and
+    ``perf_check_every``."""
     try:
         raw = tomllib.loads((project / "joinery.toml").read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return 0
-    table = raw.get("design", {})
-    value = table.get("check_every", 0) if isinstance(table, dict) else 0
+    table = raw.get("agents", {})
+    value = table.get(EVERY_KEY, 0) if isinstance(table, dict) else 0
     if not isinstance(value, int) or isinstance(value, bool):
         return 0
     return max(0, min(value, 100))
 
 
-_TABLE = re.compile(r"(?ms)^\[design\][^\n]*\n(.*?)(?=^\[|\Z)")
+#: The key in joinery.toml's [agents] table.
+EVERY_KEY = "design_check_every"
+_TABLE = re.compile(r"(?ms)^\[agents\][^\n]*\n(.*?)(?=^\[|\Z)")
 
 
 def set_check_every(project: Path, every: int) -> int:
-    """Save ``[design] check_every``, keeping every other line of joinery.toml."""
+    """Save ``[agents] design_check_every``, keeping every other line of joinery.toml."""
     if not 0 <= every <= 100:
-        raise ValueError("check_every is from 0 (off) to 100.")
+        raise ValueError("design_check_every is from 0 (off) to 100.")
     path = project / "joinery.toml"
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
-    line = f"check_every = {every}"
+    line = f"{EVERY_KEY} = {every}"
     match = _TABLE.search(text)
     if match:
         body = match.group(1)
-        key = re.compile(r"(?m)^check_every\s*=.*$")
+        key = re.compile(rf"(?m)^{EVERY_KEY}\s*=.*$")
         if key.search(body):
             body = key.sub(line, body, count=1)
         else:
@@ -568,7 +572,7 @@ def set_check_every(project: Path, every: int) -> int:
         updated = text[: match.start(1)] + body + text[match.end(1) :]
     else:
         lead = text.rstrip("\n") + "\n\n" if text.strip() else ""
-        updated = lead + "[design]\n" + line + "\n"
+        updated = lead + "[agents]\n" + line + "\n"
     try:
         tomllib.loads(updated)
     except tomllib.TOMLDecodeError as exc:
@@ -576,5 +580,5 @@ def set_check_every(project: Path, every: int) -> int:
     path.write_text(updated, encoding="utf-8")
     saved = check_every(project)
     if saved != every:
-        raise ValueError("joinery.toml keeps [design] in a form Joinery can't edit.")
+        raise ValueError("joinery.toml keeps [agents] in a form Joinery can't edit.")
     return saved

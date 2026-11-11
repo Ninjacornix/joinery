@@ -31,7 +31,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="check the design after every N accepted changes (0: off)",
     )
     parser.add_argument(
-        "--settings", action="store_true", help="print the check_every setting only"
+        "--settings",
+        action="store_true",
+        help="print the design_check_every setting only",
     )
 
 

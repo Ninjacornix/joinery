@@ -1,5 +1,5 @@
 """The design check: deterministic findings with evidence, agent findings that must
-cite real places, the check_every setting, and the CLI."""
+cite real places, the design_check_every setting, and the CLI."""
 
 from __future__ import annotations
 
@@ -508,7 +508,7 @@ def test_check_every_keeps_the_rest_of_joinery_toml(tmp_path: Path) -> None:
     assert design.set_check_every(tmp_path, 5) == 5
     assert design.set_check_every(tmp_path, 3) == 3
     text = config.read_text(encoding="utf-8")
-    assert text.count("[design]") == 1 and "check_every = 3" in text
+    assert text.count("[agents]") == 1 and "design_check_every = 3" in text
     assert 'final = ["a.png"]' in text and "reviewer = true" in text
     assert design.set_check_every(tmp_path, 0) == 0
     with pytest.raises(ValueError):

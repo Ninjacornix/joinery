@@ -8,7 +8,7 @@ told what Joinery's checks already found, reads the brief, design documents, sce
 and scripts, and reports judgement calls with evidence; ``joinery.design`` drops any
 whose evidence doesn't hold. It never edits the game.
 
-With ``[design] check_every = N`` in joinery.toml, every N-th accepted change runs the
+With ``[agents] design_check_every = N`` in joinery.toml, every N-th accepted change runs the
 checks (no model) and the card shows when they find something. The count is this
 chat session's.
 
@@ -165,7 +165,7 @@ class Designer:
         return run
 
     def after_decision(self, decision: dict[str, Any]) -> None:
-        """``[design] check_every``: the checks after every N-th accepted change."""
+        """``[agents] design_check_every``: the checks after every N-th accepted change."""
         if not decision.get("accepted"):
             return
         every = design.check_every(self.project)
