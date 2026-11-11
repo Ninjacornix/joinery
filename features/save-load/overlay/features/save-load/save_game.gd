@@ -27,6 +27,12 @@ extends Node
 ## (see save_adapter.gd): a one-line summary for the slot list and its own
 ## autosave moments.
 ##
+## Once the level has ended (`GameEvents.level_completed` or `level_failed`)
+## there is nothing left to play, so nothing is saved until the next level
+## starts: Save is disabled with the reason and autosaves are dropped. Loading
+## a save made in that state anyway (an older build allowed it) is the
+## blueprint's job: its level shows the result again or plays on.
+##
 ## Online, only the server saves and loads; the menu entries are disabled for
 ## clients. Test runs (`-- --settings-path=…`) keep their saves in a fresh
 ## folder that is removed on exit, unless `-- --saves-dir=<dir>` names one.
@@ -57,6 +63,7 @@ const REASON_OTHER_GAME := "This save belongs to a different game."
 const REASON_TOO_OLD := "This save is from an older version that cannot be upgraded."
 const REASON_CLIENT := "Only the host can save or load."
 const REASON_NO_LEVEL := "There is no game running to save."
+const REASON_LEVEL_OVER := "The level is over. Play again to save."
 
 ## Where the slot files live (an absolute or user:// path).
 var directory: String = DEFAULT_DIR
@@ -72,6 +79,8 @@ var _playtime_base: float = 0.0
 var _autosave_wait: float = -1.0
 var _last_autosave_msec: int = -1
 var _quiet_until_frame: int = 0
+## The level that announced its end; saving waits for another one.
+var _over_level_id: int = 0
 
 
 func _ready() -> void:
@@ -79,6 +88,8 @@ func _ready() -> void:
 	_load_adapter()
 	GameEvents.checkpoint_reached.connect(_on_checkpoint_reached)
 	GameEvents.level_started.connect(_on_level_started)
+	GameEvents.level_completed.connect(_on_level_over.unbind(1))
+	GameEvents.level_failed.connect(_on_level_over.unbind(1))
 	_add_menu_entries()
 	refresh_menu()
 
@@ -89,7 +100,7 @@ func _process(delta: float) -> void:
 	_autosave_wait -= delta
 	if _autosave_wait <= 0.0:
 		_autosave_wait = -1.0
-		if Game.current_level() != null and can_save():
+		if Game.current_level() != null and can_save() and not level_over():
 			autosave()
 
 
@@ -102,7 +113,8 @@ func _exit_tree() -> void:
 
 ## Saves the running game into `slot`. Errors: ERR_PARAMETER_RANGE_ERROR (no
 ## such slot), ERR_UNAUTHORIZED (an online client), ERR_UNCONFIGURED (no level
-## running), or the file error.
+## running), ERR_UNAVAILABLE (the level is over, see `level_over`), or the
+## file error.
 func save_slot(slot: int) -> Error:
 	if not _valid(slot):
 		return ERR_PARAMETER_RANGE_ERROR
@@ -111,6 +123,8 @@ func save_slot(slot: int) -> Error:
 	var level: Node = Game.current_level()
 	if level == null:
 		return ERR_UNCONFIGURED
+	if level_over():
+		return ERR_UNAVAILABLE
 	var data: Dictionary = {
 		"format": FORMAT,
 		"version": data_version(),
@@ -266,9 +280,10 @@ func autosave() -> Error:
 
 ## Asks for an autosave at the end of this frame. With `throttled`, at most
 ## one per `save/autosave_min_interval` seconds (later requests wait). Ignored
-## for online clients, while a slot is loading and right after a level starts.
+## for online clients, while a slot is loading, right after a level starts and
+## once it is over.
 func request_autosave(throttled: bool = false) -> void:
-	if not can_save() or _loading_slot >= 0 or Game.current_level() == null:
+	if not can_save() or _loading_slot >= 0 or Game.current_level() == null or level_over():
 		return
 	if Engine.get_process_frames() < _quiet_until_frame:
 		return
@@ -299,6 +314,24 @@ func can_save() -> bool:
 	if multiplayer.has_multiplayer_peer() and not multiplayer.is_server():
 		return false
 	return true
+
+
+## True once the running level has announced its end (won or lost); a new
+## level, a restart or a load clears it.
+func level_over() -> bool:
+	var level: Node = Game.current_level()
+	return level != null and level.get_instance_id() == _over_level_id
+
+
+## Why the running game cannot be saved now (a REASON_* msgid), or "".
+func save_blocked_reason() -> String:
+	if not can_save():
+		return REASON_CLIENT
+	if Game.current_level() == null:
+		return REASON_NO_LEVEL
+	if level_over():
+		return REASON_LEVEL_OVER
+	return ""
 
 
 func slot_path(slot: int) -> String:
@@ -402,8 +435,17 @@ func _load_adapter() -> void:
 
 func _add_menu_entries() -> void:
 	Menus.add_entry(&"main", &"load", "Load", _open_load_page, 15, _can_open_load)
-	Menus.add_entry(&"pause", &"save", "Save", _open_save_page, 30, can_save)
+	Menus.add_entry(&"pause", &"save", "Save", _open_save_page, 30, _can_open_save, _why_not_save)
 	Menus.add_entry(&"pause", &"load", "Load", _open_load_page, 40, _can_open_load)
+
+
+func _can_open_save() -> bool:
+	return save_blocked_reason().is_empty()
+
+
+## Shown under a disabled Save; a client's menu stays as it was.
+func _why_not_save() -> String:
+	return REASON_LEVEL_OVER if can_save() and level_over() else ""
 
 
 func _can_open_load() -> bool:
@@ -427,6 +469,14 @@ func _on_continue() -> void:
 func _on_checkpoint_reached(_id: String) -> void:
 	if bool(ProjectSettings.get_setting(AUTOSAVE_SETTING, true)):
 		request_autosave(false)
+
+
+## The level ended: drop a waiting autosave (it would keep the end state) and
+## refuse saves until another level runs.
+func _on_level_over() -> void:
+	var level: Node = Game.current_level()
+	_over_level_id = level.get_instance_id() if level != null else 0
+	_autosave_wait = -1.0
 
 
 func _on_level_started(_level: Node) -> void:

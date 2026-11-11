@@ -18,3 +18,18 @@ func change(play: PlayHarness) -> PackedStringArray:
 	await play.physics_frames(2)
 	play.expect(bool(switch.get(&"on")), "using the switch turns it on")
 	return PackedStringArray([str(switch.get(&"save_id"))])
+
+
+## Ends the level the way reaching the open exit does: the win is announced.
+func finish(play: PlayHarness) -> void:
+	var level: Node = Game.current_level()
+	GameEvents.level_completed.emit(level.call(&"_result"))
+	await play.physics_frames(2)
+	play.expect(bool(level.get(&"completed")), "the win completes the level")
+
+
+## The win panel is up.
+func result_shown(_level: Node) -> bool:
+	var me: Node = Game.local_player()
+	var hud: Node = me.get_node_or_null(^"Hud") if me != null else null
+	return hud != null and bool((hud.get(&"win_panel") as Control).visible)

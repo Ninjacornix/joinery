@@ -4,9 +4,11 @@ extends RefCounted
 ## A blueprint adapter ships res://tests/features/save-load/steps.gd with
 ## `change(play) -> PackedStringArray` (changes saved state the way playing
 ## does and returns the save ids it changed) and, optionally,
-## `prepare(level)` (called at every level start). Without one (the blank
-## starting point) only the data registered through `SaveGame.register` is
-## changed.
+## `prepare(level)` (called at every level start), `finish(play)` (ends the
+## level the way playing does; without it `GameEvents.level_failed` is
+## raised) and `result_shown(level) -> bool` (the level's result screen is
+## up). Without one (the blank starting point) only the data registered
+## through `SaveGame.register` is changed.
 
 const STEPS := "res://tests/features/save-load/steps.gd"
 const ADAPTER := "res://features/save-load/blueprint_adapter.gd"
@@ -76,6 +78,7 @@ func _phase_all() -> void:
 	await _check_pages(changed)
 	await _check_client()
 	await _check_continue(changed)
+	await _check_level_over()
 	_check_delete_all()
 
 
@@ -472,6 +475,100 @@ func _check_continue(changed: PackedStringArray) -> void:
 	await play.physics_frames(2)
 	_expect_restored(changed, expected, "after Continue")
 	_expect_extra(SAVED_COUNTER, "after Continue")
+
+
+## Once the level ends nothing saves (Save, autosave, checkpoints), and a save
+## an older build made at that moment loads into the result or a game that
+## goes on, never a level nobody can play.
+func _check_level_over() -> void:
+	await play.physics_frames(5)
+	play.expect(not SaveGame.level_over(), "a running level is not over")
+	SaveGame.request_autosave(true)
+	play.expect(SaveGame.autosave_pending(), "an autosave is waiting before the level ends")
+	if steps != null and steps.has_method(&"finish"):
+		await steps.finish(play)
+	else:
+		GameEvents.level_failed.emit("save_load_test")
+	await play.physics_frames(2)
+	play.expect(SaveGame.level_over(), "the level is over once it says so")
+	play.expect(not SaveGame.autosave_pending(), "the end of the level drops a waiting autosave")
+	var ended: Dictionary = Game.capture_state()
+	var saved: Dictionary = play.watch(SaveGame.saved)
+	play.expect(SaveGame.save_slot(1) == ERR_UNAVAILABLE, "nothing is saved once the level is over")
+	play.expect(SaveGame.autosave() == ERR_UNAVAILABLE, "no autosave once the level is over")
+	SaveGame.request_autosave()
+	play.expect(not SaveGame.autosave_pending(), "autosave requests wait for the next level")
+	GameEvents.checkpoint_reached.emit("save_load_test")
+	await play.physics_frames(5)
+	_stop(saved)
+	play.expect(play.fire_count(saved) == 0, "a checkpoint after the end does not autosave")
+	play.expect(
+		SaveGame.save_blocked_reason() == SaveGame.REASON_LEVEL_OVER, "the reason is the level end"
+	)
+	var entry: Dictionary = _entry(&"pause", &"save")
+	play.expect(not bool((entry["enabled"] as Callable).call()), "Save is disabled after the end")
+	play.expect(
+		str((entry["reason"] as Callable).call()) == SaveGame.REASON_LEVEL_OVER,
+		"the Save entry says why"
+	)
+	# Pause on the result screen (where the game lets it open) shows the same.
+	await play.tap(&"pause")
+	await play.physics_frames(2)
+	var page: Control = Menus.current_page()
+	if Menus.current_menu() == &"pause" and page != null:
+		var button: Button = page.find_child("save", true, false) as Button
+		play.expect(button != null and button.disabled, "the pause menu's Save is disabled")
+		var why: Label = page.find_child("save_reason", true, false) as Label
+		play.expect(
+			why != null and why.text == SaveGame.REASON_LEVEL_OVER, "the pause menu says why"
+		)
+		var load_button: Button = page.find_child("load", true, false) as Button
+		play.expect(load_button != null and not load_button.disabled, "Load still works")
+		Menus.close_all()
+
+	# A save made at that moment by a build that still allowed it.
+	var envelope: Dictionary = _read_json(SaveGame.slot_path(1))
+	var nodes: Dictionary = {}
+	for id: Variant in ended:
+		nodes[str(id)] = JSON.from_native(ended[id])
+	envelope["nodes"] = nodes
+	_write_text(SaveGame.slot_path(2), JSON.stringify(envelope))
+	play.expect(not bool(SaveGame.slot_info(2)["damaged"]), "the end-of-level save is loadable")
+	var loaded: Dictionary = play.watch(SaveGame.loaded)
+	play.expect(SaveGame.load_slot(2) == OK, "the end-of-level save loads")
+	var args: Array = await play.wait_watched(loaded, 300)
+	play.expect(args == [2], "loaded(2) fires")
+	await play.physics_frames(3)
+	var level: Node = Game.current_level()
+	play.expect(level != null, "a level runs after loading the end-of-level save")
+	if level == null:
+		return
+	play.expect(
+		SaveGame.level_over() or _playable(),
+		"the end-of-level save shows the result or plays on (not a stuck level)"
+	)
+	if steps != null and steps.has_method(&"result_shown"):
+		play.expect(
+			SaveGame.level_over() and bool(steps.result_shown(level)),
+			"the end-of-level save shows the result screen again"
+		)
+	var started: Dictionary = play.watch(GameEvents.level_started)
+	Game.restart_level()
+	await play.wait_watched(started, 300)
+	await play.physics_frames(2)
+	play.expect(not SaveGame.level_over(), "a restart clears the end")
+	play.expect(SaveGame.save_slot(1) == OK, "saving works again after a restart")
+	SaveGame.delete_slot(2)
+
+
+## Every player can be steered (none is down or frozen by an end screen).
+func _playable() -> bool:
+	for player: Node in Game.players():
+		if "controls_enabled" in player and not bool(player.get(&"controls_enabled")):
+			return false
+		if player.has_method(&"is_alive") and not bool(player.call(&"is_alive")):
+			return false
+	return true
 
 
 func _check_delete_all() -> void:

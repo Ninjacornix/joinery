@@ -16,3 +16,19 @@ func change(play: PlayHarness) -> PackedStringArray:
 	play.expect(bool(button.get(&"is_pressed")), "pressing the button presses it")
 	play.expect(bool(level.get(&"case_open")), "and opens the glass case")
 	return PackedStringArray(["button", "level"])
+
+
+## Ends the level the way the cube landing on the table does: the win is
+## announced.
+func finish(play: PlayHarness) -> void:
+	var level: Node = Game.current_level()
+	GameEvents.level_completed.emit({"time": float(level.get(&"elapsed")), "score": 1})
+	await play.physics_frames(2)
+	play.expect(bool(level.get(&"completed")), "the win completes the level")
+
+
+## The win page is up.
+func result_shown(_level: Node) -> bool:
+	var me: Node = Game.local_player()
+	var hud: Node = me.get_node_or_null(^"Hud") if me != null else null
+	return hud != null and is_instance_valid(hud.get(&"win_page"))
