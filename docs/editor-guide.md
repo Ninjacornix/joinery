@@ -250,6 +250,47 @@ Two more kinds of agent help, and both only read (ADR 0037).
   with `joinery reviewer --set on|off --model <name>`. `joinery transactions
   list` shows each change's `review_notes` and `reviewer`.
 
+### Playtests
+
+`/playtest` asks the playtester to play your game and tell you what went wrong
+(ADR 0038). Words after it say what to aim for: `/playtest the lever and the
+coins`. The playtester is your provider in the read-only `playtester` role (ADR
+0037): it never changes the game, and it can't.
+
+- A **Playtest** card shows above the message box with the other agents at
+  work: **Playing… 0:42 / 2:00** (game time) and its own **Stop**. A bot plays
+  the game headless in stock Godot, offline, through the game's own controls:
+  it walks, jumps and presses interact, heads for the coins, pickups,
+  checkpoints, switches and goals a blueprint marks, pauses and resumes, saves
+  and loads where the game can, and checks the menus' text in every language
+  the game has. It records script errors and warnings, crashes, freezes,
+  softlocks, falls out of the world, frame hitches, memory that keeps growing,
+  text that doesn't fit, and how long each level took.
+- When the run is over the card shows one count per severity (**1 high · 2
+  low · 1 note**) and each finding as a row. A row opens to what happened,
+  where in the code, the seed and a screenshot of the moment. **Fix this** puts
+  a ready request in the message box, with the seed to check the fix with;
+  nothing is sent until you send it. **×** dismisses the card.
+- The playtester's own report appears in the chat: bugs with repro steps,
+  softlocks and balance notes, most serious first. Each fix it proposes is a
+  line with **Ask Journeyman to fix**, which also only fills the message box.
+- Balance notes come from a bot pressing keys with some aim, not a person:
+  "finished in 0:09, may be too easy", "died 9 times without finishing".
+- The same seed plays the same run: `joinery playtest --project <path> --seed
+  4821 --seconds 120` repeats it from the command line (`--json` for the full
+  report, `--scene res://…` for one scene, `--screenshots` for pictures).
+  Each run's report and pictures stay in `.joinery/playtests/`, the last ten
+  runs; the game's own saves and settings during a run go there too, never
+  into your real ones.
+- Journeyman can play the game the same way with its `playtest` tool, for
+  example after changing how the player moves; its runs show on the same card.
+- `[agents] playtest_after_change = true` in `joinery.toml` starts the
+  playtester after you accept a change to scripts or scenes (off by default).
+  `playtest_minutes = 2` sets how long a run is.
+- Screenshots come from a second run of the same seed in a window that never
+  takes focus. Where nothing can draw (Linux without a display) the report
+  has no pictures.
+
 ### The Timeline tab
 
 **Timeline**, beside Review in the bottom bar, shows how the project changed
@@ -300,6 +341,8 @@ scene, so it joins the timeline when you save it. Switch it all off with
   new ones.
 - `/debug` debugs the last error Godot reported; words after it say what
   goes wrong (see Reviewer and debugger agents).
+- `/playtest [what to aim for]` plays the game with a bot and reports bugs,
+  softlocks and balance notes (see Playtests above).
 - `/brief` opens `design/brief.md` read-only, with **Ask Journeyman to change
   it**. With no brief, **Write the brief** drafts one from the starting point.
 - `/tools` gives each app's state and its one action (for example Start Docker
