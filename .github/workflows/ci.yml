@@ -127,6 +127,8 @@ jobs:
           PY
       - name: Stage, review, reject and accept Godot scene edits through the worker MCP
         run: uv run python tests/integration/mcp_round_trip.py
+      - name: A reviewer reads the staged change through a read-only worker view
+        run: uv run python tests/integration/review_view.py
       - name: Create, edit and replay a Surge XT sound in the offline worker
         run: uv run python tests/integration/surge_native.py
       - name: Create, edit one layer of and replay a GIMP image in the offline worker

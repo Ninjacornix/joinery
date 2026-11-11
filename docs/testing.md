@@ -71,6 +71,7 @@ Real upstream Godot MCP and cross-application checks are separate commands:
 
 ```sh
 uv run python tests/integration/mcp_round_trip.py
+uv run python tests/integration/review_view.py
 uv run python tests/integration/cross_tool.py
 ```
 

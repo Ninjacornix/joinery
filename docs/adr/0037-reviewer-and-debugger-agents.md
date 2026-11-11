@@ -45,6 +45,9 @@ core knew.
    the request, the author's summary, the changed files and their text diff, the art bible and
    game brief from the stage, the checks' results and the staged images (attached as pictures).
    It reports notes `{severity: info|warn|block, text, file?}` (`joinery/peer_review.py`).
+   - Its project-tool reads see the change as staged, new files included: they run on
+     a read-only view of the stage, answered in project paths, and never reach another
+     task's stage (ADR 0041, 5).
    - A `block` goes back to the author as a fixable `reviewer` problem, with the notes it asked
      for last time so the next round checks them. A send-back costs no submit attempt. After
      `[agents] review_rounds` send-backs (default 2) the review opens with the notes left.

@@ -35,7 +35,19 @@ ran with full network access, and a host build could drift from what the worker 
    in every argument, and `/work` paths in every answer back to the host folder
    (`mcp_runtime.worker_root`, `map_paths`, `rewrite_root`). A staged connection's answers are
    then mapped from the stage back to the project, so the agent always reads the project paths
-   it asked about. `res://` paths pass through unchanged.
+   it asked about. The server joins its file arguments (`filePath`, `scenePath`,
+   `scriptPath`, …) onto `projectPath` itself, so a `res://` there is made
+   project-relative first (`mcp_runtime.godot_relative`); other `res://` values pass
+   through unchanged.
+5. **Read-only agents read the stage read-only.** A reviewer, debugger, playtester or
+   specialist (`GatewayRPC` with `inspection_only`) calls the gateway with `view=True`:
+   while its gateway has a staged change, an audited read runs on a second worker,
+   `godot_worker(stage, readonly=True)` (Inkscape the same), so it sees new and
+   changed files as staged and can't write even past the tool allowlist. Apps whose
+   worker can't mount read-only (Blender, SuperCollider, Joinery's own servers) answer
+   audited reads from the staged connection. A path into the gateway's own stage is
+   read as the project path it stages; a path into any `.joinery/transactions/`
+   folder is refused, so no agent reads another task's stage.
 
 ## Consequences
 
