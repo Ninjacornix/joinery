@@ -408,7 +408,9 @@ func _hint_mode() -> void:
 
 func _build_project() -> void:
 	var section := _section("Project")
-	for item: Array in [["Art direction", "/art"], ["Project apps", "/setup"]]:
+	for item: Array in [
+		["Art direction", "/art"], ["Make it match", "/match"], ["Project apps", "/setup"]
+	]:
 		var button := UI.row_button(str(item[0]))
 		button.pressed.connect(_run.bind(str(item[1])))
 		_flush_row(button)

@@ -227,6 +227,7 @@ func _states(light: bool, width: int) -> void:
 		queue.call("remove", queue.call("first"))
 	await _parallel(light, width, chat)
 	await _playtest(light, width, chat)
+	await _match(light, width, chat)
 
 	chat.append_agent_text("I widened **Door** by 20% in Blender and darkened the wood.", true)
 	chat.finish_agent_response(true)
@@ -807,3 +808,35 @@ func _saved_chats(light: bool, width: int) -> void:
 	var folder := ProjectSettings.globalize_path("res://.joinery/chats")
 	for file_name: String in DirAccess.get_files_at(folder):
 		DirAccess.remove_absolute(folder.path_join(file_name))
+
+
+## Make it match: the scores and the top findings, then its fixes running as tasks.
+func _match(light: bool, width: int, chat: Control) -> void:
+	var tasks: Node = chat.get("_tasks")
+	var fixture: GDScript = load(
+		get_script().resource_path.get_base_dir().path_join("match_fixture.gd")
+	)
+	var matcher: Node = tasks.get_node("Match")
+	matcher.set(
+		"audit_runner", func(_args: PackedStringArray) -> Dictionary: return fixture.call("audit")
+	)
+	matcher.call("open")
+	var card: Control = tasks.get("match_card")
+	_check(card != null, "The match card shows")
+	await _shot("match", light, width, chat)
+	var rows: Array = fixture.call("run_rows")
+	card.call("apply_run", {"state": "fixing", "tasks": rows})
+	var apps := {"palette": ["krita"], "lighting": ["godot"], "sound": ["supercollider"]}
+	for row: Dictionary in rows:
+		var event := {"kind": "task", "task_id": row["task_id"], "title": row["title"]}
+		event.merge({"state": "working", "apps": apps[row["area"]], "origin": "match"})
+		tasks.call("on_event", event)
+		if row["state"] == "in_review":
+			event.merge({"state": "in_review", "transaction_id": "fixture"}, true)
+			tasks.call("on_event", event)
+	await _shot("match-fixing", light, width, chat)
+	for row: Dictionary in rows:
+		tasks.call("_remove", row["task_id"])
+	card.free()
+	tasks.set("match_card", null)
+	tasks.call("sync_visible")

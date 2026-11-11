@@ -66,6 +66,8 @@ SIDEBAR_STATES = (
     "debugging",
     "playtest",
     "playtest-report",
+    "match",
+    "match-fixing",
     "review-waiting",
     "review-waiting-big",
     "accepted",

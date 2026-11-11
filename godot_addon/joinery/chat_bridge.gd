@@ -1,3 +1,4 @@
+# gdlint: disable=max-public-methods
 @tool
 extends Node
 ## Persistent framed chat on native pipes. No GDScript worker touches editor state.
@@ -50,6 +51,9 @@ signal task_review(transaction_id: String)
 ## A playtest (ADR 0038), tagged with its playtest_id: {state: starting|playing|writing|done|
 ## failed|stopped, elapsed, seconds, report, summary, followups, message, origin}.
 signal playtest_event(event: Dictionary)
+## "Make it match" (ADR 0045): {state: auditing|fixing|done|failed|stopped, tasks: [{key, title,
+## area, apps, task_id, state, message}], audit?, message?}. Its changes are tasks.
+signal match_event(event: Dictionary)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 const ATTACHMENTS := preload("chat_attachments.gd")
@@ -217,6 +221,19 @@ func cancel_playtest(playtest_id: String) -> void:
 		_job.send_line(JSON.stringify({"kind": "playtest_cancel", "playtest_id": playtest_id}))
 
 
+## "Make it match": with [param stop] false the chat host audits again and makes the fixes in
+## [param areas] (all when empty), or only [param findings], as parallel tasks; with [param stop]
+## it stops those still queued or working (changes in review stay). False when not connected.
+func send_match(areas: Array, findings: Array, stop := false) -> bool:
+	if _job == null or not _connected:
+		return false
+	var line := {"kind": "match_cancel"}
+	if not stop:
+		line = {"kind": "match_fix", "areas": areas, "findings": findings}
+	_job.send_line(JSON.stringify(line))
+	return true
+
+
 ## Show a task's change in the Review tab.
 func show_task_review(transaction_id: String) -> void:
 	task_review.emit(transaction_id)
@@ -318,6 +335,8 @@ func _handle(event: Dictionary) -> void:
 			art_approved.emit(str(event.get("sha256", "")))
 		"suggestions":
 			suggestions.emit(event.get("items", []))
+		"match":
+			match_event.emit(event)
 		"chat":
 			chat_id = str(event.get("chat_id", ""))
 			chat_changed.emit(event)

@@ -16,9 +16,13 @@ extends VBoxContainer
 ## (playtest_card.gd) sits here with the tasks while it plays. Its written report goes to the
 ## transcript, each of its "Fix:" lines as an "Ask Journeyman to fix" offer, and "Fix this" on
 ## a finding puts a ready request in the composer ([method on_playtest]).
+##
+## "Make it match" (ADR 0045) has its card here too (sidebar_match.gd): the project's scores
+## against the art bible, while its fixes run as tasks with cards of their own.
 
 const CARD := preload("sidebar_task_card.gd")
 const DEBUG := preload("sidebar_debug.gd")
+const MATCH := preload("sidebar_match.gd")
 const PLAYTEST_CARD := preload("playtest_card.gd")
 const UI_MOTION := preload("ui_motion.gd")
 ## Seconds a finished task's card stays before it steps out.
@@ -43,6 +47,8 @@ var bridge: Object:
 				bridge.connect("playtest_event", on_playtest)
 ## The playtest card, while there is one.
 var playtest: Control
+## The match card (match_card.gd), while there is one.
+var match_card: Control
 var _cards: Dictionary = {}
 var _main_busy := false
 var _offer: Control
@@ -58,6 +64,8 @@ static func attach(sidebar: Control, content: Control, before: Control) -> VBoxC
 		composer.connect("alongside", tasks.run_alongside)
 	# "/debug" and the offer after a new error in Output start a debugging task.
 	DEBUG.attach(sidebar, tasks)
+	# "/match" and Make it match: the project against the art bible.
+	MATCH.attach(sidebar, tasks)
 	var slash: Object = sidebar.get("_slash")
 	if slash != null and slash.has_signal("playtest_requested"):
 		slash.connect("playtest_requested", tasks.start_playtest)
@@ -247,7 +255,7 @@ func _close_playtest() -> void:
 		null,
 		func() -> void:
 			card.queue_free()
-			visible = not _cards.is_empty()
+			sync_visible()
 	)
 	_sync()
 
@@ -315,9 +323,13 @@ func _remove(id: String) -> void:
 	_cards.erase(id)
 	if is_instance_valid(each):
 		each.queue_free()
-	if _cards.is_empty() and not is_instance_valid(playtest):
-		hide()
+	sync_visible()
 	_sync()
+
+
+## Shown while any card is: a task's, the playtest's or the match card.
+func sync_visible() -> void:
+	visible = not _cards.is_empty() or is_instance_valid(playtest) or is_instance_valid(match_card)
 
 
 func _sync() -> void:

@@ -69,6 +69,7 @@ var _bible_decided: VBoxContainer
 var _bible_status: Label
 var _bible_dot: Control
 var _bible_open: Button
+var _bible_match: Button
 var _decided_body: VBoxContainer
 var _decided_empty: Label
 var _decided_more: Label
@@ -494,6 +495,10 @@ func _build_list() -> void:
 	_bible_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_bible_status.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_bible_row.add_child(_bible_status)
+	_bible_match = UI.quiet("Make it match")
+	_bible_match.tooltip_text = "Fix what drifts from the art bible, as reviewed changes (/match)"
+	_bible_match.pressed.connect(func() -> void: _slash.call("request_match"))
+	_bible_row.add_child(_bible_match)
 	_bible_open = UI.quiet("Open")
 	_bible_open.tooltip_text = "Open the art direction (/art)"
 	_bible_open.accessibility_name = "Open the art bible"
@@ -653,6 +658,9 @@ func _render_bible() -> void:
 			_bible_open.theme_type_variation = "JoinerySecondaryButton"
 			_bible_open.text = "Review"
 	_bible_open.accessibility_name = _bible_open.text + " the art bible"
+	_bible_match.visible = (
+		state == "approved" and _slash != null and _slash.has_method("request_match")
+	)
 	_bible_dot.tooltip_text = _bible_status.text
 
 

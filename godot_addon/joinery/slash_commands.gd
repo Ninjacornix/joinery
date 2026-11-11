@@ -32,6 +32,8 @@ signal revertible_changed(states: Dictionary)
 signal bible_upgraded(ok: bool, message: String)
 ## "/playtest [focus]": the playtester plays the game; [param focus] is the words after it.
 signal playtest_requested(focus: String)
+## "/match", or Make it match elsewhere: audit the project against the art bible.
+signal match_requested
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 ## Everyday commands first; descriptions stay at 32 characters or fewer.
@@ -40,6 +42,7 @@ const COMMANDS := {
 	"/brief": ["Read the game brief", "ui"],
 	"/feature": ["Add or remove a game feature", "cli"],
 	"/playtest": ["Play the game and report bugs", "ui"],
+	"/match": ["Make everything match the bible", "ui"],
 	"/setup": ["Change project apps", "ui"],
 	"/focus": ["Toggle focus mode", "ui"],
 	"/toolbar": ["Show or hide viewport tools", "ui"],
@@ -126,6 +129,8 @@ func run(entry: String) -> bool:
 			debug_requested.emit(" ".join(arguments(entry)))
 		elif command == "/playtest":
 			playtest_requested.emit(" ".join(arguments(entry)))
+		elif command == "/match":
+			match_requested.emit()
 		else:
 			requested.emit(command)
 		return true
@@ -145,6 +150,11 @@ func run(entry: String) -> bool:
 		return true
 	started.emit(command)
 	return true
+
+
+## Make it match from outside the sidebar (the Review tab's art bible row).
+func request_match() -> void:
+	match_requested.emit()
 
 
 ## The CLI check in progress ("/doctor"), or "".

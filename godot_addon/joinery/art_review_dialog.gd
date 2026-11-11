@@ -126,6 +126,18 @@ static func _fill(
 				dialog.queue_free()
 		)
 		foot.add_child(ask)
+	if approved and parent.has_method("run_command"):
+		var tidy := UI.link("Make the project match these rules")
+		tidy.tooltip_text = "Fix what drifts, as reviewed changes (/match)"
+		tidy.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		STYLE.hug_left(tidy)
+		tidy.pressed.connect(
+			func() -> void:
+				parent.call("run_command", "/match")
+				dialog.hide()
+				dialog.queue_free()
+		)
+		foot.add_child(tidy)
 
 
 ## A document view's size: 46 by 40 font sizes, at most 90% of [param parent]'s window.
