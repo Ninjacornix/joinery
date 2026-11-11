@@ -209,6 +209,21 @@ def feature_steps(
                 lambda p: run_godot(p, test, (settings("translations"),), 180, marker="translations"),
             )
         ]
+    if feature == "vr":
+        test = "res://tests/features/vr/vr_test.gd"
+        return [
+            Step(
+                "vr:desktop",
+                lambda p: run_godot(p, test, ("--autostart", settings("vr")), 240, marker="vr"),
+            ),
+            Step(
+                "vr:simulated",
+                lambda p: run_godot(
+                    p, test, ("--autostart", settings("vr-rig"), "--vr-simulate"), 240,
+                    marker="vr",
+                ),
+            ),
+        ]
     if feature == ONLINE:
         return online_steps(blueprint, work, dedicated=alone)
     return []
