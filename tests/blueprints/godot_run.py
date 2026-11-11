@@ -26,6 +26,10 @@ STOCK_GODOT = ROOT / ".tools/Godot.app/Contents/MacOS/Godot"
 SETTINGS_ARG = "--settings-path={settings}"
 TEST_ARGS = ("--autostart", SETTINGS_ARG)
 _ERROR = re.compile(r"^(SCRIPT ERROR|ERROR:|USER SCRIPT ERROR|USER ERROR)", re.MULTILINE)
+#: What Godot's own OpenXR start-up logs when no OpenXR runtime is installed.
+#: Only runs that ask for it (`xr=True`) accept these lines.
+_OPENXR_ERROR = re.compile(r"^ERROR: OpenXR: ")
+_OPENXR_SETTING = re.compile(r"^openxr/enabled=true$", re.MULTILINE)
 _OK = re.compile(r"^\S.*: ok\s*$", re.MULTILINE)
 
 
@@ -99,6 +103,21 @@ def settings_file(project: Path) -> Path:
     return project.parent / f".settings-{project.name}.cfg"
 
 
+def xr_args(project: Path, xr: bool = False) -> list[str]:
+    """`--xr-mode off` for a project that starts OpenXR (the VR feature).
+
+    Without an OpenXR runtime, Godot's own start-up logs an error and starts
+    in normal mode. Runs that do not test that path switch XR off, which the
+    VR feature treats the same way (desktop mode). `xr=True` keeps it on.
+    """
+    if xr:
+        return []
+    path = project / "project.godot"
+    if path.is_file() and _OPENXR_SETTING.search(path.read_text(encoding="utf-8")):
+        return ["--xr-mode", "off"]
+    return []
+
+
 def _user_args(project: Path, user_args: Sequence[str]) -> list[str]:
     return [arg.replace("{settings}", str(settings_file(project))) for arg in user_args]
 
@@ -111,11 +130,15 @@ def _run(args: list[str], timeout: float, project: Path) -> Completed:
     return Completed(args, process.returncode, process.stdout + process.stderr)
 
 
-def _check(result: Completed, marker: str | None) -> Completed:
+def _check(result: Completed, marker: str | None, *, xr: bool = False) -> Completed:
     problems: list[str] = []
     if result.returncode != 0:
         problems.append(f"exit code {result.returncode}")
-    errors = [line for line in result.output.splitlines() if _ERROR.match(line)]
+    errors = [
+        line
+        for line in result.output.splitlines()
+        if _ERROR.match(line) and not (xr and _OPENXR_ERROR.match(line))
+    ]
     if errors:
         problems.append("errors: " + "; ".join(errors[:5]))
     if marker is not None:
@@ -155,14 +178,18 @@ def run_godot(
     timeout: float = 120,
     *,
     marker: str | None = "",
+    xr: bool = False,
 ) -> Completed:
-    """Run a `SceneTree` script; it must print `<marker>: ok` (any name when "")."""
+    """Run a `SceneTree` script; it must print `<marker>: ok` (any name when "").
+
+    `xr=True` lets a VR project try to start OpenXR (see `xr_args`).
+    """
     import_project(project)
     args = [
-        str(_godot()), "--headless", "--path", str(project), "--fixed-fps", "60",
-        "--script", script, "--", *_user_args(project, user_args),
+        str(_godot()), "--headless", *xr_args(project, xr), "--path", str(project),
+        "--fixed-fps", "60", "--script", script, "--", *_user_args(project, user_args),
     ]
-    return _check(_run(args, timeout, project), marker)
+    return _check(_run(args, timeout, project), marker, xr=xr)
 
 
 def boot(
@@ -172,14 +199,19 @@ def boot(
     timeout: float = 120,
     *,
     marker: str | None = None,
+    xr: bool = False,
 ) -> Completed:
-    """Run the main scene for `frames` frames; no errors allowed."""
+    """Run the main scene for `frames` frames; no errors allowed.
+
+    `xr=True` lets a VR project try to start OpenXR (see `xr_args`).
+    """
     import_project(project)
     args = [
-        str(_godot()), "--headless", "--path", str(project), "--fixed-fps", "60",
-        "--quit-after", str(frames), "--", *_user_args(project, user_args),
+        str(_godot()), "--headless", *xr_args(project, xr), "--path", str(project),
+        "--fixed-fps", "60", "--quit-after", str(frames), "--",
+        *_user_args(project, user_args),
     ]
-    return _check(_run(args, timeout, project), marker)
+    return _check(_run(args, timeout, project), marker, xr=xr)
 
 
 def free_port() -> int:
@@ -205,7 +237,10 @@ def run_pair(
     """
     import_project(project)
     port = str(free_port())
-    base = [str(_godot()), "--headless", "--path", str(project), "--fixed-fps", "60"]
+    base = [
+        str(_godot()), "--headless", *xr_args(project), "--path", str(project),
+        "--fixed-fps", "60",
+    ]
     if script:
         base += ["--script", script]
 

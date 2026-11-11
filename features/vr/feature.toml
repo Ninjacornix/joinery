@@ -1,0 +1,34 @@
+# Play a 3D starting point in a VR headset through OpenXR, which is built into
+# Godot 4.7: nothing is downloaded or installed. The `VR` autoload starts the
+# headset when an OpenXR runtime and headset are there and carries an XR rig
+# (res://features/vr/xr_rig.tscn: origin, camera, two greybox hands, a
+# pointer ray) on the local player: smooth move, snap turn (30° or 45°),
+# teleport with an arc that only lands on level floor, a comfort vignette,
+# seated or standing height and a left-handed swap. Without a runtime or
+# headset the game starts on the desktop with mouse, keyboard or pad and says
+# so once; it never stops. Comfort settings sit on a "VR comfort" settings
+# page and in the player's settings file. With save-load, a save also keeps
+# which way the player was turned; with the controller feature, hand rumble
+# and the stick deadzone follow its Controls page.
+id = "vr"
+name = "VR"
+summary = "Play in a VR headset through OpenXR: hands, smooth move, snap turn, teleport and comfort settings, with a desktop fallback."
+version = 1
+requires = []
+conflicts = []
+enhances = ["controller", "save-load"]
+blueprints = ["first-person-3d", "third-person-3d", "vr-room"]
+unsupported = "VR needs a 3D starting point: First-person 3D, Third-person 3D or VR room."
+extra_roots = []
+
+# OpenXR starts with the game when a runtime is installed. `startup_alert` off:
+# without one, Godot logs why and starts in normal mode instead of showing a
+# blocking dialog, and the VR autoload switches to the desktop.
+[project.settings]
+"xr/openxr/enabled" = true
+"xr/openxr/startup_alert" = false
+"xr/openxr/default_action_map" = "res://features/vr/openxr_action_map.tres"
+"xr/shaders/enabled" = true
+
+[autoload]
+VR = "res://features/vr/vr.gd"
