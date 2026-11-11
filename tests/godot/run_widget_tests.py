@@ -50,6 +50,7 @@ CASES = {
     "share_tab_test.gd": "share tab: ok",
     "match_card_test.gd": "match card: ok",
     "variants_test.gd": "variants: ok",
+    "complex_models_setting_test.gd": "complex models setting: ok",
     # Last: it puts the shared disposable project under git.
     "timeline_test.gd": "timeline: ok",
 }

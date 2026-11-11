@@ -15,6 +15,7 @@ const STYLE := preload("sidebar_style.gd")
 const POLICY := preload("history_policy.gd")
 const TIMELINE_SETTING := preload("timeline_setting.gd")
 const REVIEWER_SETTING := preload("reviewer_setting.gd")
+const COMPLEX_MODELS_SETTING := preload("complex_models_setting.gd")
 const PATH := "Joinery/journeyman.cfg"
 const TEXT_SIZES := UI_THEME.TEXT_SIZES
 const MODES := ["Auto", "Fast", "Thorough"]
@@ -442,6 +443,8 @@ func _build_project() -> void:
 	section.body.add_child(TIMELINE_SETTING.new())
 	# A second agent reads each change first (`[agents] reviewer`, `reviewer_model`).
 	section.body.add_child(REVIEWER_SETTING.new())
+	# Complex models made in Blender or with a kit (`[agents] complex_models`).
+	section.body.add_child(COMPLEX_MODELS_SETTING.new())
 
 
 ## Compact asks first, in place: no dialog, and Cancel leaves everything as it was.
