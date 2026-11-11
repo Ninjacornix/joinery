@@ -67,3 +67,15 @@ static func missing_text(
 	if not previews:
 		line = "Install %s on this computer to see and change .%s files." % [app, extension]
 	return ["%s isn't installed" % app, line]
+
+
+## Why an app in the "Open with" menu can't open the file.
+static func unavailable_text(option: Dictionary) -> String:
+	if source_missing(option):
+		return "The source file is missing."
+	return "Install %s on this computer to open it here." % option["name"]
+
+
+## Whether an open option failed because the source file is missing, not the app.
+static func source_missing(option: Dictionary) -> bool:
+	return str(option.get("reason", "")).begins_with("Source missing")

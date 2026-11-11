@@ -18,6 +18,7 @@ const MODEL_SCRIPT := preload("res://addons/joinery/model_preview.gd")
 const LIST_SCRIPT := preload("res://addons/joinery/asset_list.gd")
 const INDICATOR_SCRIPT := preload("res://addons/joinery/activity_indicator.gd")
 const PARTS_SCRIPT := preload("res://addons/joinery/parts_panel.gd")
+const KITS_SCRIPT := preload("res://addons/joinery/kits_panel.gd")
 const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
 const UI_COMPONENTS := preload("res://addons/joinery/ui_components.gd")
 const UI_MOTION := preload("res://addons/joinery/ui_motion.gd")
@@ -42,6 +43,10 @@ const REFRESH_SECONDS := 2.0
 const OPENED_SECONDS := 2.0
 
 var _browser: VBoxContainer
+## The assets list with its filter and states; the Kits tab swaps in the kit list.
+var _listing: VBoxContainer
+var _body: VBoxContainer
+var _kits: KITS_SCRIPT
 var _filter_section: VBoxContainer
 var _tools: LIST_SCRIPT
 var _search: LineEdit
@@ -112,9 +117,17 @@ func _build_browser(split: HSplitContainer) -> void:
 	_browser = VBoxContainer.new()
 	_browser.theme_type_variation = "JoineryStack"
 	split.add_child(_browser)
+	_kits = KITS_SCRIPT.new()
+	_kits.toggled.connect(_show_kits)
+	_kits.made.connect(func(_result: Dictionary) -> void: invalidate())
+	_browser.add_child(_kits.switch)
+	_listing = VBoxContainer.new()
+	_listing.theme_type_variation = "JoineryStack"
+	_listing.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_browser.add_child(_listing)
 	_filter_section = VBoxContainer.new()
 	_filter_section.theme_type_variation = "JoineryTight"
-	_browser.add_child(_filter_section)
+	_listing.add_child(_filter_section)
 	var heading := MarginContainer.new()
 	heading.theme_type_variation = "JoineryInset"
 	heading.add_child(UI_COMPONENTS.label("Created in", "JoinerySection"))
@@ -129,15 +142,15 @@ func _build_browser(split: HSplitContainer) -> void:
 	_search.clear_button_enabled = true
 	_search.text_changed.connect(func(_text: String) -> void: _filter())
 	UI_COMPONENTS.bind_height(_search, "md", false)
-	_browser.add_child(_search)
+	_listing.add_child(_search)
 	_loading = HBoxContainer.new()
 	_loading.theme_type_variation = "JoineryRow"
 	_loading_indicator = INDICATOR_SCRIPT.new()
 	_loading.add_child(_loading_indicator)
 	_loading.add_child(UI_COMPONENTS.label("Loading assets…", "JoineryCaption"))
-	_browser.add_child(_loading)
+	_listing.add_child(_loading)
 	_empty = UI_COMPONENTS.label("", "JoineryCaption", true)
-	_browser.add_child(_empty)
+	_listing.add_child(_empty)
 	_error_box = VBoxContainer.new()
 	_error_box.theme_type_variation = "JoineryTight"
 	_error_label = UI_COMPONENTS.label("", "JoineryError", true)
@@ -146,18 +159,23 @@ func _build_browser(split: HSplitContainer) -> void:
 	retry.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	retry.pressed.connect(_retry)
 	_error_box.add_child(retry)
-	_browser.add_child(_error_box)
+	_listing.add_child(_error_box)
 	_assets = LIST_SCRIPT.new()
 	_assets.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_assets.item_selected.connect(_select)
-	_browser.add_child(_assets)
+	_listing.add_child(_assets)
+	_browser.add_child(_kits.list)
 
 
 func _build_body(split: HSplitContainer) -> void:
-	var body := VBoxContainer.new()
+	_body = VBoxContainer.new()
+	var body := _body
 	body.theme_type_variation = "JoineryStack"
 	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	split.add_child(body)
+	# Hidden children don't take a side of the split: the Kits tab swaps the two.
+	_kits.hide()
+	split.add_child(_kits)
 	_header = HBoxContainer.new()
 	_header.theme_type_variation = "JoineryRow"
 	_header.hide()
@@ -198,6 +216,7 @@ func _build_body(split: HSplitContainer) -> void:
 	_open_with = _open_menu.get_popup()
 	_open_with.id_pressed.connect(_open_option)
 	_actions.add_child(_open_menu)
+	_actions.add_child(_kits.edit_button)
 	_build_unavailable(body)
 	_parts = HFlowContainer.new()
 	_parts.hide()
@@ -466,6 +485,14 @@ func _tool_name(tool: String) -> String:
 	return ""
 
 
+## The Kits tab: the kit list and the Kits panel stand in for the assets and their preview.
+func _show_kits(on: bool) -> void:
+	_listing.visible = not on
+	_kits.list.visible = on
+	_body.visible = not on
+	_kits.visible = on
+
+
 func use_rail_navigation() -> void:
 	_filter_section.hide()
 
@@ -649,6 +676,7 @@ func _show_asset(asset: Dictionary, notify: bool) -> void:
 	_show_preview("res://" + path, _preview_import_changed)
 	_preview_import_changed = false
 	_parts_panel.show_for(owner, _kind_of(owner) == "model")
+	_kits.show_asset(owner)
 	if notify:
 		asset_selected.emit(_current.duplicate(true))
 
@@ -666,6 +694,8 @@ func _describe(asset: Dictionary) -> String:
 		words.append("imported")
 	elif not tool.is_empty():
 		words.append("made in " + tool)
+	if not (asset.get("kit", {}) as Dictionary).is_empty():
+		words.append("%s kit" % asset["kit"].get("label", ""))
 	if not str(asset.get("pending", "")).is_empty():
 		words.append(WORDING.WAITING.to_lower())
 	return " · ".join(words)
@@ -728,7 +758,7 @@ func _update_open() -> void:
 		var available := bool(option["available"])
 		_open_with.set_item_disabled(index, not available)
 		_open_with.set_item_tooltip(
-			index, str(option["path"]) if available else _unavailable_text(option)
+			index, str(option["path"]) if available else WORDING.unavailable_text(option)
 		)
 	_open_menu.visible = options.size() > 1
 	_set_menu_label(false)
@@ -740,7 +770,7 @@ func _update_open() -> void:
 	var app := str(primary["name"])
 	if not bool(primary["available"]):
 		_open.hide()
-		var missing := _source_missing(primary)
+		var missing := WORDING.source_missing(primary)
 		var lines := _missing_text(primary, true)
 		_unavailable_title.text = "The source file is missing" if missing else lines[0]
 		_unavailable_label.text = "" if missing else lines[1]
@@ -748,7 +778,7 @@ func _update_open() -> void:
 		# Project apps can't bring back a missing source file, nor help an app that is ready.
 		_setup_link.visible = not missing and not WORDING.ready_for(_data.get("tools", []), primary)
 		# The preview's empty state already says the app is missing: say it once.
-		_unavailable.visible = _explained_app != app or _source_missing(primary)
+		_unavailable.visible = _explained_app != app or WORDING.source_missing(primary)
 		_set_menu_label(options.any(func(item: Dictionary) -> bool: return item["available"]))
 		return
 	_open.tooltip_text = str(primary["path"])
@@ -769,16 +799,6 @@ func _set_menu_label(labelled: bool) -> void:
 	_open_menu.theme_type_variation = (
 		"JoinerySecondaryButton" if labelled else "JoineryIconButton"
 	)
-
-
-func _unavailable_text(option: Dictionary) -> String:
-	if _source_missing(option):
-		return "The source file is missing."
-	return "Install %s on this computer to open it here." % option["name"]
-
-
-static func _source_missing(option: Dictionary) -> bool:
-	return str(option.get("reason", "")).begins_with("Source missing")
 
 
 func _open_option(index: int) -> void:
@@ -890,7 +910,7 @@ func _show_no_preview(extension: String) -> void:
 		return
 	var primary: Dictionary = options[0]
 	var app := str(primary["name"])
-	if bool(primary["available"]) or _source_missing(primary):
+	if bool(primary["available"]) or WORDING.source_missing(primary):
 		_empty_state("No preview for .%s files" % extension, "Open it in %s to see it." % app)
 		return
 	# The app is missing: one block says so and offers the one next step, instead of telling
@@ -908,30 +928,9 @@ func _show_no_preview(extension: String) -> void:
 ## A centred empty state in the preview: the asset kind's icon, a [param title], an optional
 ## [param line] saying what to do, and an optional [param action] button.
 func _empty_state(title: String, line: String, action: Button = null) -> void:
-	var block := VBoxContainer.new()
-	block.theme_type_variation = "JoineryTight"
-	block.alignment = BoxContainer.ALIGNMENT_CENTER
-	block.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_preview.add_child(block)
-	var icon := TextureRect.new()
-	icon.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
-	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var kind := _kind_of(_current) if not _current.is_empty() else "other"
-	UI_COMPONENTS.bind_icon(icon, kind if UI_THEME.ICONS.has(kind) else "warning", "texture")
-	icon.theme_changed.connect(
-		func() -> void: icon.self_modulate = UI_THEME.color(icon, "text_faint")
-	)
-	block.add_child(icon)
-	var heading := UI_COMPONENTS.label(title, "JoineryBodyLarge")
-	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	block.add_child(heading)
-	if not line.is_empty():
-		var hint := UI_COMPONENTS.label(line, "JoineryCaption", true)
-		hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		block.add_child(hint)
-	if action != null:
-		action.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-		block.add_child(action)
+	var icon := kind if UI_THEME.ICONS.has(kind) else "warning"
+	_preview.add_child(UI_COMPONENTS.empty_state(icon, title, line, action))
 
 
 func _note(text: String, busy := false) -> void:

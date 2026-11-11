@@ -6,13 +6,15 @@ Builds a throwaway project holding the committed hammer fixture the way a Joiner
 edit leaves it (recipe, lock, Joinery's import settings, exported texture PNGs and a
 cached parts report), imports it, then runs part_pick_test.gd and the parts section of
 workspace_test.gd headless. With --capture it also renders the workspace in dark and
-light and saves workspace-parts-<theme>.png, and asset_workspace_test.gd's states as
-workspace-assets-<theme>-<state>.png, for a visual check.
+light and saves workspace-parts-<theme>.png, and asset_workspace_test.gd's and
+kits_panel_test.gd's states as workspace-assets-<theme>-<state>.png, for a visual check
+(the Kits panel shows a preview Blender draws in the worker).
 """
 
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import shutil
@@ -25,7 +27,7 @@ sys.path.insert(0, str(ROOT))
 
 from run_startup_test import crash, scratch_folder
 
-from joinery import parts
+from joinery import kits, parts
 from joinery.locking import GLB_IMPORT, write_lock
 from joinery.workspace import index
 
@@ -71,7 +73,12 @@ def make_project(directory: Path) -> Path:
     cached.write_text(json.dumps({"sha256": digest, "inspection": inspection}))
     tests = project / "tests"
     tests.mkdir()
-    for name in ("part_pick_test.gd", "workspace_test.gd", "asset_workspace_test.gd"):
+    for name in (
+        "part_pick_test.gd",
+        "workspace_test.gd",
+        "asset_workspace_test.gd",
+        "kits_panel_test.gd",
+    ):
         shutil.copyfile(ROOT / "tests/godot" / name, tests / name)
     return project
 
@@ -142,6 +149,16 @@ def main() -> int:
         )
         if args.capture:
             args.capture.mkdir(parents=True, exist_ok=True)
+            env["JOINERY_TEST_PYTHON"] = sys.executable
+            drawn = {
+                "make": asyncio.run(
+                    kits.preview(project, "hut", {"windows": 4, "roof": "hip"}, seed=3)
+                ),
+                "edit": asyncio.run(
+                    kits.preview(project, "rock", {"moss": 0.4}, seed=11)
+                ),
+            }
+            env["JOINERY_KITS_PREVIEW"] = json.dumps(drawn)
             for theme in ("dark", "light"):
                 shot = args.capture.resolve() / f"workspace-parts-{theme}.png"
                 env.update(JOINERY_PARTS_THEME=theme, JOINERY_PARTS_CAPTURE=str(shot))
@@ -159,6 +176,12 @@ def main() -> int:
                     args.godot,
                     project,
                     ["--script", "res://tests/asset_workspace_test.gd"],
+                    env,
+                )
+                godot(
+                    args.godot,
+                    project,
+                    ["--script", "res://tests/kits_panel_test.gd"],
                     env,
                 )
                 print("saved", f"{prefix}-*.png")

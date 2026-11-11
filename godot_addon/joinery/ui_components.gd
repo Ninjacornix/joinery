@@ -800,6 +800,36 @@ static func notice(
 	return panel
 
 
+## A centred empty state: a faint [param icon_name] icon, a [param title], an optional
+## [param line] saying what to do, and an optional [param action] button. Fills the height.
+static func empty_state(
+	icon_name: String, title: String, line := "", action: Button = null
+) -> VBoxContainer:
+	var block := VBoxContainer.new()
+	block.theme_type_variation = "JoineryTight"
+	block.alignment = BoxContainer.ALIGNMENT_CENTER
+	block.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	var icon := TextureRect.new()
+	icon.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	bind_icon(icon, icon_name, "texture")
+	icon.theme_changed.connect(
+		func() -> void: icon.self_modulate = UI_THEME.color(icon, "text_faint")
+	)
+	block.add_child(icon)
+	var heading := label(title, "JoineryBodyLarge")
+	heading.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	block.add_child(heading)
+	if not line.is_empty():
+		var hint := label(line, "JoineryCaption", true)
+		hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		block.add_child(hint)
+	if action != null:
+		action.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		block.add_child(action)
+	return block
+
+
 ## A [Readiness] badge, hidden until [method Readiness.set_entry] gets a known status.
 static func readiness(entry: Dictionary = {}) -> Readiness:
 	var badge := Readiness.new()
