@@ -96,7 +96,9 @@ def test_publish_refuses_inside_an_agent_role(
 def _fake_butler_zip() -> bytes:
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w") as bundle:
-        bundle.writestr("butler", "#!/bin/sh\necho butler\n")
+        # butler's own archives name it butler.exe on Windows.
+        name = "butler.exe" if sys.platform == "win32" else "butler"
+        bundle.writestr(name, "#!/bin/sh\necho butler\n")
         bundle.writestr("7z.so", "lib")
     return buffer.getvalue()
 
