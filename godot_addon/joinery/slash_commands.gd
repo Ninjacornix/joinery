@@ -42,6 +42,8 @@ signal perf_requested(target: String)
 signal design_requested
 ## "/variants [N] <request>": make the request a few ways side by side (sidebar_variants.gd).
 signal variants_requested(words: String)
+## "/sound-pass [focus]": make the sounds the level lacks; [param focus] is the words after it.
+signal sound_pass_requested(focus: String)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 ## Everyday commands first; descriptions stay at 32 characters or fewer.
@@ -56,6 +58,7 @@ const COMMANDS := {
 	"/perf": ["Measure the game's performance", "ui"],
 	"/design": ["Check the game design", "ui"],
 	"/variants": ["Try a few ways side by side", "ui"],
+	"/sound-pass": ["Add the sounds the level lacks", "ui"],
 	"/setup": ["Change project apps", "ui"],
 	"/focus": ["Toggle focus mode", "ui"],
 	"/toolbar": ["Show or hide viewport tools", "ui"],
@@ -152,6 +155,8 @@ func run(entry: String) -> bool:
 			design_requested.emit()
 		elif command == "/variants":
 			variants_requested.emit(" ".join(arguments(entry)))
+		elif command == "/sound-pass":
+			sound_pass_requested.emit(" ".join(arguments(entry)))
 		else:
 			requested.emit(command)
 		return true

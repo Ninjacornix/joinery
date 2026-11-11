@@ -63,6 +63,9 @@ signal check_event(event: Dictionary)
 signal variants_event(event: Dictionary)
 ## The design check's agent pass, or the check after accepted changes (design_id set).
 signal design_event(event: Dictionary)
+## The sound pass: {state: auditing|making|done|failed|stopped, audit?, tasks: [{key, title,
+## category, categories, apps, sounds, facts, task_id, state, message}], summary?, message?}.
+signal sound_pass_event(event: Dictionary)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 const ATTACHMENTS := preload("chat_attachments.gd")
@@ -280,6 +283,19 @@ func send_design(deep: bool, stop := false, design_id := "") -> bool:
 	return true
 
 
+## "/sound-pass": with [param stop] false the chat host listens to the level ([param scene],
+## or the project's) and makes the sounds [param focus] names (all when empty) as parallel
+## tasks; with [param stop] it stops those still queued or working. False when not connected.
+func send_sound_pass(focus: String, scene := "", stop := false) -> bool:
+	if _job == null or not _connected:
+		return false
+	var line := {"kind": "sound_pass_cancel"}
+	if not stop:
+		line = {"kind": "sound_pass_start", "focus": focus, "scene": scene}
+	_job.send_line(JSON.stringify(line))
+	return true
+
+
 ## True while an agent is connected and takes requests.
 func is_ready() -> bool:
 	return _job != null and _connected
@@ -407,6 +423,8 @@ func _handle(event: Dictionary) -> void:
 			match_event.emit(event)
 		"access", "perf":
 			check_event.emit(event)
+		"sound_pass":
+			sound_pass_event.emit(event)
 		"chat":
 			chat_id = str(event.get("chat_id", ""))
 			chat_changed.emit(event)

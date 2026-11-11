@@ -19,13 +19,15 @@ extends VBoxContainer
 ##
 ## "Make it match" (ADR 0045) has its card here too (sidebar_match.gd): the project's scores
 ## against the art bible, while its fixes run as tasks with cards of their own. So do the
-## accessibility and performance checks (ADR 0049, ADR 0050), with the same card. The design
-## check has a card of its own (sidebar_design.gd).
+## accessibility and performance checks (ADR 0049, ADR 0050), with the same card, and the
+## sound pass (sidebar_sound_pass.gd): what the level is missing, while its sounds are made.
+## The design check has a card of its own (sidebar_design.gd).
 
 const CARD := preload("sidebar_task_card.gd")
 const DEBUG := preload("sidebar_debug.gd")
 const DESIGN := preload("sidebar_design.gd")
 const MATCH := preload("sidebar_match.gd")
+const SOUND_PASS := preload("sidebar_sound_pass.gd")
 const PLAYTEST_CARD := preload("playtest_card.gd")
 const VARIANTS := preload("sidebar_variants.gd")
 const UI_MOTION := preload("ui_motion.gd")
@@ -62,6 +64,8 @@ var perf_card: Control
 var design_card: Control
 ## Requests tried several ways (sidebar_variants.gd): their ways' events go there.
 var variants: Node
+## The sound pass card (sound_pass_card.gd), while there is one.
+var sound_card: Control
 var _cards: Dictionary = {}
 var _main_busy := false
 var _offer: Control
@@ -85,6 +89,8 @@ static func attach(sidebar: Control, content: Control, before: Control) -> VBoxC
 	# "/design": the game against its own brief.
 	DESIGN.attach(sidebar, tasks)
 	tasks.variants = VARIANTS.attach(sidebar, tasks)
+	# "/sound-pass": the sounds the level lacks.
+	SOUND_PASS.attach(sidebar, tasks)
 	var slash: Object = sidebar.get("_slash")
 	if slash != null and slash.has_signal("playtest_requested"):
 		slash.connect("playtest_requested", tasks.start_playtest)
@@ -351,7 +357,8 @@ func _remove(id: String) -> void:
 	_sync()
 
 
-## Shown while any card is: a task's, the playtest's, the match card or a variant strip.
+## Shown while any card is: a task's, the playtest's, the match card, a variant strip or
+## the sound pass's.
 func sync_visible() -> void:
 	visible = (
 		not _cards.is_empty()
@@ -360,6 +367,7 @@ func sync_visible() -> void:
 		or is_instance_valid(access_card)
 		or is_instance_valid(perf_card)
 		or is_instance_valid(design_card)
+		or is_instance_valid(sound_card)
 		or _has_variants()
 	)
 
