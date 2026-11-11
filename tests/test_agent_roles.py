@@ -207,12 +207,13 @@ def test_an_unknown_role_is_refused_not_read_as_the_lead(
 
 
 def test_roles_have_their_own_turns_and_time_boxes() -> None:
-    assert set(SPECS) == {"lead", "worker", "reviewer", "debugger"}
+    assert set(SPECS) == {"lead", "worker", "reviewer", "debugger", "playtester"}
     assert spec("lead").turn == "chat" and not spec("lead").read_only
     assert spec("worker").turn == "task"
     assert spec("reviewer").turn == "review" and spec("reviewer").read_only
     assert spec("reviewer").seconds == 90
     assert spec("debugger").turn == "diagnosis" and spec("debugger").read_only
+    assert spec("playtester").turn == "playtest" and spec("playtester").read_only
 
 
 # --- The gateway endpoint -------------------------------------------------------------
