@@ -17,8 +17,8 @@ from joinery.complex_models import (
     check_scenes,
     live_shapes,
     scene_findings,
-    setting,
     set_setting,
+    setting,
 )
 from joinery.roles import reviewer_settings, set_reviewer
 
@@ -373,3 +373,13 @@ def test_validate_judges_staged_scenes_for_every_provider(
     found = asyncio.run(submission.validate(gateway, tx, set()))  # type: ignore[arg-type]
     assert [p.check for p in found.problems] == ["complex_models"]
     assert "complex models" in found.ran
+
+
+def test_every_agent_is_told_to_make_complex_models_in_blender() -> None:
+    from bridge.instructions import GAME_GUIDE, OBJECT_GUIDE, REVIEW_GUIDE
+
+    assert OBJECT_GUIDE in GAME_GUIDE
+    assert "editor_context.complex_models" in OBJECT_GUIDE
+    assert "kit" in OBJECT_GUIDE and "Blender" in OBJECT_GUIDE
+    assert "metadata/joinery_placeholder = true" in OBJECT_GUIDE
+    assert "placeholder shapes" in REVIEW_GUIDE
