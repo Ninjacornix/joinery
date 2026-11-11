@@ -4,7 +4,7 @@ extends SceneTree
 ## Run (joinery/playtest.py does): godot --headless --path <game> --fixed-fps 60
 ##   --script <this file> -- --playtest-out=<dir> --seed=<n> --seconds=<n>
 ##   [--scene=res://…] [--softlock=<seconds>] [--focus=word,word] [--shots=f,f,…]
-##   --settings-path=<file>
+##   [--route=<file>] --settings-path=<file>
 ##
 ## It loads the game's main scene (or --scene), starts the level the way the game core's
 ## own tests do, and plays it through the input map (bot_drive.gd) while bot_watch.gd and
@@ -13,12 +13,13 @@ extends SceneTree
 ## menus in every language. Every second it prints a `PLAYTEST {…}` line, and it writes
 ## <out>/bot.json every few seconds and at the end, so a crash still leaves what it saw.
 ## With --shots it saves a picture at those frames instead (a windowed replay of the same
-## seed).
+## seed). With --route it only walks the player along a blockout's routes (bot_route.gd)
+## and reports which targets it reached.
 ##
 ## The bot never writes inside the project: everything goes to --playtest-out, and the
 ## game's user:// is wherever the caller's HOME points.
 
-const SCRIPTS := ["bot_logger.gd", "bot_watch.gd", "bot_drive.gd"]
+const SCRIPTS := ["bot_logger.gd", "bot_watch.gd", "bot_drive.gd", "bot_route.gd"]
 const SAVE_SLOT := 2
 const SHOT_WIDTH := 480
 const LIMIT_EVENTS := 300
@@ -30,6 +31,9 @@ var scene_path: String = ""
 var softlock_seconds: float = 15.0
 var shots: Dictionary = {}
 var focus: PackedStringArray = PackedStringArray()
+## A blockout's routes to walk (--route), and the walker once it runs.
+var route: Dictionary = {}
+var walker: RefCounted
 var fps: int = 60
 var frame: int = 0
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
@@ -73,6 +77,8 @@ func _initialize() -> void:
 	watch = (load(base.path_join(SCRIPTS[1])) as GDScript).new(fps, softlock_seconds)
 	drive = (load(base.path_join(SCRIPTS[2])) as GDScript).new(self, rng)
 	drive.set(&"focus", focus)
+	if not route.is_empty():
+		walker = (load(base.path_join(SCRIPTS[3])) as GDScript).new(self, route, fps)
 	process_frame.connect(func() -> void: watch.call(&"tick_process"))
 	_run.call_deferred()
 
@@ -94,6 +100,10 @@ func _run() -> void:
 		_finish()
 		return
 	var total := int(seconds * fps)
+	if walker != null:
+		await _walk(total)
+		_finish()
+		return
 	var check_at := {
 		maxi(int(total * 0.3), fps * 6): _check_pause,
 		maxi(int(total * 0.55), fps * 9): _check_save_load,
@@ -143,7 +153,7 @@ func _tick(play: bool) -> void:
 	)
 	for item: Dictionary in found:
 		_finding(item)
-		if item["kind"] == "softlock":
+		if item["kind"] == "softlock" and walker == null:
 			await _recover()
 	if shots.has(frame):
 		_shot(str(shots[frame]))
@@ -151,6 +161,14 @@ func _tick(play: bool) -> void:
 		print("PLAYTEST " + JSON.stringify({"t": frame / fps, "frame": frame}))
 	if frame % (fps * 5) == 0:
 		_write(false)
+
+
+## Walk the blockout's routes until every target is reached or missed (or time is up).
+func _walk(total: int) -> void:
+	while frame < total and not bool(walker.get(&"done")):
+		walker.call(&"step", frame, _player)
+		await _tick(false)
+	walker.call(&"step", frame, null)
 
 
 func _boot() -> bool:
@@ -625,6 +643,7 @@ func _write(done: bool) -> void:
 		"findings": findings,
 		"checks": checks,
 		"moments": moments,
+		"route": walker.get(&"results") if walker != null else [],
 		"perf": watch.call(&"summary"),
 		"log": logger.call(&"entries"),
 		"log_dropped": int(logger.get(&"dropped")),
@@ -650,6 +669,9 @@ func _parse_args() -> void:
 			softlock_seconds = maxf(value.to_float(), 2.0)
 		elif arg.begins_with("--focus="):
 			focus = value.to_lower().split(",", false)
+		elif arg.begins_with("--route="):
+			var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(value))
+			route = parsed if parsed is Dictionary else {}
 		elif arg.begins_with("--shots="):
 			for part: String in value.split(",", false):
 				shots[part.to_int()] = "shot_%06d.png" % part.to_int()

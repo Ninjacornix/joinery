@@ -57,6 +57,8 @@ class Options:
     focus: str = ""
     softlock: float = 15.0
     screenshots: bool = False
+    #: A blockout's routes (JSON): the bot only walks them (ADR 0043).
+    route: Path | None = None
     out: Path | None = None
     extra_env: dict[str, str] = field(default_factory=dict)
     #: Play an exported game's pack (the .pck a build ships) instead of the project.
@@ -65,6 +67,7 @@ class Options:
     def public(self) -> dict[str, Any]:
         data = asdict(self)
         data["project"] = str(self.project)
+        data["route"] = str(self.route) if self.route else ""
         data.pop("out")
         data.pop("extra_env")
         data.pop("pack")
@@ -178,6 +181,8 @@ def _bot_args(
         args.append("--focus=" + ",".join(words[:8]).lower())
     if shots:
         args.append("--shots=" + ",".join(str(f) for f in shots))
+    if options.route is not None:
+        args.append(f"--route={options.route}")
     return args
 
 
@@ -454,6 +459,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument(
         "--screenshots", action="store_true", help="replay in a window for pictures"
     )
+    parser.add_argument(
+        "--route",
+        type=Path,
+        help="only walk a blockout's routes (JSON from joinery.blockout.route)",
+    )
     parser.add_argument("--json", action="store_true")
 
 
@@ -476,6 +486,7 @@ def main(args: argparse.Namespace) -> int:
         focus=str(args.focus),
         softlock=float(args.softlock),
         screenshots=bool(args.screenshots),
+        route=args.route,
     )
 
     def show(t: float, total: float) -> None:

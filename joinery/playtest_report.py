@@ -357,7 +357,7 @@ def build(
     for extra in (_hitches(perf, fps), _memory(perf.get("samples", []), fps)):
         if extra is not None:
             raw.append(extra)
-    if bot is not None and status == "played":
+    if bot is not None and status == "played" and not bot.get("route"):
         raw.extend(balance_notes(bot))
     items = [_item(index, entry, options) for index, entry in enumerate(raw)]
     items.sort(key=lambda item: (SEVERITIES.index(item["severity"]), item["t"] or 0))
@@ -396,6 +396,7 @@ def build(
             if key in perf
         },
         "moments": (bot or {}).get("moments", []),
+        "route": (bot or {}).get("route", []) or [],
         "screenshots": [],
     }
 
