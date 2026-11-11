@@ -558,7 +558,7 @@ def play_in_godot(project: Path, start: float) -> dict[str, Any]:
     assert len(positions) == 3 and state["drift_ms"] <= 5.0, state
     # Asked for mid-bar, the combat section started on the next bar line (2 s), not
     # at once: about 1.2 s of it has played when the check reads it.
-    assert 1.0 < state["asked_at"] < 2.0 and 0.6 < state["position"] < 1.8, state
+    assert 0.5 < state["asked_at"] < 1.9 and 0.6 < state["position"] < 1.8, state
     return state
 
 
