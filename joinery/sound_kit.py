@@ -426,6 +426,9 @@ def _supercollider(
         # without its true peak passing the ceiling.
         body += "sig = Compander.ar(sig, sig, 0.2, 1, 0.33, 0.002, 0.08);\n"
         body += "sig = LPF.ar(sig, 12000);\n"
+        # Drive the short transients into a look-ahead limiter: the sound
+        # keeps its shape but loses the clicks that would need limiting later.
+        body += "sig = Limiter.ar(sig * 4, 0.5, 0.003);\n"
     if channels == 2 and not spec.ambience:
         body += "sig = sig ! 2;\n"
     if channels == 1 and spec.ambience:
