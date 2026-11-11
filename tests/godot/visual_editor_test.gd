@@ -491,6 +491,7 @@ func _approvals() -> void:
 	tab.call("show_task", "planks")
 	await get_tree().create_timer(0.6).timeout
 	await _shot("review-task", [bottom])
+	await _variants(tab, bottom, cache)
 	tab.call("show_list")
 	tab.call("clear_live")
 	var settled := {"state": "approved", "by": "creation"}
@@ -499,6 +500,43 @@ func _approvals() -> void:
 	tab.call("apply_listing", {"transactions": [], "art_bible": {"state": "missing"}})
 	_plugin.hide_bottom_panel()
 	await _frames()
+
+
+## A request tried three ways: the variant strip above the way on show, each way's planks.
+func _variants(tab: Control, bottom: Control, cache: String) -> void:
+	var notes := ["chunky and worn", "slim and clean", "ornate and detailed"]
+	var colours := [Color("5a3a22"), Color("b07a45"), Color("8a5a2e")]
+	var ways: Array = []
+	for index: int in 3:
+		var after := cache.path_join("way-%d.png" % index)
+		_planks(colours[index]).save_png(after)
+		var way := {"task_id": "v%d" % index, "variant": index + 1, "direction": notes[index]}
+		way.merge({"state": "in_review", "transaction_id": "way%d" % index})
+		ways.append(way)
+		var event := way.duplicate()
+		event.merge({"kind": "task", "variant_group": "g", "title": "Dock planks"})
+		tab.call("_on_task_event", event)
+		var preview := {"kind": "file_preview", "task_id": way["task_id"], "summary": notes[index]}
+		preview["transaction_id"] = way["transaction_id"]
+		preview["facts"] = [["darker planks", "lighter planks", "carved edges"][index]]
+		preview["changes"] = [{"path": "art/textures/dock_planks.png", "change": "modified"}]
+		preview["media"] = [
+			{
+				"path": "art/textures/dock_planks.png",
+				"media": "image",
+				"before": cache.path_join("wood-before.png"),
+				"after": after,
+			}
+		]
+		tab.call("_on_task_event", preview)
+	var group := {"kind": "variants", "group_id": "g", "title": "Weather the dock planks"}
+	group.merge({"state": "working", "ways": ways})
+	tab.get("_tasks").call("_on_group", group)
+	tab.call("show_task", "way1")
+	await get_tree().create_timer(0.6).timeout
+	var strip: Control = tab.get("_tasks").get("strip")
+	_check(strip != null and strip.is_visible_in_tree(), "A way's review shows the variant strip")
+	await _shot("review-variants", [bottom])
 
 
 ## The Timeline tab: entries with a filter, one entry's files open, and the offer to start one.

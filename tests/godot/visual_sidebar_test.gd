@@ -317,6 +317,7 @@ func _states(light: bool, width: int) -> void:
 	await _images(light, width)
 	await _changes(light, width)
 	await _saved_chats(light, width)
+	await _variants(light, width)
 	built = _build(light)
 	host = built[0]
 	chat = built[1]
@@ -480,6 +481,64 @@ func _playtest(light: bool, width: int, chat: Control) -> void:
 	card.free()
 	tasks.set("playtest", null)
 	tasks.hide()
+
+
+## A request tried three ways: the strip while the ways work (one waiting for an agent), then
+## side by side with Use this, Mix and Discard all, then the line once one is kept.
+func _variants(light: bool, width: int) -> void:
+	var built := _build(light)
+	var host: Control = built[0]
+	var chat: Control = built[1]
+	await _frames()
+	chat.set_chat_agent("codex")
+	chat.set_chat_state("connected", "Codex connected")
+	chat.call("_on_submit", "/variants 3 A wooden door for the cabin")
+	var tasks: Node = chat.get("_tasks")
+	var notes := ["chunky and worn", "slim and clean", "ornate and detailed"]
+	var group := {"kind": "variants", "group_id": "g", "title": "A wooden door", "ways": []}
+	group["state"] = "working"
+	var variants: Node = tasks.get("variants")
+	for index: int in 3:
+		var way := {"task_id": "v%d" % index, "variant": index + 1, "direction": notes[index]}
+		way["state"] = "queued" if index == 2 else "working"
+		group["ways"].append(way)
+	variants.call("on_group", group)
+	var steps := ["Bevelling the frame in Blender", "Starting Codex CLI…"]
+	for index: int in 2:
+		var event := {"kind": "task", "task_id": "v%d" % index, "variant_group": "g"}
+		event.merge({"state": "working", "step": steps[index]})
+		tasks.call("on_event", event)
+	await _shot("variants-working", light, width, chat)
+	var shapes := [
+		[70, 180, Color("5a3a22")], [40, 200, Color("8a6a4a")], [60, 190, Color("6b4423")]
+	]
+	for index: int in 3:
+		var image := Image.create(320, 240, false, Image.FORMAT_RGBA8)
+		image.fill(Color("3a3d42"))
+		var shape: Array = shapes[index]
+		var door := Rect2i(160 - int(shape[0]), 30, int(shape[0]) * 2, int(shape[1]))
+		image.fill_rect(door, shape[2])
+		if index == 2:
+			image.fill_rect(door.grow(-14), Color("7d5230"))
+		var path := OS.get_cache_dir().path_join("joinery-visual-way-%d.png" % index)
+		image.save_png(path)
+		group["ways"][index]["state"] = "in_review"
+		group["ways"][index]["transaction_id"] = "w%d" % index
+		var preview := {
+			"kind": "file_preview", "task_id": "v%d" % index, "transaction_id": "w%d" % index
+		}
+		preview["media"] = [{"path": "art/props/door.glb", "media": "image", "after": path}]
+		preview["facts"] = [["door 40% wider", "door 20% narrower", "carved panels"][index]]
+		preview["changes"] = [{"path": "art/props/door.glb", "change": "modified"}]
+		tasks.call("on_event", preview)
+	variants.call("on_group", group)
+	await _shot("variants", light, width, chat)
+	group["state"] = "picked"
+	group["picked"] = "v1"
+	variants.call("on_group", group)
+	await _shot("variants-picked", light, width, chat)
+	host.queue_free()
+	await _frames(2)
 
 
 func _images(light: bool, width: int) -> void:
