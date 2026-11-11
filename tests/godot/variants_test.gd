@@ -274,6 +274,36 @@ func _run() -> void:
 	(review_strip.call("way", "r3").get("use_button") as Button).pressed.emit()
 	_check(str(_sent(job, "variants_pick").get("task_id", "")) == "r3", "Use this from the review")
 
+	# "Try other ways" kept the change in review as the "As made" way: its picture opens the
+	# main review, under the same ways.
+	var main: Control = load("res://addons/joinery/review_panel.gd").new()
+	tab.call("set_detail", main)
+	tab.call("show_live", {"transaction_id": "lx", "summary": "Door, as made"})
+	var kept: Dictionary = _group(["in_review", "in_review", "in_review"])
+	kept["group_id"] = "g3"
+	for way: Dictionary in kept["ways"]:
+		way["task_id"] = "r" + str(way["variant"])
+		way["transaction_id"] = "rx" + str(way["variant"])
+	(kept["ways"] as Array).push_front(
+		{
+			"task_id": "lead",
+			"variant": 0,
+			"direction": "As made",
+			"state": "in_review",
+			"transaction_id": "lx"
+		}
+	)
+	backend.call("_handle", kept)
+	var made: Control = review_strip.call("way", "lead")
+	_check(made != null and str(made.call("note_text")) == "As made", "The strip has As made")
+	(made.get("_frame") as Button).pressed.emit()
+	_check(bool(tab.get("showing_detail")) and main.visible, "As made opens the main review")
+	_check(not (tab.get("_tasks").get("panel") as Control).visible, "…in place of the way's")
+	_check(review_strip.is_visible_in_tree(), "…under the same ways")
+	_check(bool(made.get("chosen")) and not bool(shown.get("chosen")), "…As made ringed")
+	(review_strip.call("way", "r2").get("_frame") as Button).pressed.emit()
+	_check(not main.visible and bool(shown.get("chosen")), "A task way swaps back")
+
 	tab.queue_free()
 	backend.queue_free()
 	dock.queue_free()

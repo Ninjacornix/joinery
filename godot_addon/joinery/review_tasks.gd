@@ -206,9 +206,23 @@ func _on_group(event: Dictionary) -> void:
 			strip.call("on_event", event)
 
 
+## A way's picture: a task's change in this panel, the "As made" way in the main review.
 func _open_way(id: String) -> void:
-	if _previews.has(id):
-		_tab.call("show_task", id)
+	_tab.call("show_task", id)
+
+
+## The main review shows [param id], the "As made" way of the strip's request: the strip stays
+## above it, that way ringed.
+func over_main(id: String) -> void:
+	if strip == null:
+		return
+	var ways: Array = strip.call("ways")
+	if not ways.any(func(way: Control) -> bool: return str(way.get("transaction_id")) == id):
+		return
+	strip.visible = true
+	for way: Control in ways:
+		way.set("chosen", str(way.get("transaction_id")) == id)
+		way.call("_restyle")
 
 
 func _pick(task_id: String, group: String) -> void:

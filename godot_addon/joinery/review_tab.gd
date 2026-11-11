@@ -293,10 +293,15 @@ func _on_task_event(event: Dictionary) -> void:
 
 
 ## Show the task change [param id] in the review panel; one this session never saw shows its
-## files under its row instead.
+## files under its row instead. The change Journeyman is showing (a request tried other ways
+## keeps it as its "As made" way) opens the main review, under its ways.
 func show_task(id: String) -> void:
 	if _tasks.call("open", id):
 		show_detail(_tasks.panel)
+		return
+	if _detail != null and not id.is_empty() and str(_live.get("id", "")) == id:
+		show_detail()
+		_tasks.call("over_main", id)
 		return
 	_open_files[id] = true
 	show_list()
