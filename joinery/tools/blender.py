@@ -19,6 +19,11 @@ from joinery.tools.base import (
     ToolModule,
     WorkerExec,
 )
+from joinery.tools.blender_export import (
+    BAKE_FOR_EXPORT,
+    BAKE_MACRO_KEYS,
+    macro_call,
+)
 
 # Follows each image node's links forward to the shader socket it feeds, so a
 # map is known by its role: straight into the BSDF, through Normal Map (normal),
@@ -241,65 +246,6 @@ PACK_CHANGED_IMAGES = """
 for _joinery_image in bpy.data.images:
     if _joinery_image.source in {'GENERATED', 'FILE'} and _joinery_image.has_data and _joinery_image.is_dirty:
         _joinery_image.pack()
-"""
-
-# Runs after the source is saved, so it shapes only the export. Godot cannot
-# run Blender modifiers, so the GLB is exported with them applied
-# (export_apply). The glTF exporter drops every shape key of a mesh whose
-# modifiers it applies, so such a mesh gets its modifiers applied here first,
-# once per shape key, keeping every key. An MPFB2 human is the common case: a
-# Mask modifier hides its helper geometry and it carries shape keys; without
-# this, the helpers would reach the game as visible, unweighted geometry.
-# Armature modifiers stay for the exporter's skinning.
-BAKE_FOR_EXPORT = """
-def _joinery_evaluated_coordinates(obj):
-    depsgraph = bpy.context.evaluated_depsgraph_get()
-    depsgraph.update()
-    mesh = bpy.data.meshes.new_from_object(obj.evaluated_get(depsgraph), depsgraph=depsgraph)
-    coordinates = [0.0] * (len(mesh.vertices) * 3)
-    mesh.vertices.foreach_get('co', coordinates)
-    bpy.data.meshes.remove(mesh)
-    return coordinates
-
-def _joinery_bake_for_export():
-    for obj in [o for o in bpy.data.objects if o.type == 'MESH']:
-        keys = obj.data.shape_keys
-        applied = [m for m in obj.modifiers if m.type != 'ARMATURE' and m.show_viewport]
-        if keys is None or len(keys.key_blocks) < 2 or not applied:
-            continue
-        armatures = [m for m in obj.modifiers if m.type == 'ARMATURE' and m.show_viewport]
-        for modifier in armatures:
-            modifier.show_viewport = False
-        blocks = list(keys.key_blocks)
-        settings = [(k.name, k.value, k.mute, k.slider_min, k.slider_max) for k in blocks]
-        obj.show_only_shape_key = True
-        shapes = []
-        for index in range(len(blocks)):
-            obj.active_shape_key_index = index
-            shapes.append(_joinery_evaluated_coordinates(obj))
-        if len({len(shape) for shape in shapes}) != 1:
-            raise RuntimeError(
-                f'{obj.name}: its modifiers change the vertex count per shape key, so the '
-                'GLB cannot keep both. Apply the modifiers or remove the shape keys first.'
-            )
-        obj.active_shape_key_index = 0
-        depsgraph = bpy.context.evaluated_depsgraph_get()
-        depsgraph.update()
-        baked = bpy.data.meshes.new_from_object(
-            obj.evaluated_get(depsgraph), preserve_all_data_layers=True, depsgraph=depsgraph
-        )
-        obj.show_only_shape_key = False
-        obj.data = baked
-        for modifier in applied:
-            obj.modifiers.remove(modifier)
-        for modifier in armatures:
-            modifier.show_viewport = True
-        for (name, value, mute, low, high), shape in zip(settings, shapes):
-            block = obj.shape_key_add(name=name, from_mix=False)
-            block.data.foreach_set('co', shape)
-            block.slider_min, block.slider_max = low, high
-            block.value, block.mute = value, mute
-        print('JOINERY_EXPORT_BAKED', obj.name, len(settings) - 1, 'shape keys')
 """
 
 # Runs after the save, so only the export carries it. Godot sanitises node
@@ -936,7 +882,15 @@ class Blender(ToolModule):
                 "Keep native Blender sources under art/sources/ and exports outside that source directory."
             )
 
-    def script(self, source: str, base: str, code: str, exports: list[str]) -> str:
+    def script(
+        self,
+        source: str,
+        base: str,
+        code: str,
+        exports: list[str],
+        *,
+        keep_macro_shape_keys: bool = False,
+    ) -> str:
         lines = [
             "import bpy, os, math",
             FAIL_ON_ERROR,
@@ -968,6 +922,10 @@ class Blender(ToolModule):
             # every bone, since non-deform bones there are often sockets.
             lines += [
                 "_joinery_deform_only = any('rig_id' in a for a in bpy.data.armatures)",
+                # MPFB2's body-shape macros go into the base mesh unless the
+                # model keeps them; the choice is part of this recipe.
+                BAKE_MACRO_KEYS,
+                macro_call(keep_macro_shape_keys),
                 BAKE_FOR_EXPORT,
                 "_joinery_bake_for_export()",
                 EXPORT_NAMES,

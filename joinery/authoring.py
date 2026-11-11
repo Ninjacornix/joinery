@@ -17,7 +17,7 @@ from joinery.locking import write_lock
 from joinery.mcp_runtime import validate_arguments
 from joinery.recipe import Recipe, load_recipe, recipe_paths, record, store_preimage
 from joinery.runner import Result, SandboxRunner
-from joinery.tools import blender, inkscape, material_maker
+from joinery.tools import blender, blender_export, inkscape, material_maker
 from joinery.worker_identity import docker_owner_args
 
 IMAGE = "joinery-creative-worker"
@@ -145,8 +145,20 @@ def enabled(project: Path, tool: str) -> None:
 
 
 async def edit_document(
-    project: Path, tool: str, source: str, code: str, exports: list[str], note: str = ""
+    project: Path,
+    tool: str,
+    source: str,
+    code: str,
+    exports: list[str],
+    note: str = "",
+    *,
+    keep_macro_shape_keys: bool | None = None,
 ) -> dict[str, Any]:
+    """Apply `code` to a native document, export it and record the recipe.
+
+    For Blender, `keep_macro_shape_keys` keeps MPFB2's body-shape macros as
+    morph targets; None keeps the model's recorded choice.
+    """
     enabled(project, tool)
     module = tools.get(tool)
     if not module.script_ext:
@@ -180,7 +192,15 @@ async def edit_document(
     for output in [source, *exports]:
         confined(project, output).parent.mkdir(parents=True, exist_ok=True)
     script = recipe_dir / (identifier + module.script_ext)
-    script.write_text(module.script(source, base, code, exports))
+    if isinstance(module, blender.Blender):
+        keep = keep_macro_shape_keys
+        if keep is None:
+            keep = _recorded_keep(project, source)
+        script.write_text(
+            module.script(source, base, code, exports, keep_macro_shape_keys=keep)
+        )
+    else:
+        script.write_text(module.script(source, base, code, exports))
     if module.text_source:
         target.write_text(code)
     recipe = Recipe(
@@ -216,7 +236,36 @@ async def edit_document(
         # Godot imports portable GLB exports. Keep native .blend documents
         # without requiring a Blender install on every game developer's host.
         (target.parent / ".gdignore").write_text("")
-    return await _record(project, recipe, recipe_dir / (identifier + ".toml"))
+    recorded = await _record(project, recipe, recipe_dir / (identifier + ".toml"))
+    if tool == "blender":
+        recorded.update(_export_facts(project, exports, result.output))
+    return recorded
+
+
+def _recorded_keep(project: Path, source: str) -> bool:
+    """The macro shape-key choice of the recipe that last made `source`."""
+    for path in recipe_paths(project):
+        recipe = load_recipe(path)
+        script = project / recipe.script
+        if source in recipe.outputs and script.is_file():
+            return bool(blender_export.recorded_keep(script.read_text()))
+    return False
+
+
+def _export_facts(project: Path, exports: list[str], output: str) -> dict[str, Any]:
+    """Shape keys baked or kept per mesh, and each GLB's meshes and morph targets."""
+    facts: dict[str, Any] = {}
+    rows = blender_export.shape_rows(output)
+    if rows:
+        facts["shape_keys"] = rows
+    models = {}
+    for path in exports:
+        if Path(path).suffix == ".glb" and (project / path).is_file():
+            with contextlib.suppress(ValueError, KeyError, IndexError):
+                models[path] = blender_export.glb_meshes(project / path)
+    if models:
+        facts["models"] = models
+    return facts
 
 
 def _restore(project: Path, files: dict[str, bytes]) -> None:

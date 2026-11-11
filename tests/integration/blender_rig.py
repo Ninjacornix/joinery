@@ -5,7 +5,8 @@ generates the Rigify rig and exports a GLB. The game gets only the deform
 bones: the GLB skin must list exactly the rig's deform bones, every one a
 `DEF-` bone, and the mesh must be skinned to it. MPFB2's helper geometry
 (hidden by a Mask modifier) must not reach the GLB, while the human's shape
-keys do. A second recipe poses an FK control in an action; the exported
+keys are body-shape macros, baked into the mesh by default and kept as morph
+targets when the recipe says so. A second recipe poses an FK control in an action; the exported
 animation must drive deform bones only. A hand-made crate with a Subdivision
 modifier and a shape key checks that the GLB shows what Blender shows. Every
 recipe replays (Blender recipes are compared as Blender writes them; see
@@ -25,7 +26,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from joinery.authoring import IMAGE, edit_document, inspect_document
+from joinery.authoring import IMAGE, edit_document, inspect_document, run_offline
 from joinery.recipe import rebuild_one, recipe_paths
 from joinery.runner import SandboxRunner
 
@@ -92,7 +93,9 @@ async def main(stage: Path) -> dict[str, Any]:
     (stage / "project.godot").write_text("config_version=5\n")
     facts: dict[str, Any] = {}
 
-    await edit_document(stage, "blender", SOURCE, BUILD, [EXPORT], "rigged human")
+    built = await edit_document(
+        stage, "blender", SOURCE, BUILD, [EXPORT], "rigged human"
+    )
     document = await inspect_document(stage, "blender", SOURCE)
     rig = rig_row(document)
     assert rig["name"] == "HeroRig", rig
@@ -111,22 +114,65 @@ async def main(stage: Path) -> dict[str, Any]:
     skinned = [n for n in gltf["nodes"] if "skin" in n and "mesh" in n]
     assert skinned, "the human mesh is not skinned to the rig"
     # MPFB2 hides its helper geometry with a Mask modifier. The game gets the
-    # body only (no helpers, so no unweighted vertices and no "neutral_bone")
-    # and keeps the human's shape keys as morph targets.
+    # body only (no helpers, so no unweighted vertices and no "neutral_bone").
+    # Its shape keys are all body-shape macros ($md-…): by default the export
+    # bakes their mix into the mesh, so the GLB has no morph targets.
     (primitive,) = gltf["meshes"][skinned[0]["mesh"]]["primitives"]
-    exported = gltf["accessors"][primitive["attributes"]["POSITION"]]["count"]
+    position = gltf["accessors"][primitive["attributes"]["POSITION"]]
+    exported = position["count"]
     assert exported < hero["vertices"], (exported, hero["vertices"])
-    assert len(primitive.get("targets", [])) == len(hero["shape_keys"]) - 1, primitive
+    macros = [k for k in hero["shape_keys"][1:] if k.startswith("$md-")]
+    assert macros and len(macros) == len(hero["shape_keys"]) - 1, hero["shape_keys"]
+    assert "targets" not in primitive, "the macro shape keys reached the GLB"
+    (row,) = [r for r in built["shape_keys"] if r["object"] == "Hero"]
+    assert row["baked"] == len(macros) and row["kept"] == 0, row
     facts.update(
         bones=rig["bone_count"],
         deform_bones=len(joints),
         source_vertices=hero["vertices"],
         exported_vertices=exported,
-        morph_targets=len(primitive.get("targets", [])),
+        source_shape_keys=len(hero["shape_keys"]) - 1,
+        morph_targets_baked=len(primitive.get("targets", [])),
+        glb_bytes_baked=(stage / EXPORT).stat().st_size,
+    )
+    # Kept on request: the macros reach the GLB as morph targets at their
+    # values, over the unmixed base, and the recipe records the choice.
+    kept = await edit_document(
+        stage,
+        "blender",
+        SOURCE,
+        "pass",
+        [EXPORT],
+        "keep the body shapes",
+        keep_macro_shape_keys=True,
+    )
+    gltf = glb_json(stage / EXPORT)
+    (mesh,) = [
+        gltf["meshes"][n["mesh"]] for n in gltf["nodes"] if "skin" in n and "mesh" in n
+    ]
+    (primitive,) = mesh["primitives"]
+    assert len(primitive.get("targets", [])) == len(macros), primitive.keys()
+    assert mesh["extras"]["targetNames"] == macros, mesh["extras"]
+    assert (
+        gltf["accessors"][primitive["attributes"]["POSITION"]]["min"] != position["min"]
+    )
+    assert (
+        "_joinery_bake_macro_keys(keep=True)"
+        in (stage / kept["recipe"]).with_suffix(".py").read_text()
+    )
+    facts.update(
+        morph_targets_kept=len(primitive["targets"]),
+        glb_bytes_kept=(stage / EXPORT).stat().st_size,
     )
 
+    # A later edit keeps the model's choice without being told again.
     await edit_document(stage, "blender", SOURCE, WAVE, [EXPORT], "wave")
     gltf = glb_json(stage / EXPORT)
+    assert any(
+        len(p.get("targets", [])) == len(macros)
+        for m in gltf["meshes"]
+        for p in m["primitives"]
+    ), "the kept macro shape keys were dropped by a later edit"
     (skin,) = gltf["skins"]
     skinned_bones = {gltf["nodes"][i]["name"] for i in skin["joints"]}
     (wave,) = [a for a in gltf.get("animations", []) if a["name"] == "Wave"]
@@ -138,7 +184,8 @@ async def main(stage: Path) -> dict[str, Any]:
     facts["animated_bones"] = len(targets)
 
     # A hand-made model: what Godot shows is what Blender shows. The
-    # Subdivision modifier reaches the GLB, and so does the shape key.
+    # Subdivision modifier reaches the GLB, and so does its shape key, which
+    # is not a macro and so is never baked.
     await edit_document(stage, "blender", CRATE, CRATE_CODE, [CRATE_EXPORT], "crate")
     gltf = glb_json(stage / CRATE_EXPORT)
     (mesh,) = gltf["meshes"]
@@ -148,6 +195,16 @@ async def main(stage: Path) -> dict[str, Any]:
     assert len(primitive.get("targets", [])) == 1, primitive
     assert mesh.get("extras", {}).get("targetNames") == ["Dent"], mesh
     facts["crate_vertices"] = count
+
+    # Godot imports both models.
+    imported = await run_offline(
+        ["godot", "--headless", "--path", "/work", "--editor", "--import"], stage, 300
+    )
+    assert imported.ok, imported.output[-2000:]
+    scenes = list((stage / ".godot/imported").glob("*.scn"))
+    assert len(scenes) >= 2, sorted(
+        p.name for p in (stage / ".godot/imported").iterdir()
+    )
 
     replays = [
         rebuild_one(path, stage, SandboxRunner(image=IMAGE))
