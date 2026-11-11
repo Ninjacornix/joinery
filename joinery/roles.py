@@ -352,18 +352,12 @@ def reviewer_settings(project: Path) -> ReviewerSettings:
 _AGENTS_TABLE = re.compile(r"(?ms)^\[agents\][^\n]*\n(.*?)(?=^\[|\Z)")
 
 
-def set_reviewer(project: Path, *, enabled: bool | None, model: str | None) -> None:
-    """Save the reviewer choices, keeping every other line of joinery.toml."""
+def set_agents_values(project: Path, values: dict[str, str]) -> None:
+    """Write ``key = value`` lines (TOML values as written) into ``[agents]`` of
+    joinery.toml, keeping every other line. Raises ValueError when the result
+    would not read back."""
     path = project / "joinery.toml"
     text = path.read_text(encoding="utf-8") if path.is_file() else ""
-    values: dict[str, str] = {}
-    if enabled is not None:
-        values["reviewer"] = "true" if enabled else "false"
-    if model is not None:
-        clean = model.strip()
-        if len(clean) > 120 or any(c in clean for c in '"\\\n'):
-            raise ValueError("Name the reviewer's model in one plain line.")
-        values["reviewer_model"] = '"' + clean + '"'
     match = _AGENTS_TABLE.search(text)
     if match:
         body = match.group(1)
@@ -390,6 +384,19 @@ def set_reviewer(project: Path, *, enabled: bool | None, model: str | None) -> N
     except tomllib.TOMLDecodeError as exc:
         raise ValueError(f"joinery.toml can't be read: {exc}") from None
     path.write_text(updated, encoding="utf-8")
+
+
+def set_reviewer(project: Path, *, enabled: bool | None, model: str | None) -> None:
+    """Save the reviewer choices, keeping every other line of joinery.toml."""
+    values: dict[str, str] = {}
+    if enabled is not None:
+        values["reviewer"] = "true" if enabled else "false"
+    if model is not None:
+        clean = model.strip()
+        if len(clean) > 120 or any(c in clean for c in '"\\\n'):
+            raise ValueError("Name the reviewer's model in one plain line.")
+        values["reviewer_model"] = '"' + clean + '"'
+    set_agents_values(project, values)
     saved = reviewer_settings(project)
     if (enabled is not None and saved.enabled is not enabled) or (
         model is not None and saved.model != model.strip()
