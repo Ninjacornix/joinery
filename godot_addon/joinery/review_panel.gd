@@ -65,7 +65,6 @@ const BUTTON_EM := 6.0
 const STAGE_SHARE := 0.5
 const STAGE_MIN := 2.0
 const STAGE_MAX := 10.0
-const STAGE_NARROW_SHARE := 0.6
 ## Opacity of a disabled Discard: it keeps its fill and shape, only dimmed.
 const DISABLED_ALPHA := 0.5
 
@@ -756,17 +755,17 @@ func _apply_sizes() -> void:
 	_size_stage()
 
 
-## The stage grows with the panel's width (see STAGE_SHARE). Stacked, the panel asks for the
-## stage at STAGE_NARROW_SHARE of the width, the rail's actions and two lines of its title and
-## facts; the layout still gives the stage its share first.
+## The stage grows with the panel's width (see STAGE_SHARE). Stacked, the panel asks only for
+## the least stage and the rail's own minimum (its actions), so a short panel (a 1024 × 768
+## editor's bottom panel) never pushes Accept and Discard out of sight; the layout gives the
+## stage every bit of height the rail doesn't need.
 func _size_stage() -> void:
 	if _stage_area == null or not is_inside_tree():
 		return
 	var large := float(UI_THEME.control_h(self, "lg"))
 	var tall := floorf(clampf(size.x * STAGE_SHARE, large * STAGE_MIN, large * STAGE_MAX))
 	if _body.narrow:
-		var stage := clampf(size.x * STAGE_NARROW_SHARE, large * STAGE_MIN, large * STAGE_MAX)
-		var rail := _rail.get_combined_minimum_size().y + UI_THEME.control_h(self, "md") * 2
-		tall = floorf(stage + rail + UI_THEME.space(self, 4))
+		var rail := _rail.get_combined_minimum_size().y
+		tall = floorf(large * STAGE_MIN + rail + UI_THEME.space(self, 4))
 	if not is_equal_approx(_body.custom_minimum_size.y, tall):
 		_body.custom_minimum_size.y = tall
