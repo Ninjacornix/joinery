@@ -66,39 +66,51 @@ IMG_BITS = 4
 
 # Asks Blender what is in a file and prints a stable signature of it. Passed as
 # a single argv element, so the newlines are fine and no temp file is needed.
-_BLEND_SIGNATURE = r"""
+_BLEND_SIGNATURE_FN = r"""
 import bpy, json, hashlib
-items = []
-for obj in sorted(bpy.data.objects, key=lambda o: o.name):
-    mesh = getattr(obj.data, "vertices", None)
-    items.append(
-        {
-            "name": obj.name,
-            "type": obj.type,
-            "verts": len(obj.data.vertices) if mesh is not None else 0,
-            "polys": len(obj.data.polygons) if mesh is not None else 0,
-            "geometry": hashlib.sha256(json.dumps({
-                "vertices": [[round(x, 6) for x in v.co] for v in obj.data.vertices],
-                "polygons": [list(p.vertices) for p in obj.data.polygons],
-            }, sort_keys=True).encode()).hexdigest() if mesh is not None else "",
-            "materials": sorted(s.name for s in obj.material_slots if s.name),
-            "modifiers": [m.type for m in obj.modifiers],
-            "loc": [round(v, 4) for v in obj.location],
-            "scale": [round(v, 4) for v in obj.scale],
-            "matrix": [[round(v, 6) for v in row] for row in obj.matrix_world],
-        }
-    )
-doc = {"objects": items, "materials": [{
-    "name": m.name, "diffuse": list(m.diffuse_color), "nodes": sorted([
-        {"name": n.name, "type": n.bl_idname, "inputs": [
-            {"name": i.name, "value": list(i.default_value) if hasattr(i.default_value, '__len__') and not isinstance(i.default_value, str) else str(i.default_value)}
-            for i in n.inputs if hasattr(i, 'default_value')
-        ]} for n in m.node_tree.nodes
-    ], key=lambda n: n['name']) if m.use_nodes and m.node_tree else []
-} for m in sorted(bpy.data.materials, key=lambda m: m.name)]}
-blob = json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()
-print("JOINERY_SIG:" + hashlib.sha256(blob).hexdigest())
+def joinery_signature():
+    items = []
+    for obj in sorted(bpy.data.objects, key=lambda o: o.name):
+        mesh = getattr(obj.data, "vertices", None)
+        items.append(
+            {
+                "name": obj.name,
+                "type": obj.type,
+                "verts": len(obj.data.vertices) if mesh is not None else 0,
+                "polys": len(obj.data.polygons) if mesh is not None else 0,
+                "geometry": hashlib.sha256(json.dumps({
+                    "vertices": [[round(x, 6) for x in v.co] for v in obj.data.vertices],
+                    "polygons": [list(p.vertices) for p in obj.data.polygons],
+                }, sort_keys=True).encode()).hexdigest() if mesh is not None else "",
+                "materials": sorted(s.name for s in obj.material_slots if s.name),
+                "modifiers": [m.type for m in obj.modifiers],
+                "loc": [round(v, 4) for v in obj.location],
+                "scale": [round(v, 4) for v in obj.scale],
+                "matrix": [[round(v, 6) for v in row] for row in obj.matrix_world],
+            }
+        )
+    doc = {"objects": items, "materials": [{
+        "name": m.name, "diffuse": list(m.diffuse_color), "nodes": sorted([
+            {"name": n.name, "type": n.bl_idname, "inputs": [
+                {"name": i.name, "value": list(i.default_value) if hasattr(i.default_value, '__len__') and not isinstance(i.default_value, str) else str(i.default_value)}
+                for i in n.inputs if hasattr(i, 'default_value')
+            ]} for n in m.node_tree.nodes
+        ], key=lambda n: n['name']) if m.use_nodes and m.node_tree else []
+    } for m in sorted(bpy.data.materials, key=lambda m: m.name)]}
+    blob = json.dumps(doc, sort_keys=True, separators=(",", ":")).encode()
+    return hashlib.sha256(blob).hexdigest()
 """
+_BLEND_SIGNATURE = _BLEND_SIGNATURE_FN + 'print("JOINERY_SIG:" + joinery_signature())\n'
+# Signs several files in one Blender run: a kit set has a .blend per model, and
+# starting Blender once per file would cost seconds each.
+_BLEND_SIGNATURES = (
+    _BLEND_SIGNATURE_FN
+    + """
+for _rel in json.loads(RELS):
+    bpy.ops.wm.open_mainfile(filepath=_rel, load_ui=False)
+    print("JOINERY_SIG:" + _rel + "|" + joinery_signature())
+"""
+)
 
 
 class Recipe(BaseModel):
@@ -165,6 +177,59 @@ def blend_signature(path: Path, project: Path, runner: Runner) -> str:
         if line.startswith("JOINERY_SIG:"):
             return "blend:" + line.removeprefix("JOINERY_SIG:").strip()
     raise RuntimeError(f"no signature from Blender for {rel}: {got.output[-400:]}")
+
+
+def blend_signatures(rels: list[str], project: Path, runner: Runner) -> dict[str, str]:
+    """Semantic signatures of several .blend files, from one Blender run."""
+    if len(rels) == 1:
+        return {rels[0]: blend_signature(project / rels[0], project, runner)}
+    script = f"RELS = {json.dumps(json.dumps(rels))}\n" + _BLEND_SIGNATURES
+    got = runner.run(
+        ["blender", "--background", "--factory-startup", "--python-expr", script],
+        project,
+        timeout=DEFAULT_TIMEOUT,
+    )
+    found = {}
+    for line in got.output.splitlines():
+        if line.startswith("JOINERY_SIG:"):
+            rel, _, digest = line.removeprefix("JOINERY_SIG:").rpartition("|")
+            found[rel] = "blend:" + digest.strip()
+    missing = [rel for rel in rels if rel not in found]
+    if missing:
+        raise RuntimeError(
+            f"no signature from Blender for {missing[0]}: {got.output[-400:]}"
+        )
+    return found
+
+
+def fingerprints(
+    rels: tuple[str, ...], project: Path, runner: Runner, renders: tuple[str, ...] = ()
+) -> dict[str, str | Exception]:
+    """Each output's fingerprint, or the error measuring it (FileNotFoundError: missing).
+
+    Every .blend is signed in one Blender run; the rest one by one.
+    """
+    measured: dict[str, str | Exception] = {}
+    blends = [
+        rel
+        for rel in rels
+        if Path(rel).suffix.lower() == ".blend"
+        and rel not in renders
+        and (project / rel).is_file()
+    ]
+    if len(blends) > 1:
+        try:
+            measured.update(blend_signatures(blends, project, runner))
+        except RuntimeError as exc:
+            measured.update(dict.fromkeys(blends, exc))
+    for rel in rels:
+        if rel in measured:
+            continue
+        try:
+            measured[rel] = fingerprint(rel, project, runner, render=rel in renders)
+        except (FileNotFoundError, RuntimeError) as exc:
+            measured[rel] = exc
+    return measured
 
 
 def image_signature(rel: str, project: Path, runner: Runner) -> str:
@@ -346,17 +411,16 @@ def _verify_rebuilt(
         return Rebuilt(name, False, got.seconds, (f"{recipe.tool} failed: {tail}",))
     problems: list[str] = []
     measured: dict[str, str] = {}
+    found = fingerprints(recipe.outputs, project, runner, recipe.renders)
     for rel in recipe.outputs:
-        try:
-            measured[rel] = fingerprint(
-                rel, project, runner, render=rel in recipe.renders
-            )
-        except FileNotFoundError:
+        value = found[rel]
+        if isinstance(value, FileNotFoundError):
             problems.append(f"{rel}: not produced")
             continue
-        except RuntimeError as exc:
-            problems.append(f"{rel}: {exc}")
+        if isinstance(value, Exception):
+            problems.append(f"{rel}: {value}")
             continue
+        measured[rel] = value
         wanted = recipe.expect.get(rel)
         if wanted is None:
             problems.append(f"{rel}: recipe records no expected fingerprint")
@@ -406,10 +470,13 @@ def record(path: Path, project: Path, runner: Runner) -> Recipe:
     measures the real file, which is the same rule the sandbox checksums follow.
     """
     recipe = load_recipe(path)
-    expect = {
-        rel: fingerprint(rel, project, runner, render=rel in recipe.renders)
-        for rel in recipe.outputs
-    }
+    expect: dict[str, str] = {}
+    for rel, value in fingerprints(
+        recipe.outputs, project, runner, recipe.renders
+    ).items():
+        if isinstance(value, Exception):
+            raise value
+        expect[rel] = value
     updated = recipe.model_copy(update={"expect": expect})
     lines = [
         f"version = {updated.version}",
