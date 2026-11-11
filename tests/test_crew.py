@@ -869,7 +869,6 @@ def test_a_task_changes_the_scene_on_screen_once_the_main_request_is_idle(
         assert test.gateway.claims.release_live() == lamp.id
         assert await crew.live_decided(lamp.id, True)
         assert lamp.state == "accepted"
-        assert main_turn.admit_live_edit is not None
         main_turn.begin("Paint the walls")
         assert main_turn.admit_live_edit({"scene_path": "res://level.tscn"}) == (
             "res://level.tscn"
