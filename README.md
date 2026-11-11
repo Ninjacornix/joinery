@@ -110,6 +110,8 @@ In the editor:
   Review panel.
 - Type `/` for every command. `/feature add translations` shows what would
   change and does nothing until you press **Apply**.
+- Open **Share** in the bottom bar to build the game for the web and desktops,
+  make screenshots, a trailer and a cover, and publish to itch.io yourself.
 
 From a source checkout, build the patched editor first:
 `uv run --frozen python release/build_editor.py --jobs 4`.

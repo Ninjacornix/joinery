@@ -33,6 +33,18 @@ or successful cross-export is not a native graphical editor check. Windows CI
 may provision pinned software OpenGL privately for its graphical harness; those
 Mesa DLLs are test infrastructure, not a shipped user dependency.
 
+`joinery share build` exports web, Windows, macOS and Linux games with stock
+Godot 4.7.2 and the pinned official export templates. Verified locally on macOS
+ARM64 for a third-person game: web and universal macOS builds exported and
+zipped with notices, the macOS build started headless and its pack played by
+the playtester. Windows and Linux builds made on a Mac are checked for contents
+and size only; they are started on their own systems in CI (exported-game
+runtimes). The web build is not run in a browser by Joinery. Store media
+(`joinery share media`) needs a display for the windowed replay and Movie Maker,
+and Docker for the worker's ffmpeg 7.1.5 and Krita 5.2.9. Publishing to itch.io
+runs butler; it is tested against a recording stub only, and installing butler
+needs its per-platform SHA-256 recorded in `policy/butler.toml` first.
+
 All bundles require uv and a usable provider CLI/API profile. Offline native
 authoring additionally requires a running Linux-container Docker engine, which
 also runs the pinned Godot MCP server (built into `joinery-mcp-worker` with its

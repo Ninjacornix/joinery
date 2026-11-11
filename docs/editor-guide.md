@@ -329,6 +329,51 @@ scene, so it joins the timeline when you save it. Switch it all off with
 `joinery.toml`). The command line is `joinery timeline list|show|restore
 --project <path> --json` (ADR 0034).
 
+### Sharing your game
+
+**Share**, beside Timeline in the bottom bar, takes the game to players
+(ADR 0046). It has four parts:
+
+- **Builds.** Tick Web, Windows, macOS and Linux, then **Build**. Joinery keeps
+  an export preset per target in `export_presets.cfg` (it adds what is missing
+  and leaves your own settings alone), exports with Godot 4.7 and zips each
+  build with a README and the licence notes into `share/builds/`. Each row
+  shows the size, whether the build started and what the playtester found:
+  the build for your own computer is started once and played for 30 seconds;
+  the others are checked for size and contents. The web build has threads off
+  and uses the Compatibility renderer, as itch.io needs. The first build needs
+  Godot's export templates; if they aren't on your computer the page says how
+  big they are and offers **Download and build**. Nothing downloads otherwise.
+- **Store media.** **Make media** plays a seeded run of the game and keeps 4
+  to 8 screenshots of different moments, records a 30-second trailer with
+  Godot's Movie Maker (a title card and an end card with the game's name;
+  the game's own sound only if all of it is tool-made, never added music) and
+  composes a 630 × 500 cover in Krita. Everything is in `share/media/`;
+  **Remake** plays a new seed. It needs Docker for ffmpeg and Krita.
+- **Page text.** **Draft page text** writes `share/page.md` from your brief,
+  the controls and the credits in `joinery.lock`. What the project doesn't say
+  is left as "_Write this part._". **Edit** opens it in your text editor; a new
+  draft never replaces your edits unless you ask (`--redraft`).
+- **Publish to itch.io…** asks for your itch.io page (`user/game`), the builds
+  to push, and shows each file it will push. Publish stays off until you are
+  signed in to butler, itch.io's upload tool, with your own `BUTLER_API_KEY`
+  or `butler login` in a terminal; Joinery never sees your key. If butler
+  isn't installed, a checkbox offers to install the pinned version from
+  itch.io. Only you can publish: agents can't run it.
+
+The same from a terminal:
+
+```sh
+uv run joinery share build --project <path> --targets web,macos
+uv run joinery share media --project <path> [--only screenshots,trailer,cover] [--new-seed]
+uv run joinery share page --project <path>
+uv run joinery share itch --project <path> --target you/your-game --dry-run
+```
+
+Builds, `share/.work/` and rendered media are ignored by git; the page text,
+`share/media/cover.kra` and `share/recipes/` are kept so the media can be made
+again.
+
 ### Sidebar commands
 
 - `/feature` or `/feature list` says what the game has and what can be added.
