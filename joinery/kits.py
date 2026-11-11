@@ -18,7 +18,6 @@ the set again with new values.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import math
 import random
@@ -138,6 +137,10 @@ class Kit:
     #: The kit's own code, copied into each recipe.
     source: str
     limits: Callable[[dict[str, Any]], list[str]] | None = None
+    #: Where a shared kit came from ("Harbour 1.0 by Ana, CC-BY-4.0"); "" for Joinery's.
+    credit: str = ""
+    #: Named parameter sets a shared kit brings: [{name, params, colours}].
+    presets: tuple[Mapping[str, Any], ...] = ()
 
     def param(self, name: str) -> Param:
         for param in self.params:
@@ -153,17 +156,14 @@ class Kit:
         return {p.name: p.default for p in self.params}
 
 
-def _load(path: Path) -> Kit:
-    source = path.read_text(encoding="utf-8")
-    # The kit file is plain Python until build() runs: SPEC, the parameter
-    # limits and their helpers need no Blender.
-    namespace: dict[str, Any] = {"__name__": f"joinery_kit_{path.stem}"}
-    exec(compile(source, str(path), "exec"), namespace)  # noqa: S102 - our own kit code
-    spec = namespace["SPEC"]
+def from_spec(
+    spec: Mapping[str, Any], source: str, limits: Any = None, **extra: Any
+) -> Kit:
+    """A kit from its SPEC dict and code; ``extra`` sets id, label, credit or presets."""
     params = []
     for name, raw in spec["params"].items():
         if raw["kind"] not in KINDS:
-            raise ValueError(f"{path.name}: {name} has an unknown kind {raw['kind']!r}")
+            raise ValueError(f"{name} has an unknown kind {raw['kind']!r}")
         params.append(
             Param(
                 name=name,
@@ -179,17 +179,23 @@ def _load(path: Path) -> Kit:
                 vary=raw.get("vary", ""),
             )
         )
-    limits = namespace.get("limits")
+    fields = {k: spec[k] for k in ("id", "label", "summary", "folder")}
     return Kit(
-        id=spec["id"],
-        label=spec["label"],
-        summary=spec["summary"],
-        folder=spec["folder"],
+        **{**fields, **extra},
         params=tuple(params),
         looks=spec["materials"],
         source=source,
         limits=limits if callable(limits) else None,
     )
+
+
+def _load(path: Path) -> Kit:
+    source = path.read_text(encoding="utf-8")
+    # The kit file is plain Python until build() runs: SPEC, the parameter
+    # limits and their helpers need no Blender.
+    namespace: dict[str, Any] = {"__name__": f"joinery_kit_{path.stem}"}
+    exec(compile(source, str(path), "exec"), namespace)  # noqa: S102 - our own kit code
+    return from_spec(namespace["SPEC"], source, namespace.get("limits"))
 
 
 #: The order kits are listed in; any other kit follows by name.
@@ -209,8 +215,17 @@ def common_source() -> str:
     return (KITS_DIR / "common.py").read_text(encoding="utf-8")
 
 
-def get(kit_id: str) -> Kit:
-    kits = catalogue()
+def every(project: Path | None = None) -> dict[str, Kit]:
+    """Joinery's kits, then the project's own and those from imported shared kits."""
+    if project is None:
+        return catalogue()
+    from joinery.kit_library import project_kits
+
+    return {**catalogue(), **project_kits(project)}
+
+
+def get(kit_id: str, project: Path | None = None) -> Kit:
+    kits = every(project)
     if kit_id not in kits:
         raise ValueError(f"No kit {kit_id!r}. Kits: {', '.join(kits)}.")
     return kits[kit_id]
@@ -455,7 +470,7 @@ def plan(
     rules: BibleRules | None = None,
 ) -> Plan:
     """Everything a set needs before Blender runs, checked."""
-    kit = get(kit_id)
+    kit = get(kit_id, project)
     values = check_params(kit, params)
     if isinstance(seed, bool) or not isinstance(seed, int) or not 0 <= seed < 2**31:
         raise ValueError("The seed is a whole number from 0 to 2147483647.")
@@ -551,6 +566,8 @@ def script(made: Plan) -> str:
             (
                 f"# Made by Joinery's {made.kit.label.lower()} kit (kits/blender/"
                 f"{made.kit.id}.py, MIT): hand-written procedural code, no models."
+                if not made.kit.credit
+                else f"# Made by the {made.kit.id} kit from {made.kit.credit}."
             ),
             MARKER + json.dumps(made.marker(), sort_keys=True),
             "import bpy, os, math, json",
@@ -601,7 +618,7 @@ def _taken(project: Path, outputs: list[str]) -> list[str]:
 
 def free_name(project: Path, kit_id: str, count: int, folder: str = "") -> str:
     """The kit's own name, or the first numbered one no file uses yet."""
-    kit = get(kit_id)
+    kit = get(kit_id, project)
     where = check_folder(folder or kit.folder)
     for number in range(1, 1000):
         stem = kit.id if number == 1 else f"{kit.id}_{number}"
@@ -754,14 +771,15 @@ def kit_records(
     such as a change waiting for review.
     """
     found: dict[str, dict[str, Any]] = {}
-    every: dict[str, tuple[Path, Recipe]] = {}
+    known = every(project)
+    listed: dict[str, tuple[Path, Recipe]] = {}
     for path in recipe_paths(project):
         try:
-            every[path.relative_to(project).as_posix()] = (project, load_recipe(path))
+            listed[path.relative_to(project).as_posix()] = (project, load_recipe(path))
         except (OSError, ValueError):
             continue
-    every.update(recipes or {})
-    for relative, (root, recipe) in every.items():
+    listed.update(recipes or {})
+    for relative, (root, recipe) in listed.items():
         if recipe.tool != "blender":
             continue
         try:
@@ -772,7 +790,7 @@ def kit_records(
         marker = read_marker(head)
         if marker is None:
             continue
-        kit = catalogue().get(str(marker.get("kit")))
+        kit = known.get(str(marker.get("kit")))
         for model in marker.get("models", []):
             info = {
                 "kit": marker.get("kit"),
@@ -843,8 +861,9 @@ def describe(project: Path | None = None) -> dict[str, Any]:
     """The kit catalogue, with each kit's materials and budget under this project's bible."""
     rules = load_rules(project) if project is not None else BibleRules()
     rows = []
-    for kit in catalogue().values():
+    for kit in every(project).values():
         folder = kit.folder
+        shared = {"from": kit.credit, "presets": list(kit.presets)} if kit.credit else {}
         rows.append(
             {
                 "id": kit.id,
@@ -856,6 +875,7 @@ def describe(project: Path | None = None) -> dict[str, Any]:
                 "budget": _folder_value(rules.models.max_triangles, f"{folder}/x.glb"),
                 "pivot": _folder_value(rules.models.pivot, f"{folder}/x.glb")
                 or "bottom-centre",
+                **shared,
             }
         )
     return {
@@ -869,127 +889,6 @@ def describe(project: Path | None = None) -> dict[str, Any]:
             "in a scene."
         ),
     }
-
-
-# --- preview ------------------------------------------------------------------------
-
-PREVIEW_DIR = ".joinery/kits/previews"
-PREVIEW_SIZE = 384
-
-_PREVIEW = r"""
-import math
-from mathutils import Vector
-reset()
-_model = MODELS[0]
-_obj = build(_model['params'], random.Random(_model['seed']), {
-    role: material(f"{_model['prefix']}_{role}", look) for role, look in CONTEXT['looks'].items()
-}, _model['object'])
-fit_budget(_obj, CONTEXT['budget'])
-set_pivot(_obj, CONTEXT['pivot'])
-_low, _high = bounds(_obj)
-_centre = Vector([(a + b) / 2 for a, b in zip(_low, _high)])
-_radius = max(0.05, (Vector(_high) - Vector(_low)).length / 2)
-_scene = bpy.context.scene
-_camera = bpy.data.objects.new('Camera', bpy.data.cameras.new('Camera'))
-_scene.collection.objects.link(_camera)
-_scene.camera = _camera
-_camera.data.lens = 50
-_fov = _camera.data.angle
-_view = Vector((1.0, -1.35, 0.85)).normalized()
-_camera.location = _centre + _view * (_radius / math.sin(_fov / 2) * 1.08)
-_camera.rotation_euler = (-_view).to_track_quat('-Z', 'Y').to_euler()
-_scene.render.engine = 'BLENDER_WORKBENCH'
-_scene.display.shading.light = 'STUDIO'
-_scene.display.shading.color_type = 'MATERIAL'
-_scene.display.shading.show_cavity = True
-_scene.render.film_transparent = True
-_scene.render.resolution_x = _scene.render.resolution_y = SIZE
-_scene.render.filepath = os.path.abspath(OUT)
-bpy.ops.render.render(write_still=True)
-print('JOINERY_PREVIEW:' + json.dumps({'triangles': triangles(_obj), 'size': [round(h - l, 3) for l, h in zip(_low, _high)]}))
-"""
-
-
-async def preview(
-    project: Path,
-    kit_id: str,
-    params: Mapping[str, Any] | None = None,
-    *,
-    seed: int = 1,
-    colours: Mapping[str, str] | None = None,
-) -> dict[str, Any]:
-    """A picture of one model with these values, rendered in Blender (cached)."""
-    made = plan(project, kit_id, params, seed=seed, name="preview", colours=colours)
-    context = {"looks": made.looks, "budget": made.budget, "pivot": made.pivot}
-    model = made.models[0]
-    job = {key: model[key] for key in ("object", "prefix", "seed", "params")}
-    key = hashlib.sha256(
-        json.dumps(
-            [made.kit.source, common_source(), context, job], sort_keys=True
-        ).encode()
-    ).hexdigest()[:24]
-    folder = project / PREVIEW_DIR
-    folder.mkdir(parents=True, exist_ok=True)
-    image = folder / f"{made.kit.id}-{key}.png"
-    facts = folder / f"{made.kit.id}-{key}.json"
-    if image.is_file() and facts.is_file():
-        return {**json.loads(facts.read_text()), "image": str(image), "cached": True}
-    code = "\n".join(
-        [
-            "import bpy, os, math, json, random",
-            FAIL_ON_ERROR,
-            "os.chdir('/work')",
-            common_source(),
-            made.kit.source,
-            f"CONTEXT = json.loads({json.dumps(context)!r})",
-            f"MODELS = [json.loads({json.dumps(job)!r})]",
-            f"SIZE = {PREVIEW_SIZE}",
-            f"OUT = {image.name!r}",
-            _PREVIEW,
-        ]
-    )
-    work = folder / f"{key}.py"
-    work.write_text(code, encoding="utf-8")
-    try:
-        result = await run_offline(
-            ["blender", "--background", "--factory-startup", "--python", work.name],
-            folder,
-            300,
-        )
-    finally:
-        work.unlink(missing_ok=True)
-    row = next(
-        (
-            json.loads(line.removeprefix("JOINERY_PREVIEW:"))
-            for line in result.output.splitlines()
-            if line.startswith("JOINERY_PREVIEW:")
-        ),
-        None,
-    )
-    if not result.ok or row is None or not image.is_file():
-        raise RuntimeError(
-            "Blender could not draw the preview: " + _reason(result.output)
-        )
-    data = {
-        "kit": made.kit.id,
-        "triangles": row["triangles"],
-        "size_m": row["size"],
-        "budget": made.budget,
-        "seconds": round(result.seconds, 1),
-    }
-    facts.write_text(json.dumps(data))
-    _prune(folder)
-    return {**data, "image": str(image), "cached": False}
-
-
-def _prune(folder: Path, keep: int = 64) -> None:
-    """Keep the newest previews only."""
-    pictures = sorted(
-        folder.glob("*.png"), key=lambda p: p.stat().st_mtime, reverse=True
-    )
-    for old in pictures[keep:]:
-        old.unlink(missing_ok=True)
-        old.with_suffix(".json").unlink(missing_ok=True)
 
 
 def run(coroutine: Any) -> Any:
