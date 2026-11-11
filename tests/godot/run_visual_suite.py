@@ -86,6 +86,7 @@ SIDEBAR_STATES = (
     "settings-compact",
     "settings-policy",
     "settings-policy-custom",
+    "settings-models",
     "chat-restored",
     "chats",
     "chats-rename",

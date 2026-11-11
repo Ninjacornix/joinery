@@ -351,8 +351,16 @@ func _states(light: bool, width: int) -> void:
 	await _frames()
 	(settings as ScrollContainer).scroll_vertical = 100000
 	await _shot("settings-policy-custom", light, width, chat)
-	(settings as ScrollContainer).scroll_vertical = 0
 	settings.call("_close_policy")
+	# The Project section's last switches: the Reviewer agent and Complex models in Blender.
+	var models: Node = settings.find_child("ComplexModelsSetting", true, false)
+	_check(models != null, "Settings shows Complex models in Blender")
+	if models != null:
+		models.call("apply_status", {"complex_models": "blender", "blender": true})
+	await _frames()
+	(settings as ScrollContainer).scroll_vertical = 100000
+	await _shot("settings-models", light, width, chat)
+	(settings as ScrollContainer).scroll_vertical = 0
 	if width == WIDTHS[0]:
 		_theme.set_pref("reduce_motion", "on")
 		await _shot("reduce-motion", light, width, chat)
