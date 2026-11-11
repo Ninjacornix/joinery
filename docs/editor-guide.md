@@ -454,6 +454,13 @@ uv run joinery new /path/to/game --tools godot --blueprint top-down \
   --features online-play,steam --steam-app-id 480 --connect steam
 ```
 
+The starting points: `blank`, `first-person-3d`, `third-person-3d`,
+`platformer-2d`, `top-down`, `puzzle-cards` and `vr-room` (a small greybox room
+to walk and teleport in, with things to pick up, a button and a goal: put the
+cube on the table). The features: `controller`, `save-load`, `online-play`,
+`steam`, `translations` and `vr`. VR works with the three 3D starting points
+and is refused for the others with a plain reason.
+
 Without `--features` the blueprint's suggested features are used;
 `--features ""` adds none. Every new project gets the Joinery addon with its MIT
 licence (the addon ships inside your game) and the plugin turned on. With a
@@ -476,6 +483,22 @@ The wizard runs the same step as `joinery game apply --project <path>
 which prints one JSON line per finished step. `joinery blueprints --json` is the
 catalogue the wizard shows: each blueprint's screenshot, and for every feature
 whether it can be chosen there, why not, and what it adds.
+
+### VR
+
+`--features vr` (on by default for the VR room) turns on Godot's built-in
+OpenXR: nothing is downloaded. With an OpenXR runtime and a headset the game
+starts in the headset and an XR rig is carried on the player: greybox hands,
+a pointer ray (trigger presses buttons and switches and clicks the menus,
+which show on a panel in front of you), grip to pick things up and throw
+them, the left stick to walk, the right stick to snap-turn and, pushed
+forward, to aim a teleport arc that only lands on level floor. **Settings ›
+VR comfort** has smooth movement and its speed, snap turn 30° or 45°,
+teleport, the comfort vignette, seated play and left-handed. Without a
+runtime or headset the game starts on the desktop with mouse, keyboard or pad
+and says so once; Godot's own log notes that OpenXR could not start. Tests
+pass `-- --vr-simulate` to run the rig without a headset; see ADR 0039 for
+what was and was not tested on real hardware.
 
 ### Changing features
 
