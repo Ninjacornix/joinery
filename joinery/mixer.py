@@ -279,11 +279,31 @@ def _effect_text(effect: Effect) -> str:
     header = f'[sub_resource type="{effect.type}" id="{effect.id}"]'
     if effect.type not in {COMPRESSOR, REVERB}:
         return _trimmed([header, effect.body])
+    # As Godot's editor saves it: resource_name first, then the class's properties in
+    # its own order, leaving out those at their default. Anything else would be saved
+    # again by the next editor that opens the project, and parallel changes would each
+    # find the layout changed.
     defaults = COMPRESSOR_DEFAULTS if effect.type == COMPRESSOR else REVERB_DEFAULTS
-    known = [name for name in defaults if name in effect.props]
-    other = [name for name in effect.props if name not in defaults]
-    lines = [header] + [f"{name} = {effect.props[name]}" for name in known + other]
+    first = [n for n in ("resource_name",) if n in effect.props]
+    known = [
+        name
+        for name in defaults
+        if name in effect.props and not _is_default(effect.props[name], defaults[name])
+    ]
+    other = [n for n in effect.props if n not in defaults and n not in first]
+    lines = [header] + [
+        f"{name} = {effect.props[name]}" for name in first + known + other
+    ]
     return "\n".join(lines)
+
+
+def _is_default(raw: str, default: float | str) -> bool:
+    if isinstance(default, str):
+        return _unquote(raw) == default
+    try:
+        return abs(float(raw) - default) < 1e-9
+    except ValueError:
+        return False
 
 
 def to_tres(layout: BusLayout) -> str:
@@ -299,13 +319,20 @@ def to_tres(layout: BusLayout) -> str:
     lines = ["[resource]", *layout.extra]
     for index, bus in enumerate(layout.buses):
         prefix = f"bus/{index}/"
+        fields = [
+            ("name", _string_name(bus.name), bus.name != "Master"),
+            ("solo", str(bus.solo).lower(), bus.solo),
+            ("mute", str(bus.mute).lower(), bus.mute),
+            ("bypass_fx", str(bus.bypass_fx).lower(), bus.bypass_fx),
+            ("volume_db", _float(bus.volume_db), bus.volume_db != 0.0),
+            ("send", _string_name("" if index == 0 else bus.send), False),
+        ]
+        # Godot writes every field of the buses it adds, and only the changed
+        # fields of Master, which every layout has.
         lines += [
-            f"{prefix}name = {_string_name(bus.name)}",
-            f"{prefix}solo = {str(bus.solo).lower()}",
-            f"{prefix}mute = {str(bus.mute).lower()}",
-            f"{prefix}bypass_fx = {str(bus.bypass_fx).lower()}",
-            f"{prefix}volume_db = {_float(bus.volume_db)}",
-            f"{prefix}send = {_string_name('' if index == 0 else bus.send)}",
+            f"{prefix}{name} = {value}"
+            for name, value, changed in fields
+            if index > 0 or changed
         ]
         for slot, effect in enumerate(bus.effects):
             lines += [
@@ -343,8 +370,12 @@ def standard_bus(name: str) -> Bus:
     bus = Bus(name=name, send="" if name == "Master" else "Master")
     if name == "Music":
         bus.effects = [compressor(sidechain="Voice")]
+        bus.effects[0].props = {"resource_name": '"Ducking"', **bus.effects[0].props}
+        bus.effects[0].id = "AudioEffectCompressor_ducking"
     elif name == "Ambience":
         bus.effects = [reverb()]
+        bus.effects[0].props = {"resource_name": '"Room"', **bus.effects[0].props}
+        bus.effects[0].id = "AudioEffectReverb_room"
     return bus
 
 

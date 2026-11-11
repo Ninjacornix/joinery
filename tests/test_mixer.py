@@ -99,9 +99,24 @@ def test_standard_layout_matches_the_game_core() -> None:
     room = layout.buses[3].first(mixer.REVERB)
     assert room is not None and room.number("wet") == 0.25
     assert room.number("room_size") == 0.6
+    # Byte for byte what the core ships, which is how Godot's editor saves it: a
+    # layout the editor would save again changes in every staged change.
+    core = Path(__file__).parents[1] / "blueprints/_core/overlay/default_bus_layout.tres"
+    layout.uid = "uid://bswsg0sypxobf"
+    assert mixer.to_tres(layout) == core.read_text()
+    assert mixer.to_tres(mixer.from_tres(core.read_text())) == core.read_text()
+
+
+def test_master_writes_only_what_differs_from_godots_defaults() -> None:
+    layout = mixer.standard_layout()
     text = mixer.to_tres(layout)
-    assert 'id="AudioEffectCompressor_music"' in text
-    assert 'id="AudioEffectReverb_ambience"' in text
+    assert "bus/0/" not in text
+    layout.buses[0].volume_db = -3.0
+    text = mixer.to_tres(layout)
+    assert "bus/0/volume_db = -3.0" in text
+    assert "bus/0/name" not in text and "bus/0/send" not in text
+    # An effect value at Godot's default is left out, as the editor leaves it out.
+    assert "\nratio = " not in text and "\ndamping = " not in text
 
 
 def test_add_missing_buses_keeps_the_existing_ones_first() -> None:
