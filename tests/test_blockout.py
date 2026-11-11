@@ -548,3 +548,96 @@ def test_a_playtest_with_a_route_only_walks_it(tmp_path: Path) -> None:
     report = build(bot, "", 0, options={"seed": 1, "seconds": 9})
     assert report["route"] == [{"id": "exit", "reached": True}]
     assert not [i for i in report["items"] if i["kind"] == "balance"]
+
+
+@pytest.mark.parametrize(
+    "named",
+    ["", ".joinery/attachments/sketch.png", "sketch.png", "res://nope.png", "SKETCH"],
+)
+def test_a_resubmit_after_a_send_back_keeps_the_sketch_beside_the_plan(
+    project: Path, monkeypatch: pytest.MonkeyPatch, named: str
+) -> None:
+    """The reviewer sends the blockout back; the author builds it again and resubmits.
+    The review that opens still shows the sketch: whether the author names it again
+    (absolute, relative, by name, wrongly) or not, and when the fix runs in a
+    continuation whose prompt carries no attachments."""
+    from collections.abc import AsyncIterator
+
+    from bridge.protocol import Done, Message, Prompt
+    from bridge.turn_runner import run_turn
+    from joinery.peer_review import PeerReview, ReviewNote, ReviewRequest
+    from joinery.runner import Result
+    from joinery.timing import TurnTiming
+    from joinery.turn import TurnController
+    from tests.test_crew import wire
+    from tests.test_review_agents import Author, scripted
+
+    monkeypatch.setattr("joinery.submission.approved_in", lambda *_: True)
+    monkeypatch.setattr("joinery.submission.check_assets", lambda *_: [])
+
+    async def offline(*_a: Any, **_k: Any) -> Result:
+        return Result(True, "", "", 0.0)
+
+    monkeypatch.setattr("joinery.submission.run_offline", offline)
+    monkeypatch.setattr("joinery.blockout.stage.playtest.godot_binary", _no_godot)
+    sketch = project / ".joinery/attachments/sketch.png"
+    sketch.parent.mkdir(parents=True)
+    sketch.write_bytes((FIXTURES / "keep.png").read_bytes())
+    block = ReviewNote("block", "The stairs climb the wrong way.", "game/keep.tscn")
+    moved = parse(_layout("keep")).model_dump()
+    moved["spawn"]["at"] = [4, 4]
+
+    async def go() -> None:
+        events: list[dict[str, Any]] = []
+        gateway = wire(ProjectGateway(project))
+        gateway.attachments = (str(sketch),)
+        controller = TurnController(gateway, events.append, "codex")
+        seen: list[ReviewRequest] = []
+        controller.reviewer = scripted(
+            [PeerReview("reviewed", [block]), PeerReview("reviewed", [])], seen
+        )
+        results: list[str] = []
+
+        async def builds(lane: ProjectGateway) -> AsyncIterator[Any]:
+            await stage.tool(lane, {"layout": _layout("keep")})
+            assert lane.turn is not None
+            results.append((await lane.turn.submit("The keep")).status)
+            yield Done(ok=True)
+
+        async def fixes(lane: ProjectGateway) -> AsyncIterator[Any]:
+            # The continuation's prompt has no attachments; nor has the gateway now.
+            lane.attachments = ()
+            params: dict[str, Any] = {"layout": moved}
+            if named:
+                params["sketch"] = named
+            assert (await stage.tool(lane, params))["status"] == "staged"
+            assert lane.turn is not None
+            results.append((await lane.turn.submit("The keep, fixed")).status)
+            yield Message(text="Fixed the stairs.")
+            yield Done(ok=True)
+
+        author = Author(gateway, [builds, fixes])
+        try:
+            await run_turn(
+                controller,
+                author,
+                Prompt(
+                    text="/blockout",
+                    project_dir=str(project),
+                    attachments=(str(sketch),),
+                ),
+                events.append,
+                TurnTiming(),
+                request="/blockout",
+            )
+            assert results == ["failed", "in_review"]
+            assert author.prompts[1].attachments == ()
+            (preview,) = [e for e in events if e.get("kind") == "file_preview"]
+            item = preview["media"][0]
+            assert item["path"] == "design/blockouts/keep.toml"
+            assert item["reference"] == str(sketch.resolve())
+            assert preview["facts"][0].startswith("Walkable:")
+        finally:
+            await gateway.close()
+
+    asyncio.run(go())

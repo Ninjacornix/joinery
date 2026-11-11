@@ -50,15 +50,34 @@ def _player_scene(root: Path) -> bool:
     return False
 
 
-def _sketch(gateway: ProjectGateway, asked: str) -> str:
-    """The sketch to show beside the blockout: the one named, else the prompt's first."""
-    candidates = [asked] if asked else list(gateway.attachments)
-    for candidate in candidates:
+def _sketch(gateway: ProjectGateway, asked: str, kept: str = "") -> str:
+    """The sketch to show beside the blockout.
+
+    The one named (an absolute path, or one relative to the project, res:// or the
+    attachment folder), else the one this staged change already showed (a resubmit
+    after the reviewer sent it back keeps its sketch), else the prompt's first image.
+    """
+    asked = asked.removeprefix("res://")
+    named = [asked]
+    if asked and not Path(asked).is_absolute():
+        folder = gateway.project / chat_attachments.ATTACHMENT_DIR
+        named = [str(gateway.project / asked), str(folder / Path(asked).name)]
+    for candidate in [*named, kept, *gateway.attachments]:
+        if not candidate:
+            continue
         try:
             (path,) = chat_attachments.validate(gateway.project, [candidate])
         except (TypeError, ValueError):
             continue
         return path
+    return ""
+
+
+def _kept_reference(gateway: ProjectGateway, tx_id: str, path: str) -> str:
+    """The reference this staged change's review already showed for ``path``."""
+    for item in gateway.review_extras.get(tx_id, {}).get("media", []):
+        if item.get("path") == path and item.get("reference"):
+            return str(item["reference"])
     return ""
 
 
@@ -206,7 +225,11 @@ async def tool(gateway: ProjectGateway, params: dict[str, Any]) -> dict[str, Any
             before_png = previews / f"blockout-{built.layout.name}-before.png"
             before_png.write_bytes(before)
             item["before"] = str(before_png)
-        sketch = _sketch(gateway, str(params.get("sketch", "") or ""))
+        sketch = _sketch(
+            gateway,
+            str(params.get("sketch", "") or ""),
+            _kept_reference(gateway, tx.id, built.layout_file),
+        )
         if sketch:
             item["reference"] = sketch
         counts = built.counts()
