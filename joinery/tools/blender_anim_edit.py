@@ -337,7 +337,7 @@ def _j_rename(st, action, op):
     was = action.name
     action.name = name
     _j_stash(st.rig, action)
-    return {'was': was}
+    return {'renamed_from': was}
 
 def _j_copy(st, action, op):
     name = op['name']

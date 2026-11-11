@@ -43,6 +43,11 @@ FAMILIES = {
         "kit_batch",
         "kit_edit",
         "scatter",
+        # Animations (servers/blender_ops/animation.py).
+        "make_cycle",
+        "edit_action",
+        "audit_animations",
+        "animation_pass",
     },
     "joinery-paint": {
         "inspect_document",
@@ -101,6 +106,7 @@ def test_discovery_exposes_only_real_family_capabilities(
                 "document_capabilities",
                 "inspect_music",
                 "kit_list",
+                "audit_animations",
             }
             for name in readers & set(tools):
                 assert tools[name].annotations.read_only_hint is True
