@@ -106,3 +106,31 @@ def test_object_targets_and_other_sources_add_no_texture_view(
         },
     ]
     assert [p["id"] for p in _parts_in("art/sources/h.blend", targets)] == ["c"]
+
+
+def test_a_full_model_is_shown_from_two_angles(tmp_path: Path, monkeypatch) -> None:
+    from joinery import review
+    from joinery.runner import Result
+
+    (tmp_path / "project.godot").write_text("config_version=5\n")
+    (tmp_path / "art/sources").mkdir(parents=True)
+    (tmp_path / "art/sources/door.blend").write_bytes(b"before")
+    tx = FileTransaction(tmp_path)
+    tx.begin("Make the door wider")
+    (tx.stage / "art/sources/door.blend").write_bytes(b"after")
+
+    async def render(argv: list[str], root: Path, *_args: object) -> Result:
+        output = argv[-1].split("\n", 1)[0].split("=", 1)[1].strip("\x27")
+        target = root / output.removeprefix("/work/")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(b"png")
+        assert "BACK_SUFFIX" in argv[-1]
+        target.with_name(target.stem + review.BACK_SUFFIX).write_bytes(b"png")
+        return Result(True, "", "", 0.0)
+
+    monkeypatch.setattr(review, "run_offline", render)
+    media = asyncio.run(evidence(tx, [{"path": "art/sources/door.blend"}]))
+    item = media[0]
+    for side in ("before", "after"):
+        assert item[side + "_back"].endswith("-back.png")
+        assert Path(item[side + "_back"]).is_file()

@@ -41,7 +41,14 @@ scene.render.resolution_percentage = 100
 scene.render.image_settings.file_format = 'PNG'
 scene.render.filepath = OUTPUT
 bpy.ops.render.render(write_still=True)
+# The second angle: the far side, so a change at the back shows too.
+camera.location = center + Vector((-1, 1.5, 1)) * extent
+camera.rotation_euler = (center - camera.location).to_track_quat('-Z', 'Y').to_euler()
+scene.render.filepath = OUTPUT[:-4] + BACK_SUFFIX
+bpy.ops.render.render(write_still=True)
 """
+#: Name ending of the far-side render a full model view writes beside the front one.
+BACK_SUFFIX = "-back.png"
 
 
 # Shows the selected map on the model: Workbench draws the active image node of
@@ -106,7 +113,10 @@ def _order(relative: str) -> int:
 async def _render(root: Path, relative: str, name: str, script: str) -> Path:
     output = root / ".joinery/previews" / name
     output.parent.mkdir(parents=True, exist_ok=True)
-    code = "OUTPUT=" + repr("/work/.joinery/previews/" + name) + "\n" + script
+    code = (
+        f"OUTPUT={'/work/.joinery/previews/' + name!r}\n"
+        f"BACK_SUFFIX={BACK_SUFFIX!r}\n" + script
+    )
     got = await run_offline(
         ["blender", "--background", relative, "--python-expr", code], root, 120
     )
@@ -144,6 +154,11 @@ class Render:
     @property
     def output(self) -> Path:
         return self.root / ".joinery/previews" / self.name
+
+    @property
+    def back(self) -> Path:
+        """The far-side render a full model view writes beside ``output``."""
+        return self.output.with_name(self.output.stem + BACK_SUFFIX)
 
 
 def plan(
@@ -212,6 +227,7 @@ def plan(
     for job in renders:
         # A file left by an earlier review would show before this render is done.
         job.output.unlink(missing_ok=True)
+        job.back.unlink(missing_ok=True)
         job.item[job.side] = str(job.output)
     return media, renders
 
@@ -234,6 +250,9 @@ async def render(renders: list[Render], *, strict: bool = False) -> None:
             job.item["error"] = str(result).split("\n", 1)[0]
         else:
             job.item[job.side] = str(result)
+            if job.back.is_file():
+                # A full model shows from two angles: the front and the far side.
+                job.item[job.side + "_back"] = str(job.back)
 
 
 async def evidence(
