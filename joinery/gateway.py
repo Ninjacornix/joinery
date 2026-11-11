@@ -11,7 +11,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from mcp.types import CallToolResult, TextContent
 
@@ -30,12 +30,16 @@ from joinery.server_install import configured, installation
 from joinery.submission import is_reference
 from joinery.timing import TurnTiming
 from joinery.transactions import FileTransaction, ProjectLease, inventory
+from joinery.turn import scene_route
 from joinery.workers import (
     blender_worker,
     godot_worker,
     inkscape_worker,
     supercollider_worker,
 )
+
+if TYPE_CHECKING:
+    from joinery.turn import TurnController
 
 #: Native document operations: each saves, exports and records a recipe, and its
 #: result is imported into Godot before the next call can use it.
@@ -54,6 +58,7 @@ NATIVE_OPS = frozenset(
 TEXT_SUFFIXES = frozenset(
     {".gd", ".tscn", ".tres", ".json", ".toml", ".gdshader", ".md"}
 )
+LIVE_SCENE = "This scene is open with unsaved edits; change it live with edit_scene."
 ART_GATE_MESSAGE = (
     "Before Journeyman makes anything, agree how your game should look. "
     "Review the look, then approve these rules."
@@ -168,6 +173,8 @@ class ProjectGateway:
         self.transaction: FileTransaction | None = None
         self._last_accepted: FileTransaction | None = None
         self.live_edit_pending = False
+        #: The turn this gateway serves; it decides when the project may change.
+        self.turn: TurnController | None = None
         self.request_summary = ""
         self.editor_context: dict[str, str] = {}
         #: The prompt's selection targets; part targets scope typed part edits.
@@ -193,6 +200,11 @@ class ProjectGateway:
         #: (transaction id, review media, renders still to run) from open_review.
         self._media_jobs: tuple[str, list[dict[str, Any]], list[Render]] = ("", [], [])
         self._media_task: asyncio.Task[None] | None = None
+
+    @property
+    def call_lock(self) -> asyncio.Lock:
+        """Held for every tool call; a submit holds it while the change is checked."""
+        return self._call_lock
 
     async def connection(self, server: str) -> MCPConnection:
         """Start just the requested server; unrelated creative apps stay idle."""
@@ -296,21 +308,25 @@ class ProjectGateway:
         )
         if custom is None:
             validate_arguments(arguments)
+        readonly = read_only(server, tool)
+        if not readonly and self.turn is not None:
+            self.turn.admit_mutation()
+        scene = str(arguments.get("scenePath", "") or "")
+        if (
+            not readonly
+            and server == "godot"
+            and scene
+            and (
+                scene_route(scene, self.editor_context) == "live"
+                or (self.turn is not None and self.turn.edited_live(scene))
+            )
+        ):
+            raise ValueError(LIVE_SCENE)
         connection = await self.connection(server)
         if server == "godot" and tool.startswith("game_") and not self.runtime_owned:
             raise ValueError(
                 "This call needs a project-owned running-game session; it cannot target an arbitrary global port."
             )
-        readonly = read_only(server, tool)
-        if not readonly and server == "godot":
-            unsaved = json.loads(self.editor_context.get("unsaved_scenes", "[]"))
-            scene_path = "res://" + str(arguments.get("scenePath", "")).removeprefix(
-                "res://"
-            )
-            if scene_path in unsaved:
-                raise ValueError(
-                    "This scene has unsaved editor changes; use the live-editor tools."
-                )
         if not readonly and self.live_edit_pending and server == "godot":
             scene = self.editor_context.get("scene_path", "")
             if scene and str(arguments.get("scenePath", "")).removeprefix(
@@ -341,9 +357,10 @@ class ProjectGateway:
         if not readonly and self.transaction is None:
             self.transaction = FileTransaction(self.project)
             self.transaction.begin(self.request_summary[:160] or "Project changes")
-        if self.transaction is not None:
-            if self.transaction.state != "staging":
+        if self.transaction is not None and self.transaction.state != "staging":
+            if not readonly:
                 raise ValueError("Accept or reject the pending transaction first.")
+        elif self.transaction is not None:
             if not readonly:
                 # The Review tab names the app that made each change.
                 self.transaction.note_tool(

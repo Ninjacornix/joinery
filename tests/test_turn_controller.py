@@ -2,14 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from typing import Any
 
 import pytest
 
+from joinery.submission import Validation
 from joinery.turn import (
     ContextMeter,
     Problem,
     SubmitResult,
+    TurnController,
     TurnState,
     allowed,
     scene_route,
@@ -101,3 +105,100 @@ def test_submit_result_reads_as_a_tool_result() -> None:
             "paths": ["room.tscn"],
         }
     ]
+
+
+class FakeGateway:
+    """Just enough gateway for the controller's own bookkeeping."""
+
+    def __init__(self) -> None:
+        self.transaction: Any = None
+        self.art_gate: dict[str, Any] | None = None
+        self.turn: Any = None
+        self.call_lock = asyncio.Lock()
+        self.cancelled = 0
+        self.progress: Any = lambda _text: None
+
+    async def submit_checks(self, _live: set[str]) -> Validation:
+        return Validation()
+
+    async def cancel(self) -> None:
+        self.cancelled += 1
+        self.transaction = None
+
+    def start_media(self, _emit: Any) -> None:
+        pass
+
+
+def controller() -> tuple[TurnController, list[dict[str, Any]], FakeGateway]:
+    events: list[dict[str, Any]] = []
+    gateway = FakeGateway()
+    return TurnController(gateway, events.append), events, gateway  # type: ignore[arg-type]
+
+
+def states(events: list[dict[str, Any]]) -> list[str]:
+    return [e["state"] for e in events if e["kind"] == "turn_state"]
+
+
+def test_every_transition_is_announced() -> None:
+    turn, events, gateway = controller()
+    assert gateway.turn is turn
+    turn.begin("Rename the lamp")
+    turn.record_live_edit("", True)
+    result = asyncio.run(turn.end(True))
+    assert result is not None and result.status == "in_review"
+    assert states(events) == ["working", "submitting", "in_review"]
+    assert all(e["turn_id"] == turn.turn_id for e in events)
+    turn.live_decided()
+    assert states(events)[-2:] == ["decided", "idle"]
+
+
+def test_an_illegal_transition_raises() -> None:
+    turn, _events, _gateway = controller()
+    with pytest.raises(RuntimeError, match="cannot go from idle to in_review"):
+        turn._to(TurnState.IN_REVIEW)
+
+
+def test_mutations_are_refused_outside_working() -> None:
+    turn, _events, _gateway = controller()
+    with pytest.raises(ValueError, match="active user request"):
+        turn.admit_mutation()
+    turn.begin_compaction()
+    with pytest.raises(ValueError, match="summarising"):
+        turn.admit_mutation()
+    turn.end_compaction()
+    turn.begin("Rename")
+    turn.admit_mutation()
+
+
+def test_a_request_while_a_review_is_open_only_looks() -> None:
+    turn, events, _gateway = controller()
+    turn.begin("Rename the lamp")
+    turn.record_live_edit("", True)
+    asyncio.run(turn.end(True))
+    turn.begin("What else is in the room?")
+    with pytest.raises(ValueError, match="Accept or reject the change on screen"):
+        turn.admit_mutation()
+    asyncio.run(turn.end(True))
+    assert turn.state is TurnState.IN_REVIEW
+    asyncio.run(turn.cancel())
+    assert turn.state is TurnState.IN_REVIEW, "A stop keeps the open review"
+    assert states(events)[-2:] == ["working", "in_review"]
+
+
+def test_a_live_edit_of_a_saved_scene_is_refused() -> None:
+    turn, _events, _gateway = controller()
+    turn.begin("Rename the lamp")
+    with pytest.raises(ValueError, match="This scene is saved"):
+        turn.admit_live_edit({"scene_path": "res://room.tscn"})
+    unsaved = {"scene_path": "res://levels/room.tscn", **UNSAVED}
+    assert turn.admit_live_edit(unsaved) == "res://levels/room.tscn"
+    assert turn.admit_live_edit({"scene_path": ""}) == ""
+
+
+def test_a_failed_turn_drops_its_change() -> None:
+    turn, events, gateway = controller()
+    turn.begin("Rename the lamp")
+    turn.record_live_edit("", True)
+    asyncio.run(turn.end(False))
+    assert gateway.cancelled == 1 and turn.live_edits == 0
+    assert events[-1]["state"] == "idle" and events[-1]["reason"] == "failed"
