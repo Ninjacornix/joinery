@@ -1,0 +1,44 @@
+[gd_scene load_steps=3 format=3]
+
+[ext_resource type="Script" path="res://main.gd" id="1_main"]
+
+[sub_resource type="StyleBoxFlat" id="StyleBoxFlat_grey"]
+bg_color = Color(0.533, 0.533, 0.533, 1)
+
+[node name="Main" type="Control"]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("1_main")
+
+[node name="Light" type="ColorRect" parent="."]
+offset_left = 40.0
+offset_top = 40.0
+offset_right = 80.0
+offset_bottom = 80.0
+
+[node name="Box" type="PanelContainer" parent="."]
+offset_left = 400.0
+offset_top = 40.0
+offset_right = 700.0
+offset_bottom = 120.0
+theme_override_styles/panel = SubResource("StyleBoxFlat_grey")
+
+[node name="Row" type="HBoxContainer" parent="Box"]
+
+[node name="Dim" type="Label" parent="Box/Row"]
+theme_override_colors/font_color = Color(0.467, 0.467, 0.467, 1)
+theme_override_font_sizes/font_size = 9
+text = "Score: 12"
+
+[node name="Gear" type="Button" parent="Box/Row"]
+custom_minimum_size = Vector2(40, 40)
+
+[node name="VoiceLine" type="AudioStreamPlayer" parent="."]
+
+[node name="Flash" type="ColorRect" parent="."]
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+mouse_filter = 2

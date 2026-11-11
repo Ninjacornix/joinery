@@ -18,6 +18,7 @@ from joinery import (
     blueprints,
     brief,
     chats,
+    checks_cli,
     claims,
     complex_models,
     connection,
@@ -1015,6 +1016,12 @@ def _parser() -> argparse.ArgumentParser:
     steam_cmd.add_argument("--app-id", help="Steam app ID (digits); 0 clears it")
     steam_cmd.add_argument("--connect", choices=["steam", "direct"])
     steam_cmd.add_argument("--json", action="store_true")
+    checks_cli.add_access(
+        commands.add_parser("access", help="check the game's accessibility; list what to fix")
+    )
+    checks_cli.add_perf(
+        commands.add_parser("perf", help="measure how the game runs against a target machine")
+    )
     playtest_cmd = commands.add_parser(
         "playtest", help="play the game headless with a bot and report what goes wrong"
     )
@@ -1411,6 +1418,8 @@ def main(argv: list[str] | None = None) -> int:
         return share.main(args)
     if args.command == "match":
         return match_cli.main(args)
+    if args.command in {"access", "perf"}:
+        return checks_cli.main(args)
     if args.command == "blockout":
         return blockout_command.main(args)
     if args.command == "kits":
