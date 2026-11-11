@@ -195,6 +195,24 @@ async def make_project(folder: Path) -> Path:
     from sound_pass import core_sound_nodes
 
     core_sound_nodes(project)
+    # The project as the editor leaves it once opened: every script has its .uid.
+    # Without that each parallel task's import would write the same new .uid files.
+    from sound_pass import godot
+
+    imported = await asyncio.create_subprocess_exec(
+        str(godot()),
+        "--headless",
+        "--audio-driver",
+        "Dummy",
+        "--path",
+        str(project),
+        "--editor",
+        "--import",
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    if await imported.wait() != 0:
+        raise RuntimeError("Godot could not import the new project")
     return project
 
 
