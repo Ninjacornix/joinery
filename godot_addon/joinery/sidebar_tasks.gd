@@ -19,10 +19,12 @@ extends VBoxContainer
 ##
 ## "Make it match" (ADR 0045) has its card here too (sidebar_match.gd): the project's scores
 ## against the art bible, while its fixes run as tasks with cards of their own. So do the
-## accessibility and performance checks (ADR 0049, ADR 0050), with the same card.
+## accessibility and performance checks (ADR 0049, ADR 0050), with the same card. The design
+## check has a card of its own (sidebar_design.gd).
 
 const CARD := preload("sidebar_task_card.gd")
 const DEBUG := preload("sidebar_debug.gd")
+const DESIGN := preload("sidebar_design.gd")
 const MATCH := preload("sidebar_match.gd")
 const PLAYTEST_CARD := preload("playtest_card.gd")
 const VARIANTS := preload("sidebar_variants.gd")
@@ -56,6 +58,8 @@ var match_card: Control
 ## The accessibility and performance cards (match_card.gd), while there are.
 var access_card: Control
 var perf_card: Control
+## The design check's card (design_card.gd), while there is one.
+var design_card: Control
 ## Requests tried several ways (sidebar_variants.gd): their ways' events go there.
 var variants: Node
 var _cards: Dictionary = {}
@@ -78,6 +82,8 @@ static func attach(sidebar: Control, content: Control, before: Control) -> VBoxC
 	# "/access" and "/perf": the game's accessibility and performance.
 	MATCH.attach(sidebar, tasks, "access")
 	MATCH.attach(sidebar, tasks, "perf")
+	# "/design": the game against its own brief.
+	DESIGN.attach(sidebar, tasks)
 	tasks.variants = VARIANTS.attach(sidebar, tasks)
 	var slash: Object = sidebar.get("_slash")
 	if slash != null and slash.has_signal("playtest_requested"):
@@ -353,6 +359,7 @@ func sync_visible() -> void:
 		or is_instance_valid(match_card)
 		or is_instance_valid(access_card)
 		or is_instance_valid(perf_card)
+		or is_instance_valid(design_card)
 		or _has_variants()
 	)
 

@@ -51,6 +51,7 @@ CASES = {
     "match_card_test.gd": "match card: ok",
     "access_card_test.gd": "access card: ok",
     "perf_card_test.gd": "perf card: ok",
+    "design_card_test.gd": "design card: ok",
     "variants_test.gd": "variants: ok",
     "complex_models_setting_test.gd": "complex models setting: ok",
     # Last: it puts the shared disposable project under git.

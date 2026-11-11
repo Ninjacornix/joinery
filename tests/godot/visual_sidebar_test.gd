@@ -229,6 +229,7 @@ func _states(light: bool, width: int) -> void:
 	await _playtest(light, width, chat)
 	await _match(light, width, chat)
 	await _check_cards(light, width, chat)
+	await _design(light, width, chat)
 
 	chat.append_agent_text("I widened **Door** by 20% in Blender and darkened the wood.", true)
 	chat.finish_agent_response(true)
@@ -907,6 +908,30 @@ func _match(light: bool, width: int, chat: Control) -> void:
 		tasks.call("_remove", row["task_id"])
 	card.free()
 	tasks.set("match_card", null)
+	tasks.call("sync_visible")
+
+
+## The design check: its findings at a glance, the agent reading, and a sound game.
+func _design(light: bool, width: int, chat: Control) -> void:
+	var tasks: Node = chat.get("_tasks")
+	var fixture: GDScript = load(
+		get_script().resource_path.get_base_dir().path_join("design_fixture.gd")
+	)
+	var designer: Node = tasks.get_node("Design")
+	designer.set(
+		"check_runner", func(_args: PackedStringArray) -> Dictionary: return fixture.call("report")
+	)
+	designer.call("open")
+	var card: Control = tasks.get("design_card")
+	_check(card != null, "The design card shows")
+	await _shot("design", light, width, chat)
+	card.call("show_report", fixture.call("report", true), false)
+	card.call("set_reading")
+	await _shot("design-reading", light, width, chat)
+	card.call("show_report", fixture.call("clean"), true)
+	await _shot("design-clean", light, width, chat)
+	card.free()
+	tasks.set("design_card", null)
 	tasks.call("sync_visible")
 
 

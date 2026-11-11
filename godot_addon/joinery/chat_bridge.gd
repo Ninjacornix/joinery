@@ -61,6 +61,8 @@ signal check_event(event: Dictionary)
 ## ({kind: "variants", state, picked, ways}) or the host refusing a pick ({kind: "notice"}).
 ## Each way's own events come as task events, tagged with variant_group.
 signal variants_event(event: Dictionary)
+## The design check's agent pass, or the check after accepted changes (design_id set).
+signal design_event(event: Dictionary)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 const ATTACHMENTS := preload("chat_attachments.gd")
@@ -266,6 +268,18 @@ func send_check(check: String, areas: Array, findings: Array, stop := false, tar
 	return true
 
 
+## The design check: with [param deep] the designer agent reads the game after Joinery's
+## checks; with [param stop] the run [param design_id] stops. False when not connected.
+func send_design(deep: bool, stop := false, design_id := "") -> bool:
+	if _job == null or not _connected:
+		return false
+	var line := {"kind": "design_start", "deep": deep}
+	if stop:
+		line = {"kind": "design_cancel", "design_id": design_id}
+	_job.send_line(JSON.stringify(line))
+	return true
+
+
 ## Show a task's change in the Review tab.
 func show_task_review(transaction_id: String) -> void:
 	task_review.emit(transaction_id)
@@ -314,6 +328,9 @@ func _handle(event: Dictionary) -> void:
 		return
 	if not str(event.get("playtest_id", "")).is_empty():
 		playtest_event.emit(event)
+		return
+	if not str(event.get("design_id", "")).is_empty():
+		design_event.emit(event)
 		return
 	if not str(event.get("group_id", "")).is_empty():
 		variants_event.emit(event)

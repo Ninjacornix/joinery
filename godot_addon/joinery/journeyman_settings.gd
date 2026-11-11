@@ -15,6 +15,7 @@ const STYLE := preload("sidebar_style.gd")
 const POLICY := preload("history_policy.gd")
 const TIMELINE_SETTING := preload("timeline_setting.gd")
 const REVIEWER_SETTING := preload("reviewer_setting.gd")
+const DESIGN_SETTING := preload("design_setting.gd")
 const COMPLEX_MODELS_SETTING := preload("complex_models_setting.gd")
 const PATH := "Joinery/journeyman.cfg"
 const TEXT_SIZES := UI_THEME.TEXT_SIZES
@@ -414,6 +415,7 @@ func _build_project() -> void:
 		["Make it match", "/match"],
 		["Accessibility check", "/access"],
 		["Performance check", "/perf"],
+		["Design check", "/design"],
 		["Project apps", "/setup"],
 	]:
 		var button := UI.row_button(str(item[0]))
@@ -449,6 +451,10 @@ func _build_project() -> void:
 	section.body.add_child(REVIEWER_SETTING.new())
 	# Complex models made in Blender or with a kit (`[agents] complex_models`).
 	section.body.add_child(COMPLEX_MODELS_SETTING.new())
+	# The design check after every N accepted changes (`[agents] design_check_every`).
+	var design: Control = DESIGN_SETTING.new()
+	section.body.add_child(design)
+	_flush_picker(design.get("picker"))
 
 
 ## Compact asks first, in place: no dialog, and Cancel leaves everything as it was.

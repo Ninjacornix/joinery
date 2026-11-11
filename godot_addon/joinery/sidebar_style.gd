@@ -50,6 +50,29 @@ static func hug_left(button: Button) -> void:
 	)
 
 
+## The same on the right: [param button]'s text ends on the content edge, its hover fill
+## reaching past it, so a trailing action lines up with the links above and below it.
+static func hug_right(button: Button) -> void:
+	on_theme_overrides(
+		button,
+		func() -> void:
+			var variation := button.theme_type_variation
+			for state: String in [
+				"normal", "hover", "pressed", "hover_pressed", "disabled", "focus"
+			]:
+				button.remove_theme_stylebox_override(state)
+				var source := button.get_theme_stylebox(state, variation)
+				if source == null:
+					continue
+				var box := source.duplicate() as StyleBox
+				var pad := box.content_margin_right
+				box.content_margin_right = 0.0
+				if box is StyleBoxFlat:
+					(box as StyleBoxFlat).expand_margin_right += pad
+				button.add_theme_stylebox_override(state, box)
+	)
+
+
 ## A quiet button that reads as a button at rest: a surface_raised fill (a step stronger on
 ## hover and press) at RADIUS.md, with SPACE.2 padding on both sides. Enabled text is the full
 ## text colour and hover adds a border_strong hairline, so it reads as clickable. Disabled

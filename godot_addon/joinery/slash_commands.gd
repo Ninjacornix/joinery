@@ -38,6 +38,8 @@ signal match_requested
 signal access_requested
 ## "/perf [target]": measure the game against a target machine (ADR 0050).
 signal perf_requested(target: String)
+## "/design": check the game's design against its brief (sidebar_design.gd).
+signal design_requested
 ## "/variants [N] <request>": make the request a few ways side by side (sidebar_variants.gd).
 signal variants_requested(words: String)
 
@@ -52,6 +54,7 @@ const COMMANDS := {
 	"/match": ["Make everything match the bible", "ui"],
 	"/access": ["Check the game's accessibility", "ui"],
 	"/perf": ["Measure the game's performance", "ui"],
+	"/design": ["Check the game design", "ui"],
 	"/variants": ["Try a few ways side by side", "ui"],
 	"/setup": ["Change project apps", "ui"],
 	"/focus": ["Toggle focus mode", "ui"],
@@ -145,6 +148,8 @@ func run(entry: String) -> bool:
 			access_requested.emit()
 		elif command == "/perf":
 			perf_requested.emit(" ".join(arguments(entry)).strip_edges())
+		elif command == "/design":
+			design_requested.emit()
 		elif command == "/variants":
 			variants_requested.emit(" ".join(arguments(entry)))
 		else:
