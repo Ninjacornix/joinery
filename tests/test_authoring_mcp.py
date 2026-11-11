@@ -72,6 +72,8 @@ FAMILIES = {
         "inspect_track",
         "compose_track",
         "edit_track",
+        # The sound kit (servers/sound/make.py).
+        "make_sound",
     },
     "joinery-materialmaker": {
         "inspect_document",

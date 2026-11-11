@@ -18,7 +18,7 @@ from joinery.art_approval import approve
 from joinery.gateway_rpc import GatewayRPC, rpc
 from joinery.hook import violation
 from joinery.policy import Severity
-from joinery.roles import ROLE_ENV, READ_ONLY_ROLES, SOUND_AUDIT, spec
+from joinery.roles import READ_ONLY_ROLES, ROLE_ENV, SOUND_AUDIT, spec
 
 PROVIDERS = ("claude", "codex", "gemini", "opencode")
 
