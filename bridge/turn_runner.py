@@ -49,6 +49,7 @@ PLAIN = {
     "art_bible": "it breaks the art direction's rules",
     "godot_import": "Godot couldn't import it",
     "tests": "the project's tests failed",
+    "conflict": "another accepted change touched the same file",
 }
 
 

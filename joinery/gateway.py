@@ -21,16 +21,31 @@ from joinery import tools as tool_modules
 from joinery.art_approval import approved, review
 from joinery.authoring import run_offline
 from joinery.catalog import blocked_tools, load_catalog, load_project_tools
+from joinery.claims import (
+    MAIN,
+    MAIN_TITLE,
+    PathClaims,
+    WorkerSlots,
+    project_paths,
+    refusal,
+)
 from joinery.lockfile import asset_files
 from joinery.locking import record_custom_outputs
 from joinery.mcp_runtime import MCPConnection, PolicyStop, validate_arguments
 from joinery.read_access import read_only
+from joinery.rebase import Rebase, rebase, refresh_review
 from joinery.review import Render, plan, render
 from joinery.server_install import configured, installation
 from joinery.submission import is_reference
 from joinery.timing import TurnTiming
-from joinery.transactions import FileTransaction, ProjectLease, inventory
-from joinery.turn import scene_route
+from joinery.transactions import (
+    DIRECTORY,
+    FileTransaction,
+    ProjectLease,
+    copy_file,
+    inventory,
+)
+from joinery.turn import Problem, scene_route
 from joinery.workers import (
     blender_worker,
     godot_worker,
@@ -60,6 +75,11 @@ TEXT_SUFFIXES = frozenset(
 )
 LIVE_SCENE = (
     "This scene is on screen or has unsaved edits; change it live with edit_scene."
+)
+#: A task tried to stage the scene on screen; only the main request changes it.
+LANE_LIVE_SCENE = (
+    "This scene is on screen or has unsaved edits, and only the main request "
+    "changes it live. Change a scene that isn't open, or leave this to the main request."
 )
 ART_GATE_MESSAGE = (
     "Before Journeyman makes anything, agree how your game should look. "
@@ -154,6 +174,14 @@ def _map_paths(value: Any, project: PurePath, stage: PurePath) -> Any:
 
 
 class ProjectGateway:
+    """The project's tools for one turn's agent.
+
+    The chat's own gateway owns the project: the lease, recovery and the app
+    connections. A parallel task works through a *lane* of it (:meth:`lane`):
+    the same project and connections, but its own staged change, staged apps,
+    turn and lock, so several changes can be staged at once (ADR 0036).
+    """
+
     def __init__(self, project: Path) -> None:
         self.project = project.resolve()
         self.specs, self.unavailable = configured(self.project)
@@ -171,13 +199,33 @@ class ProjectGateway:
             self._lease.close()
             raise
         self.connections: dict[str, MCPConnection] = {}
+        self.edit_scene: (
+            Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None
+        ) = None
+        #: Capture the editor's viewport as the user sees it (read-only); set by the chat host.
+        self.view_editor: Callable[[], Awaitable[dict[str, Any]]] | None = None
+        self._discovery_cache: tuple[float, dict[str, Any]] | None = None
+        self._discovery_lock = asyncio.Lock()
+        #: Which task changes which file, shared by every lane of this project.
+        self.claims = PathClaims()
+        self.slots = WorkerSlots()
+        self.task_id = MAIN
+        self.title = MAIN_TITLE
+        self._root = self
+        #: The parallel tasks' lanes, by task id (on the chat's own gateway).
+        self.lanes: dict[str, ProjectGateway] = {}
+        self.claims.register(MAIN, MAIN_TITLE)
+        self.editor_context: dict[str, str] = {}
+        self._lane_state()
+
+    def _lane_state(self) -> None:
+        """What each turn's agent has for itself."""
         self.staged: dict[str, MCPConnection] = {}
         self.transaction: FileTransaction | None = None
         self._last_accepted: FileTransaction | None = None
         #: The turn this gateway serves; it decides when the project may change.
         self.turn: TurnController | None = None
         self.request_summary = ""
-        self.editor_context: dict[str, str] = {}
         #: The prompt's selection targets; part targets scope typed part edits.
         self.target_context: tuple[dict[str, str], ...] = ()
         #: Set when a call needed an approved art bible; the turn's end reports it.
@@ -186,21 +234,55 @@ class ProjectGateway:
         self.runtime_config: str | None = None
         self.runtime_injected: str | None = None
         self.runtime_root_script = False
-        self.edit_scene: (
-            Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None
-        ) = None
-        #: Capture the editor's viewport as the user sees it (read-only); set by the chat host.
-        self.view_editor: Callable[[], Awaitable[dict[str, Any]]] | None = None
         self._call_lock = asyncio.Lock()
         self.progress: Callable[[str], None] = lambda _text: None
         self.timing: TurnTiming | None = None
-        self._discovery_cache: tuple[float, dict[str, Any]] | None = None
-        self._discovery_lock = asyncio.Lock()
         #: (transaction id, stage inventory) right after a clean Godot import.
         self._imported: tuple[str, dict[str, str]] | None = None
         #: (transaction id, review media, renders still to run) from open_review.
         self._media_jobs: tuple[str, list[dict[str, Any]], list[Render]] = ("", [], [])
         self._media_task: asyncio.Task[None] | None = None
+        #: The accepted-change count (claims.generation) the stage last followed.
+        self._synced = 0
+
+    @property
+    def is_lane(self) -> bool:
+        return self._root is not self
+
+    def lane(self, task_id: str, title: str) -> ProjectGateway:
+        """A gateway for a parallel task: shared project and apps, its own change."""
+        root = self._root
+        if task_id in root.lanes or task_id == MAIN:
+            raise ValueError("That task already has a gateway.")
+        child = ProjectGateway.__new__(ProjectGateway)
+        for name in (
+            "project",
+            "specs",
+            "unavailable",
+            "_lease",
+            "connections",
+            "view_editor",
+            "_discovery_cache",
+            "_discovery_lock",
+            "claims",
+            "slots",
+            "lanes",
+        ):
+            setattr(child, name, getattr(root, name))
+        child._root = root
+        child.task_id = task_id
+        child.title = title
+        child.edit_scene = None
+        child.editor_context = dict(root.editor_context)
+        child._lane_state()
+        child._synced = root.claims.generation
+        # From now on staged files are claimed as they are written; record
+        # what the others staged before there was anyone to clash with.
+        for other in [root, *root.lanes.values()]:
+            other.claim_stage(strict=False)
+        root.lanes[task_id] = child
+        root.claims.register(task_id, title)
+        return child
 
     @property
     def call_lock(self) -> asyncio.Lock:
@@ -225,6 +307,8 @@ class ProjectGateway:
         return connection
 
     async def discover(self) -> dict[str, Any]:
+        if self.is_lane:
+            return await self._root.discover()
         async with self._discovery_lock:
             if (
                 self._discovery_cache
@@ -322,7 +406,13 @@ class ProjectGateway:
                 or (self.turn is not None and self.turn.edited_live(scene))
             )
         ):
-            raise ValueError(LIVE_SCENE)
+            raise ValueError(LANE_LIVE_SCENE if self.is_lane else LIVE_SCENE)
+        if not readonly and self.claims.contended():
+            path, title = self.claims.first_conflict(
+                project_paths(arguments, self.project), self.task_id
+            )
+            if path:
+                raise ValueError(refusal(path, title))
         connection = await self.connection(server)
         if server == "godot" and tool.startswith("game_") and not self.runtime_owned:
             raise ValueError(
@@ -350,6 +440,10 @@ class ProjectGateway:
         if not readonly and self.transaction is None:
             self.transaction = FileTransaction(self.project)
             self.transaction.begin(self.request_summary[:160] or "Project changes")
+            self._synced = self.claims.generation
+        elif not readonly and self._synced < self.claims.generation:
+            # Another task's change was accepted: follow it before writing.
+            self.follow_project(take_theirs=False)
         if self.transaction is not None and self.transaction.state != "staging":
             if not readonly:
                 raise ValueError("Accept or reject the pending transaction first.")
@@ -415,16 +509,25 @@ class ProjectGateway:
         ):
             # The tool server of this stage reads the prompt's part targets.
             part_targets.write_targets(self.transaction.stage, self.target_context)
+        owner = ""
         if tool in NATIVE_OPS:
             owner = str(arguments.get("tool", server.removeprefix("joinery-")))
             self.progress("Working in " + owner.replace("-", " ").capitalize() + "…")
-        result = await connection.call(
-            tool,
-            arguments,
-            timeout=900 if server == "blender" or server.startswith("joinery-") else 60,
-        )
+        app = owner.replace("-", " ").capitalize()
+        async with self.slots.hold(
+            owner, lambda: self.progress(f"Waiting for {app}: another task is using it…")
+        ):
+            result = await connection.call(
+                tool,
+                arguments,
+                timeout=900
+                if server == "blender" or server.startswith("joinery-")
+                else 60,
+            )
         if result.is_error and result_text(result).startswith("Rule Zero STOP:"):
             raise PolicyStop(result_text(result))
+        if not readonly and self.claims.contended():
+            self.claim_stage(strict=True)
         if (
             server.startswith("joinery-")
             and tool in NATIVE_OPS
@@ -477,6 +580,47 @@ class ProjectGateway:
         elif server == "godot" and tool == "stop_project" and not result.is_error:
             self.runtime_owned = False
         return result
+
+    def claim_stage(self, *, strict: bool) -> None:
+        """Claim every file this turn's stage changed.
+
+        With ``strict`` a file another task already holds is put back as the
+        project has it and the call is refused, in words the agent can act on.
+        """
+        tx = self.transaction
+        if tx is None or tx.state not in {"staging", "review"}:
+            return
+        try:
+            changed = {
+                c["path"]
+                for c in (tx.diff() if tx.state == "staging" else tx.changes)
+                if DIRECTORY not in {c["before"], c["after"]}
+            }
+        except (OSError, ValueError):
+            return
+        refused = self.claims.claim(self.task_id, changed)
+        if not refused or not strict:
+            return
+        for path in refused:
+            original = self.project / path
+            target = tx.stage / path
+            if original.is_file():
+                copy_file(original, target)
+            else:
+                target.unlink(missing_ok=True)
+        path = min(refused)
+        raise ValueError(
+            refusal(path, refused[path])
+            + " That file was left as the project has it; the rest of the call stands."
+        )
+
+    def follow_project(self, *, take_theirs: bool) -> Rebase:
+        """Bring the stage up to date with changes accepted since it was made."""
+        self._synced = self.claims.generation
+        tx = self.transaction
+        if tx is None or tx.state != "staging":
+            return Rebase()
+        return rebase(tx, take_theirs=take_theirs)
 
     def _prepare_runtime(self) -> None:
         if self.runtime_config is not None or self.transaction is None:
@@ -560,8 +704,24 @@ class ProjectGateway:
         self._strip_runtime()
         if tx is None or tx.state != "staging":
             return submission.Validation()
+        moved: list[Problem] = []
+        if self._synced < self.claims.generation:
+            conflicts = self.follow_project(take_theirs=True).conflicts
+            if conflicts:
+                moved.append(
+                    Problem(
+                        "conflict",
+                        "While you worked the user accepted another change to "
+                        + ", ".join(conflicts[:5])
+                        + ". Your stage now has that version; redo your part on top "
+                        "of it, then submit again.",
+                        conflicts,
+                    )
+                )
         with self.span("submit"):
-            return await submission.validate(self, tx, live_scenes)
+            checked = await submission.validate(self, tx, live_scenes)
+        checked.problems[:0] = moved
+        return checked
 
     def open_review(self, summary: str) -> dict[str, Any]:
         """Put the checked stage in review and return its ``file_preview``.
@@ -651,9 +811,14 @@ class ProjectGateway:
         if tx is None or tx.id != identifier:
             raise ValueError("This transaction is not pending in the current session.")
         await self.stop_media()
+        if accept and self._synced < self.claims.generation:
+            # Another change was accepted since this one was staged.
+            refresh_review(tx)
         changes = tx.accept() if accept else []
         notice = ""
+        self.claims.release(self.task_id)
         if accept:
+            self.claims.generation += 1
             self._last_accepted = tx
         if not accept:
             added = references.created(tx.changes)
@@ -730,6 +895,7 @@ class ProjectGateway:
         }:
             self.transaction.reject()
         self.transaction = None
+        self.claims.release(self.task_id)
 
     async def close(self) -> None:
         await self.stop_media()
@@ -738,6 +904,17 @@ class ProjectGateway:
             "review",
         }:
             self.transaction.reject()
+        if self.is_lane:
+            # A task's lane: its own apps and claims go; the project's stay.
+            for connection in self.staged.values():
+                await connection.close()
+            self.staged.clear()
+            self.transaction = None
+            self.claims.unregister(self.task_id)
+            self.lanes.pop(self.task_id, None)
+            return
+        for lane in list(self.lanes.values()):
+            await lane.close()
         for connection in [*self.connections.values(), *self.staged.values()]:
             await connection.close()
         self.connections.clear()
