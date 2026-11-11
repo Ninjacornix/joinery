@@ -157,6 +157,12 @@ class CodexSession:
                 "-c",
                 'mcp_servers.joinery-registry.tools.task_status.approval_mode="approve"',
             ]
+            # The reviewer's and debugger's reports; the policy hook lets only them call these.
+            for tool in ("report_review", "report_diagnosis", "reproduce_error"):
+                args += [
+                    "-c",
+                    f'mcp_servers.joinery-registry.tools.{tool}.approval_mode="approve"',
+                ]
         self._secrets = [
             env[key]
             for key in ("OPENAI_API_KEY", "JOINERY_MODEL_API_KEY")
