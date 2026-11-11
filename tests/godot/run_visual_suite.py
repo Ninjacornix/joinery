@@ -179,6 +179,14 @@ LEGACY = {
             for width in (480, 1000)
         ),
     ),
+    "shared-kits": (
+        "run_kit_share_shots.py",
+        tuple(
+            f"shared-kits-{theme}-kits-{state}.png"
+            for theme in THEMES
+            for state in ("import", "export", "shared")
+        ),
+    ),
     "scene-edit": (
         "run_scene_edit_test.py",
         (
@@ -331,20 +339,24 @@ def startup(theme: str, capture: Path, logs: Path) -> Harness:
 
 def sidebar(capture: Path, logs: Path) -> Harness:
     harness = Harness("sidebar")
-    harness.expected = [
-        f"sidebar-{state}-{theme}-{width}.png"
-        for state in SIDEBAR_STATES
-        for theme in THEMES
-        for width in (480, 1000)
-    ] + [
-        f"sidebar-{state}-{theme}-480.png"
-        for state in SIDEBAR_NARROW
-        for theme in THEMES
-    ] + [
-        f"sidebar-{state}-{theme}-1000.png"
-        for state in SIDEBAR_WIDE
-        for theme in THEMES
-    ]
+    harness.expected = (
+        [
+            f"sidebar-{state}-{theme}-{width}.png"
+            for state in SIDEBAR_STATES
+            for theme in THEMES
+            for width in (480, 1000)
+        ]
+        + [
+            f"sidebar-{state}-{theme}-480.png"
+            for state in SIDEBAR_NARROW
+            for theme in THEMES
+        ]
+        + [
+            f"sidebar-{state}-{theme}-1000.png"
+            for state in SIDEBAR_WIDE
+            for theme in THEMES
+        ]
+    )
     with scratch_folder("joinery-visual-sidebar-") as directory:
         temporary = Path(directory)
         project = temporary / "project"
