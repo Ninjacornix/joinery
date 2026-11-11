@@ -3,7 +3,8 @@ extends SceneTree
 ## and Discard, the change on screen opening its full review, files on demand for the others,
 ## decided rows newest first with Revert only where it still works, the art bible row, and the
 ## count for the tab's badge, and the change Journeyman submitted, with Accept on its row the
-## moment it passes Joinery's checks, while its renders are still coming.
+## moment it passes Joinery's checks, while its renders are still coming. A parallel task's
+## change opens the same full review, one panel at a time, never over the main request's.
 
 const TAB := preload("res://addons/joinery/review_tab.gd")
 const PANEL := preload("res://addons/joinery/review_panel.gd")
@@ -23,6 +24,17 @@ class FakeChat:
 	signal file_preview(event: Dictionary)
 	signal completed(ok: bool)
 	signal file_decision(event: Dictionary)
+
+
+## The chat with parallel tasks: their events, the Review link, and decisions sent through it.
+class TaskChat:
+	extends FakeChat
+	signal task_event(event: Dictionary)
+	signal task_review(transaction_id: String)
+	var decided: Array = []
+
+	func decide_files(id: String, accepted: bool) -> void:
+		decided.append([id, accepted])
 
 
 func _initialize() -> void:
@@ -77,6 +89,7 @@ func _run() -> void:
 	await _check_bible(tab)
 	await _check_live(tab, panel)
 	await _check_submitted(tab)
+	await _check_task_review(tab, panel)
 	await _check_discard_warning(tab)
 	_host.queue_free()
 	Engine.remove_meta("joinery_ui_config")
@@ -366,6 +379,82 @@ func _check_submitted(tab: TAB) -> void:
 	await _frames()
 	_check(_rows(tab._waiting_body).size() == 1, "The turn ending keeps the review")
 	chat.queue_free()
+
+
+func _check_task_review(tab: TAB, panel: PANEL) -> void:
+	var chat := TaskChat.new()
+	_host.add_child(chat)
+	tab.follow(chat)
+	var now := Time.get_unix_time_from_system()
+	tab.apply_listing({"transactions": [_tx("t1x", "review", "Model a lamp", now - 30, 0.0, true)]})
+	panel.show_file_review("Paint the walls", "", [], [{"path": "a.tres", "change": "modified"}])
+	chat.file_preview.emit({"transaction_id": "m1", "summary": "Paint the walls"})
+	tab.show_detail()
+	var lamp := {
+		"kind": "file_preview",
+		"task_id": "t1",
+		"transaction_id": "t1x",
+		"summary": "Model a lamp",
+		"diff": "",
+		"changes": [{"path": "art/lamp.glb", "change": "created"}],
+		"media": [{"path": "art/lamp.glb", "media": "image", "after": "/missing/after.png"}],
+		"media_pending": true,
+	}
+	chat.task_event.emit(lamp)
+	await _frames()
+	var task_panel: Control = tab._tasks.panel
+	_check(panel.visible and not task_panel.visible, "A task never opens the panel by itself")
+	tab.show_list()
+	await _frames()
+	var row := _row(tab, "t1x")
+	_check(
+		(_find(row, "Open") as Button).tooltip_text == "Show the before and after", "Full review"
+	)
+	(_find(row, "Open") as Button).pressed.emit()
+	await _frames()
+	_check(tab.showing_detail and task_panel.visible, "Its row opens the full review")
+	_check(not panel.visible, "One review panel at a time")
+	_check(str(task_panel.get("_title").text) == "Model a lamp", "It shows the task's change")
+	_check(bool(task_panel.get("pending")), "With Accept and Discard")
+	tab.show_list()
+	(_find(_row(tab, "m1"), "Open") as Button).pressed.emit()
+	await _frames()
+	_check(panel.visible and not task_panel.visible, "The main request's row swaps it back")
+	chat.task_review.emit("t1x")
+	await _frames()
+	_check(task_panel.visible, "The task card's Review link opens it")
+	tab.show_detail()
+	_check(panel.visible and not task_panel.visible, "The main request's review takes priority")
+	chat.task_review.emit("t1x")
+	(task_panel.get("_accept") as Button).pressed.emit()
+	await _frames()
+	_check(chat.decided == [["t1x", true]], "Accept decides it through the chat")
+	_check(_find(_row(tab, "t1x"), "Working") != null, "Its row says it is accepting")
+	var why := "Blender couldn't save lamp.blend."
+	chat.task_event.emit({"kind": "notice", "task_id": "t1", "transaction_id": "t1x", "text": why})
+	await _frames()
+	_check(str(task_panel.get("_error").text) == why, "A failed decision shows in the panel")
+	(_find(_row(tab, "t1x"), "Accept") as Button).pressed.emit()
+	await _frames()
+	_check(chat.decided.size() == 2, "The row's Accept goes through the same panel")
+	var decision := {
+		"kind": "file_decision", "task_id": "t1", "transaction_id": "t1x", "accepted": true
+	}
+	chat.task_event.emit(decision)
+	await create_timer(UI_MOTION.duration("confirm") + 0.2).timeout
+	await _frames()
+	_check(panel.visible and not task_panel.visible, "After it, the waiting main review is back")
+	_check(not tab._tasks.has("t1x"), "The decided change leaves")
+	tab.clear_live()
+	panel.clear()
+	chat.queue_free()
+
+
+func _row(tab: TAB, id: String) -> Node:
+	for row: Node in _rows(tab._waiting_body):
+		if str(row.get_meta("transaction_id")) == id:
+			return row
+	return Node.new()
 
 
 func _check_discard_warning(tab: TAB) -> void:

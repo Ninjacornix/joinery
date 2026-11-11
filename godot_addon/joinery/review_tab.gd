@@ -11,7 +11,8 @@ extends VBoxContainer
 ##
 ## The list comes from `joinery transactions list` (command_job.gd), read when the tab is
 ## shown, on focus, when a turn ends and when a change is staged or decided; it never polls.
-## Each parallel task's change is its own row, decided through the chat that runs the task.
+## Each parallel task's change is its own row with the same full review (review_tasks.gd),
+## decided through the chat that runs the task.
 ## [signal count_changed] carries the number of things waiting, for the tab's badge.
 
 ## The number of things waiting for the user changed (the tab reads "Review 2").
@@ -84,9 +85,9 @@ var _count := -1
 var _jobs: Dictionary = {}
 var _list_again := false
 var _slash: Object
-## The chat (chat_bridge.gd), and its parallel tasks' changes: decided through the chat.
+## The chat (chat_bridge.gd), and its parallel tasks' changes (review_tasks.gd).
 var _chat: Object
-var _task_ids: Dictionary = {}
+var _tasks: RefCounted
 var _legacy_button: Button
 ## True when the bottom panel opened by itself for the live review, so it closes again after.
 var _opened_itself := false
@@ -111,6 +112,7 @@ func _init() -> void:
 	UI.bind_icon(_back, "back")
 	_back.pressed.connect(show_list)
 	_detail_view.add_child(_back)
+	_tasks = load("res://addons/joinery/review_tasks.gd").new(self, _detail_view)
 	_render()
 
 
@@ -195,14 +197,19 @@ func _pin() -> void:
 	tabs.set_tab_hidden(index, false)
 
 
-## Show the full review of the change Journeyman is showing. Call it before the bottom panel
-## opens on this tab: a panel that was closed opened by itself, and closes after the decision.
-func show_detail() -> void:
-	if _detail == null:
+## Show the full review of the change Journeyman is showing, or [param panel] (a task's). Call
+## it before the bottom panel opens on this tab: a panel that was closed opened by itself, and
+## closes after the decision. One review shows at a time.
+func show_detail(panel: Control = null) -> void:
+	var shown := panel if panel != null else _detail
+	if shown == null:
 		return
 	if not showing_detail:
 		_opened_itself = not is_visible_in_tree()
 	showing_detail = true
+	if _detail != null:
+		_detail.visible = shown == _detail
+	_tasks.panel.visible = shown == _tasks.panel
 	_pin()
 	var arriving := not _detail_view.visible
 	_list_view.hide()
@@ -226,6 +233,10 @@ func show_list() -> void:
 func review_closed() -> bool:
 	clear_live()
 	refresh()
+	if _tasks.in_view():
+		# The user is looking at a task's change: it stays.
+		_opened_itself = false
+		return false
 	var close := _opened_itself and is_visible_in_tree()
 	_opened_itself = false
 	if close or not showing_detail or not is_inside_tree():
@@ -239,6 +250,7 @@ func review_closed() -> bool:
 ## passes Joinery's checks; the list is read again when a turn ends or a change is decided.
 func follow(chat: Object) -> void:
 	_chat = chat
+	_tasks.follow(chat)
 	var links := {
 		"file_preview": show_live,
 		"completed": func(_ok: bool) -> void: refresh(),
@@ -260,12 +272,11 @@ func show_live(event: Dictionary) -> void:
 
 ## A parallel task's change passed its checks, was decided, or its decision failed.
 func _on_task_event(event: Dictionary) -> void:
-	var id := str(event.get("transaction_id", ""))
+	var id: String = _tasks.call("on_event", event)
+	if id.is_empty():
+		return
 	match str(event.get("kind", "")):
-		"file_preview":
-			_task_ids[id] = true
 		"file_decision":
-			_task_ids.erase(id)
 			_busy.erase(id)
 			if event.get("accepted", false):
 				var paths := PackedStringArray()
@@ -276,24 +287,33 @@ func _on_task_event(event: Dictionary) -> void:
 			if _busy.has(id):
 				_busy.erase(id)
 				_errors[id] = str(event.get("text", ""))
-		_:
-			return
 	refresh()
 	_render()
 
 
-## Show the list with the files of the task change [param id] open under its row.
+## Show the task change [param id] in the review panel; one this session never saw shows its
+## files under its row instead.
 func show_task(id: String) -> void:
+	if _tasks.call("open", id):
+		show_detail(_tasks.panel)
+		return
 	_open_files[id] = true
 	show_list()
 	refresh()
 	_render()
 
 
+## A row's decision is on its way: it says so at once.
+func mark_busy(id: String, accepted: bool) -> void:
+	_busy[id] = "accepting" if accepted else "discarding"
+	_errors.erase(id)
+	_render()
+
+
 func _list_after_result() -> void:
 	await get_tree().create_timer(UI_MOTION.duration("confirm")).timeout
 	var pending: bool = _detail != null and bool(_detail.get("pending"))
-	if showing_detail and not pending:
+	if showing_detail and not pending and not _tasks.call("in_view"):
 		show_list()
 
 
@@ -639,6 +659,8 @@ func _render_bible() -> void:
 func _pending_row(entry: Dictionary, now: float) -> VBoxContainer:
 	var id := str(entry.get("id", ""))
 	var live := bool(entry.get("live", false))
+	# The change on screen and every task's change open the full review.
+	var detailed: bool = live or _tasks.call("has", id)
 	var summary := str(entry.get("summary", "")).strip_edges()
 	if summary.is_empty():
 		summary = "Project changes"
@@ -653,15 +675,15 @@ func _pending_row(entry: Dictionary, now: float) -> VBoxContainer:
 	open.name = "Open"
 	open.set_meta("focus_key", id + ":open")
 	open.tooltip_text = (
-		"Show the before and after" if live else "Show the files this change touches"
+		"Show the before and after" if detailed else "Show the files this change touches"
 	)
-	open.accessibility_name = summary + (", show the review" if live else ", show its files")
-	if not live and _open_files.has(id):
+	open.accessibility_name = summary + (", show the review" if detailed else ", show its files")
+	if not detailed and _open_files.has(id):
 		UI.bind_icon(open, "disclosure_open")
 	# The chevron leads the summary, like every disclosure, so it lines up with the glyphs of
 	# the decided rows instead of floating beside the caption.
 	open.icon_alignment = HORIZONTAL_ALIGNMENT_LEFT
-	open.pressed.connect(_on_open.bind(id, live))
+	open.pressed.connect(_on_open.bind(id, detailed))
 	line.add_child(open)
 	var meta := UI.label(meta_text(entry, now), "JoineryNumeric")
 	meta.name = "Meta"
@@ -699,7 +721,7 @@ func _pending_row(entry: Dictionary, now: float) -> VBoxContainer:
 		for button: Button in ordered:
 			line.add_child(button)
 	_add_error(box, id)
-	if not live and _open_files.has(id):
+	if not detailed and _open_files.has(id):
 		box.add_child(_files(entry))
 	return box
 
@@ -831,9 +853,12 @@ func _restore_focus(key: String) -> void:
 # --- Actions -----------------------------------------------------------------------------------
 
 
-func _on_open(id: String, live: bool) -> void:
-	if live:
-		show_detail()
+func _on_open(id: String, detailed: bool) -> void:
+	if detailed:
+		if _tasks.call("has", id):
+			show_task(id)
+		else:
+			show_detail()
 		return
 	if _open_files.has(id):
 		_open_files.erase(id)
@@ -850,8 +875,7 @@ func _decide(id: String, accepted: bool, live: bool) -> void:
 	_errors.erase(id)
 	_render()
 	decision_requested.emit(id, accepted, live)
-	if _task_ids.has(id) and _chat != null:
-		_chat.call("decide_files", id, accepted)
+	if _tasks.call("decide", id, accepted):
 		return
 	if live:
 		# Decided exactly as the full review's own buttons would.
