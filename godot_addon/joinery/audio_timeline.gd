@@ -20,6 +20,9 @@ const SILENCE := 0.0001
 var duration := 0.0
 var compact := false:
 	set = set_compact
+## One row tall, nothing to click: a stem beside its name (the review's music layers).
+var mini := false:
+	set = set_mini
 var playhead := 0.0
 var peaks := PackedVector2Array()
 ## Largest absolute sample seen so far (linear, 0–1).
@@ -50,6 +53,13 @@ func set_compact(value: bool) -> void:
 	_fit()
 
 
+func set_mini(value: bool) -> void:
+	mini = value
+	focus_mode = Control.FOCUS_NONE if value else Control.FOCUS_ALL
+	mouse_filter = Control.MOUSE_FILTER_IGNORE if value else Control.MOUSE_FILTER_STOP
+	_fit()
+
+
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_THEME_CHANGED:
 		_fit()
@@ -58,6 +68,9 @@ func _notification(what: int) -> void:
 
 func _fit() -> void:
 	var line := float(UI_THEME.font_size(self, "body"))
+	if mini:
+		custom_minimum_size = Vector2(line * 6.0, UI_THEME.control_h(self, "sm"))
+		return
 	var tall := 2.0 * UI_THEME.control_h(self, "lg") if compact else line * HEIGHT_EM
 	custom_minimum_size = Vector2(line * HEIGHT_EM / 2.0, tall)
 
@@ -144,6 +157,8 @@ func _draw() -> void:
 			continue
 		var ink := played if x <= inset + progress * width else unplayed
 		draw_line(Vector2(x, top), Vector2(x, bottom), ink, stroke)
+	if mini:
+		return
 	var head := inset + progress * width
 	draw_line(Vector2(head, inset), Vector2(head, size.y - inset), played, hairline * 2.0)
 	if has_focus():

@@ -31,6 +31,7 @@ const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const INDICATOR := preload("activity_indicator.gd")
 const MEDIA := preload("review_media.gd")
+const MUSIC := preload("review_music.gd")
 const DETAILS := preload("review_details.gd")
 const SUMMARY := preload("review_summary.gd")
 const SNAPSHOT := preload("review_snapshot.gd")
@@ -59,6 +60,7 @@ var _after: Button
 var _stage: MarginContainer
 var _body: VBoxContainer
 var _media: MEDIA
+var _music: MUSIC
 var _scene_note: Label
 var _summary: SUMMARY
 var _details_button: Button
@@ -140,6 +142,7 @@ func show_scene_review(summary: String, count: int, media: Array = []) -> void:
 	var arriving := _begin(summary)
 	var frames := media if not media.is_empty() else SNAPSHOT.media()
 	_media.show_media(frames)
+	_music.clear()
 	_details.clear_changes()
 	_summary.show_review({"scene_count": count})
 	_scene_note.visible = not _media.visible
@@ -164,6 +167,7 @@ func show_file_review(
 	if not text.is_empty():
 		items.append(text)
 	_media.show_media(items)
+	_music.show_change(diff, media, listed)
 	_details.show_changes(diff, listed)
 	_summary.show_review({"changes": listed, "diff": diff})
 	_measure()
@@ -184,6 +188,8 @@ func show_glance(extra: Dictionary) -> void:
 	if _state == "empty":
 		return
 	_summary.update(extra)
+	if extra.get("facts") is Array:
+		_music.set_facts(extra["facts"])
 	_sync_details()
 	glance_changed.emit()
 
@@ -305,6 +311,7 @@ func clear() -> void:
 	set_applying(false)
 	_reset_stage()
 	_media.clear_media()
+	_music.clear()
 	_details.clear_changes()
 	_summary.clear()
 	_title.text = ""
@@ -461,6 +468,8 @@ func _build_body() -> void:
 	_media.side_changed.connect(_sync_sides)
 	_media.hide()
 	_body.add_child(_media)
+	_music = MUSIC.new()
+	_body.add_child(_music)
 	_scene_note = UI.label(SCENE_NOTE, "JoineryCaption", true)
 	_scene_note.hide()
 	_body.add_child(_scene_note)

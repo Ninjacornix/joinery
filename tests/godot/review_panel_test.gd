@@ -50,6 +50,7 @@ func _run() -> void:
 	await _check_image_pair(panel)
 	await _check_new_asset(panel)
 	await _check_audio(panel)
+	await _check_music(panel)
 	await _check_loading(panel)
 	await _check_renders_arrive(panel)
 	await _check_details(panel)
@@ -237,6 +238,84 @@ func _check_audio(panel: PANEL) -> void:
 	panel.clear()
 	await _frames()
 	_check(panel._media.audio() == null, "Clearing drops the audio preview")
+
+
+## A change to a music track: one row per layer with its stem's waveform and its level at the
+## track's start, the tempo, bars and key above, and loudness from the facts.
+func _check_music(panel: PANEL) -> void:
+	var stem := _cache.path_join("main_pads.wav")
+	DirAccess.copy_absolute(ProjectSettings.globalize_path("res://audio/sfx/door_creak.wav"), stem)
+	var stems := {}
+	var levels := {}
+	for layer: String in ["pads", "bass", "drums"]:
+		stems[layer] = "res://audio/music/harbour/main_%s.wav" % layer
+		levels[layer] = 1.0 if layer != "drums" else 0.5
+	var track := {
+		"version": 1,
+		"name": "harbour",
+		"key": "D minor",
+		"tempo_bpm": 120.0,
+		"layers":
+		[
+			{"name": "pads", "role": "pads", "volume_db": -6.0},
+			{"name": "bass", "role": "bass", "muted": true},
+			{"name": "drums", "role": "percussion"},
+		],
+		"sections": [{"name": "main", "bars": 8, "stems": stems}],
+		"states": {"explore": {"section": "main", "layers": levels}},
+		"default_state": "explore",
+	}
+	var diff := (
+		"--- music/harbour.tres\n+++ music/harbour.tres\n@@ -1,0 +1,4 @@\n"
+		+ '+[gd_resource type="Resource" format=3]\n+\n+[resource]\n'
+		+ "+metadata/joinery_music = %s\n" % JSON.stringify(track)
+	)
+	(
+		panel
+		. show_file_review(
+			"Write the harbour theme",
+			diff,
+			[
+				{
+					"path": "audio/music/harbour/main_pads.wav",
+					"media": "audio",
+					"after": stem,
+				}
+			],
+			[
+				{"path": "music/harbour.tres", "change": "created"},
+				{"path": "audio/music/harbour/main_pads.wav", "change": "created"},
+			]
+		)
+	)
+	panel.show_glance({"facts": ["Pads −15.8 LUFS", "Mix −16.1 LUFS (target −16)"]})
+	await _frames(4)
+	var music: Control = panel._music
+	_check(music.visible, "A music change shows its layers")
+	var rows: Dictionary = music.call("rows")
+	_check(rows.keys() == ["pads", "bass", "drums"], "One row per layer: " + str(rows.keys()))
+	var title := (music.get_node("Track") as Label).text
+	_check(title == "Harbour · 120 BPM · 8 bars · D minor · mix −16.1 LUFS", title)
+	if rows.size() == 3:
+		var level := func(layer: String) -> String:
+			return (rows[layer].get_node("Level") as Label).text
+		_check(level.call("pads") == "−6.0 dB", "The fader sets the level: " + level.call("pads"))
+		_check(level.call("bass") == "Silent", "A muted layer is silent")
+		_check(level.call("drums") == "−6.0 dB", "Half level is −6 dB: " + level.call("drums"))
+		var loud := rows["pads"].get_node("Loudness") as Label
+		_check(loud.visible and loud.text == "−15.8 LUFS", "Loudness joins its layer")
+		var wave: Control = rows["pads"].get_node("Wave")
+		_check(wave.get("duration") > 0.0, "The proposed stem is drawn")
+		_check(wave.get("mini") == true, "as a small waveform")
+	panel.show_file_review(
+		"Make the door creak shorter",
+		"",
+		[],
+		[{"path": "audio/sfx/door_creak.wav", "change": "modified"}]
+	)
+	_check(not music.visible, "Other changes show no music layers")
+	panel.clear()
+	await _frames()
 
 
 ## The review opens before its renders are done: Accept works at once, a render that fails says
