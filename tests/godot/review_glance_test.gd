@@ -240,7 +240,7 @@ func _check_keyboard(panel: PANEL) -> void:
 	_key(KEY_B)
 	await _frames()
 	_check(panel._media.side == "before", "B flips a split picture to the original")
-	_check(panel._before.button_pressed, "The switch follows the key")
+	_check(panel._media.sides().tag("before").button_pressed, "The Before tag follows the key")
 	_key(KEY_A)
 	await _frames()
 	_check(panel._media.side == "after", "A flips back to the change")
@@ -295,10 +295,69 @@ func _check_filmstrip(panel: PANEL) -> void:
 	strip.tiles()[1].pressed.emit()
 	await _frames()
 	_check(panel._media.current_index() == 1, "Pressing a tile shows its item")
-	_check(panel._new_chip.visible and not panel._segment.visible, "A new item is marked New")
+	var sides: Control = panel._media.sides()
+	_check(
+		sides.tag("after").text == "New" and not sides.tag("before").is_visible_in_tree(),
+		"A new item is tagged New on the media"
+	)
 	var glance := panel.glance()
 	_check(not bool(glance.get("simple", true)), "Several assets open the panel")
 	_check(glance.get("thumbnail") != null, "The card gets a picture")
+
+
+## The wheel zooms both sides about the pointer, a drag pans both, a double-click fits again;
+## nothing here takes the keyboard focus.
+func _check_zoom(swipe: Control) -> void:
+	var focus_before := swipe.get_viewport().gui_get_focus_owner()
+	var fitted: Rect2 = swipe.call("picture_rect")
+	var at := fitted.get_center() + Vector2(fitted.size.x * 0.25, 0.0)
+	var wheel := InputEventMouseButton.new()
+	wheel.button_index = MOUSE_BUTTON_WHEEL_UP
+	wheel.pressed = true
+	wheel.position = at
+	wheel.factor = 1.0
+	for notch: int in 4:
+		swipe.call("_gui_input", wheel)
+	var view: RefCounted = swipe.get("view")
+	_check(view.call("zoomed"), "The wheel zooms in")
+	var drawn: Rect2 = view.call("view", fitted)
+	var spot := (at - fitted.position) / fitted.size
+	_check(
+		(at - drawn.position).distance_to(spot * drawn.size) < 1.0,
+		"The point under the pointer stays put: %s" % drawn
+	)
+	_check(swipe.texture_filter == CanvasItem.TEXTURE_FILTER_NEAREST, "Zoomed pixel art is crisp")
+	var press := InputEventMouseButton.new()
+	press.button_index = MOUSE_BUTTON_LEFT
+	press.pressed = true
+	press.position = fitted.position + Vector2(4.0, 4.0)
+	swipe.call("_gui_input", press)
+	var drag := InputEventMouseMotion.new()
+	drag.relative = Vector2(10.0, 6.0)
+	drag.position = press.position + drag.relative
+	drag.button_mask = MOUSE_BUTTON_MASK_LEFT
+	swipe.call("_gui_input", drag)
+	press.pressed = false
+	swipe.call("_gui_input", press)
+	var panned: Rect2 = view.call("view", fitted)
+	_check(panned.position.is_equal_approx(drawn.position + drag.relative), "A drag pans")
+	_check(is_equal_approx(float(swipe.get("split")), 0.5), "…and leaves the line where it was")
+	# Both sides are drawn from the same view, so they stay lined up while zoomed.
+	_check(swipe.get("before") != null and swipe.get("after") != null, "Both sides zoom together")
+	var twice := InputEventMouseButton.new()
+	twice.button_index = MOUSE_BUTTON_LEFT
+	twice.pressed = true
+	twice.double_click = true
+	twice.position = at
+	swipe.call("_gui_input", twice)
+	twice.pressed = false
+	twice.double_click = false
+	swipe.call("_gui_input", twice)
+	_check(not view.call("zoomed"), "A double-click fits the picture again")
+	_check(
+		swipe.get_viewport().gui_get_focus_owner() == focus_before,
+		"Zooming and panning by event take no focus"
+	)
 
 
 func _check_model(panel: PANEL) -> void:
@@ -316,7 +375,9 @@ func _check_model(panel: PANEL) -> void:
 	await _frames()
 	_check(panel._media.current_kind() == "model", "A render with a far side is a model")
 	_check(not panel._media.swipe().visible, "Models do not split")
-	_check(panel._after.button_pressed, "A model opens on its After")
+	var tags: Control = panel._media.sides()
+	_check(tags.tag("after").button_pressed, "A model opens on its After")
+	_check(not tags.both_shown, "Model renders show one side at a time: the tags sit together")
 	_check(panel._media.far_texture() != null, "The far side shows beside the front")
 	var front: Texture2D = panel._media.texture()
 	panel.flip()
@@ -401,11 +462,14 @@ func _check_scaling(panel: PANEL) -> void:
 	_check(swipe.texture_filter == CanvasItem.TEXTURE_FILTER_NEAREST, "…and stays crisp")
 	var tiles: Array = panel._media.filmstrip().tiles()
 	_check(tiles[0].texture_filter == CanvasItem.TEXTURE_FILTER_NEAREST, "Its tile is crisp too")
+	await _check_zoom(swipe)
 	panel._media.select_item(1)
 	await _frames(3)
-	var picture: TextureRect = panel._media._front.main
-	_check(picture.texture != null and picture.size.y >= frame - 1.0, "A photo fills the frame")
-	_check(picture.texture_filter == CanvasItem.TEXTURE_FILTER_LINEAR, "…smoothly")
+	# A new picture shows alone in the same zoomable view, without a line.
+	var photo: Rect2 = swipe.call("picture_rect")
+	_check(swipe.visible and swipe.before == null, "A new picture shows alone")
+	_check(photo.size.y >= frame - 1.0, "A photo fills the frame: %s" % photo.size)
+	_check(swipe.texture_filter == CanvasItem.TEXTURE_FILTER_LINEAR, "…smoothly")
 	var blockout := [
 		{
 			"path": "design/blockouts/keep.toml",
@@ -460,19 +524,51 @@ func _check_scaling(panel: PANEL) -> void:
 
 
 func _check_narrow(panel: PANEL) -> void:
-	_host.size = Vector2(340, 420)
-	await _frames(4)
-	_check(panel._accept.is_visible_in_tree(), "Accept shows at a narrow width")
-	var inside := panel.get_global_rect().grow(1.0)
-	_check(
-		inside.encloses(panel._accept.get_global_rect()),
-		"Accept stays inside a narrow panel: %s in %s" % [panel._accept.get_global_rect(), inside]
-	)
-	_check(
-		inside.encloses(panel._details_button.get_global_rect()), "Details stay inside the panel"
-	)
+	# The sidebar's width, and the bottom panel at its usual short height.
+	for spec: Array in [[Vector2(340, 420), "narrow"], [Vector2(900, 300), "short"]]:
+		_host.size = spec[0]
+		await _frames(4)
+		var name: String = spec[1]
+		_check(panel._accept.is_visible_in_tree(), "%s: Accept shows" % name)
+		var inside := panel.get_global_rect().grow(1.0)
+		_check(
+			inside.encloses(panel._accept.get_global_rect()),
+			"%s: Accept stays inside: %s in %s" % [name, panel._accept.get_global_rect(), inside]
+		)
+		_check(
+			inside.encloses(panel._details_button.get_global_rect()),
+			"%s: Details stay inside the panel" % name
+		)
+		_check_stacked(panel, name)
 	_host.size = Vector2(900, 560)
 	await _frames()
+
+
+## One job per row: title, media, facts, Details, actions, top to bottom and never overlapping;
+## Accept and Discard keep their text whole.
+func _check_stacked(panel: PANEL, name: String) -> void:
+	var rows: Array[Control] = [panel._header, panel._media, panel._summary]
+	rows.append_array([panel._details_button, panel._footer])
+	var last := -INF
+	for row: Control in rows:
+		if not row.is_visible_in_tree():
+			continue
+		var rect := row.get_global_rect()
+		_check(rect.position.y >= last - 1.0, "%s: %s sits below the row above" % [name, row.name])
+		last = rect.end.y
+	for button: Button in [panel._accept, panel._reject]:
+		var font := button.get_theme_font("font")
+		var text := font.get_string_size(
+			button.text, HORIZONTAL_ALIGNMENT_LEFT, -1, button.get_theme_font_size("font_size")
+		)
+		_check(button.size.x >= text.x, "%s: %s is not squeezed" % [name, button.text])
+	_check(
+		panel._media.frame_height() >= panel.size.y * 0.3,
+		(
+			"%s: the media keeps most of the height: %.0f of %.0f"
+			% [name, panel._media.frame_height(), panel.size.y]
+		)
+	)
 
 
 func _check_card(panel: PANEL) -> void:

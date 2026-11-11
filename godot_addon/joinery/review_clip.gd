@@ -3,7 +3,19 @@ extends HBoxContainer
 ## An animation in review: the original and the change as two short looping clips side by side,
 ## played in sync from the strips Blender rendered in the worker (one PNG per side, N square
 ## frames left to right). Choosing Before or After dims the other clip instead of hiding it, so
-## the comparison stays in view. A new action shows its clip alone, marked New.
+## the comparison stays in view. A new action shows its clip alone. The Before/After/New tags
+## are the review's own (review_sides.gd), placed at the foot of [method drawn_rects].
+##
+## One clock drives both clips: [method toggle_play], [method seek] (the scrub bar) and
+## [method step] (Left and Right, a frame at a time) move both together. Clicking a clip
+## focuses it, and gives the review its keys.
+
+## Both clips moved to [param seconds] (playing, scrubbed or stepped).
+signal ticked(seconds: float)
+## A key was pressed while a clip had focus.
+signal key_pressed(event: InputEventKey)
+## A clip was clicked: 0 the original, 1 the change.
+signal side_clicked(index: int)
 
 const UI := preload("ui_components.gd")
 const UI_THEME := preload("ui_theme.gd")
@@ -14,25 +26,24 @@ const NOTICE := 0.05
 
 ## Seconds since the clips started; both sides read their frame from it, so they stay in sync.
 var clock := 0.0
+## False while paused.
+var playing := true
 var _sides: Array[ClipSide] = []
 
 
-## One clip: the picture stepping through its strip, as large as the frame allows, and its
-## caption as a small tag over the picture's foot, so the caption costs the picture no height.
+## One clip: the picture stepping through its strip, as large as the frame allows.
 class ClipSide:
 	extends Control
 	var picture: TextureRect
-	var tag: PanelContainer
-	var caption: Label
 	var strip: Texture2D
 	var frames := 1
 	var fps := 12.0
 	var frame := 0
 
-	func _init(word: String) -> void:
+	func _init() -> void:
 		size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		size_flags_vertical = Control.SIZE_EXPAND_FILL
-		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		mouse_filter = Control.MOUSE_FILTER_PASS
 		clip_contents = true
 		picture = TextureRect.new()
 		picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -42,15 +53,6 @@ class ClipSide:
 		picture.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		picture.texture = AtlasTexture.new()
 		add_child(picture)
-		tag = PanelContainer.new()
-		tag.theme_type_variation = "JoineryPopup"
-		tag.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		add_child(tag)
-		caption = UI.label(word, "JoineryCaption")
-		caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		tag.add_child(caption)
-		resized.connect(place_tag)
-		tag.minimum_size_changed.connect(place_tag)
 
 	## Width over height of one frame (1 for the square frames Blender renders).
 	func aspect() -> float:
@@ -63,15 +65,9 @@ class ClipSide:
 		var width := height * aspect()
 		return Rect2((size - Vector2(width, height)) / 2.0, Vector2(width, height))
 
-	func place_tag() -> void:
-		var shown := drawn()
-		var tag_size := tag.get_combined_minimum_size()
-		var margin := float(get_theme_constant("separation", "JoineryTight"))
-		tag.size = tag_size
-		tag.position = Vector2(
-			roundf(shown.get_center().x - tag_size.x / 2.0),
-			roundf(shown.end.y - tag_size.y - maxf(margin, 4.0))
-		)
+	## Seconds of one loop.
+	func seconds() -> float:
+		return frames / fps if fps > 0.0 else 0.0
 
 	func set_strip(texture: Texture2D, meta: Dictionary) -> void:
 		strip = texture
@@ -105,10 +101,13 @@ func _init() -> void:
 	theme_type_variation = "JoineryRow"
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	alignment = BoxContainer.ALIGNMENT_CENTER
-	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	mouse_filter = Control.MOUSE_FILTER_STOP
+	focus_mode = Control.FOCUS_CLICK
 	accessibility_name = "Animation before and after"
-	for word: String in ["Before", "After"]:
-		var side := ClipSide.new(word)
+	tooltip_text = "Click a clip to focus it. Space plays or pauses, Left and Right step a frame."
+	for index: int in 2:
+		var side := ClipSide.new()
+		side.gui_input.connect(_on_side_input.bind(index))
 		_sides.append(side)
 		add_child(side)
 	hide()
@@ -131,7 +130,6 @@ func _fit() -> void:
 		var width := floorf(maxf(minf(size.y * side_view.aspect(), share), 0.0))
 		if not is_equal_approx(side_view.custom_minimum_size.x, width):
 			side_view.custom_minimum_size.x = width
-		side_view.place_tag()
 
 
 ## Play [param item]'s clips: [param before] and [param after] are its strips (null for a
@@ -144,12 +142,58 @@ func show_clip(item: Dictionary, before: Texture2D, after: Texture2D) -> void:
 		side.visible = textures[index] != null
 		if side.visible:
 			side.set_strip(textures[index], item.get(keys[index] + "_clip", {}))
-	_sides[1].caption.text = "After" if before != null else "New"
-	_sides[0].caption.text = "Before" if after != null else "Removed"
 	clock = 0.0
+	playing = true
 	show()
 	set_process(true)
 	_fit()
+
+
+## Where each clip is drawn, in this control's coordinates (before, after); empty for a side
+## not shown.
+func drawn_rects() -> Array[Rect2]:
+	var rects: Array[Rect2] = []
+	for side_view: ClipSide in _sides:
+		var shown := side_view.drawn()
+		rects.append(
+			Rect2(side_view.position + shown.position, shown.size) if side_view.visible else Rect2()
+		)
+	return rects
+
+
+## Seconds of the longest clip shown.
+func length() -> float:
+	var longest := 0.0
+	for side_view: ClipSide in _sides:
+		if side_view.visible:
+			longest = maxf(longest, side_view.seconds())
+	return longest
+
+
+## Play or pause both clips.
+func toggle_play() -> void:
+	playing = not playing
+
+
+## Show both clips at [param seconds].
+func seek(seconds: float) -> void:
+	clock = maxf(seconds, 0.0)
+	_show_frames()
+
+
+## Pause and move both clips [param frames] frames on (back when negative), by the first
+## shown clip's frame rate.
+func step(frames: int) -> void:
+	playing = false
+	var rate := 12.0
+	for side_view: ClipSide in _sides:
+		if side_view.visible:
+			rate = side_view.fps
+			break
+	var at := floori(clock * rate + 0.0001) + frames
+	var loop := length()
+	clock = fposmod(at / rate, loop) if loop > 0.0 else maxf(at / rate, 0.0)
+	_show_frames()
 
 
 ## Emphasise "before" or "after" (the other clip's picture dims); "compare" shows both alike.
@@ -176,10 +220,29 @@ func side_at(index: int) -> ClipSide:
 
 
 func _process(delta: float) -> void:
-	clock += delta
+	if playing:
+		clock += delta
+		_show_frames()
+
+
+func _show_frames() -> void:
 	for side_view: ClipSide in _sides:
 		if side_view.visible:
-			side_view.show_frame(floori(clock * side_view.fps))
+			# A hair over the frame's time, so a frame stepped to exactly lands on it.
+			side_view.show_frame(floori(clock * side_view.fps + 0.0001))
+	ticked.emit(clock)
+
+
+func _gui_input(event: InputEvent) -> void:
+	var key := event as InputEventKey
+	if key != null and key.pressed:
+		key_pressed.emit(key)
+
+
+func _on_side_input(event: InputEvent, index: int) -> void:
+	var button := event as InputEventMouseButton
+	if button != null and button.pressed and button.button_index == MOUSE_BUTTON_LEFT:
+		side_clicked.emit(index)
 
 
 ## The middle frame of a strip, for the filmstrip tile and the chat card.

@@ -140,6 +140,10 @@ func preview(scene: Node, payload: Dictionary, expected: Dictionary, targets: Ar
 	_generic.apply_group(_generic_plans)
 	for plan: Dictionary in _generic_plans:
 		changes.append({"kind": "generic", "node": plan["node"], "plan": plan})
+	SNAPSHOT.nodes.clear()
+	for change: Dictionary in changes:
+		if change["node"] is Node:
+			SNAPSHOT.nodes.append(change["node"])
 	return {
 		"success": true,
 		"status": "preview",
@@ -274,6 +278,7 @@ func _clear() -> void:
 	_recorded = false
 	transaction_id = ""
 	changes.clear()
+	SNAPSHOT.nodes.clear()
 	operations.clear()
 	root = null
 	owns_preview_root = false

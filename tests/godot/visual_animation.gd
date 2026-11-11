@@ -157,3 +157,85 @@ static func clip_media(host: Node, cache: String) -> Array:
 	item["before_clip"] = meta.merged({"bounce": 0.06})
 	item["after_clip"] = meta.merged({"bounce": 0.09})
 	return [item]
+
+
+## The hammer as live 3D: renders first, then the GLB files load and both sides turn together.
+static func live_model(
+	host: Node, dock: Control, panel: Control, cache: String, renders: Array
+) -> void:
+	var still: String = renders[0]
+	var far: String = renders[1]
+	var models := [cache.path_join("hammer-before.glb"), cache.path_join("hammer-after.glb")]
+	hammer_glb(models[0], 1.8)
+	hammer_glb(models[1], 2.3)
+	(
+		dock
+		. call(
+			"show_file_review",
+			"Lengthen the hammer's handle",
+			"",
+			[
+				{
+					"path": "art/sources/hammer.blend",
+					"media": "image",
+					"before": still,
+					"before_back": far,
+					"after": still,
+					"after_back": far,
+					"before_model": models[0],
+					"after_model": models[1],
+				}
+			],
+			[
+				{"path": "art/sources/hammer.blend", "change": "modified"},
+				{"path": "art/models/hammer.glb", "change": "modified"},
+			],
+		)
+	)
+	var live: Control = panel.get("_media").call("model_view")
+	var deadline := Time.get_ticks_msec() + 5000
+	while not live.call("is_live") and Time.get_ticks_msec() < deadline:
+		await host.get_tree().process_frame
+	host.call("_check", live.call("is_live"), "The hammer loads as live 3D")
+	live.call("orbit_by", Vector2(-60.0, 0.0))
+	for frame: int in 6:
+		await host.get_tree().process_frame
+	await host.call("_shot", "review-model-live", [panel, dock])
+	dock.call("hide_edit_review")
+	await host.get_tree().process_frame
+
+
+## A hammer with a handle of [param handle] metres, written as a GLB.
+static func hammer_glb(path: String, handle: float) -> void:
+	var root := Node3D.new()
+	root.name = "Hammer"
+	var steel := StandardMaterial3D.new()
+	steel.albedo_color = Color("9aa3ad")
+	steel.metallic = 0.6
+	steel.roughness = 0.4
+	var wood := StandardMaterial3D.new()
+	wood.albedo_color = Color("8a5a32")
+	var head := MeshInstance3D.new()
+	head.name = "Head"
+	var head_mesh := BoxMesh.new()
+	head_mesh.size = Vector3(1.2, 0.4, 0.4)
+	head_mesh.material = steel
+	head.mesh = head_mesh
+	head.position = Vector3(0, handle / 2.0, 0)
+	root.add_child(head)
+	head.owner = root
+	var grip := MeshInstance3D.new()
+	grip.name = "Handle"
+	var grip_mesh := CylinderMesh.new()
+	grip_mesh.top_radius = 0.09
+	grip_mesh.bottom_radius = 0.11
+	grip_mesh.height = handle
+	grip_mesh.material = wood
+	grip.mesh = grip_mesh
+	root.add_child(grip)
+	grip.owner = root
+	var document := GLTFDocument.new()
+	var state := GLTFState.new()
+	document.append_from_scene(root, state)
+	document.write_to_filesystem(state, path)
+	root.free()

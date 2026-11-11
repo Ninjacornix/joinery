@@ -145,12 +145,16 @@ func _check_image_pair(panel: PANEL) -> void:
 	_check(
 		facts == "Door wood darker, 64×48 → 80×40 px · 1 image · 2 files", "Facts line: " + facts
 	)
-	_check(panel._segment.visible, "Before/After shows when a pair exists")
-	_check(not panel._new_chip.visible, "A changed asset is not marked new")
 	_check(
-		not panel._after.button_pressed and not panel._before.button_pressed,
+		_tag(panel, "before").is_visible_in_tree() and _tag(panel, "after").is_visible_in_tree(),
+		"Before and After tags show on the media when a pair exists"
+	)
+	_check(_tag(panel, "after").text == "After", "A changed asset is not marked new")
+	_check(
+		not _tag(panel, "after").button_pressed and not _tag(panel, "before").button_pressed,
 		"A texture pair opens as a split picture, neither side pressed"
 	)
+	_check(_tags_on_their_sides(panel), "Each tag sits on its own half of the picture")
 	var swipe: Control = panel._media.swipe()
 	_check(swipe.visible and is_equal_approx(swipe.split, 0.5), "The split starts in the middle")
 	_check(swipe.before != null and swipe.after != null, "Both sides are in the split")
@@ -158,19 +162,21 @@ func _check_image_pair(panel: PANEL) -> void:
 	_check(texture != null and texture.get_size() == Vector2(80, 40), "The After image renders")
 	_check(panel._media.file_name() == "door_wood.png", "The shown file is named")
 	_check(not panel._details_scroll.visible, "Details start closed when there is media")
-	panel._before.button_pressed = true
+	_tag(panel, "before").pressed.emit()
 	await _frames()
 	texture = panel._media.texture()
 	_check(texture != null and texture.get_size() == Vector2(64, 48), "Before swaps the image")
 	_check(is_equal_approx(swipe.split, 1.0), "Before slides the line all the way")
-	panel._before.button_pressed = false
+	_check(_tag(panel, "before").button_pressed, "The Before tag shows it is in focus")
+	_tag(panel, "before").pressed.emit()
 	await _frames()
 	_check(
 		panel._media.side == "compare" and is_equal_approx(swipe.split, 0.5),
-		"Unpressing the side goes back to the split"
+		"Clicking the focused tag again goes back to the split"
 	)
-	panel._before.button_pressed = true
+	_tag(panel, "before").pressed.emit()
 	await _frames()
+	_check_rows(panel)
 	_check(panel._media.texture().get_width() > 0, "Headless image has a real size")
 	_check(panel._media.size.y > panel.size.y * 0.4, "The preview takes most of the height")
 	_check(
@@ -198,8 +204,12 @@ func _check_new_asset(panel: PANEL) -> void:
 		)
 	)
 	await _frames()
-	_check(not panel._segment.visible, "Before/After hides without a pair")
-	_check(panel._new_chip.visible, "A new asset shows the New chip")
+	_check(not _tag(panel, "before").is_visible_in_tree(), "No Before tag without a pair")
+	_check(
+		_tag(panel, "after").is_visible_in_tree() and _tag(panel, "after").text == "New",
+		"A new asset is tagged New on the media"
+	)
+	_check(not _tag(panel, "after").toggle_mode, "New names the side; it switches nothing")
 	_check(panel._media.texture() != null, "A new model render shows")
 	_check(not panel._media.filmstrip().visible, "One item has no filmstrip")
 	var facts: String = panel._summary.facts_text()
@@ -219,7 +229,7 @@ func _check_audio(panel: PANEL) -> void:
 	await _frames()
 	var preview: Control = panel._media.audio()
 	_check(preview != null, "Audio uses one audio preview")
-	_check(panel._segment.visible, "Audio pairs get Before/After")
+	_check(_tag(panel, "before").is_visible_in_tree(), "Audio pairs get Before/After tags")
 	if preview == null:
 		return
 	_check(preview.get("compact") == true, "The review's audio preview is compact")
@@ -228,13 +238,13 @@ func _check_audio(panel: PANEL) -> void:
 	)
 	if preview.has_method("seek_to"):
 		preview.call("seek_to", 0.3)
-		panel._before.button_pressed = true
+		_tag(panel, "before").pressed.emit()
 		await _frames()
 		_check(
 			is_equal_approx(float(preview.get("playhead")), 0.3),
 			"Switching sides keeps the playback position"
 		)
-	panel._after.button_pressed = true
+	_tag(panel, "after").pressed.emit()
 	panel.clear()
 	await _frames()
 	_check(panel._media.audio() == null, "Clearing drops the audio preview")
@@ -439,7 +449,7 @@ func _check_details(panel: PANEL) -> void:
 	var shown: String = panel._media.diff_view().shown_text()
 	_check(shown.contains("+var b := 3") and shown.contains("-var a := 1"), "Changed lines show")
 	_check(not shown.contains("@@"), "No hunk headers in the preview")
-	_check(not panel._segment.visible, "Text has no Before/After switch")
+	_check(not panel._media.sides().is_visible_in_tree(), "Text has no Before/After tags")
 	_check(
 		panel._summary.facts_text() == "+2 −1 lines · 1 model · 1 script",
 		"Text facts: " + panel._summary.facts_text()
@@ -494,7 +504,8 @@ func _check_scene(panel: PANEL) -> void:
 	_check(
 		not panel._media.visible and panel._scene_note.visible, "Scene edits point at the viewport"
 	)
-	_check(not panel._segment.visible and not panel._new_chip.visible, "No toggle for scene edits")
+	_check(not panel._media.sides().is_visible_in_tree(), "No tags for scene edits")
+	_check(not panel._open_link.visible, "No Open in editor outside the editor")
 	_check(not panel._details_button.visible, "Scene edits have no details")
 	_check(
 		panel._footer.get_global_rect().end.y >= panel.get_global_rect().end.y - 2,
@@ -514,7 +525,42 @@ func _check_scene(panel: PANEL) -> void:
 	await _frames()
 	_check(panel._media.visible and not panel._scene_note.visible, "The viewport frames show")
 	_check(panel._media.swipe().visible, "A scene edit compares in one frame")
-	_check(panel._segment.visible, "The scene's sides can be flipped")
+	_check(_tag(panel, "before").is_visible_in_tree(), "The scene's sides can be flipped")
+
+
+static func _tag(panel: PANEL, key: String) -> Button:
+	return panel._media.sides().tag(key)
+
+
+## The Before tag lies on the left half of the split picture, After on the right.
+static func _tags_on_their_sides(panel: PANEL) -> bool:
+	var swipe: Control = panel._media.swipe()
+	var middle := swipe.get_global_rect().get_center().x
+	var before := _tag(panel, "before").get_global_rect()
+	var after := _tag(panel, "after").get_global_rect()
+	var inside := swipe.get_global_rect().grow(1.0)
+	return (
+		before.end.x <= middle
+		and after.position.x >= middle
+		and inside.encloses(before)
+		and inside.encloses(after)
+	)
+
+
+## Each row has one job: the title alone, Details on their own row, the actions alone on the
+## last row, trailing, with nothing beside them.
+func _check_rows(panel: PANEL) -> void:
+	var title := panel._title.get_global_rect()
+	_check(panel._header.get_child_count() == 1, "The title row holds only the title")
+	_check(title.end.y <= panel._media.get_global_rect().position.y + 1, "The title sits above")
+	var details := panel._details_button.get_global_rect()
+	var footer := panel._footer.get_global_rect()
+	_check(details.end.y <= footer.position.y + 1, "Details have their own row above the actions")
+	_check(panel._details_button.get_parent() != panel._footer, "Details are not in the actions")
+	_check(
+		absf(panel._accept.get_global_rect().end.x - footer.end.x) <= 1.0,
+		"Accept ends the actions row"
+	)
 
 
 func _check_applying(panel: PANEL) -> void:

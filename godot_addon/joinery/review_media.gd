@@ -6,15 +6,22 @@ extends VBoxContainer
 ##
 ## - Textures, part views and scene snapshots: one frame split by a line you can drag
 ##   (review_swipe.gd), the original left, the change right. Before and After slide the line
-##   all the way, so the switch is a mask reveal.
-## - Models: the front and the far side next to each other; Before and After crossfade both.
+##   all the way, so the switch is a mask reveal. Wheel to zoom, drag to pan, both sides at once.
+## - Models: live 3D, the original and the change side by side with one shared orbit
+##   (review_model_view.gd), once their GLB files load; until then, or when they do not load in
+##   time, the renders: the front and the far side, Before and After crossfading both.
 ## - Sounds: one compact audio_preview with its waveform, so Before and After play A/B at the
 ##   same position.
 ## - Text: only the changed lines (review_diff.gd).
 ## - A blockout (ADR 0043): the user's sketch (the item's `reference`) beside the plan of the
-##   level built from it; Before and After crossfade the plan.
+##   level built from it.
 ## - Animations: the original and the change as two looping clips side by side
-##   (review_clip.gd); Before and After dim the other clip.
+##   (review_clip.gd), or the models themselves playing the action live when their GLB files
+##   load; Before and After dim the other side. One play/pause and scrub bar drives both
+##   (review_transport.gd); Left and Right step a frame.
+##
+## The one Before/After control is the pair of tags on the media (review_sides.gd): each sits on
+## the side it names and switches to it; a change with no original has one tag, "New".
 ##
 ## Pictures fill the frame, keeping their shape: a pair shares its width. Pixel art and small
 ## or flat pictures (a sketch, a plan, a 32 px texture) are blown up crisp, photos and renders
@@ -40,6 +47,11 @@ const SWIPE := preload("review_swipe.gd")
 const DIFF := preload("review_diff.gd")
 const FILMSTRIP := preload("review_filmstrip.gd")
 const CLIP := preload("review_clip.gd")
+const SIDES := preload("review_sides.gd")
+const MODEL_VIEW := preload("review_model_view.gd")
+const TRANSPORT := preload("review_transport.gd")
+const View := preload("review_view.gd")
+const AUDIO_STAGE := preload("review_audio_stage.gd")
 ## Seconds to wait for a preview file before giving up.
 const LOAD_TIMEOUT := 120.0
 ## Seconds between checks for a preview file that is still being written.
@@ -57,6 +69,11 @@ const FRAME_UNDER_WAYS := 3.0
 
 ## The side on show: "before", "after", or "compare" (a split picture).
 var side := "after"
+## Pixels the panel's own rows under the media take; the picture is that much shorter.
+var reserve := 0.0:
+	set(value):
+		reserve = value
+		_size_frame()
 ## The tallest the picture frame grows, in large control heights.
 var frame_max := FRAME_MAX:
 	set(value):
@@ -65,77 +82,29 @@ var frame_max := FRAME_MAX:
 var _items: Array = []
 var _index := 0
 var _textures := {}
-var _streams := {}
 var _frame: PanelContainer
 var _front: View
 var _back: View
 var _swipe: SWIPE
 var _diff: DIFF
-var _audio_box: VBoxContainer
-var _audio: Control
+## Holds the audio preview with the side tags over it.
+var _audio_box: AUDIO_STAGE
 var _loading: PanelContainer
 var _loading_dots: INDICATOR
 var _failure: Label
 var _strip: FILMSTRIP
 var _clip: CLIP
+var _sides: SIDES
+var _model: MODEL_VIEW
+var _transport: TRANSPORT
+## Which item the live models were loaded for.
+var _live_key := ""
+## True once the user picked a side for the item on show.
+var _touched := false
+var _place_queued := false
 var _waiting := ""
 var _waited := 0.0
 var _since_poll := 0.0
-
-
-## One side of a model or picture: the main picture, and the far side of a model beside it.
-class View:
-	extends HBoxContainer
-	var main: TextureRect
-	var far: TextureRect
-
-	func _init() -> void:
-		theme_type_variation = "JoineryRowTight"
-		size_flags_vertical = Control.SIZE_EXPAND_FILL
-		# The two angles sit together in the middle, not at the far ends of a wide frame.
-		alignment = BoxContainer.ALIGNMENT_CENTER
-		mouse_filter = Control.MOUSE_FILTER_IGNORE
-		main = _picture()
-		far = _picture()
-		resized.connect(func() -> void: set_pictures(main.texture, far.texture))
-		hide()
-
-	func set_pictures(front: Texture2D, back: Texture2D) -> void:
-		main.texture = front
-		far.texture = back
-		far.visible = back != null
-		for picture: TextureRect in [main, far]:
-			_fit(picture)
-			_sample(picture)
-
-	## Two angles: each picture is as wide as its height allows, so the pair stays together.
-	func _fit(picture: TextureRect) -> void:
-		var texture := picture.texture
-		var paired := far != null and far.visible
-		if not paired or texture == null or texture.get_height() == 0:
-			picture.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			picture.custom_minimum_size.x = 0.0
-			return
-		picture.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-		var width := size.y * texture.get_width() / texture.get_height()
-		width = minf(width, (size.x - get_theme_constant("separation")) / 2.0)
-		if not is_equal_approx(picture.custom_minimum_size.x, width):
-			picture.custom_minimum_size.x = maxf(0.0, floorf(width))
-
-	func _picture() -> TextureRect:
-		var picture := TextureRect.new()
-		picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		picture.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		picture.size_flags_vertical = Control.SIZE_EXPAND_FILL
-		picture.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		picture.resized.connect(func() -> void: _sample(picture))
-		add_child(picture)
-		return picture
-
-	## Crisp or smooth for the size the picture is shown at.
-	func _sample(picture: TextureRect) -> void:
-		picture.texture_filter = GLANCE.picture_filter(picture.texture, picture.size)
 
 
 func _init() -> void:
@@ -158,13 +127,26 @@ func _init() -> void:
 	_swipe.dragged.connect(_on_dragged)
 	_frame.add_child(_swipe)
 	_clip = CLIP.new()
+	_clip.side_clicked.connect(func(index: int) -> void: _on_side_clicked(index))
 	_frame.add_child(_clip)
+	_model = MODEL_VIEW.new()
+	_model.loaded.connect(_on_live)
+	_frame.add_child(_model)
+	_sides = SIDES.new()
+	_sides.chosen.connect(_on_chosen)
+	_frame.add_child(_sides)
+	for area: Control in [_frame, _clip, _model, _swipe]:
+		area.resized.connect(_queue_place)
+	# The clips and live views are laid out after the frame: place the tags once they are.
+	for row: Container in [_clip, _model]:
+		row.sort_children.connect(_queue_place)
+	_transport = TRANSPORT.new()
+	_transport.attach(_clip, _model)
+	add_child(_transport)
 	_diff = DIFF.new()
 	_diff.hide()
 	add_child(_diff)
-	_audio_box = VBoxContainer.new()
-	_audio_box.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_audio_box.hide()
+	_audio_box = AUDIO_STAGE.new()
 	add_child(_audio_box)
 	_loading = PanelContainer.new()
 	_loading.theme_type_variation = "JoineryLoadingFrame"
@@ -197,6 +179,23 @@ func _notification(what: int) -> void:
 		_size_frame()
 	elif what == NOTIFICATION_RESIZED:
 		_size_frame()
+	elif what == NOTIFICATION_VISIBILITY_CHANGED:
+		_resume.call_deferred()
+
+
+## Live views are freed while the panel is hidden, and come back when it shows again.
+func _resume() -> void:
+	if not is_inside_tree():
+		return
+	if not is_visible_in_tree():
+		_model.release()
+		_live_key = ""
+	elif (
+		not _items.is_empty()
+		and not _live_key_of(_items[_index]).is_empty()
+		and _live_key.is_empty()
+	):
+		_show_current(false)
 
 
 ## The picture frame (and the loading frame in its place) grows with the width.
@@ -204,7 +203,13 @@ func _size_frame() -> void:
 	if not is_inside_tree():
 		return
 	var large := float(UI_THEME.control_h(self, "lg"))
-	var tall := floorf(clampf(size.x * FRAME_SHARE, large * FRAME_MIN, large * frame_max))
+	var tall := clampf(size.x * FRAME_SHARE, large * FRAME_MIN, large * frame_max)
+	# Rows under the picture (the playback bar, the panel's own) come out of its height, so the
+	# review needs no more room than one picture would.
+	var under := reserve
+	if _transport.visible:
+		under += _transport.get_combined_minimum_size().y + get_theme_constant("separation")
+	tall = floorf(maxf(tall - under, large * FRAME_MIN))
 	for area: Control in [_frame, _loading]:
 		if not is_equal_approx(area.custom_minimum_size.y, tall):
 			area.custom_minimum_size.y = tall
@@ -273,15 +278,16 @@ func update_media(media: Array) -> void:
 ## Stop audio, drop loaded previews and forget the items.
 func clear_media() -> void:
 	_stop_waiting()
-	stop_audio()
-	if _audio != null:
-		_audio.queue_free()
-		_audio = null
+	_audio_box.forget()
 	_items.clear()
 	_textures.clear()
-	_streams.clear()
 	_index = 0
 	side = "after"
+	_touched = false
+	_model.release()
+	_live_key = ""
+	_transport.hide()
+	_sides.hide()
 	for view: View in [_front, _back]:
 		UI_MOTION.stop(view)
 		view.set_pictures(null, null)
@@ -337,7 +343,7 @@ func asset_count() -> int:
 func set_side(value: String) -> void:
 	if value == side or not value in ["before", "after", "compare"]:
 		return
-	if value == "compare" and not (not _items.is_empty() and swipes(_items[_index])):
+	if value == "compare" and not (not _items.is_empty() and _both_at_once(_items[_index])):
 		value = "after"
 	side = value
 	if not _items.is_empty():
@@ -377,6 +383,26 @@ func swipe() -> SWIPE:
 ## The changed lines view (text items).
 func diff_view() -> DIFF:
 	return _diff
+
+
+## The Before/After tags on the media.
+func sides() -> SIDES:
+	return _sides
+
+
+## The live 3D view of models.
+func model_view() -> MODEL_VIEW:
+	return _model
+
+
+## The animation clips.
+func clip() -> CLIP:
+	return _clip
+
+
+## Play/pause and the scrub bar of an animation.
+func transport() -> TRANSPORT:
+	return _transport
 
 
 ## The picture on show (null for audio, text, while loading, or on failure). For a split
@@ -443,8 +469,8 @@ func measured_facts() -> Array[String]:
 				if old != null and new != null:
 					found.append_array(GLANCE.image_facts(name, old.get_image(), new.get_image()))
 			"audio":
-				var old_sound := _stream(before)
-				var new_sound := _stream(after)
+				var old_sound := _audio_box.stream(before)
+				var new_sound := _audio_box.stream(after)
 				if old_sound != null and new_sound != null:
 					var fact := GLANCE.audio_fact(
 						name, old_sound.get_length(), new_sound.get_length()
@@ -466,18 +492,12 @@ func is_failed() -> bool:
 
 ## The audio preview in use, or null.
 func audio() -> Control:
-	return _audio
+	return _audio_box.preview
 
 
 ## Stop audio playback, if any.
 func stop_audio() -> void:
-	if _audio == null:
-		return
-	if _audio.has_method("stop"):
-		_audio.call("stop")
-	var player: Variant = _audio.get("player")
-	if player is AudioStreamPlayer and is_instance_valid(player):
-		(player as AudioStreamPlayer).stop()
+	_audio_box.stop()
 
 
 ## "image", "model", "audio", "clip" (an animation) or "text" for a media [param item].
@@ -494,7 +514,8 @@ static func kind_of(item: Dictionary) -> String:
 
 
 ## True when [param item] shows both sides at once: a split picture (texture, part view or scene
-## snapshot) or two clips. Models have their own framing per side, so they crossfade.
+## snapshot) or two clips. Model renders have their own framing per side, so they crossfade;
+## live models are side by side ([method _both_at_once]).
 static func swipes(item: Dictionary) -> bool:
 	return (
 		kind_of(item) in ["image", "clip"]
@@ -506,6 +527,20 @@ static func swipes(item: Dictionary) -> bool:
 
 static func _paired(item: Dictionary) -> bool:
 	return item.has("before") and item.has("after")
+
+
+func _both_at_once(item: Dictionary) -> bool:
+	return swipes(item) or (_model.is_live() and _paired(item) and _live_key == _live_key_of(item))
+
+
+## What identifies the live models of [param item] ("" when it names no GLB files).
+static func _live_key_of(item: Dictionary) -> String:
+	if not kind_of(item) in ["model", "clip"]:
+		return ""
+	var files := "%s|%s" % [item.get("before_model", ""), item.get("after_model", "")]
+	if files == "|":
+		return ""
+	return "%s#%s|%s" % [item.get("path", ""), item.get("part", ""), files]
 
 
 static func _item_name(item: Dictionary) -> String:
@@ -554,6 +589,9 @@ func _on_item_selected(index: int) -> void:
 		return
 	stop_audio()
 	_index = index
+	_touched = false
+	_model.release()
+	_live_key = ""
 	side = "compare" if swipes(_items[index]) else "after"
 	_show_current(false)
 	item_changed.emit()
@@ -562,10 +600,36 @@ func _on_item_selected(index: int) -> void:
 func _on_dragged() -> void:
 	if side != "compare":
 		side = "compare"
+		_sides.set_side(side)
 		side_changed.emit()
 
 
+## A tag was clicked.
+func _on_chosen(value: String) -> void:
+	_touched = true
+	set_side(value)
+	side_changed.emit()
+
+
+## A clip was clicked: focus it, or show both alike when it is already in focus.
+func _on_side_clicked(index: int) -> void:
+	if _items.is_empty() or not _paired(_items[_index]):
+		return
+	var key: String = ["before", "after"][index]
+	_on_chosen("compare" if side == key else key)
+
+
 func _show_current(swap: bool) -> void:
+	_show_item(swap)
+	var item: Dictionary = _items[_index]
+	var playing := kind_of(item) == "clip" and _frame.visible and not _failure.visible
+	if playing != _transport.visible:
+		_transport.visible = playing
+		_size_frame()
+	_queue_place()
+
+
+func _show_item(swap: bool) -> void:
 	var item: Dictionary = _items[_index]
 	var path := str(item.get("path", ""))
 	tooltip_text = "res://" + path if kind_of(item) != "text" else ""
@@ -581,6 +645,11 @@ func _show_current(swap: bool) -> void:
 		_stop_waiting()
 		_fail(str(item.get("error", "")))
 		return
+	_start_live(item)
+	if _model.is_live():
+		_show_live(item)
+		return
+	_model.hide()
 	if kind_of(item) == "clip" or swipes(item):
 		_show_both(item, swap)
 		return
@@ -602,8 +671,61 @@ func _show_current(swap: bool) -> void:
 	elif item.has("reference") and FileAccess.file_exists(str(item["reference"])):
 		# The sketch stays on the left; the plan beside it is what changes.
 		_show_image(str(item["reference"]), source, swap)
-	else:
+	elif kind_of(item) == "model":
 		_show_image(source, str(item.get(chosen + "_back", "")), swap)
+	else:
+		# One picture (new, or its other side failed): the split view without a line, so it
+		# zooms and pans like a pair.
+		var picture := _texture(source)
+		_show_swipe(
+			picture if chosen == "before" else null, picture if chosen == "after" else null, swap
+		)
+
+
+## Load the item's GLB files as live 3D, once per item, while the panel is on screen.
+func _start_live(item: Dictionary) -> void:
+	var key := _live_key_of(item)
+	if key.is_empty() or key == _live_key or not is_visible_in_tree():
+		return
+	_live_key = key
+	var actions: Array[String] = [
+		str(item.get("before_action", item.get("action", ""))),
+		str(item.get("after_action", item.get("action", ""))),
+	]
+	_model.load_models(
+		str(item.get("before_model", "")) if item.has("before") or kind_of(item) == "model" else "",
+		str(item.get("after_model", "")),
+		actions
+	)
+
+
+## The live models loaded: show them, both alike unless the user already chose a side.
+func _on_live() -> void:
+	if _items.is_empty() or _live_key_of(_items[_index]) != _live_key:
+		return
+	if not _touched and _paired(_items[_index]):
+		side = "compare"
+	_show_current(false)
+	side_changed.emit()
+
+
+func _show_live(item: Dictionary) -> void:
+	_stop_waiting()
+	_audio_box.hide()
+	_swipe.hide()
+	for view: View in [_front, _back]:
+		UI_MOTION.stop(view)
+		view.hide()
+	_frame.show()
+	_set_ground(Color.TRANSPARENT)
+	_model.show()
+	_model.set_side(side)
+	if kind_of(item) == "clip":
+		# The clip keeps the time for both live models; its strips are not drawn.
+		_clip.hide()
+		_clip.set_process(true)
+	else:
+		_clip.stop()
 
 
 ## Both sides at once (a split picture, or an animation's clips), once each side it has is
@@ -617,7 +739,12 @@ func _show_both(item: Dictionary, swap: bool) -> void:
 	_stop_waiting()
 	if kind_of(item) != "clip":
 		_clip.stop()
-		_show_swipe(item, swap)
+		var old := _texture(str(item["before"]))
+		var new := _texture(str(item["after"]))
+		if old == null or new == null:
+			_fail()
+			return
+		_show_swipe(old, new, swap)
 		return
 	_audio_box.hide()
 	_swipe.hide()
@@ -645,21 +772,21 @@ func _hide_stage() -> void:
 	_loading.hide()
 
 
-func _show_swipe(item: Dictionary, swap: bool) -> void:
+func _show_swipe(old: Texture2D, new: Texture2D, swap: bool) -> void:
 	_audio_box.hide()
-	var old := _texture(str(item["before"]))
-	var new := _texture(str(item["after"]))
-	if old == null or new == null:
+	if old == null and new == null:
 		_fail()
 		return
 	_frame.show()
 	_set_ground(Color.TRANSPARENT)
 	for view: View in [_front, _back]:
 		view.hide()
-	var fresh := not _swipe.visible or _swipe.after != new
+	var fresh := not _swipe.visible or _swipe.after != new or _swipe.before != old
 	_swipe.set_pictures(old, new)
 	_swipe.show()
 	var target: float = {"before": 1.0, "after": 0.0}.get(side, 0.5)
+	if old == null or new == null:
+		target = 0.0 if new != null else 1.0
 	if swap and not fresh:
 		_swipe.slide_to(target)
 	else:
@@ -720,36 +847,12 @@ func frame_ground() -> Color:
 
 func _show_audio(source: String, swap: bool) -> void:
 	_frame.hide()
-	var stream := _stream(source)
+	var stream := _audio_box.stream(source)
 	if stream == null:
 		_fail()
 		return
 	_audio_box.show()
-	if _audio == null:
-		_audio = _make_audio(stream)
-	elif _audio.has_method("set_stream"):
-		_audio.call("set_stream", stream, swap)
-
-
-## A compact audio_preview (it owns its player). Falls back to handing it a player for the
-## older preview that needs one before it enters the tree.
-func _make_audio(stream: AudioStream) -> Control:
-	var here := (get_script() as Script).resource_path.get_base_dir()
-	var script: Script = load(here.path_join("audio_preview.gd"))
-	var preview: Control = script.new()
-	preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	if "compact" in preview:
-		preview.set("compact", true)
-	if preview.has_method("set_stream"):
-		_audio_box.add_child(preview)
-		preview.call("set_stream", stream, false)
-		return preview
-	var player := AudioStreamPlayer.new()
-	player.stream = stream
-	_audio_box.add_child(player)
-	preview.set("player", player)
-	_audio_box.add_child(preview)
-	return preview
+	_audio_box.play_stream(stream, swap)
 
 
 func _texture(source: String) -> Texture2D:
@@ -762,22 +865,6 @@ func _texture(source: String) -> Texture2D:
 		return null
 	var result := ImageTexture.create_from_image(image)
 	_textures[source] = result
-	return result
-
-
-func _stream(source: String) -> AudioStream:
-	if _streams.has(source):
-		return _streams[source]
-	var result: AudioStream = null
-	match source.get_extension().to_lower():
-		"wav":
-			result = AudioStreamWAV.load_from_file(source)
-		"ogg":
-			result = AudioStreamOggVorbis.load_from_file(source)
-		"mp3":
-			result = AudioStreamMP3.load_from_file(source)
-	if result != null:
-		_streams[source] = result
 	return result
 
 
@@ -817,3 +904,69 @@ func _fail(reason := "", missing := "") -> void:
 	if not reason.is_empty():
 		_failure.text += " " + reason
 	_failure.show()
+
+
+# --- Side tags and playback ------------------------------------------------------------------
+
+
+func _queue_place() -> void:
+	if not _place_queued:
+		_place_queued = true
+		_place_sides.call_deferred()
+
+
+## Put the Before/After tags on the media on show: under each side when both are on screen,
+## together under the picture when one side shows at a time, over the waveform for a sound.
+func _place_sides() -> void:
+	_place_queued = false
+	if _items.is_empty() or _failure.visible or not (_frame.visible or _audio_box.visible):
+		_sides.hide()
+		return
+	var item: Dictionary = _items[_index]
+	if kind_of(item) == "text":
+		_sides.hide()
+		return
+	var host: Control = _audio_box if _audio_box.visible else _frame
+	if _sides.get_parent() != host:
+		_sides.reparent(host, false)
+		_sides.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	host.move_child(_sides, -1)
+	_sides.show_sides(item.has("before") and not item.has("reference"), item.has("after"))
+	_sides.set_side(side)
+	var rects := _side_rects(host)
+	_sides.place(rects[0], rects[1])
+
+
+## Where each side is drawn in [param host] (before, after); the same rectangle twice when one
+## side shows at a time.
+func _side_rects(host: Control) -> Array[Rect2]:
+	if host == _audio_box:
+		var band := Rect2(Vector2.ZERO, Vector2(host.size.x, UI_THEME.control_h(self, "md")))
+		return [band, band]
+	if _model.visible and _model.is_live():
+		return _moved(_model.side_rects(), _model.position)
+	if _clip.visible:
+		return _moved(_clip.drawn_rects(), _clip.position)
+	if _swipe.visible:
+		var shown := _swipe.picture_rect()
+		shown.position += _swipe.position
+		if not _swipe.paired():
+			return [shown, shown]
+		var half := Rect2(shown.position, Vector2(shown.size.x / 2.0, shown.size.y))
+		return [half, Rect2(half.position + Vector2(half.size.x, 0.0), half.size)]
+	var pictures := Rect2()
+	# A blockout's tag goes on the plan, beside the sketch; a model's under both its angles.
+	var plan_only: bool = _items[_index].has("reference")
+	for picture: TextureRect in [_front.main, _front.far]:
+		if picture.visible and picture.texture != null:
+			var rect := Rect2(_front.position + picture.position, picture.size)
+			var alone := not pictures.has_area() or (plan_only and picture == _front.far)
+			pictures = rect if alone else pictures.merge(rect)
+	return [pictures, pictures]
+
+
+static func _moved(rects: Array[Rect2], by: Vector2) -> Array[Rect2]:
+	var moved: Array[Rect2] = []
+	for rect: Rect2 in rects:
+		moved.append(Rect2(rect.position + by, rect.size) if rect.has_area() else rect)
+	return moved

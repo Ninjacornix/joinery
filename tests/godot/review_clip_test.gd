@@ -1,8 +1,9 @@
 extends SceneTree
 ## An animation in review (review_media.gd with review_clip.gd): Blender's before and after
-## strips play as two clips side by side in sync, Before and After dim the other clip, a new
-## action shows alone marked New, the filmstrip tile is a frame of the clip, and the facts line
-## says "Run: 0.8 s loop, bounce +30%". The strips are made here, frame by frame, as PNGs.
+## strips play as two clips side by side in sync, the Before and After tags on them dim the
+## other clip, a new action shows alone tagged New, the filmstrip tile is a frame of the clip,
+## and the facts line says "Run: 0.8 s loop, bounce +30%". One play/pause and scrub bar drives
+## both clips, and Left/Right step a frame. The strips are made here, frame by frame, as PNGs.
 
 const MEDIA := preload("res://addons/joinery/review_media.gd")
 const CLIP := preload("res://addons/joinery/review_clip.gd")
@@ -59,12 +60,16 @@ func _run() -> void:
 	var item := clip_item(folder)
 	media.show_media([item])
 	await process_frame
-	var clip: CLIP = media._clip
+	await process_frame
+	var clip: CLIP = media.clip()
+	var sides := media.sides()
 	_check(media.current_kind() == "clip", "A clip item: " + media.current_kind())
 	_check(clip.visible, "The clips show")
 	_check(clip.side_at(0).visible and clip.side_at(1).visible, "Before and After side by side")
-	_check(clip.side_at(0).caption.text == "Before", clip.side_at(0).caption.text)
-	_check(clip.side_at(1).caption.text == "After", clip.side_at(1).caption.text)
+	_check(sides.tag("before").text == "Before", sides.tag("before").text)
+	_check(sides.tag("after").text == "After", sides.tag("after").text)
+	_check(sides.both_shown, "Each tag sits under its own clip")
+	_check(media.transport().visible, "Animations get one play/pause and scrub bar")
 	_check(clip.side_at(0).frames == 10 and clip.side_at(1).frames == 8, "Frames per strip")
 	_check(media.side == "compare", "Both alike to start: " + media.side)
 	_check(
@@ -79,12 +84,23 @@ func _run() -> void:
 	_check(clip.frames_shown() == [8, 0], "Each loops its own strip: %s" % [clip.frames_shown()])
 	var region := (clip.side_at(1).picture.texture as AtlasTexture).region
 	_check(region == Rect2(0, 0, 48, 48), "After shows its first frame again: %s" % region)
+	await _check_playback(media, clip)
 	media.set_side("before")
 	_check(clip.side_at(1).picture.modulate.a < 0.5, "Before dims the change")
 	_check(clip.side_at(0).picture.modulate.a == 1.0, "and keeps the original")
 	media.set_side("after")
 	_check(clip.side_at(0).picture.modulate.a < 0.5, "After dims the original")
 	_check(clip.visible and clip.side_at(0).visible, "Neither clip is hidden")
+	# Clicking a clip focuses it; clicking it again shows both alike.
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.pressed = true
+	clip.side_at(0).gui_input.emit(click)
+	_check(media.side == "before", "Clicking the original's clip focuses it: " + media.side)
+	clip.side_at(0).gui_input.emit(click)
+	_check(media.side == "compare", "Clicking it again shows both alike: " + media.side)
+	sides.tag("after").pressed.emit()
+	_check(media.side == "after", "The After tag focuses the change")
 	var facts := media.measured_facts()
 	_check(facts == ["Run: 0.8 s loop, bounce +30%"], "Facts: %s" % [facts])
 	var tile := media.thumbnail() as AtlasTexture
@@ -92,8 +108,10 @@ func _run() -> void:
 	# A new action: After alone, marked New.
 	media.show_media([clip_item(folder, true)])
 	await process_frame
+	await process_frame
 	_check(not clip.side_at(0).visible and clip.side_at(1).visible, "Only the new clip")
-	_check(clip.side_at(1).caption.text == "New", clip.side_at(1).caption.text)
+	_check(sides.tag("after").text == "New", sides.tag("after").text)
+	_check(not sides.tag("before").is_visible_in_tree(), "No Before tag for a new action")
 	_check(media.current_is_new(), "Reads as new")
 	facts = media.measured_facts()
 	_check(facts == ["Run: new, 0.8 s loop"], "New facts: %s" % [facts])
@@ -111,6 +129,7 @@ func _run() -> void:
 	# Other kinds hide the clips.
 	media.show_media([{"path": "scripts/a.gd", "media": "text", "diff": "+a\n-b"}])
 	_check(not clip.visible, "Text hides the clips")
+	_check(not media.transport().visible, "Text has no playback bar")
 	media.queue_free()
 	await process_frame
 	print("review clip: ", "FAILED" if _failed else "ok")
@@ -133,13 +152,12 @@ func _check_fills(media: MEDIA, clip: CLIP) -> void:
 			var shown := side.drawn()
 			total += shown.size.x
 			_check(is_equal_approx(shown.size.x, shown.size.y), "%s: square frames" % spec[1])
+			var tag := media.sides().tag_rects()[index]
+			var drawn := clip.drawn_rects()[index]
+			drawn.position += clip.position
 			_check(
-				Rect2(Vector2.ZERO, side.size).encloses(Rect2(side.tag.position, side.tag.size)),
-				"%s: the caption sits on its clip" % spec[1]
-			)
-			_check(
-				side.tag.position.y + side.tag.size.y <= shown.end.y,
-				"%s: the caption is over the picture, not below it" % spec[1]
+				drawn.grow(1.0).encloses(tag),
+				"%s: the tag sits on its clip (%s in %s)" % [spec[1], tag, drawn]
 			)
 			if spec[1] == "short":
 				_check(
@@ -151,6 +169,34 @@ func _check_fills(media: MEDIA, clip: CLIP) -> void:
 			_check(total + gap >= frame.x - 2.0, "narrow: the clips share the full width")
 	media.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	await process_frame
+
+
+## Play/pause, the scrub bar and frame steps move both clips together.
+func _check_playback(media: MEDIA, clip: CLIP) -> void:
+	var bar := media.transport()
+	bar.toggle_play()
+	_check(not clip.playing and not bar.is_playing(), "Pause stops both clips")
+	var held := clip.frames_shown()
+	clip._process(0.5)
+	_check(clip.frames_shown() == held, "Paused clips hold their frame")
+	bar.scrubbed.emit(0.5)
+	_check(clip.frames_shown() == [5, 5], "Scrubbing to the middle: %s" % [clip.frames_shown()])
+	_check(is_equal_approx(bar.bar.value, 0.5), "The bar follows: %s" % bar.bar.value)
+	var right := InputEventKey.new()
+	right.keycode = KEY_RIGHT
+	right.pressed = true
+	clip.key_pressed.emit(right)
+	_check(clip.frames_shown() == [6, 6], "Right steps a frame: %s" % [clip.frames_shown()])
+	var left := right.duplicate() as InputEventKey
+	left.keycode = KEY_LEFT
+	clip.key_pressed.emit(left)
+	clip.key_pressed.emit(left)
+	_check(clip.frames_shown() == [4, 4], "Left steps back: %s" % [clip.frames_shown()])
+	var space := right.duplicate() as InputEventKey
+	space.keycode = KEY_SPACE
+	clip.key_pressed.emit(space)
+	_check(clip.playing and bar.is_playing(), "Space plays again")
+	_check(clip.focus_mode == Control.FOCUS_CLICK, "The clips take focus only when clicked")
 
 
 func _check_facts() -> void:

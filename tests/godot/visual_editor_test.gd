@@ -191,6 +191,7 @@ func _reviews(dock: Control) -> void:
 		await _frames()
 	dock.hide_edit_review()
 	await _frames()
+	await _animation.live_model(self, dock, panel, cache, [still, far])
 	var before := cache.path_join("wood-before.png")
 	var after := cache.path_join("wood-after.png")
 	_planks(Color("b07a45")).save_png(before)
@@ -250,6 +251,11 @@ func _reviews(dock: Control) -> void:
 	await get_tree().create_timer(0.6).timeout
 	await _shot("review-rendered", [panel, dock])
 	await _before_after(panel, "review-image-before")
+	# Zoomed in on the texture: both sides magnified together, the planks' pixels crisp.
+	var swipe: Control = panel.get("_media").call("swipe")
+	swipe.call("zoom_at", swipe.size / 2.0, 3.0)
+	await _shot("review-image-zoom", [panel, dock])
+	swipe.call("reset_view")
 	dock.hide_edit_review()
 	await _frames()
 	var creak := ProjectSettings.globalize_path("res://audio/sfx/door_creak.wav")
@@ -319,8 +325,16 @@ func _glance_reviews(
 			"after": room_after,
 		}
 	]
+	# The changed node is in the open scene, so the review offers to show it there.
+	var snapshot: GDScript = load("res://addons/joinery/review_snapshot.gd")
+	var scene_root := EditorInterface.get_edited_scene_root()
+	var crate := scene_root.get_node_or_null("Crate") if scene_root != null else null
+	if crate != null:
+		snapshot.set("nodes", [crate] as Array[Node])
 	panel.call("show_scene_review", "Warm up the workshop light", 2, frames)
 	await _shot("review-scene", [panel, dock])
+	_check(crate == null or panel.get("_open_link").is_visible_in_tree(), "Open in editor shows")
+	snapshot.set("nodes", [] as Array[Node])
 	dock.hide_edit_review()
 	await _frames()
 	var creak := ProjectSettings.globalize_path("res://audio/sfx/door_creak.wav")
@@ -665,16 +679,13 @@ func _timeline() -> void:
 
 ## Switch the review to Before, capture it, and switch back to After.
 func _before_after(panel: Control, screen: String) -> void:
-	var before: Button = panel.get("_before")
-	var after: Button = panel.get("_after")
-	_check(before != null and before.is_visible_in_tree(), "Before/After shows for a pair")
-	if before == null or after == null:
-		return
-	before.button_pressed = true
+	var sides: Control = panel.get("_media").call("sides")
+	var before: Button = sides.call("tag", "before")
+	var after: Button = sides.call("tag", "after")
+	_check(before.is_visible_in_tree(), "The Before tag shows on the media for a pair")
 	before.pressed.emit()
 	await _frames()
 	await _shot(screen, [panel])
-	after.button_pressed = true
 	after.pressed.emit()
 	await _frames()
 

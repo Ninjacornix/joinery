@@ -1,16 +1,19 @@
 @tool
 extends VBoxContainer
-## The Review panel: answers "is this right?" in one look. Top to bottom: the request as the
-## title with a Before/After switch, one before/after view that takes the remaining height
-## (review_media.gd: a split picture, a model from two angles, A/B audio, the changed lines; a
-## filmstrip when there are several items), one line of facts, the checks as one quiet status,
-## the reviewer's notes as one line when there are any (review_summary.gd), and the Details
-## disclosure beside Discard / Accept on the last row. Details hold the files with their
-## diffs, the checks that ran and every note; they stay closed unless asked for. Discard only
-## throws the proposed change away: the user's files were never touched, and the panel says so.
+## The Review panel: answers "is this right?" in one look. Each row has one job, top to
+## bottom: the request as the title; one before/after view that takes the remaining height
+## (review_media.gd: a split picture, the model in live 3D, A/B audio, the changed lines; a
+## filmstrip when there are several items) with its Before/After tags on it, the one switch
+## between the sides; one line of facts, the checks as one quiet status and the reviewer's
+## notes as one line when there are any (review_summary.gd); the Details disclosure; and the
+## actions, Discard / Accept on the trailing edge (with "Open in editor" leading for a scene
+## edit). Details hold the files with their diffs, the checks that ran and every note; they
+## stay closed unless asked for. Discard only throws the proposed change away: the user's
+## files were never touched, and the panel says so.
 ##
 ## Keyboard, with focus anywhere in the review: Enter accepts, Backspace or Delete discards,
-## A or B flips between before and after.
+## A or B flips between before and after. The media takes no focus until it is clicked; then
+## an animation also takes Space (play/pause) and Left/Right (a frame).
 ##
 ## Deciding is optimistic: pressing Accept or Discard collapses the review into one line
 ## ("Change accepted", with dots while the commit runs) at once. [method show_result] confirms
@@ -53,10 +56,6 @@ var _serial := 0
 var _details_pref := false
 var _header: HBoxContainer
 var _title: Label
-var _new_chip: PanelContainer
-var _segment: HBoxContainer
-var _before: Button
-var _after: Button
 var _stage: MarginContainer
 var _body: VBoxContainer
 var _media: MEDIA
@@ -64,6 +63,8 @@ var _music: MUSIC
 var _scene_note: Label
 var _summary: SUMMARY
 var _details_button: Button
+## "Open in editor" for a scene edit: selects the changed nodes in the live scene.
+var _open_link: Button
 var _details_scroll: ScrollContainer
 var _gutter: MarginContainer
 var _details: DETAILS
@@ -146,9 +147,9 @@ func show_scene_review(summary: String, count: int, media: Array = []) -> void:
 	_details.clear_changes()
 	_summary.show_review({"scene_count": count})
 	_scene_note.visible = not _media.visible
+	_open_link.visible = SNAPSHOT.can_open()
 	_sync_details()
 	_set_details(false, false)
-	_sync_sides()
 	_present(arriving)
 
 
@@ -161,6 +162,7 @@ func show_file_review(
 ) -> void:
 	var arriving := _begin(summary)
 	_scene_note.hide()
+	_open_link.hide()
 	var listed := changes if not changes.is_empty() else DETAILS.changes_from(diff, media)
 	var items := media.duplicate()
 	var text := _text_item(diff, listed)
@@ -172,7 +174,6 @@ func show_file_review(
 	_summary.show_review({"changes": listed, "diff": diff})
 	_measure()
 	_sync_details()
-	_sync_sides()
 	_set_details(_details_pref or not _media.visible, false)
 	_present(arriving)
 
@@ -198,7 +199,6 @@ func show_glance(extra: Dictionary) -> void:
 func update_media(media: Array) -> void:
 	_media.update_media(media)
 	_measure()
-	_sync_sides()
 	glance_changed.emit()
 
 
@@ -222,9 +222,7 @@ func request_show() -> void:
 
 ## Flip the preview between before and after (A or B). Returns the side now on show.
 func flip() -> String:
-	var shown := _media.flip()
-	_sync_sides()
-	return shown
+	return _media.flip()
 
 
 ## Disable both buttons while the decision is applied; Accept shows dots and "Applying…".
@@ -415,47 +413,6 @@ func _build_header() -> void:
 	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_title.mouse_filter = Control.MOUSE_FILTER_PASS
 	_header.add_child(_title)
-	var chip := UI.chip("New")
-	chip.label.theme_type_variation = "JoineryCaption"
-	chip.tooltip_text = "This file is new; there is no earlier version to compare"
-	chip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	chip.hide()
-	_new_chip = chip
-	_header.add_child(_new_chip)
-	_segment = HBoxContainer.new()
-	_segment.theme_type_variation = "JoineryRowTight"
-	_segment.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_segment.hide()
-	_header.add_child(_segment)
-	var group := ButtonGroup.new()
-	# Neither pressed is the split picture of a texture.
-	group.allow_unpress = true
-	_before = _side_button("before", "Show the original (A or B flips)", group)
-	_after = _side_button("after", "Show the change (A or B flips)", group)
-	_after.set_pressed_no_signal(true)
-
-
-func _side_button(side: String, hint: String, group: ButtonGroup) -> Button:
-	var button := Button.new()
-	button.text = side.capitalize()
-	button.theme_type_variation = "JoinerySegment"
-	button.toggle_mode = true
-	button.button_group = group
-	button.focus_mode = Control.FOCUS_ALL
-	button.tooltip_text = hint
-	button.accessibility_name = hint
-	UI.bind_height(button, "sm")
-	UI_MOTION.press_feedback(button)
-	button.toggled.connect(
-		func(on: bool) -> void:
-			if on:
-				_media.set_side(side)
-			elif not _before.button_pressed and not _after.button_pressed:
-				_media.set_side("compare")
-			_sync_sides()
-	)
-	_segment.add_child(button)
-	return button
 
 
 func _build_body() -> void:
@@ -464,8 +421,6 @@ func _build_body() -> void:
 	_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_stage.add_child(_body)
 	_media = MEDIA.new()
-	_media.item_changed.connect(_sync_sides)
-	_media.side_changed.connect(_sync_sides)
 	_media.hide()
 	_body.add_child(_media)
 	_music = MUSIC.new()
@@ -475,6 +430,7 @@ func _build_body() -> void:
 	_body.add_child(_scene_note)
 	_summary = SUMMARY.new()
 	_body.add_child(_summary)
+	_build_details_button()
 	_details_scroll = ScrollContainer.new()
 	_details_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_details_scroll.size_flags_vertical = Control.SIZE_FILL
@@ -518,10 +474,8 @@ func _build_body() -> void:
 	_build_footer()
 
 
-func _build_footer() -> void:
-	_footer = HBoxContainer.new()
-	_footer.theme_type_variation = "JoineryStack"
-	_body.add_child(_footer)
+## Details sit on their own row above the actions: their own job, never squeezing Accept.
+func _build_details_button() -> void:
 	# A flat disclosure, not a tab-like button: no fill open or closed, muted ink that
 	# brightens on hover, and no padding, so its chevron sits on the content edge.
 	_details_button = UI.quiet("Details")
@@ -532,9 +486,21 @@ func _build_footer() -> void:
 	_details_button.accessibility_name = "Show or hide the files, checks and notes"
 	_details_button.tooltip_text = "Files, checks and notes"
 	UI.bind_icon(_details_button, "disclosure_closed")
-	UI.bind_height(_details_button)
+	UI.bind_height(_details_button, "sm")
 	_details_button.toggled.connect(func(open: bool) -> void: _set_details(open, true))
-	_footer.add_child(_details_button)
+	_body.add_child(_details_button)
+
+
+func _build_footer() -> void:
+	_footer = HBoxContainer.new()
+	_footer.theme_type_variation = "JoineryStack"
+	_body.add_child(_footer)
+	_open_link = UI.link("Open in editor")
+	_open_link.tooltip_text = "Select the changed nodes in the scene"
+	_open_link.accessibility_name = "Open the change in the editor: select the changed nodes"
+	_open_link.pressed.connect(SNAPSHOT.open_in_editor)
+	_open_link.hide()
+	_footer.add_child(_open_link)
 	var push := Control.new()
 	push.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	push.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -719,6 +685,11 @@ func _sync_details() -> void:
 	_details_button.visible = _details.has_content() or _summary.has_info()
 	if not _details_button.visible:
 		_details_scroll.hide()
+	# Details have their own row: the picture gives up that height, not the editor above.
+	var row := 0.0
+	if _details_button.visible and is_inside_tree():
+		row = _details_button.get_combined_minimum_size().y + _body.get_theme_constant("separation")
+	_media.reserve = row
 
 
 func _set_details(open: bool, animate: bool) -> void:
@@ -735,16 +706,6 @@ func _set_details(open: bool, animate: bool) -> void:
 		if animate:
 			UI_MOTION.reveal(_gutter)
 			UI_MOTION.stagger(_details.rows())
-
-
-func _sync_sides() -> void:
-	var pairs := _media.visible and _media.current_paired() and _media.current_kind() != "text"
-	_segment.visible = pairs
-	_new_chip.visible = (
-		_media.visible and not pairs and _media.current_is_new() and _media.current_kind() != "text"
-	)
-	_after.set_pressed_no_signal(_media.side == "after")
-	_before.set_pressed_no_signal(_media.side == "before")
 
 
 ## A short label that keeps its full width in a row (no ellipsis collapsing it to "…").
@@ -786,8 +747,9 @@ func _apply_sizes() -> void:
 	busy += box.get_margin(SIDE_LEFT) + box.get_margin(SIDE_RIGHT)
 	var width := maxf(BUTTON_EM * UI_THEME.font_size(self, "body"), busy)
 	if size.x > 0.0:
-		var gaps := _footer.get_theme_constant("separation") * 3.0
-		var room := (size.x - _details_button.get_combined_minimum_size().x - gaps) / 2.0
+		var gaps := _footer.get_theme_constant("separation") * 2.0
+		var lead := _open_link.get_combined_minimum_size().x if _open_link.visible else 0.0
+		var room := (size.x - lead - gaps) / 2.0
 		width = maxf(busy, minf(width, room))
 	width = ceilf(width)
 	var height := UI_THEME.control_h(self, "md")
