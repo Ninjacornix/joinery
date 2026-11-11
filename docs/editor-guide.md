@@ -650,6 +650,39 @@ the game's mesh on export, so the model in the game has the body you made and
 no extra morph targets. Expressions and other shape keys stay. Ask to keep the
 body-shape keys if the game changes the body at run time; the model remembers.
 
+### Animations
+
+A model with animations shows them under its preview in the Blender tab: each
+one with its length, whether it loops and its frame rate. The model plays the
+selected one; ← and → (or the arrow buttons) go to the previous or next, Space
+plays and pauses, the slider scrubs, and the menus choose Loop, Ping-pong or
+Once and a speed from 0.25× to 2×. The name and frame number show beside the
+controls. An action that is in the `.blend` but not yet in the game copy says
+so. Click a row, or **Use in message**, to make that animation the target:
+"make the run bouncier" then changes only the run.
+
+Every motion is made by operating Blender: Joinery writes keyframes on the
+rig's controls (the FK controls of a Rigify or MPFB2 rig, or the bones of a
+hand-made humanoid named like hips, spine, thigh, upper_leg, forearm, hand),
+with a small leg solver that keeps planted feet still. Nothing is downloaded
+and no motion model is used. You can ask for:
+
+- **A new motion**: walk, run, idle, jump (start, in the air, landing), attack
+  or wave, with how fast, how long, stride, bounce, arm swing and lean.
+- **A change to one**: faster or slower, more or less motion in the arms,
+  legs, spine or head, more bounce (the feet stay planted), shifted timing,
+  feet pinned while they touch the ground, a loop that meets itself, left and
+  right swapped, a copy, a new name, or deleting it.
+- **An animation pass** ("make the animations the game needs"): Journeyman
+  compares the character's actions with the clips your game plays (a
+  blueprint's player plays idle, walk, run, jump_start, jump_air and
+  jump_land) and makes the missing ones.
+
+The review plays the animation before and after as two looping clips side by
+side, with one line of facts such as "Run: 0.8 s loop, bounce +30%". In the
+third-person and first-person blueprints, the player plays the character's
+idle, walk, run and jump clips when the model you put in it has them.
+
 For an installation with a matching Joinery editor already built or bundled:
 
 ```sh
