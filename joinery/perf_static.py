@@ -425,7 +425,9 @@ def scripts(
         tally.check("scripts", path, False)
         where = "; ".join(f"line {line} in {fn} {what}" for fn, line, what in hot)
         measured_text = f"{cost:.1f} ms a frame" if cost >= 0.05 else "work every frame"
-        severity: Severity = ("high" if cost >= budget_ms * 0.3 else "medium") if heavy else "low"
+        severity: Severity = (
+            ("high" if cost >= budget_ms * 0.3 else "medium") if heavy else "low"
+        )
         words = [f"Costs {cost:.1f} ms of every frame on the target."] if heavy else []
         if where:
             words.append(where[0].upper() + where[1:] + ".")
