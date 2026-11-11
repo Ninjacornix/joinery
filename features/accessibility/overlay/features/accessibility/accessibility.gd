@@ -203,7 +203,14 @@ func _scale_label(node: Node) -> void:
 func _on_node_added(node: Node) -> void:
 	if node is Label or node is RichTextLabel or node is Button:
 		# HUD code sets its size after adding the label; look once it has.
-		_scale_label.call_deferred(node)
+		# The game may free it first (cards are dealt and discarded in one frame).
+		_scale_later.call_deferred(weakref(node))
+
+
+func _scale_later(ref: WeakRef) -> void:
+	var node := ref.get_ref() as Node
+	if node != null:
+		_scale_label(node)
 
 
 func _on_menu_opened(page: Control) -> void:
