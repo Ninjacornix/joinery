@@ -1,7 +1,7 @@
 extends SceneTree
-## The Review panel, headless: counts, Before/After only with pairs, a split picture for a
-## texture pair, loading and failure, the changed lines of text, details, optimistic
-## Accept/Discard with rollback, and results. Also
+## The Review panel, headless: counts, the stage and the rail, Before/After only with pairs, a
+## split picture for a texture pair, loading and failure, the changed lines of text, Details as
+## a drawer, optimistic Accept/Discard with rollback, and results. Also
 ## the settings page's Compact history, which asks in place before it runs.
 
 const PANEL := preload("res://addons/joinery/review_panel.gd")
@@ -151,42 +151,42 @@ func _check_image_pair(panel: PANEL) -> void:
 	)
 	_check(_tag(panel, "after").text == "After", "A changed asset is not marked new")
 	_check(
-		not _tag(panel, "after").button_pressed and not _tag(panel, "before").button_pressed,
-		"A texture pair opens as a split picture, neither side pressed"
+		_tag(panel, "compare").button_pressed and not _tag(panel, "before").button_pressed,
+		"A texture pair opens as a split picture: Both is pressed"
 	)
-	_check(_tags_on_their_sides(panel), "Each tag sits on its own half of the picture")
+	_check(_tag(panel, "compare").is_visible_in_tree(), "A split picture offers Both")
+	_check(_tags_on_their_sides(panel), "A tiny label names each half of the picture")
+	_check(_pill_in_corner(panel), "The Before/After pill floats in the stage's top corner")
 	var swipe: Control = panel._media.swipe()
 	_check(swipe.visible and is_equal_approx(swipe.split, 0.5), "The split starts in the middle")
 	_check(swipe.before != null and swipe.after != null, "Both sides are in the split")
 	var texture: Texture2D = panel._media.texture()
 	_check(texture != null and texture.get_size() == Vector2(80, 40), "The After image renders")
 	_check(panel._media.file_name() == "door_wood.png", "The shown file is named")
-	_check(not panel._details_scroll.visible, "Details start closed when there is media")
+	_check(not panel.details_open(), "Details start closed when there is media")
 	_tag(panel, "before").pressed.emit()
 	await _frames()
 	texture = panel._media.texture()
 	_check(texture != null and texture.get_size() == Vector2(64, 48), "Before swaps the image")
 	_check(is_equal_approx(swipe.split, 1.0), "Before slides the line all the way")
 	_check(_tag(panel, "before").button_pressed, "The Before tag shows it is in focus")
-	_tag(panel, "before").pressed.emit()
+	_check(panel._media.sides().tag_rects().is_empty(), "One side in focus needs no side labels")
+	_tag(panel, "compare").pressed.emit()
 	await _frames()
 	_check(
 		panel._media.side == "compare" and is_equal_approx(swipe.split, 0.5),
-		"Clicking the focused tag again goes back to the split"
+		"Both goes back to the split"
 	)
 	_tag(panel, "before").pressed.emit()
 	await _frames()
 	_check_rows(panel)
 	_check(panel._media.texture().get_width() > 0, "Headless image has a real size")
-	_check(panel._media.size.y > panel.size.y * 0.4, "The preview takes most of the height")
+	_check(panel._media.size.y > panel.size.y * 0.8, "The stage takes the full height")
 	_check(
 		panel._accept.get_global_rect().end.y <= panel.get_global_rect().end.y + 1,
 		"Accept stays inside the panel"
 	)
-	_check(
-		is_equal_approx(panel._accept.size.x, panel._reject.size.x),
-		"Accept and Discard share one width"
-	)
+	_check(panel._accept.size.x > panel._reject.size.x, "Accept is the larger action")
 	_check(
 		panel._reject.get_global_rect().position.x < panel._accept.get_global_rect().position.x,
 		"Accept sits on the trailing edge"
@@ -454,10 +454,11 @@ func _check_details(panel: PANEL) -> void:
 		panel._summary.facts_text() == "+2 −1 lines · 1 model · 1 script",
 		"Text facts: " + panel._summary.facts_text()
 	)
-	_check(not panel._details_scroll.visible, "Details stay closed with a preview")
+	_check(not panel.details_open(), "Details stay closed with a preview")
 	panel._details_button.button_pressed = true
 	await _frames()
-	_check(panel._details_scroll.visible, "The Details button opens them")
+	_check(panel.details_open(), "The Details button opens them")
+	_check_drawer(panel)
 	_check(panel._details.rows().size() == 2, "One row per changed file")
 	_check(panel._details.row_counts(0) == "+2 −1", "Line counts: " + panel._details.row_counts(0))
 	_check(panel._details.row_counts(1) == "", "A binary file has no line counts")
@@ -471,7 +472,7 @@ func _check_details(panel: PANEL) -> void:
 		[{"path": "scripts/door.gd", "change": "modified"}]
 	)
 	await _frames()
-	_check(not panel._details_scroll.visible, "Details stay closed with media")
+	_check(not panel.details_open(), "Details stay closed with media")
 	_check(panel._media.filmstrip().visible, "A picture and text make a filmstrip")
 	_check(panel._media.filmstrip().tiles().size() == 2, "One tile per item")
 	_check(panel._media.current_kind() == "image", "The picture comes first")
@@ -480,11 +481,15 @@ func _check_details(panel: PANEL) -> void:
 	_check(panel._media.current_kind() == "text", "A tile shows its item")
 	panel.show_file_review("Only a model went", "", [], [{"path": "a.glb", "change": "deleted"}])
 	await _frames()
-	_check(not panel._media.visible, "Nothing to preview hides the stage")
-	_check(panel._details_scroll.visible, "Details open when there is nothing to preview")
+	_check(not panel._media.visible, "Nothing to preview hides the media")
+	_check(panel.details_open(), "Details open when there is nothing to preview")
+	_check(
+		panel._drawer.fill and not panel._drawer.close_button().visible,
+		"…as the whole stage, with nothing to close"
+	)
 	panel.set_details_open(true)
 	await _frames()
-	_check(panel._details_scroll.visible, "The preference opens details")
+	_check(panel.details_open(), "The preference opens details")
 	panel.show_file_review(
 		"And again",
 		diff,
@@ -492,7 +497,7 @@ func _check_details(panel: PANEL) -> void:
 		[{"path": "scripts/door.gd", "change": "modified"}]
 	)
 	await _frames()
-	_check(panel._details_scroll.visible, "The details preference holds for the next review")
+	_check(panel.details_open(), "The details preference holds for the next review")
 	panel.set_details_open(false)
 
 
@@ -532,35 +537,69 @@ static func _tag(panel: PANEL, key: String) -> Button:
 	return panel._media.sides().tag(key)
 
 
-## The Before tag lies on the left half of the split picture, After on the right.
+## The Before label lies on the left half of the split picture, After on the right.
 static func _tags_on_their_sides(panel: PANEL) -> bool:
 	var swipe: Control = panel._media.swipe()
+	var sides: Control = panel._media.sides()
+	var rects: Array[Rect2] = sides.tag_rects()
+	if rects.size() != 2:
+		return false
 	var middle := swipe.get_global_rect().get_center().x
-	var before := _tag(panel, "before").get_global_rect()
-	var after := _tag(panel, "after").get_global_rect()
+	var before := Rect2(sides.get_global_rect().position + rects[0].position, rects[0].size)
+	var after := Rect2(sides.get_global_rect().position + rects[1].position, rects[1].size)
 	var inside := swipe.get_global_rect().grow(1.0)
 	return (
 		before.end.x <= middle
-		and after.position.x >= middle
+		and after.position.x >= middle - 1.0
 		and inside.encloses(before)
 		and inside.encloses(after)
 	)
 
 
-## Each row has one job: the title alone, Details on their own row, the actions alone on the
-## last row, trailing, with nothing beside them.
+## The pill sits in the top trailing corner of the stage, inside it.
+static func _pill_in_corner(panel: PANEL) -> bool:
+	var stage := panel._stage_area.get_global_rect()
+	var pill: Rect2 = panel._media.sides().pill().get_global_rect()
+	return (
+		stage.grow(1.0).encloses(pill)
+		and pill.get_center().x > stage.get_center().x
+		and pill.get_center().y < stage.get_center().y
+	)
+
+
+## Stage and rail: the media fills the leading side at the full height; the rail on the trailing
+## side holds the title over the facts, and the actions anchored at its foot: Details and the
+## other links on one line, then Discard and Accept, Accept on the trailing edge.
 func _check_rows(panel: PANEL) -> void:
+	var stage := panel._stage_area.get_global_rect()
+	var rail := panel._rail.get_global_rect()
+	_check(stage.end.x <= rail.position.x, "The stage leads, the rail trails")
+	_check(stage.size.x > rail.size.x * 1.8, "The stage takes most of the width")
+	_check(absf(stage.size.y - rail.size.y) <= 1.0, "Both take the full height")
 	var title := panel._title.get_global_rect()
-	_check(panel._header.get_child_count() == 1, "The title row holds only the title")
-	_check(title.end.y <= panel._media.get_global_rect().position.y + 1, "The title sits above")
+	_check(rail.encloses(title), "The title is in the rail")
 	var details := panel._details_button.get_global_rect()
 	var footer := panel._footer.get_global_rect()
-	_check(details.end.y <= footer.position.y + 1, "Details have their own row above the actions")
-	_check(panel._details_button.get_parent() != panel._footer, "Details are not in the actions")
+	_check(title.end.y <= footer.position.y, "The title sits above the actions")
+	_check(footer.grow(1.0).encloses(details), "Details are a link beside the actions")
+	_check(
+		details.end.y <= panel._accept.get_global_rect().position.y + 1,
+		"…on the line above Discard and Accept"
+	)
+	_check(absf(footer.end.y - rail.end.y) <= 1.0, "The actions are anchored at the rail's foot")
 	_check(
 		absf(panel._accept.get_global_rect().end.x - footer.end.x) <= 1.0,
 		"Accept ends the actions row"
 	)
+
+
+## Details slide over the stage from the rail's side: the stage and the rail stay put.
+func _check_drawer(panel: PANEL) -> void:
+	var drawer := panel._drawer.get_global_rect()
+	var stage := panel._stage_area.get_global_rect()
+	_check(stage.grow(1.0).encloses(drawer), "The drawer lies over the stage")
+	_check(absf(drawer.end.x - stage.end.x) <= 1.0, "…against the rail's side")
+	_check(drawer.size.x < stage.size.x, "…leaving part of the stage in view")
 
 
 func _check_applying(panel: PANEL) -> void:

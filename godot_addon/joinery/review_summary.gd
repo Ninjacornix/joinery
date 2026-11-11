@@ -1,31 +1,38 @@
 @tool
 extends VBoxContainer
-## The lines under the review's picture: what changed in plain words ("Door 20% wider · wood
-## darker · 2 files"), the checks as one quiet status ("Checks passed"), and the reviewer's
-## notes as one line when there are any (the worst first, "· 2 more"). Each is one line that
-## ends in an ellipsis; the full text is in its tooltip and in Details ([method info]).
+## The review rail's glance under the title: what changed in plain words ("Door 20% wider ·
+## wood darker · 2 files", up to two lines), the checks as small chips ("Checks passed",
+## "Reviewer checking…", "1 warning"), and the reviewer's worst note as one quiet line when
+## there are any ("· 2 more"). The full texts are in tooltips and in Details ([method info]).
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const GLANCE := preload("review_glance.gd")
-## Severity -> [icon, tint role].
+## Severity -> [icon, tint role, word].
 const NOTE_LOOK := {
-	0: ["chats", "text_muted"],
-	1: ["warning", "text_muted"],
-	2: ["error", "danger"],
+	0: ["", "text_muted", "note"],
+	1: ["warning", "text_muted", "warning"],
+	2: ["error", "danger", "blocker"],
 }
+## Lines the facts take at most before they end in an ellipsis.
+const FACT_LINES := 2
 
 var _review: Dictionary = {}
 var _measured: Array = []
 var _notes: Array[Dictionary] = []
 var _reviewer := ""
 var _facts: Label
-var _status: HBoxContainer
+var _facts_line := ""
+var _chips: HFlowContainer
+var _status: PanelContainer
 var _status_icon: TextureRect
 var _status_text: Label
+var _reviewer_chip: PanelContainer
+var _reviewer_text: Label
+## One chip per note severity present: {severity: chip}.
+var _note_chips := {}
 var _notes_row: HBoxContainer
-var _notes_icon: TextureRect
 var _notes_text: Label
 var _info: VBoxContainer
 var _info_checks: Label
@@ -33,22 +40,43 @@ var _info_notes: VBoxContainer
 
 
 func _init() -> void:
-	theme_type_variation = "JoineryTight"
+	theme_type_variation = "JoineryStack"
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	accessibility_name = "What changed"
-	_facts = _line("", "")
+	_facts = UI.label("", "", true)
+	_facts.max_lines_visible = FACT_LINES
+	_facts.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_facts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_facts.mouse_filter = Control.MOUSE_FILTER_PASS
 	_facts.accessibility_name = "What changed"
 	add_child(_facts)
-	_status = _row()
-	_status_icon = _glyph("success")
-	_status.add_child(_status_icon)
-	_status_text = _line("", "JoineryCaption")
-	_status.add_child(_status_text)
-	_notes_row = _row()
+	_chips = HFlowContainer.new()
+	_chips.name = "Checks"
+	_chips.accessibility_name = "Checks"
+	add_child(_chips)
+	var status := _chip("success", "success")
+	_status = status[0]
+	_status_icon = status[1]
+	_status_text = status[2]
+	var reviewer := _chip("", "text_muted")
+	_reviewer_chip = reviewer[0]
+	_reviewer_text = reviewer[2]
+	_reviewer_chip.hide()
+	for severity: int in [2, 1, 0]:
+		var look: Array = NOTE_LOOK[severity]
+		var made := _chip(look[0], look[1])
+		(made[0] as Control).hide()
+		_note_chips[severity] = made
+	_notes_row = HBoxContainer.new()
+	_notes_row.theme_type_variation = "JoineryRowTight"
 	_notes_row.accessibility_name = "Reviewer notes"
-	_notes_icon = _glyph("warning")
-	_notes_row.add_child(_notes_icon)
-	_notes_text = _line("", "JoineryCaption")
+	add_child(_notes_row)
+	# The chips carry the severity; the line only says what the worst note is.
+	_notes_text = UI.label("", "JoineryCaption", true)
+	_notes_text.max_lines_visible = FACT_LINES
+	_notes_text.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_notes_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_notes_text.mouse_filter = Control.MOUSE_FILTER_PASS
 	_notes_row.add_child(_notes_text)
 	_notes_row.hide()
 	_info = VBoxContainer.new()
@@ -92,16 +120,20 @@ func update(extra: Dictionary) -> void:
 	for key: String in ["facts", "checks"]:
 		if extra.has(key):
 			_review[key] = extra[key]
+	var fresh := false
 	if extra.has("review_notes"):
 		var arrived := GLANCE.sorted_notes(extra["review_notes"])
-		var fresh := arrived.size() > _notes.size()
+		fresh = arrived.size() > _notes.size()
 		_notes = arrived
-		if fresh and is_inside_tree():
-			UI_MOTION.fade_in(_notes_row)
 	var status := _status_of(extra)
 	if not status.is_empty() or extra.has("reviewer_status"):
 		_reviewer = status
 	_sync()
+	if fresh and is_inside_tree():
+		UI_MOTION.fade_in(_notes_row)
+		for chip: Array in _note_chips.values():
+			if (chip[0] as Control).visible:
+				UI_MOTION.fade_in(chip[0])
 
 
 ## Forget the review.
@@ -111,17 +143,29 @@ func clear() -> void:
 
 ## The facts line as shown.
 func facts_text() -> String:
-	return _facts.text
+	return _facts_line
 
 
-## The status line as shown ("Checks passed", "Checks passed · Reviewer checking…").
+## The checks as shown, chip by chip ("Checks passed", "Checks passed · Reviewer checking…").
 func status_text() -> String:
+	if _reviewer_chip.visible:
+		return _status_text.text + " · " + _reviewer_text.text
 	return _status_text.text
 
 
 ## The notes line as shown ("" without notes).
 func notes_text() -> String:
 	return _notes_text.text if _notes_row.visible else ""
+
+
+## The note chips as shown, worst first ("1 warning", "2 notes").
+func note_chips() -> Array[String]:
+	var words: Array[String] = []
+	for severity: int in [2, 1, 0]:
+		var chip: Array = _note_chips[severity]
+		if (chip[0] as Control).visible:
+			words.append((chip[2] as Label).text)
+	return words
 
 
 ## The reviewer's notes, worst first.
@@ -146,41 +190,53 @@ func has_info() -> bool:
 
 func _sync() -> void:
 	var line := GLANCE.facts_line(_review, _measured)
-	_facts.text = line
+	_facts_line = line
+	# A wrapped line never starts with its separator: the dot stays with the fact before it.
+	_facts.text = line.replace(" · ", "\u00a0· ")
 	_facts.tooltip_text = line
 	_facts.visible = not line.is_empty()
-	var status := GLANCE.checks_text(_review)
-	var reviewer := GLANCE.reviewer_text(_reviewer)
-	_status_text.text = status if reviewer.is_empty() else status + " · " + reviewer
+	_status_text.text = GLANCE.checks_text(_review)
 	var detail := GLANCE.checks_detail(_review)
-	_status_text.tooltip_text = detail
 	_status.tooltip_text = detail
 	_status.visible = not _review.is_empty()
-	var summary := GLANCE.notes_line(_notes)
-	_notes_text.text = summary
-	_notes_row.visible = not summary.is_empty()
+	var reviewer := GLANCE.reviewer_text(_reviewer)
+	_reviewer_text.text = reviewer
+	_reviewer_chip.visible = not reviewer.is_empty() and not _review.is_empty()
+	_reviewer_chip.tooltip_text = "The reviewer agent reads the change before you decide"
+	var counts := {0: 0, 1: 0, 2: 0}
+	for note: Dictionary in _notes:
+		counts[GLANCE.severity(note)] += 1
 	var words := PackedStringArray()
 	for note: Dictionary in _notes:
 		words.append(_note_words(note))
+	for severity: int in [2, 1, 0]:
+		var chip: Array = _note_chips[severity]
+		var count: int = counts[severity]
+		(chip[0] as Control).visible = count > 0
+		var word: String = NOTE_LOOK[severity][2]
+		(chip[2] as Label).text = "%d %s%s" % [count, word, "" if count == 1 else "s"]
+		(chip[0] as Control).tooltip_text = "\n".join(words)
+	_chips.visible = _status.visible or _reviewer_chip.visible or not _notes.is_empty()
+	var summary := GLANCE.notes_line(_notes)
+	_notes_text.text = summary
 	_notes_text.tooltip_text = "\n".join(words)
+	_notes_row.visible = not summary.is_empty()
 	_info_checks.text = detail
 	_info_checks.visible = not detail.is_empty()
 	for child: Node in _info_notes.get_children():
 		_info_notes.remove_child(child)
 		child.queue_free()
 	for note: Dictionary in _notes:
-		var row := _row(_info_notes)
+		var row := HBoxContainer.new()
+		row.theme_type_variation = "JoineryRowTight"
+		_info_notes.add_child(row)
 		var look: Array = NOTE_LOOK[GLANCE.severity(note)]
-		var icon := _glyph(look[0])
+		var icon := _glyph(look[0] if not str(look[0]).is_empty() else "chats")
 		icon.set_meta("role", look[1])
 		row.add_child(icon)
 		var text := UI.label(_note_words(note), "JoineryCaption", true)
 		text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(text)
-	if not _notes.is_empty():
-		var look: Array = NOTE_LOOK[GLANCE.severity(_notes[0])]
-		UI.bind_icon(_notes_icon, look[0], "texture")
-		_notes_icon.set_meta("role", look[1])
 	_tint()
 
 
@@ -201,17 +257,34 @@ static func _status_of(event: Dictionary) -> String:
 func _tint() -> void:
 	if not is_inside_tree():
 		return
-	_status_icon.self_modulate = UI_THEME.color(self, "success")
-	for icon: Node in [_notes_icon] + _info_notes.find_children("*", "TextureRect", true, false):
+	var icons: Array = _info_notes.find_children("*", "TextureRect", true, false)
+	icons.append_array(_chips.find_children("*", "TextureRect", true, false))
+	for icon: Node in icons:
 		var role := str(icon.get_meta("role", "text_muted"))
 		(icon as TextureRect).self_modulate = UI_THEME.color(self, role)
 
 
-func _row(parent: Control = self) -> HBoxContainer:
+## A status chip in the checks row: [the chip, its icon (or null), its label].
+func _chip(icon_name: String, role: String) -> Array:
+	var chip := PanelContainer.new()
+	chip.theme_type_variation = "JoineryStatusChip"
+	chip.mouse_filter = Control.MOUSE_FILTER_PASS
+	_chips.add_child(chip)
 	var row := HBoxContainer.new()
 	row.theme_type_variation = "JoineryRowTight"
-	parent.add_child(row)
-	return row
+	row.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	chip.add_child(row)
+	var icon: TextureRect = null
+	if not icon_name.is_empty():
+		icon = _glyph(icon_name)
+		icon.set_meta("role", role)
+		row.add_child(icon)
+	var words := UI.label("", "JoineryCaption")
+	words.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
+	words.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	words.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(words)
+	return [chip, icon, words]
 
 
 func _glyph(icon_name: String) -> TextureRect:
@@ -221,12 +294,3 @@ func _glyph(icon_name: String) -> TextureRect:
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	UI.bind_icon(icon, icon_name, "texture")
 	return icon
-
-
-## A one-line label that ends in an ellipsis and keeps the full text in its tooltip.
-static func _line(text: String, variation: String) -> Label:
-	var label := UI.label(text, variation)
-	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-	label.mouse_filter = Control.MOUSE_FILTER_PASS
-	return label

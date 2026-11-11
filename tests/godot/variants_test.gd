@@ -2,8 +2,8 @@ extends SceneTree
 ## Variants side by side: "/variants", "Try 3 ways" and "Try other ways" start them; the ways
 ## show as one strip in the sidebar (no task card each), with pictures, a sound to play and
 ## changed lines; Use this, Mix and Discard all send one line each; a refused pick puts the
-## strip back; the pick leaves one transcript line; the Review tab shows the same strip above
-## a way's full review.
+## strip back; the pick leaves one transcript line; the Review tab shows the same strip in the
+## rail of a way's full review.
 
 const DOCK_PATH := "res://addons/joinery/journeyman_dock.gd"
 const JOB_SOURCE := """extends RefCounted
@@ -249,7 +249,7 @@ func _run() -> void:
 	)
 	_check(line == "A wooden door: kept 2 · slim and clean. The other ways were discarded.", line)
 
-	# The Review tab shows the same strip above a way's full review.
+	# The Review tab shows the same strip in the rail of a way's full review.
 	var tab: Control = load("res://addons/joinery/review_tab.gd").new()
 	tab.set("cli_enabled", false)
 	root.add_child(tab)
@@ -273,6 +273,11 @@ func _run() -> void:
 	var review_strip: Control = tab.get("_tasks").get("strip")
 	_check(review_strip != null and review_strip.is_visible_in_tree(), "The review shows the strip")
 	_check((review_strip.call("ways") as Array).size() == 3, "…with every way")
+	var way_panel: Control = tab.get("_tasks").get("panel")
+	_check(
+		(way_panel.call("rail_slot") as Control).is_ancestor_of(review_strip),
+		"…in the rail beside the way's review"
+	)
 	var shown: Control = review_strip.call("way", "r2")
 	_check(bool(shown.get("chosen")), "The way on show is ringed")
 	(review_strip.call("way", "r3").get("use_button") as Button).pressed.emit()
@@ -282,6 +287,9 @@ func _run() -> void:
 	# main review, under the same ways.
 	var main: Control = load("res://addons/joinery/review_panel.gd").new()
 	tab.call("set_detail", main)
+	main.call(
+		"show_file_review", "Door, as made", "", [], [{"path": "a.png", "change": "modified"}]
+	)
 	tab.call("show_live", {"transaction_id": "lx", "summary": "Door, as made"})
 	var kept: Dictionary = _group(["in_review", "in_review", "in_review"])
 	kept["group_id"] = "g3"
@@ -303,7 +311,8 @@ func _run() -> void:
 	(made.get("_frame") as Button).pressed.emit()
 	_check(bool(tab.get("showing_detail")) and main.visible, "As made opens the main review")
 	_check(not (tab.get("_tasks").get("panel") as Control).visible, "…in place of the way's")
-	_check(review_strip.is_visible_in_tree(), "…under the same ways")
+	_check(review_strip.is_visible_in_tree(), "…beside the same ways")
+	_check((main.call("rail_slot") as Control).is_ancestor_of(review_strip), "…in its rail")
 	_check(bool(made.get("chosen")) and not bool(shown.get("chosen")), "…As made ringed")
 	(review_strip.call("way", "r2").get("_frame") as Button).pressed.emit()
 	_check(not main.visible and bool(shown.get("chosen")), "A task way swaps back")

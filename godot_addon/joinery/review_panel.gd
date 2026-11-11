@@ -1,19 +1,26 @@
 @tool
 extends VBoxContainer
-## The Review panel: answers "is this right?" in one look. Each row has one job, top to
-## bottom: the request as the title; one before/after view that takes the remaining height
-## (review_media.gd: a split picture, the model in live 3D, A/B audio, the changed lines; a
-## filmstrip when there are several items) with its Before/After tags on it, the one switch
-## between the sides; one line of facts, the checks as one quiet status and the reviewer's
-## notes as one line when there are any (review_summary.gd); the Details disclosure; and the
-## actions, Discard / Accept on the trailing edge (with "Open in editor" leading for a scene
-## edit). Details hold the files with their diffs, the checks that ran and every note; they
-## stay closed unless asked for. Discard only throws the proposed change away: the user's
-## files were never touched, and the panel says so.
+## The Review panel: answers "is this right?" in one look. Two parts (review_layout.gd):
 ##
-## Keyboard, with focus anywhere in the review: Enter accepts, Backspace or Delete discards,
-## A or B flips between before and after. The media takes no focus until it is clicked; then
-## an animation also takes Space (play/pause) and Left/Right (a frame).
+## - The stage, about 70% on the leading side at the full height: the change itself, edge to
+##   edge on its own background (review_media.gd: a split picture, the model in live 3D,
+##   clips, A/B audio, the changed lines; a filmstrip when there are several items), with the
+##   Before | After | Both pill in its corner and an animation's transport floating over its
+##   foot. Music layers sit under a track's waveform (review_music.gd).
+## - The rail on the trailing side (review_rail.gd): "2 of 5" with previous and next and All
+##   approvals; the request as the title; one line of facts and the checks as chips
+##   (review_summary.gd); Details; a request's other ways; and, anchored at the foot, Ask for
+##   changes, Discard and a large Accept.
+##
+## Narrow (the sidebar's width), the rail stacks under the stage. Details slide over the stage
+## as a drawer (review_drawer.gd) with the files and their diffs, the checks that ran and every
+## note; closed unless asked for, or when there is nothing else to show. Discard only throws
+## the proposed change away: the user's files were never touched, and the panel says so.
+##
+## Keyboard, once the review has the focus (a click in it; it never takes the focus itself): A
+## accepts, D discards, B flips between before and after, Left and Right go to the previous or
+## next change waiting, Escape closes Details. With the media clicked, an animation takes Space
+## (play/pause) and Left/Right (a frame) instead.
 ##
 ## Deciding is optimistic: pressing Accept or Discard collapses the review into one line
 ## ("Change accepted", with dots while the commit runs) at once. [method show_result] confirms
@@ -28,6 +35,13 @@ signal reject_pressed
 signal show_requested
 ## What the review shows at a glance changed (a render arrived, notes came in).
 signal glance_changed
+## All approvals: back to the list (the Review tab).
+signal list_requested
+## Previous (-1) or next (1) change waiting (the Review tab).
+signal step_requested(step: int)
+## Ask for changes: the chat should take a message about this change; [param path] is the
+## changed asset ("" for a scene edit). Shown only when something listens.
+signal revise_requested(path: String)
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
@@ -38,14 +52,20 @@ const MUSIC := preload("review_music.gd")
 const DETAILS := preload("review_details.gd")
 const SUMMARY := preload("review_summary.gd")
 const SNAPSHOT := preload("review_snapshot.gd")
+const RAIL := preload("review_rail.gd")
+const DRAWER := preload("review_drawer.gd")
+const LAYOUT := preload("review_layout.gd")
 const ACCEPTED := "Change accepted"
 const REJECTED := "Discarded. Your files were not touched."
 const SCENE_NOTE := "The change is shown in the viewport."
-## Minimum width of Accept and Discard, in em; narrow panels shrink them to their text.
-const BUTTON_EM := 8.0
-## Open Details grow with their rows up to this many control heights, then scroll; the
-## scroll bar shows only past that.
-const DETAILS_ROWS := 6
+## Least width of Discard, in em.
+const BUTTON_EM := 6.0
+## The stage's least height: this share of the panel's width, between STAGE_MIN and STAGE_MAX
+## large control heights, so a wide bottom panel opens tall enough to judge the change.
+const STAGE_SHARE := 0.5
+const STAGE_MIN := 2.0
+const STAGE_MAX := 10.0
+const STAGE_NARROW_SHARE := 0.6
 ## Opacity of a disabled Discard: it keeps its fill and shape, only dimmed.
 const DISABLED_ALPHA := 0.5
 
@@ -54,27 +74,30 @@ var pending := false
 var _state := "empty"
 var _serial := 0
 var _details_pref := false
-var _header: HBoxContainer
+## The rail's title block (the landing spot of the chat card's entrance).
+var _header: VBoxContainer
 var _title: Label
 var _stage: MarginContainer
-var _body: VBoxContainer
+var _body: LAYOUT
+var _rail: RAIL
+var _stage_area: Control
 var _media: MEDIA
 var _music: MUSIC
 var _scene_note: Label
 var _summary: SUMMARY
 var _details_button: Button
-## "Open in editor" for a scene edit: selects the changed nodes in the live scene.
-var _open_link: Button
+var _drawer: DRAWER
 var _details_scroll: ScrollContainer
-var _gutter: MarginContainer
 var _details: DETAILS
-var _spacer: Control
+var _open_link: Button
+var _revise: Button
+var _revise_path := ""
 var _error_row: HBoxContainer
 var _error_icon: TextureRect
 var _error: Label
 ## True after a decision failed: Accept reads "Try again" until the next decision.
 var _failed := false
-var _footer: HBoxContainer
+var _footer: VBoxContainer
 var _reject: Button
 var _accept: Button
 var _applying: HBoxContainer
@@ -97,7 +120,6 @@ func _init() -> void:
 	# A click anywhere in the review gives it focus, so its keys work.
 	focus_mode = Control.FOCUS_CLICK
 	accessibility_name = "Review the proposed change"
-	_build_header()
 	_stage = MarginContainer.new()
 	_stage.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	add_child(_stage)
@@ -117,7 +139,7 @@ func _notification(what: int) -> void:
 		_queue_sizes()
 		_tint_outcome()
 	elif what == NOTIFICATION_RESIZED:
-		_queue_sizes()
+		_size_stage()
 
 
 ## Called by UI_THEME.watch after a live re-theme.
@@ -148,6 +170,8 @@ func show_scene_review(summary: String, count: int, media: Array = []) -> void:
 	_summary.show_review({"scene_count": count})
 	_scene_note.visible = not _media.visible
 	_open_link.visible = SNAPSHOT.can_open()
+	_revise_path = ""
+	_rail.sync_links()
 	_sync_details()
 	_set_details(false, false)
 	_present(arriving)
@@ -172,6 +196,8 @@ func show_file_review(
 	_music.show_change(diff, media, listed)
 	_details.show_changes(diff, listed)
 	_summary.show_review({"changes": listed, "diff": diff})
+	_revise_path = _asset_path(media, listed)
+	_rail.sync_links()
 	_measure()
 	_sync_details()
 	_set_details(_details_pref or not _media.visible, false)
@@ -180,11 +206,6 @@ func show_file_review(
 
 ## The review event's extra fields: the agent's "facts", the "checks" that ran, the reviewer's
 ## "review_notes" and "reviewer_status". Missing keys keep what is shown.
-## Keep the picture shorter while a row of ways (the variant strip) sits above the panel.
-func set_under_ways(under: bool) -> void:
-	_media.frame_max = MEDIA.FRAME_UNDER_WAYS if under else MEDIA.FRAME_MAX
-
-
 func show_glance(extra: Dictionary) -> void:
 	if _state == "empty":
 		return
@@ -220,9 +241,25 @@ func request_show() -> void:
 	show_requested.emit()
 
 
-## Flip the preview between before and after (A or B). Returns the side now on show.
+## Flip the preview between before and after (B). Returns the side now on show.
 func flip() -> String:
 	return _media.flip()
+
+
+## Where this change sits among those waiting: [param index] (0-based) of [param total]. The
+## Review tab sets it; a negative total hides the row.
+func set_queue(index: int, total: int) -> void:
+	_rail.set_queue(index, total)
+
+
+## Where a request's ways go (variant_strip.gd), in the rail.
+func rail_slot() -> Control:
+	return _rail.slot
+
+
+## True when Details are open.
+func details_open() -> bool:
+	return _drawer.open and _drawer.visible
 
 
 ## Disable both buttons while the decision is applied; Accept shows dots and "Applying…".
@@ -237,12 +274,10 @@ func set_applying(on: bool) -> void:
 	_accept.tooltip_text = (
 		"Applying the change…"
 		if on
-		else ("Try keeping this change again (Enter)" if _failed else "Keep this change (Enter)")
+		else ("Try keeping this change again (A)" if _failed else "Keep this change (A)")
 	)
 	_reject.tooltip_text = (
-		"Applying the change…"
-		if on
-		else "Throw this change away. Your files stay as they are. (Delete)"
+		"Applying the change…" if on else "Throw this change away. Your files stay as they are. (D)"
 	)
 	# A disabled Discard keeps its fill and height, only dimmed, so the pair still reads as two
 	# buttons (the theme's disabled secondary has no fill).
@@ -313,6 +348,7 @@ func clear() -> void:
 	_details.clear_changes()
 	_summary.clear()
 	_title.text = ""
+	_set_details(false, false)
 	_set_error("")
 
 
@@ -326,13 +362,13 @@ func set_details_open(open: bool) -> void:
 		_set_details(open or not _media.visible, true)
 
 
-## The header, as the landing spot of a shared-element transition from the chat change card.
+## The title block, as the landing spot of a shared-element transition from the chat card.
 func morph_target() -> Control:
 	return _header
 
 
 ## Shared-element entrance (motion rules 7, 9, 20): a surface shaped like the chat change
-## card at [param card_rect] (global rect, same window) travels on an arc into the header,
+## card at [param card_rect] (global rect, same window) travels on an arc into the title,
 ## which fades in as it lands. Call it right after a show_* method with the card's
 ## get_global_rect(). Instant when motion is off.
 func arrive_from(card_rect: Rect2) -> void:
@@ -363,7 +399,7 @@ func arrive_from(card_rect: Rect2) -> void:
 	var tween := ghost.create_tween()
 	tween.set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
 	tween.tween_method(travel, 0.0, 1.0, UI_MOTION.duration("base") * 1.5)
-	# On landing the ghost hands over to the header: overlap, never a blank frame.
+	# On landing the ghost hands over to the title: overlap, never a blank frame.
 	tween.tween_property(ghost, "modulate:a", 0.0, UI_MOTION.duration("fast"))
 	tween.parallel().tween_property(_header, "modulate:a", 1.0, UI_MOTION.duration("fast"))
 	tween.tween_callback(ghost.queue_free)
@@ -378,18 +414,45 @@ func _input(event: InputEvent) -> void:
 		return
 	if key.ctrl_pressed or key.alt_pressed or key.meta_pressed or key.shift_pressed:
 		return
-	if not _has_focus_inside():
-		return
-	match key.keycode:
-		KEY_ENTER, KEY_KP_ENTER:
+	if _has_focus_inside() and _on_key(key.keycode):
+		get_viewport().set_input_as_handled()
+
+
+## Act on [param code] with the focus in the review. True when the key was used.
+func _on_key(code: Key) -> bool:
+	match code:
+		KEY_A:
 			_decide(true)
-		KEY_BACKSPACE, KEY_DELETE:
+		KEY_D:
 			_decide(false)
-		KEY_A, KEY_B:
+		KEY_B:
 			flip()
+		KEY_ESCAPE:
+			if not details_open() or _drawer.fill:
+				return false
+			_set_details(false, true)
+		KEY_LEFT, KEY_RIGHT:
+			# A clicked animation steps a frame instead (review_transport.gd), the filmstrip
+			# moves between its tiles.
+			var focused := get_viewport().gui_get_focus_owner()
+			var strip := _media.filmstrip()
+			var stepping := _media.transport().visible and _media.is_ancestor_of(focused)
+			stepping = stepping or focused == strip or strip.is_ancestor_of(focused)
+			if stepping or not _rail.has_queue():
+				return false
+			step_requested.emit(-1 if code == KEY_LEFT else 1)
 		_:
-			return
-	get_viewport().set_input_as_handled()
+			return false
+	return true
+
+
+## A click anywhere in the review (not on a control that takes the focus itself) gives it the
+## keys. Nothing else ever moves the focus here.
+func _gui_input(event: InputEvent) -> void:
+	var click := event as InputEventMouseButton
+	if click != null and click.pressed and click.button_index == MOUSE_BUTTON_LEFT:
+		if not _has_focus_inside():
+			grab_focus()
 
 
 ## True when the focus is on the panel or inside it, and not in a field that takes text.
@@ -405,129 +468,68 @@ func _has_focus_inside() -> bool:
 # --- Building ----------------------------------------------------------------------------------
 
 
-func _build_header() -> void:
-	_header = HBoxContainer.new()
-	_header.theme_type_variation = "JoineryRow"
-	add_child(_header)
-	_title = UI.label("", "JoineryBodyLarge")
-	_title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_title.mouse_filter = Control.MOUSE_FILTER_PASS
-	_header.add_child(_title)
-
-
 func _build_body() -> void:
-	_body = VBoxContainer.new()
-	_body.theme_type_variation = "JoineryStack"
-	_body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_rail = RAIL.new()
+	_rail.list_requested.connect(func() -> void: list_requested.emit())
+	_rail.step_requested.connect(func(step: int) -> void: step_requested.emit(step))
+	_stage_area = Control.new()
+	_stage_area.name = "Stage"
+	_stage_area.clip_contents = true
+	_stage_area.mouse_filter = Control.MOUSE_FILTER_PASS
+	_body = LAYOUT.new(_stage_area, _rail)
+	_body.narrow_changed.connect(
+		func(_narrow: bool) -> void:
+			_queue_sizes()
+			_size_stage.call_deferred()
+	)
 	_stage.add_child(_body)
+	var column := VBoxContainer.new()
+	column.theme_type_variation = "JoineryStack"
+	column.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	column.mouse_filter = Control.MOUSE_FILTER_PASS
+	_stage_area.add_child(column)
+	# Only the height: the stage's width is the layout's to give.
+	column.minimum_size_changed.connect(
+		func() -> void: _stage_area.custom_minimum_size.y = column.get_combined_minimum_size().y
+	)
 	_media = MEDIA.new()
 	_media.hide()
-	_body.add_child(_media)
+	_media.set_room(_stage_area)
+	column.add_child(_media)
 	_music = MUSIC.new()
-	_body.add_child(_music)
+	column.add_child(_music)
 	_scene_note = UI.label(SCENE_NOTE, "JoineryCaption", true)
+	_scene_note.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_scene_note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_scene_note.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_scene_note.hide()
-	_body.add_child(_scene_note)
-	_summary = SUMMARY.new()
-	_body.add_child(_summary)
-	_build_details_button()
-	_details_scroll = ScrollContainer.new()
-	_details_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_details_scroll.size_flags_vertical = Control.SIZE_FILL
-	_details_scroll.follow_focus = true
-	_details_scroll.accessibility_name = "Details"
-	_details_scroll.hide()
-	UI_MOTION.rubber_band(_details_scroll)
-	_body.add_child(_details_scroll)
-	# The gutter keeps the scroll bar off the line counts; without a scroll bar it is dropped
-	# so the counts share the right edge of the buttons (see _fit_details).
-	_gutter = MarginContainer.new()
-	_gutter.theme_type_variation = "JoineryGutter"
-	_gutter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_gutter.minimum_size_changed.connect(_fit_details)
-	_details_scroll.add_child(_gutter)
-	var details_box := VBoxContainer.new()
-	details_box.theme_type_variation = "JoineryStack"
-	_gutter.add_child(details_box)
-	details_box.add_child(_summary.info())
+	column.add_child(_scene_note)
+	_drawer = DRAWER.new()
+	_drawer.attach(_stage_area)
+	_drawer.close_requested.connect(func() -> void: _set_details(false, true))
+	_details_scroll = _drawer.scroll
+	_drawer.body.add_child(_rail.summary.info())
 	_details = DETAILS.new()
-	details_box.add_child(_details)
-	# Keeps the buttons at the bottom when there is neither a preview nor open details.
-	_spacer = Control.new()
-	_spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_body.add_child(_spacer)
-	_error_row = HBoxContainer.new()
-	_error_row.theme_type_variation = "JoineryRowTight"
-	_error_row.hide()
-	_body.add_child(_error_row)
-	_error_icon = TextureRect.new()
-	_error_icon.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
-	_error_icon.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	_error_icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	UI.bind_icon(_error_icon, "error", "texture")
-	_error_row.add_child(_error_icon)
-	_error = UI.label("", "JoineryError", true)
-	_error.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_error.hide()
-	_error_row.add_child(_error)
-	_build_footer()
-
-
-## Details sit on their own row above the actions: their own job, never squeezing Accept.
-func _build_details_button() -> void:
-	# A flat disclosure, not a tab-like button: no fill open or closed, muted ink that
-	# brightens on hover, and no padding, so its chevron sits on the content edge.
-	_details_button = UI.quiet("Details")
-	_details_button.theme_type_variation = "JoinerySectionButton"
-	_details_button.toggle_mode = true
-	_details_button.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	_details_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	_details_button.accessibility_name = "Show or hide the files, checks and notes"
-	_details_button.tooltip_text = "Files, checks and notes"
-	UI.bind_icon(_details_button, "disclosure_closed")
-	UI.bind_height(_details_button, "sm")
+	_drawer.body.add_child(_details)
+	_header = _rail.head
+	_title = _rail.title
+	_summary = _rail.summary
+	_details_button = _rail.details_button
 	_details_button.toggled.connect(func(open: bool) -> void: _set_details(open, true))
-	_body.add_child(_details_button)
-
-
-func _build_footer() -> void:
-	_footer = HBoxContainer.new()
-	_footer.theme_type_variation = "JoineryStack"
-	_body.add_child(_footer)
-	_open_link = UI.link("Open in editor")
-	_open_link.tooltip_text = "Select the changed nodes in the scene"
-	_open_link.accessibility_name = "Open the change in the editor: select the changed nodes"
+	_error_row = _rail.error_row
+	_error_icon = _rail.error_icon
+	_error = _rail.error
+	_footer = _rail.actions
+	_open_link = _rail.open_link
 	_open_link.pressed.connect(SNAPSHOT.open_in_editor)
-	_open_link.hide()
-	_footer.add_child(_open_link)
-	var push := Control.new()
-	push.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	push.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_footer.add_child(push)
-	_reject = UI.secondary("Discard")
-	_reject.accessibility_name = "Discard this change"
+	_revise = _rail.revise
+	_revise.pressed.connect(func() -> void: revise_requested.emit(_revise_path))
+	_reject = _rail.reject
 	_reject.pressed.connect(_decide.bind(false))
-	_accept = UI.primary("Accept")
+	_accept = _rail.accept
 	_accept.pressed.connect(_decide.bind(true))
-	# Follow the editor's OK/Cancel order: the primary action sits on the trailing edge
-	# unless the platform puts OK first.
-	var ordered := [_accept, _reject] if DisplayServer.get_swap_cancel_ok() else [_reject, _accept]
-	for button: Button in ordered:
-		_footer.add_child(button)
-	_applying = HBoxContainer.new()
-	_applying.theme_type_variation = "JoineryRowTight"
-	_applying.alignment = BoxContainer.ALIGNMENT_CENTER
-	_applying.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_applying.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_applying.hide()
-	_accept.add_child(_applying)
-	_applying_dots = INDICATOR.new()
-	_applying.add_child(_applying_dots)
-	var label := _fixed(UI.label("Applying…"))
-	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_applying.add_child(label)
+	_applying = _rail.applying
+	_applying_dots = _rail.applying_dots
 	set_applying(false)
 
 
@@ -574,7 +576,6 @@ func _set_state(state: String) -> void:
 	pending = state in ["review", "deciding"]
 	var idle := state == "empty"
 	_empty.visible = idle
-	_header.visible = not idle
 	_stage.visible = not idle
 
 
@@ -584,9 +585,11 @@ func _next_serial() -> int:
 
 
 ## Reset to a fresh review. Returns true when the panel was not already showing one, so the
-## caller animates the entrance.
+## caller animates the entrance; a review replacing another crossfades over it.
 func _begin(summary: String) -> bool:
 	var arriving := _state in ["empty", "result"]
+	if not arriving and _title.text != summary:
+		LAYOUT.ghost(_body, self)
 	_next_serial()
 	_set_state("review")
 	_reset_stage()
@@ -595,6 +598,7 @@ func _begin(summary: String) -> bool:
 	_set_error("")
 	_title.text = summary
 	_title.tooltip_text = summary
+	_revise.visible = not revise_requested.get_connections().is_empty()
 	return arriving
 
 
@@ -611,9 +615,6 @@ func _present(arriving: bool) -> void:
 	if arriving:
 		UI_MOTION.fade_in(self)
 		UI_MOTION.reveal(self, "down")
-	# Keys work at once unless the user is busy elsewhere (typing in the chat).
-	if is_visible_in_tree() and get_viewport().gui_get_focus_owner() == null:
-		grab_focus()
 	show_requested.emit()
 	glance_changed.emit()
 
@@ -675,6 +676,14 @@ static func _text_item(diff: String, changes: Array) -> Dictionary:
 	}
 
 
+## The changed asset Ask for changes attaches: the first previewed item, else the first file.
+static func _asset_path(media: Array, changes: Array) -> String:
+	for entry: Variant in media + changes:
+		if entry is Dictionary and not str((entry as Dictionary).get("path", "")).is_empty():
+			return str((entry as Dictionary)["path"])
+	return ""
+
+
 ## Take what the media can measure into the facts line.
 func _measure() -> void:
 	_summary.set_measured(_media.measured_facts())
@@ -683,29 +692,21 @@ func _measure() -> void:
 ## Details show when there is anything behind them: files, checks or notes.
 func _sync_details() -> void:
 	_details_button.visible = _details.has_content() or _summary.has_info()
-	if not _details_button.visible:
-		_details_scroll.hide()
-	# Details have their own row: the picture gives up that height, not the editor above.
-	var row := 0.0
-	if _details_button.visible and is_inside_tree():
-		row = _details_button.get_combined_minimum_size().y + _body.get_theme_constant("separation")
-	_media.reserve = row
+	_rail.sync_links()
+	if not _details_button.visible and _drawer.open:
+		_set_details(false, false)
 
 
 func _set_details(open: bool, animate: bool) -> void:
 	var shown := open and _details_button.visible
 	_details_button.set_pressed_no_signal(shown)
-	UI.bind_icon(_details_button, "disclosure_open" if shown else "disclosure_closed")
-	_details_scroll.visible = shown
-	# Open details take the height of their rows (see _fit_details); the preview keeps the
-	# rest, so it stays the largest thing in the panel.
-	_fit_details()
-	_spacer.visible = not _media.visible
-	if shown:
-		_details_scroll.scroll_vertical = 0
-		if animate:
-			UI_MOTION.reveal(_gutter)
-			UI_MOTION.stagger(_details.rows())
+	_details_button.text = "Hide details" if shown else "Details"
+	UI.bind_icon(_details_button, "next" if shown else "previous")
+	# With nothing to preview the drawer is the stage.
+	_drawer.fill = not _media.visible and not _scene_note.visible
+	_drawer.set_open(shown, animate)
+	if shown and animate:
+		UI_MOTION.stagger(_details.rows())
 
 
 ## A short label that keeps its full width in a row (no ellipsis collapsing it to "…").
@@ -733,8 +734,8 @@ func _tint_outcome() -> void:
 		_error_icon.self_modulate = get_theme_color("danger", "Joinery")
 
 
-## Accept and Discard share one width: 8em, and wide enough for "Applying…"; a narrow panel
-## shrinks them towards that text so Details, Discard and Accept stay on one row.
+## Accept fills the rail's width beside Discard, large while the rail is beside the stage and
+## standard when it is stacked under it; both stay wide enough for their text and "Applying…".
 func _apply_sizes() -> void:
 	_sizes_queued = false
 	if _accept == null or not is_inside_tree():
@@ -745,35 +746,27 @@ func _apply_sizes() -> void:
 	var busy := font.get_string_size("Applying…", HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
 	busy += _applying_dots.get_combined_minimum_size().x + UI_THEME.space(self, 1)
 	busy += box.get_margin(SIDE_LEFT) + box.get_margin(SIDE_RIGHT)
-	var width := maxf(BUTTON_EM * UI_THEME.font_size(self, "body"), busy)
-	if size.x > 0.0:
-		var gaps := _footer.get_theme_constant("separation") * 2.0
-		var lead := _open_link.get_combined_minimum_size().x if _open_link.visible else 0.0
-		var room := (size.x - lead - gaps) / 2.0
-		width = maxf(busy, minf(width, room))
-	width = ceilf(width)
-	var height := UI_THEME.control_h(self, "md")
-	for button: Button in [_accept, _reject]:
-		button.custom_minimum_size = Vector2(width, height)
+	var height := UI_THEME.control_h(self, "md" if _body.narrow else "lg")
+	_accept.custom_minimum_size = Vector2(ceilf(busy), height)
+	_reject.custom_minimum_size = Vector2(BUTTON_EM * UI_THEME.font_size(self, "body"), height)
 	# Discard keeps its normal fill and ink when disabled; set_applying dims it instead.
 	_reject.add_theme_stylebox_override("disabled", _reject.get_theme_stylebox("normal"))
 	_reject.add_theme_color_override("font_disabled_color", _reject.get_theme_color("font_color"))
-	_fit_details()
-	custom_minimum_size.y = UI_THEME.control_h(self, "md") * 7
+	custom_minimum_size.y = UI_THEME.control_h(self, "md") * 6
+	_size_stage()
 
 
-## Size the open Details to their content, capped at DETAILS_ROWS control heights; only
-## content past the cap scrolls, so a short list never shows a scroll bar.
-func _fit_details() -> void:
-	if _gutter == null:
+## The stage grows with the panel's width (see STAGE_SHARE). Stacked, the panel asks for the
+## stage at STAGE_NARROW_SHARE of the width, the rail's actions and two lines of its title and
+## facts; the layout still gives the stage its share first.
+func _size_stage() -> void:
+	if _stage_area == null or not is_inside_tree():
 		return
-	var content := _gutter.get_combined_minimum_size().y
-	var cap := UI_THEME.control_h(self, "md") * DETAILS_ROWS if is_inside_tree() else content
-	var scrolls: bool = content > cap
-	if scrolls and _gutter.has_theme_constant_override("margin_right"):
-		_gutter.remove_theme_constant_override("margin_right")
-	elif not scrolls and _gutter.get_theme_constant("margin_right") != 0:
-		_gutter.add_theme_constant_override("margin_right", 0)
-	var height := ceilf(minf(content, cap))
-	if not is_equal_approx(_details_scroll.custom_minimum_size.y, height):
-		_details_scroll.custom_minimum_size.y = height
+	var large := float(UI_THEME.control_h(self, "lg"))
+	var tall := floorf(clampf(size.x * STAGE_SHARE, large * STAGE_MIN, large * STAGE_MAX))
+	if _body.narrow:
+		var stage := clampf(size.x * STAGE_NARROW_SHARE, large * STAGE_MIN, large * STAGE_MAX)
+		var rail := _rail.get_combined_minimum_size().y + UI_THEME.control_h(self, "md") * 2
+		tall = floorf(stage + rail + UI_THEME.space(self, 4))
+	if not is_equal_approx(_body.custom_minimum_size.y, tall):
+		_body.custom_minimum_size.y = tall

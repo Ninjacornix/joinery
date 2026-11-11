@@ -39,6 +39,9 @@ func setup(plugin: Object, chat: Node) -> void:
 	for signal_name: String in links:
 		if chat.has_signal(signal_name):
 			chat.connect(signal_name, links[signal_name])
+	var panel := _panel()
+	if panel != null and panel.has_signal("revise_requested"):
+		panel.connect("revise_requested", _on_revise)
 
 
 ## A live edit is on screen in the viewport ([param summary] names it; [param owner] is the
@@ -143,6 +146,19 @@ func _glance(event: Dictionary) -> void:
 	var panel := _panel()
 	if panel != null and panel.has_method("show_glance"):
 		panel.call("show_glance", event)
+
+
+## Ask for changes, from the review: the chat's message box takes the focus with the changed
+## asset as its target, so the user says what to change about this change.
+func _on_revise(path: String) -> void:
+	var dock: Variant = _plugin.get("_dock")
+	if not dock is Object:
+		return
+	if not path.is_empty():
+		(dock as Object).call("set_resource_target", "res://" + path.trim_prefix("res://"))
+	var prompt: Variant = (dock as Object).get("_prompt")
+	if prompt is Control and (prompt as Control).is_visible_in_tree():
+		(prompt as Control).grab_focus()
 
 
 ## The reviewer's notes arrived after the review opened.

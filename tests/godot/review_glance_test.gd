@@ -1,10 +1,11 @@
 extends SceneTree
 ## The review at a glance, headless: the facts line (the agent's words, what the media
-## measures, the counts), the checks as one status, the reviewer's notes as one line with the
-## rest in Details, the keyboard (Enter, Backspace / Delete, A / B) only with focus in the
-## review, a filmstrip for several items with the most important first, a model from two
-## angles, a blockout's plan beside the sketch it was built from, Accept on screen at a narrow
-## width, and the chat card's row that decides a small change and offers Review for a big one.
+## measures, the counts), the checks as chips, the reviewer's notes as one line with the rest
+## in Details, the keyboard (A, D, B, Escape) only once the review has the focus, a filmstrip
+## for several items with the most important first, a model from two angles, a blockout's plan
+## beside the sketch it was built from, the rail stacked under the stage at a narrow width with
+## Accept on screen, and the chat card's row that decides a small change and offers Review for
+## a big one.
 
 const PANEL := preload("res://addons/joinery/review_panel.gd")
 const GLANCE := preload("res://addons/joinery/review_glance.gd")
@@ -154,6 +155,7 @@ func _check_facts_and_notes(panel: PANEL) -> void:
 	_check(facts == "Door wood darker · 1 image · 2 files", "Measured facts: " + facts)
 	_check(panel._summary.status_text() == "Checks passed", "The checks are one quiet status")
 	_check(panel._summary.notes_text().is_empty(), "No notes line without notes")
+	_check(panel._summary.note_chips().is_empty(), "No note chips without notes")
 	(
 		panel
 		. show_glance(
@@ -190,7 +192,11 @@ func _check_facts_and_notes(panel: PANEL) -> void:
 		"Notes as one line: " + panel._summary.notes_text()
 	)
 	_check(panel._summary.status_text() == "Checks passed", "A finished reviewer drops off")
-	_check(not panel._details_scroll.visible, "Notes never open Details by themselves")
+	_check(
+		panel._summary.note_chips() == ["1 warning", "1 note"],
+		"A chip per kind of note: %s" % [panel._summary.note_chips()]
+	)
+	_check(not panel.details_open(), "Notes never open Details by themselves")
 	panel._details_button.button_pressed = true
 	await _frames()
 	var info: Control = panel._summary.info()
@@ -230,37 +236,72 @@ func _check_keyboard(panel: PANEL) -> void:
 	]
 	var field := LineEdit.new()
 	_host.add_child(field)
+	field.grab_focus()
 	panel.show_file_review("Darken the crate", "", media, [])
 	await _frames()
-	field.grab_focus()
-	_key(KEY_ENTER)
+	_check(field.has_focus(), "A review that opens takes no focus")
+	_key(KEY_A)
 	await _frames()
-	_check(accepted[0] == 0 and panel.pending, "Enter elsewhere never accepts")
-	panel.grab_focus()
+	_check(accepted[0] == 0 and panel.pending, "A elsewhere never accepts")
+	field.release_focus()
+	_key(KEY_A)
+	await _frames()
+	_check(accepted[0] == 0 and panel.pending, "Without a click in the review, A does nothing")
+	_click(panel)
+	await _frames()
+	_check(panel.has_focus(), "A click in the review gives it the keys")
 	_key(KEY_B)
 	await _frames()
 	_check(panel._media.side == "before", "B flips a split picture to the original")
-	_check(panel._media.sides().tag("before").button_pressed, "The Before tag follows the key")
+	_check(panel._media.sides().tag("before").button_pressed, "The pill follows the key")
+	_key(KEY_B)
+	await _frames()
+	_check(panel._media.side == "after", "B flips back to the change")
+	panel._details_button.button_pressed = true
+	await _frames()
+	panel.grab_focus()
+	_key(KEY_ESCAPE)
+	await _frames()
+	_check(not panel.details_open(), "Escape closes Details")
+	_check(panel._accept.tooltip_text.ends_with("(A)"), "Accept's tooltip names its key")
+	_check(panel._reject.tooltip_text.ends_with("(D)"), "Discard's tooltip names its key")
 	_key(KEY_A)
 	await _frames()
-	_check(panel._media.side == "after", "A flips back to the change")
-	panel._reject.grab_focus()
-	_key(KEY_ENTER)
-	await _frames()
-	_check(accepted[0] == 1 and rejected[0] == 0, "Enter accepts, even on Discard")
+	_check(accepted[0] == 1 and rejected[0] == 0, "A accepts")
 	panel.show_error("Try again")
 	panel._accept.grab_focus()
-	_key(KEY_DELETE)
+	_key(KEY_D)
 	await _frames()
-	_check(rejected[0] == 1, "Delete discards")
+	_check(rejected[0] == 1, "D discards, with the focus on any of the review's controls")
 	panel.show_error("Try again")
 	panel.grab_focus()
-	_key(KEY_BACKSPACE)
+	_key(KEY_ENTER)
+	_key(KEY_DELETE)
 	await _frames()
-	_check(rejected[0] == 2, "Backspace discards")
+	_check(accepted[0] == 1 and rejected[0] == 1, "Enter and Delete decide nothing")
+	var steps: Array[int] = []
+	panel.step_requested.connect(func(step: int) -> void: steps.append(step))
+	_key(KEY_RIGHT)
+	await _frames()
+	_check(steps.is_empty(), "Left and Right go nowhere without other changes waiting")
+	panel.set_queue(1, 3)
+	_key(KEY_RIGHT)
+	_key(KEY_LEFT)
+	await _frames()
+	_check(steps == [1, -1], "Right and Left step through the changes waiting: %s" % [steps])
+	panel.set_queue(0, -1)
 	panel.set_applying(false)
 	await _frames()
 	field.queue_free()
+
+
+## A left click on [param control], as the viewport would deliver it.
+func _click(control: Control) -> void:
+	var click := InputEventMouseButton.new()
+	click.button_index = MOUSE_BUTTON_LEFT
+	click.pressed = true
+	click.position = control.get_global_rect().get_center()
+	control.call("_gui_input", click)
 
 
 func _check_filmstrip(panel: PANEL) -> void:
@@ -452,8 +493,10 @@ func _check_scaling(panel: PANEL) -> void:
 	await _frames(3)
 	var swipe: Control = panel._media.swipe()
 	var frame := float(panel._media.frame_height())
-	var least := float(panel._media._frame.custom_minimum_size.y)
-	_check(least > 120.0, "The frame grows with a wide panel: %.0f" % least)
+	_check(
+		frame >= panel._stage_area.size.y * 0.7,
+		"The frame fills the stage: %.0f of %.0f" % [frame, panel._stage_area.size.y]
+	)
 	var shown: Rect2 = swipe.call("fit", Vector2(16, 16))
 	_check(
 		shown.size.y >= swipe.size.y - 1.0 and shown.size.y > 16.0 * 4.0,
@@ -468,7 +511,10 @@ func _check_scaling(panel: PANEL) -> void:
 	# A new picture shows alone in the same zoomable view, without a line.
 	var photo: Rect2 = swipe.call("picture_rect")
 	_check(swipe.visible and swipe.before == null, "A new picture shows alone")
-	_check(photo.size.y >= frame - 1.0, "A photo fills the frame: %s" % photo.size)
+	_check(
+		photo.size.y >= frame - 1.0 or photo.size.x >= swipe.size.x - 1.0,
+		"A photo fills the frame: %s in %s" % [photo.size, swipe.size]
+	)
 	_check(swipe.texture_filter == CanvasItem.TEXTURE_FILTER_LINEAR, "…smoothly")
 	var blockout := [
 		{
@@ -485,8 +531,8 @@ func _check_scaling(panel: PANEL) -> void:
 	var plan: TextureRect = view.far
 	frame = float(panel._media.frame_height())
 	_check(
-		sketch.size.y >= frame - 1.0 and absf(sketch.size.x - frame * 0.75) <= 2.0,
-		"The sketch fills the frame's height at its shape: %s" % sketch.size
+		sketch.size.y >= frame - 1.0 and sketch.size.x * 2.0 >= view.size.x - 8.0,
+		"The sketch and the plan fill the frame: %s in %s" % [sketch.size, view.size]
 	)
 	_check(absf(plan.size.x - sketch.size.x) <= 1.0, "The plan shares the space equally")
 	_check(sketch.texture_filter == CanvasItem.TEXTURE_FILTER_NEAREST, "A small sketch is crisp")
@@ -510,17 +556,10 @@ func _check_scaling(panel: PANEL) -> void:
 		panel._media.frame_ground().to_html(false) == backdrop.to_html(false),
 		"Renders on one backdrop fill the frame with it: no empty bands"
 	)
-	panel.set_under_ways(true)
-	await _frames(3)
-	var under := float(panel._media._frame.custom_minimum_size.y)
-	_check(under < least, "Under a row of ways the frame is shorter: %.0f" % under)
-	panel.set_under_ways(false)
-	_host.size = Vector2(340, 420)
-	await _frames(4)
-	var narrow := float(panel._media._frame.custom_minimum_size.y)
-	_check(narrow < least, "A narrow panel has a smaller frame: %.0f" % narrow)
-	_host.size = Vector2(900, 560)
-	await _frames()
+	_check(
+		panel._media._frame.get_theme_stylebox("panel").get_margin(SIDE_LEFT) <= 0.0,
+		"The stage is the picture: no frame inside it"
+	)
 
 
 func _check_narrow(panel: PANEL) -> void:
@@ -531,44 +570,44 @@ func _check_narrow(panel: PANEL) -> void:
 		var name: String = spec[1]
 		_check(panel._accept.is_visible_in_tree(), "%s: Accept shows" % name)
 		var inside := panel.get_global_rect().grow(1.0)
+		for part: Control in [panel._accept, panel._reject, panel._details_button]:
+			_check(
+				inside.encloses(part.get_global_rect()),
+				"%s: %s stays inside: %s in %s" % [name, part.name, part.get_global_rect(), inside]
+			)
 		_check(
-			inside.encloses(panel._accept.get_global_rect()),
-			"%s: Accept stays inside: %s in %s" % [name, panel._accept.get_global_rect(), inside]
-		)
-		_check(
-			inside.encloses(panel._details_button.get_global_rect()),
-			"%s: Details stay inside the panel" % name
+			panel._body.narrow == (name == "narrow"), "%s: the rail stacks only when narrow" % name
 		)
 		_check_stacked(panel, name)
 	_host.size = Vector2(900, 560)
 	await _frames()
 
 
-## One job per row: title, media, facts, Details, actions, top to bottom and never overlapping;
-## Accept and Discard keep their text whole.
+## Narrow, the rail stacks under the stage, which keeps at least 55% of the height; wide, they
+## sit side by side at the full height. Accept and Discard keep their text whole.
 func _check_stacked(panel: PANEL, name: String) -> void:
-	var rows: Array[Control] = [panel._header, panel._media, panel._summary]
-	rows.append_array([panel._details_button, panel._footer])
-	var last := -INF
-	for row: Control in rows:
-		if not row.is_visible_in_tree():
-			continue
-		var rect := row.get_global_rect()
-		_check(rect.position.y >= last - 1.0, "%s: %s sits below the row above" % [name, row.name])
-		last = rect.end.y
+	var stage := panel._stage_area.get_global_rect()
+	var rail := panel._rail.get_global_rect()
+	if panel._body.narrow:
+		_check(stage.end.y <= rail.position.y, "%s: the rail sits under the stage" % name)
+		_check(
+			stage.size.y >= panel._body.size.y * 0.55 - 1.0,
+			(
+				"%s: the stage keeps most of the height: %.0f of %.0f"
+				% [name, stage.size.y, panel._body.size.y]
+			)
+		)
+	else:
+		_check(stage.end.x <= rail.position.x, "%s: the rail sits beside the stage" % name)
+		_check(
+			absf(stage.size.y - panel._body.size.y) <= 1.0, "%s: the stage is full height" % name
+		)
 	for button: Button in [panel._accept, panel._reject]:
 		var font := button.get_theme_font("font")
 		var text := font.get_string_size(
 			button.text, HORIZONTAL_ALIGNMENT_LEFT, -1, button.get_theme_font_size("font_size")
 		)
 		_check(button.size.x >= text.x, "%s: %s is not squeezed" % [name, button.text])
-	_check(
-		panel._media.frame_height() >= panel.size.y * 0.3,
-		(
-			"%s: the media keeps most of the height: %.0f of %.0f"
-			% [name, panel._media.frame_height(), panel.size.y]
-		)
-	)
 
 
 func _check_card(panel: PANEL) -> void:

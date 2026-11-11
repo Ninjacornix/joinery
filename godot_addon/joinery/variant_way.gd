@@ -43,6 +43,12 @@ var state := "queued"
 var chosen := false
 ## The picture's tallest, in large control heights (smaller above a full review).
 var picture_max := PICTURE_MAX
+## False hides the facts line (a dense strip; the way's review shows them).
+var facts_shown := true:
+	set(value):
+		facts_shown = value
+		if _facts != null:
+			_facts.visible = value
 var use_button: Button
 var picture: TextureRect
 var _frame: Button
@@ -53,6 +59,8 @@ var _play: Button
 var _note: Label
 var _facts: Label
 var _player: AudioStreamPlayer
+## True once laid out as one line (use_row).
+var _row := false
 var _sound := ""
 
 
@@ -139,6 +147,26 @@ func _init(identifier := "", number := 0, note := "") -> void:
 
 func _ready() -> void:
 	_restyle()
+
+
+## One line instead of a tile (the strip in a review's rail): the picture small and square at
+## the start, the direction beside it, Use this at the end, and no facts line.
+func use_row() -> void:
+	var column := _frame.get_parent()
+	var row := HBoxContainer.new()
+	row.theme_type_variation = "JoineryRowTight"
+	column.add_child(row)
+	column.move_child(row, 0)
+	for part: Control in [_frame, _note, use_button]:
+		part.reparent(row, false)
+	_note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_note.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_note.autowrap_mode = TextServer.AUTOWRAP_OFF
+	_note.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	use_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	facts_shown = false
+	_row = true
+	_fit()
 
 
 ## The way's state from its task event ({state, step, message, transaction_id}).
@@ -275,6 +303,11 @@ func _label() -> String:
 
 
 func _fit() -> void:
+	if _row:
+		if is_inside_tree():
+			var side := ceilf(float(UI_THEME.control_h(self, "lg")) * picture_max)
+			_frame.custom_minimum_size = Vector2(side, side)
+		return
 	var tallest := float(UI_THEME.control_h(self, "lg")) * picture_max if is_inside_tree() else INF
 	var height := ceilf(minf(size.x * ASPECT, tallest))
 	if absf(_frame.custom_minimum_size.y - height) >= 1.0:

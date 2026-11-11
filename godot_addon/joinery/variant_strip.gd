@@ -22,6 +22,9 @@ const UI := preload("ui_components.gd")
 const WAY := preload("variant_way.gd")
 ## A tile is at least this many large control heights wide before the row wraps.
 const TILE_MIN := 2.6
+## Dense ways (in a review's rail): one line each, with a picture this many large control
+## heights square.
+const DENSE_PICTURE := 1.0
 
 var group_id := ""
 var title := ""
@@ -30,6 +33,8 @@ var state := "working"
 var picked_id := ""
 ## Smaller pictures, for the strip above a way's full review.
 var compact := false
+## Smallest: the strip in a review's rail, beside the way's own review, one way per line.
+var dense := false
 var mix_button: Button
 var discard_button: Button
 var mix_field: LineEdit
@@ -212,6 +217,9 @@ func _add(task_id: String, number: int, direction: String) -> Control:
 	var each: Control = WAY.new(task_id, number, direction)
 	if compact:
 		each.set("picture_max", 2.0)
+	if dense:
+		each.set("picture_max", DENSE_PICTURE)
+		each.call("use_row")
 	each.connect("use_pressed", pick.bind(task_id))
 	each.connect("open_pressed", _open.bind(each))
 	_ways[task_id] = each
@@ -281,6 +289,9 @@ func _sync() -> void:
 
 func _fit() -> void:
 	if not is_inside_tree() or _order.is_empty():
+		return
+	if dense:
+		_grid.columns = 1
 		return
 	var tile := float(UI_THEME.control_h(self, "lg")) * TILE_MIN
 	var fits := maxi(1, int(size.x / maxf(tile, 1.0)))

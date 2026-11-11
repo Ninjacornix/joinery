@@ -8,9 +8,9 @@ extends RefCounted
 ## one, holding one task's change. Opening another task's row swaps what it shows. A task never
 ## opens the panel by itself; the main request's review does, and takes the view back.
 ##
-## A way of a request tried several ways (ADR 0042) shows the variant strip above its panel
-## (variant_strip.gd): every way side by side, Use this, Mix and Discard all; a way's picture
-## swaps the panel to that way.
+## A way of a request tried several ways (ADR 0042) shows the variant strip in its panel's rail
+## (variant_strip.gd, dense): every way side by side, Use this, Mix and Discard all; a way's
+## picture swaps the panel to that way.
 
 const PANEL := preload("review_panel.gd")
 const STRIP := preload("variant_strip.gd")
@@ -20,7 +20,7 @@ const UI_MOTION := preload("ui_motion.gd")
 var panel: Control
 ## The transaction of the task change on show ("" for none).
 var showing := ""
-## The variant strip above the panel while a way is on show (null otherwise).
+## The variant strip in the rail of the panel on show while a way is on show (null otherwise).
 var strip: Control
 var _tab: Control
 var _chat: Object
@@ -163,35 +163,38 @@ func _show_strip(group: String, id: String) -> void:
 		_drop_strip()
 		strip = STRIP.new(group)
 		strip.set("compact", true)
+		strip.set("dense", true)
 		strip.name = "VariantStrip"
-		_view.add_child(strip)
-		_view.move_child(strip, panel.get_index())
 		strip.connect("open_requested", _open_way)
 		strip.connect("picked", _pick.bind(group))
 		strip.connect("mix_requested", _mix.bind(group))
 		strip.connect("discard_all_requested", _discard.bind(group))
-		var shown := strip
-		panel.visibility_changed.connect(
-			func() -> void:
-				if is_instance_valid(shown):
-					shown.visible = panel.visible
-		)
+		_place_strip(panel)
 		strip.call("show_group", _groups[group])
 		for each: String in _previews:
 			if strip.call("has_way", str(_previews[each].get("task_id", ""))):
 				strip.call("on_event", _previews[each])
+	_place_strip(panel)
 	strip.visible = true
-	panel.call("set_under_ways", true)
 	for way: Control in strip.call("ways"):
 		way.set("chosen", str(way.get("transaction_id")) == id)
 		way.call("_restyle")
 
 
+## Put the strip in the rail of [param host] (a review_panel.gd).
+func _place_strip(host: Control) -> void:
+	if strip == null or host == null or not host.has_method("rail_slot"):
+		return
+	var slot: Control = host.call("rail_slot")
+	if strip.get_parent() == slot:
+		return
+	if strip.get_parent() != null:
+		strip.reparent(slot, false)
+	else:
+		slot.add_child(strip)
+
+
 func _drop_strip() -> void:
-	panel.call("set_under_ways", false)
-	var main: Control = _tab.call("detail")
-	if main != null and main.has_method("set_under_ways"):
-		main.call("set_under_ways", false)
 	if strip != null:
 		strip.queue_free()
 		strip = null
@@ -224,10 +227,8 @@ func over_main(id: String) -> void:
 	var ways: Array = strip.call("ways")
 	if not ways.any(func(way: Control) -> bool: return str(way.get("transaction_id")) == id):
 		return
+	_place_strip(_tab.call("detail"))
 	strip.visible = true
-	var main: Control = _tab.call("detail")
-	if main != null and main.has_method("set_under_ways"):
-		main.call("set_under_ways", true)
 	for way: Control in ways:
 		way.set("chosen", str(way.get("transaction_id")) == id)
 		way.call("_restyle")
