@@ -31,9 +31,12 @@ def _game(tmp_path: Path, *, runtime: bool = True, approved: bool = True) -> Pat
     )
     (project / "joinery.toml").write_text('[tools]\nenabled = ["godot"]\n')
     blueprints.apply(project, "third-person-3d", [])
-    if runtime:
-        for path in sound_pass.RUNTIME:
-            target = project / sound_pass.rel(path)
+    for path in sound_pass.RUNTIME:
+        target = project / sound_pass.rel(path)
+        if not runtime:
+            # A game made before the core had its sound nodes.
+            target.unlink(missing_ok=True)
+        elif not target.is_file():
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text("extends Node\n")
     (project / "art").mkdir(exist_ok=True)
