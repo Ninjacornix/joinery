@@ -231,6 +231,86 @@ def test_closing_the_main_gateway_drops_every_lane(project: Path) -> None:
     run(go)
 
 
+def test_an_unnamed_rewrite_in_place_is_caught_at_submit(project: Path) -> None:
+    """A file rewritten in place that no call named slips past the stat snapshot,
+    so the submit's full hash finds it: put back, and a fixable conflict."""
+
+    async def go() -> None:
+        from joinery.turn import TurnController
+
+        main = wire(ProjectGateway(project))
+        turn = TurnController(main, lambda _e: None)
+        try:
+            lane = wire(main.lane("t1", "Lamp"))
+            await write(lane, "notes/shared.txt", "lamp\n")
+            turn.begin("Notes")
+            await write(main, "notes/main.txt", "main\n")
+            assert main.transaction is not None
+            # Behind every call's back: same folder listing, so no call sees it.
+            (main.transaction.stage / "notes/shared.txt").write_text("sneaky\n")
+            result = await turn.submit("Notes")
+            assert result.status == "failed" and not result.final
+            (problem,) = result.problems
+            assert problem.check == "conflict"
+            assert problem.paths == ["notes/shared.txt"]
+            assert "another task: Lamp" in problem.message
+            stage = main.transaction.stage
+            assert (stage / "notes/shared.txt").read_text() == "before\n"
+        finally:
+            await main.close()
+
+    run(go)
+
+
+def test_writes_stay_fast_on_a_large_stage(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """While two agents work, a write hashes what it wrote, never the whole stage."""
+    from joinery.timing import TurnTiming
+    from joinery.transactions import FileTransaction
+
+    blob = b"x" * 2048
+    for folder in range(60):
+        base = project / f"art/set{folder}"
+        base.mkdir(parents=True)
+        for index in range(50):
+            (base / f"tile{index}.png").write_bytes(blob)
+
+    full: list[int] = []
+    diff = FileTransaction.diff
+
+    def counted(self: FileTransaction) -> list[dict[str, str]]:
+        full.append(1)
+        return diff(self)
+
+    async def go() -> None:
+        import time
+
+        main = wire(ProjectGateway(project))
+        try:
+            lane = wire(main.lane("t1", "Lamp"))
+            await write(main, "notes/main.txt", "main\n")
+            await write(lane, "notes/lamp.txt", "lamp\n")
+            monkeypatch.setattr(FileTransaction, "diff", counted)
+            main.timing = TurnTiming()
+            started = time.monotonic()
+            for index in range(20):
+                await write(main, f"art/set{index}/new{index}.png", "new")
+            spent = time.monotonic() - started
+            assert full == [], "a write hashed the whole stage"
+            assert "claims" in main.timing.phases
+            assert main.timing.phases["claims"] < 2.0
+            assert spent < 10.0
+            assert len(main.claims.held("main")) == 21
+            # The other agent still can't take one of them.
+            with pytest.raises(ValueError, match="another task: the main request"):
+                await write(lane, "art/set3/new3.png", "mine")
+        finally:
+            await main.close()
+
+    run(go)
+
+
 # --- Following the project ------------------------------------------------------------
 
 

@@ -36,12 +36,14 @@ from joinery.read_access import read_only
 from joinery.rebase import Rebase, rebase, refresh_review
 from joinery.review import Render, plan, render
 from joinery.server_install import configured, installation
+from joinery.stage_watch import StageWatch
 from joinery.submission import is_reference
 from joinery.timing import TurnTiming
 from joinery.transactions import (
     DIRECTORY,
     FileTransaction,
     ProjectLease,
+    _sha256,
     copy_file,
     inventory,
 )
@@ -246,6 +248,9 @@ class ProjectGateway:
         self._media_task: asyncio.Task[None] | None = None
         #: The accepted-change count (claims.generation) the stage last followed.
         self._synced = 0
+        #: While others work: the stage's stat snapshot and the files it changed.
+        self._watch: StageWatch | None = None
+        self._changed: set[str] = set()
 
     @property
     def is_lane(self) -> bool:
@@ -412,10 +417,9 @@ class ProjectGateway:
             )
         ):
             raise ValueError(LANE_LIVE_SCENE if self.is_lane else LIVE_SCENE)
+        named = project_paths(arguments, self.project) if not readonly else set()
         if not readonly and self.claims.contended():
-            path, title = self.claims.first_conflict(
-                project_paths(arguments, self.project), self.task_id
-            )
+            path, title = self.claims.first_conflict(named, self.task_id)
             if path:
                 raise ValueError(refusal(path, title))
         connection = await self.connection(server)
@@ -487,6 +491,8 @@ class ProjectGateway:
                 self.staged[server] = staged
             connection = staged
             arguments = _map_paths(arguments, self.project, self.transaction.stage)
+            if not readonly and self.claims.contended():
+                self._watch_stage()
         if connection.spec.container_name and self.transaction is not None:
             arguments = _map_paths(
                 arguments, self.transaction.stage, PurePosixPath("/work")
@@ -532,7 +538,7 @@ class ProjectGateway:
         if result.is_error and result_text(result).startswith("Rule Zero STOP:"):
             raise PolicyStop(result_text(result))
         if not readonly and self.claims.contended():
-            self.claim_stage(strict=True)
+            self._claim_written(named)
         if (
             server.startswith("joinery-")
             and tool in NATIVE_OPS
@@ -587,25 +593,83 @@ class ProjectGateway:
         return result
 
     def claim_stage(self, *, strict: bool) -> None:
-        """Claim every file this turn's stage changed.
+        """Claim every file this turn's stage changed, hashing the whole stage.
 
-        With ``strict`` a file another task already holds is put back as the
-        project has it and the call is refused, in words the agent can act on.
+        Used when another agent joins, and at submit; between them each call's
+        writes are claimed from a stat snapshot (:meth:`_claim_written`). With
+        ``strict`` a file another task already holds is put back as the project
+        has it and the call is refused, in words the agent can act on.
         """
+        refused = self._claim_full(restore=strict)
+        if refused and strict:
+            raise ValueError(self._refused(refused))
+
+    def _claim_full(self, *, restore: bool) -> dict[str, str]:
+        """Claim the stage's changes from a full hash; returns the files another
+        task holds (put back as the project has them with ``restore``)."""
         tx = self.transaction
         if tx is None or tx.state not in {"staging", "review"}:
+            return {}
+        with self.span("claims"):
+            try:
+                changed = {
+                    c["path"]
+                    for c in (tx.diff() if tx.state == "staging" else tx.changes)
+                    if DIRECTORY not in {c["before"], c["after"]}
+                }
+            except (OSError, ValueError):
+                return {}
+            if tx.state == "staging":
+                # From here on the snapshot tells what each call wrote.
+                self._watch = StageWatch(tx.stage, tx.id)
+            self._changed = changed
+            return self._claim(tx, restore=restore)
+
+    def _watch_stage(self) -> None:
+        """Before a call while others work: know the stage as it is now."""
+        tx = self.transaction
+        if tx is None or tx.state != "staging":
             return
-        try:
-            changed = {
-                c["path"]
-                for c in (tx.diff() if tx.state == "staging" else tx.changes)
-                if DIRECTORY not in {c["before"], c["after"]}
-            }
-        except (OSError, ValueError):
+        if self._watch is None or self._watch.id != tx.id:
+            with self.span("claims"):
+                self._watch = StageWatch(tx.stage, tx.id)
+
+    def _claim_written(self, named: set[str]) -> None:
+        """After a call while others work: claim what it wrote, hashing only that.
+
+        The files the call named and those in folders whose listing changed are
+        hashed and compared with the stage's start; nothing else is read.
+        """
+        tx, watch = self.transaction, self._watch
+        if tx is None or tx.state != "staging":
             return
-        refused = self.claims.claim(self.task_id, changed)
-        if not refused or not strict:
+        if watch is None or watch.id != tx.id:
+            self.claim_stage(strict=True)
             return
+        with self.span("claims"):
+            for path in watch.changes(named):
+                before = tx.base.get(path, "")
+                if before == DIRECTORY:
+                    continue
+                target = tx.stage / path
+                try:
+                    now = _sha256(target) if target.is_file() else ""
+                except OSError:
+                    continue
+                if now != before:
+                    self._changed.add(path)
+                else:
+                    self._changed.discard(path)
+            refused = self._claim(tx, restore=True)
+        if refused:
+            raise ValueError(self._refused(refused))
+
+    def _claim(self, tx: FileTransaction, *, restore: bool) -> dict[str, str]:
+        """Claim ``self._changed``. Returns the files another task holds, with its
+        title; with ``restore`` they are put back as the project has them."""
+        refused = self.claims.claim(self.task_id, self._changed)
+        if not refused or not restore or tx.state != "staging":
+            return refused
         for path in refused:
             original = self.project / path
             target = tx.stage / path
@@ -613,8 +677,15 @@ class ProjectGateway:
                 copy_file(original, target)
             else:
                 target.unlink(missing_ok=True)
+            self._changed.discard(path)
+        if self._watch is not None:
+            self._watch.changes(set(refused))
+        return refused
+
+    @staticmethod
+    def _refused(refused: dict[str, str]) -> str:
         path = min(refused)
-        raise ValueError(
+        return (
             refusal(path, refused[path])
             + " That file was left as the project has it; the rest of the call stands."
         )
@@ -710,6 +781,19 @@ class ProjectGateway:
         if tx is None or tx.state != "staging":
             return submission.Validation()
         moved: list[Problem] = []
+        if self.claims.contended():
+            # The full hash: catches a file rewritten in place that no call named.
+            refused = self._claim_full(restore=True)
+            if refused:
+                path = min(refused)
+                moved.append(
+                    Problem(
+                        "conflict",
+                        refusal(path, refused[path])
+                        + " Your stage has that file as the project has it again.",
+                        sorted(refused),
+                    )
+                )
         if self._synced < self.claims.generation:
             conflicts = self.follow_project(take_theirs=True).conflicts
             if conflicts:
