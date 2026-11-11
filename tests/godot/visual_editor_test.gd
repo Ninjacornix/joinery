@@ -7,6 +7,7 @@ extends EditorPlugin
 
 var _checks: GDScript
 var _animation: GDScript
+var _sound: GDScript
 var _theme := "dark"
 var _failed := false
 var _plugin: EditorPlugin
@@ -15,6 +16,7 @@ var _plugin: EditorPlugin
 func _enter_tree() -> void:
 	_checks = load(get_script().resource_path.get_base_dir().path_join("ui_checks.gd"))
 	_animation = load(get_script().resource_path.get_base_dir().path_join("visual_animation.gd"))
+	_sound = load(get_script().resource_path.get_base_dir().path_join("visual_sound.gd"))
 	# Windowed runs animate; captures must show end states.
 	load("res://addons/joinery/ui_motion.gd").set_enabled(false)
 	var theme := OS.get_environment("JOINERY_VISUAL_THEME")
@@ -73,7 +75,7 @@ func _run() -> void:
 	await _approvals()
 	await _timeline()
 	await _share()
-	await _mixer()
+	await _sound.mixer(self)
 	await _tools()
 	await _panels(base, dock)
 	await _dialogs()
@@ -269,7 +271,7 @@ func _reviews(dock: Control) -> void:
 	)
 	await _shot("review-audio", [panel, dock])
 	await _before_after(panel, "review-audio-before")
-	await _review_music(dock, panel)
+	await _sound.review_music(self, dock, panel)
 	dock.hide_edit_review()
 	await _frames()
 	await _glance_reviews(dock, panel, cache, before, after, still)
@@ -871,62 +873,6 @@ func _share() -> void:
 	await get_tree().create_timer(0.3).timeout
 	await _shot("share-publish", [dialog], dialog)
 	dialog.hide()
-	if split != null:
-		split.split_offset = offset
-	_plugin.hide_bottom_panel()
-	await _frames()
-
-
-## A new music track in review: its layers with their stems and levels, loudness from the facts.
-func _review_music(dock: Control, panel: Control) -> void:
-	var text := FileAccess.get_file_as_string("res://music/harbour.tres")
-	var diff := "--- music/harbour.tres\n+++ music/harbour.tres\n@@ -0,0 +1,4 @@\n"
-	for line: String in text.strip_edges().split("\n"):
-		diff += "+" + line + "\n"
-	var lead := ProjectSettings.globalize_path("res://audio/music/harbour/main_lead.wav")
-	var stem := {"path": "audio/music/harbour/main_lead.wav", "media": "audio", "after": lead}
-	var changes := [{"path": "music/harbour.tres", "change": "created"}]
-	changes.append({"path": stem["path"], "change": "created"})
-	dock.show_file_review("Compose a calm harbour theme", diff, [stem], changes)
-	panel.call("show_glance", {"facts": ["4 layers", "Lead −15.8 LUFS", "Mix −16.1 LUFS"]})
-	await get_tree().create_timer(0.4).timeout
-	await _shot("review-music", [panel, dock])
-
-
-## The Mixer tab: a clean project with no music yet, then a mix in progress with a track.
-func _mixer() -> void:
-	var tab: Control
-	for node: Node in EditorInterface.get_base_control().find_children("Mixer", "", true, false):
-		if node.get_script() == load("res://addons/joinery/mixer_tab.gd"):
-			tab = node as Control
-	_check(tab != null, "The Mixer tab exists")
-	if tab == null:
-		return
-	_plugin.make_bottom_panel_item_visible(tab)
-	var split: SplitContainer
-	var walker: Node = tab
-	while walker != null and split == null:
-		walker = walker.get_parent()
-		split = walker as SplitContainer
-	var offset := split.split_offset if split != null else 0
-	if split != null:
-		split.split_offset = offset - 560
-	tab.call("refresh")
-	var music: Control = tab.get("music")
-	music.call("select", "")
-	await get_tree().create_timer(0.3).timeout
-	await _shot("mixer-empty", [tab])
-	music.call("refresh")
-	var strip: Control = tab.call("strip", "Music")
-	(strip.get("fader") as Range).value = -4.5
-	(tab.call("strip", "Ambience").get("reverb_amount") as Range).value = 0.4
-	(tab.get("duck_buttons")["SFX"] as Button).button_pressed = true
-	music.call("set_intensity", "danger")
-	music.call("set_layer", "lead", "volume_db", -3.0)
-	music.call("set_layer", "pads", "muted", true)
-	await get_tree().create_timer(0.3).timeout
-	await _shot("mixer", [tab])
-	tab.call("revert")
 	if split != null:
 		split.split_offset = offset
 	_plugin.hide_bottom_panel()
