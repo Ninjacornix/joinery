@@ -63,6 +63,10 @@ func load_state(state: Dictionary) -> void:
 	if not completed:
 		_local_hud_call(&"hide_win")
 		FirstPersonLook.set_playing(true)
+	elif _is_authority():
+		# Saved after the win: show the result again, not a level nobody can
+		# move in.
+		GameEvents.level_completed.emit.call_deferred(_result())
 
 
 func _is_authority() -> bool:
@@ -90,12 +94,17 @@ func _on_exit_body_entered(body: Node3D) -> void:
 	if not bool(door.get(&"is_open")):
 		return
 	completed = true
-	GameEvents.level_completed.emit({
+	GameEvents.level_completed.emit(_result())
+
+
+## The `level_completed` result: time, switches on and how many there are.
+func _result() -> Dictionary:
+	return {
 		"time": elapsed,
 		"score": switches_on(),
 		"switches": switches_on(),
 		"total": switch_total(),
-	})
+	}
 
 
 ## Runs everywhere the level is won: here on the authority, and on joining

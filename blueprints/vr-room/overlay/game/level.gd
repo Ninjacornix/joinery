@@ -86,6 +86,10 @@ func load_state(state: Dictionary) -> void:
 	_set_controls(not completed)
 	if not completed:
 		_local_hud_call(&"hide_win")
+	elif _is_authority():
+		# Saved after the win: show the result again, not a level nobody can
+		# move in.
+		GameEvents.level_completed.emit.call_deferred({"time": elapsed, "score": 1})
 
 
 func _is_authority() -> bool:
