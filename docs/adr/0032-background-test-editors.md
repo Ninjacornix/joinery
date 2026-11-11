@@ -40,3 +40,7 @@ with the editor's `.pdb`, to stderr and exit with `0xE04A0001`–`0xE04A0004`.
 `JOINERY_CRASH_TRACE=selftest` aborts at startup to prove the trace in CI.
 Only the Windows CI editor steps set it; `isolated_environment()` passes it
 through. Without it nothing changes.
+
+On macOS the test editor's windows also stay at desktop level (`GodotWindow` clamps
+`setLevel`), behind every app the user works in, so they never draw over it. They
+keep drawing for captures, because the window delegate ignores occlusion in this mode.

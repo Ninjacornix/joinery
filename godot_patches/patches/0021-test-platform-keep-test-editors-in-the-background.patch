@@ -16,10 +16,11 @@ the variable every path is stock.
  platform/joinery_background.h               | 19 +++++++++++++++++++
  platform/macos/display_server_macos.mm      | 13 ++++++++++++-
  platform/macos/godot_application.mm         |  5 +++++
+ platform/macos/godot_window.mm              | 11 +++++++++++
  platform/macos/godot_window_delegate.mm     |  5 ++++-
  platform/macos/os_macos.mm                  |  8 +++++---
  platform/windows/display_server_windows.cpp | 12 +++++++++---
- 6 files changed, 54 insertions(+), 8 deletions(-)
+ 7 files changed, 65 insertions(+), 8 deletions(-)
  create mode 100644 platform/joinery_background.h
 
 diff --git a/platform/joinery_background.h b/platform/joinery_background.h
@@ -122,6 +123,35 @@ index 9d30313..2e4fd77 100644
  	[NSApp activateIgnoringOtherApps:YES];
  	NSString *nsappname = [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleName"];
  	const char *bundled_id = getenv("__CFBundleIdentifier");
+diff --git a/platform/macos/godot_window.mm b/platform/macos/godot_window.mm
+index 9d42288..4e07e4f 100644
+--- a/platform/macos/godot_window.mm
++++ b/platform/macos/godot_window.mm
+@@ -32,6 +32,8 @@
+ 
+ #import "display_server_macos.h"
+ 
++#include "platform/joinery_background.h"
++
+ @implementation GodotWindow
+ 
+ - (id)init {
+@@ -55,6 +57,15 @@
+ 
+ - (void)setWindowID:(DisplayServerEnums::WindowID)wid {
+ 	window_id = wid;
++	if (joinery_background()) {
++		[self setLevel:NSNormalWindowLevel];
++	}
++}
++
++// Joinery: a test editor's windows stay at desktop level, behind every app the user
++// works in, so they never draw over it. They keep drawing (see the window delegate).
++- (void)setLevel:(NSWindowLevel)level {
++	[super setLevel:joinery_background() ? (NSWindowLevel)kCGDesktopWindowLevel : level];
+ }
+ 
+ - (BOOL)canBecomeKeyWindow {
 diff --git a/platform/macos/godot_window_delegate.mm b/platform/macos/godot_window_delegate.mm
 index 73429c6..21d52c1 100644
 --- a/platform/macos/godot_window_delegate.mm

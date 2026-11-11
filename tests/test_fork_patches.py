@@ -144,6 +144,7 @@ def test_patches_target_only_expected_areas() -> None:
                 "platform/joinery_background.h",
                 "platform/macos/display_server_macos.mm",
                 "platform/macos/godot_application.mm",
+                "platform/macos/godot_window.mm",
                 "platform/macos/godot_window_delegate.mm",
                 "platform/macos/os_macos.mm",
                 "platform/windows/display_server_windows.cpp",
