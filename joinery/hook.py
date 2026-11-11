@@ -282,10 +282,11 @@ def main(agent_id: str | None = None) -> int:
         verdict = violation(raw)
         if verdict is None:
             return 0
-        endpoint = os.environ.get("JOINERY_INSPECTION_ENDPOINT")
+        endpoint = os.environ.get("JOINERY_POLICY_ENDPOINT")
         if verdict.severity == Severity.STOP and endpoint:
-            # Inform the parent directly: stopping only the child must not let
-            # the parent retry a forbidden asset request through another tool.
+            # Inform the chat host directly: the provider ending its turn must
+            # not let Joinery submit or continue it, and stopping a specialist
+            # must not let the parent retry through another tool.
             from joinery.gateway_rpc import rpc
 
             async def notify() -> None:

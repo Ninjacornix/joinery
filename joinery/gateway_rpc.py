@@ -158,10 +158,12 @@ class GatewayRPC:
                 raise TypeError("Invalid gateway parameters.")
             if self.stop_reason:
                 raise PolicyStop(self.stop_reason)
-            if method == "policy_stop" and self.inspection_only:
+            if method == "policy_stop":
+                # The policy hook of the agent this gateway serves (main or
+                # specialist) stopped a Rule Zero call: the whole turn stops.
                 reason = params.get("reason")
                 if not isinstance(reason, str) or not reason:
-                    raise ValueError("Missing specialist policy-stop reason.")
+                    raise ValueError("Missing policy-stop reason.")
                 raise PolicyStop(reason[:1000])
             if method == "inventory":
                 data = await self.gateway.discover()

@@ -249,9 +249,11 @@ class ClaudeSession:
         if prompt.attachments:
             # Images go in as content blocks, which only the stream-json input takes.
             args += ["--input-format", "stream-json"]
+        if self.gateway_socket is not None:
+            # The policy hook reports a Rule Zero stop to the chat host here.
+            env["JOINERY_POLICY_ENDPOINT"] = str(self.gateway_socket)
         if self.inspection_only:
             env["JOINERY_INSPECTION_ONLY"] = "1"
-            env["JOINERY_INSPECTION_ENDPOINT"] = str(self.gateway_socket)
             args += ["--disallowedTools", "Task", "Agent"]
         self.process = await asyncio.create_subprocess_exec(
             *readonly_command(launch_argv(args[0], args[1:]), self.project),

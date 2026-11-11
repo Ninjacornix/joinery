@@ -49,6 +49,7 @@ class Host:
         self.root = root
         self.events: list[dict[str, Any]] = []
         self.gateway: ProjectGateway | None = None
+        self.policy_stop: Any = None
         self.prompts: list[Prompt] = []
         self.editor_results: list[dict[str, Any]] = []
         self.scripts: list[Script] = []
@@ -103,7 +104,8 @@ class Host:
             return self.gateway
 
         class FakeRPC:
-            def __init__(self, gateway: Any, _stop: Any) -> None:
+            def __init__(self, gateway: Any, stop: Any) -> None:
+                host.policy_stop = stop
                 self.path = Path("gateway.sock")
                 self.stop_reason = ""
                 self.gateway = gateway
@@ -498,3 +500,20 @@ def test_the_summary_primes_only_its_own_chat() -> None:
 def test_the_failure_line_is_plain(problems: list[Problem], text: str) -> None:
     result = SubmitResult("failed", 3, 0, True, problems=problems)
     assert failure_notice(result)["text"] == text
+
+
+def test_a_rule_zero_stop_ends_the_turn_without_a_submit(host: Host) -> None:
+    async def agent(bridge: Any) -> AsyncIterator[Any]:
+        host.tx = host.stage({"scenes/ashtray.tscn": SCENE})  # type: ignore[attr-defined]
+        # The agent's policy hook reports the stop over the gateway, like the RPC.
+        asyncio.ensure_future(host.policy_stop("STOP, Rule Zero by Joinery policy"))
+        await asyncio.sleep(1)
+        yield Done(ok=True)
+
+    host.run(agent)
+    assert len(host.prompts) == 1, "Never continued after a stop"
+    assert host.tx.state == "rejected"  # type: ignore[attr-defined]
+    kinds = host.kinds()
+    assert "file_preview" not in kinds and "submitting" not in kinds
+    stop = next(e for e in host.events if e.get("kind") == "message")
+    assert stop["text"].startswith("Stopped by project policy: STOP, Rule Zero")

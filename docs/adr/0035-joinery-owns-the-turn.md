@@ -49,7 +49,9 @@ the model runtime and keep the user's subscription.
    wait for `in_review`. If the turn ends with an unsubmitted change, Joinery submits it on the
    agent's behalf. If that fails with problems the agent can fix, Joinery asks the agent once
    more in the same turn. If the change still fails, Joinery posts the outcome as its own
-   `notice`, so the agent's last words never stand unbacked.
+   `notice`, so the agent's last words never stand unbacked. A Rule Zero stop in any agent's policy hook
+   reaches the chat host too (`JOINERY_POLICY_ENDPOINT`, the agent's gateway), which stops the
+   turn and drops its change: a stopped turn is never submitted or continued.
 5. **Context summaries.** The controller tracks `Usage`. At 80 % of a known context window,
    after the turn, Joinery runs a read-only summary turn: mutations and submit are refused
    while the controller is `compacting`. Joinery adds the facts it recorded itself (accepted,

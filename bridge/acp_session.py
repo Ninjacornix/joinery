@@ -109,10 +109,11 @@ class ACPSession:
             else self.agent
         )
         env = dict(os.environ)
+        if self.gateway_socket is not None:
+            # The policy hook reports a Rule Zero stop to the chat host here.
+            env["JOINERY_POLICY_ENDPOINT"] = str(self.gateway_socket)
         if self.inspection_only:
             env["JOINERY_INSPECTION_ONLY"] = "1"
-            if self.gateway_socket is not None:
-                env["JOINERY_INSPECTION_ENDPOINT"] = str(self.gateway_socket)
         extra: list[str] = []
         if profile_id:
             driver, extra, values = runtime(profile_id)

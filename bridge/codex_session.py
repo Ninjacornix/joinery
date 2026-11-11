@@ -104,10 +104,11 @@ class CodexSession:
             raise ValueError("Codex CLI is not installed.")
         args: list[str] = []
         env = os.environ.copy()
+        if self.gateway_socket is not None:
+            # The policy hook reports a Rule Zero stop to the chat host here.
+            env["JOINERY_POLICY_ENDPOINT"] = str(self.gateway_socket)
         if self.inspection_only:
             env["JOINERY_INSPECTION_ONLY"] = "1"
-            if self.gateway_socket is not None:
-                env["JOINERY_INSPECTION_ENDPOINT"] = str(self.gateway_socket)
         if profile_id:
             driver, args, extra = runtime(profile_id)
             if driver != "codex":

@@ -197,9 +197,11 @@ def test_one_specialist_failure_does_not_fabricate_success_or_discard_other_find
     asyncio.run(run())
 
 
-def test_specialist_rule_zero_hook_notifies_parent_stop_endpoint(
-    tmp_path: Path, monkeypatch
+@pytest.mark.parametrize("specialist", [True, False])
+def test_a_rule_zero_hook_stops_the_chat_host(
+    tmp_path: Path, monkeypatch, specialist: bool
 ):
+    """The main agent's hook and a specialist's both reach the chat host."""
     (tmp_path / "joinery.toml").write_text('[tools]\nenabled=["godot"]\n')
 
     async def run():
@@ -210,11 +212,19 @@ def test_specialist_rule_zero_hook_notifies_parent_stop_endpoint(
             reasons.append(reason)
             stopped.set()
 
-        endpoint = GatewayRPC(SimpleNamespace(), on_stop, inspection_only=True)
+        async def close():
+            pass
+
+        endpoint = GatewayRPC(
+            SimpleNamespace(close=close), on_stop, inspection_only=specialist
+        )
         try:
             await endpoint.start()
-            monkeypatch.setenv("JOINERY_INSPECTION_ONLY", "1")
-            monkeypatch.setenv("JOINERY_INSPECTION_ENDPOINT", str(endpoint.path))
+            if specialist:
+                monkeypatch.setenv("JOINERY_INSPECTION_ONLY", "1")
+            else:
+                monkeypatch.delenv("JOINERY_INSPECTION_ONLY", raising=False)
+            monkeypatch.setenv("JOINERY_POLICY_ENDPOINT", str(endpoint.path))
             monkeypatch.setattr(
                 "sys.stdin",
                 io.StringIO(
