@@ -26,6 +26,7 @@ from joinery import (
     playtest,
     references,
     setup_imports,
+    share,
     timeline,
 )
 from joinery.agents import all_agents
@@ -958,6 +959,10 @@ def _parser() -> argparse.ArgumentParser:
         "playtest", help="play the game headless with a bot and report what goes wrong"
     )
     playtest.add_arguments(playtest_cmd)
+    share_cmd = commands.add_parser(
+        "share", help="build the game for players, make store media, publish"
+    )
+    share.add_arguments(share_cmd)
     setup = commands.add_parser("setup", help="change a project's tools")
     setup.add_argument("--tools", help="comma-separated ids; skips the menu")
     setup.add_argument("--project", type=Path, default=ROOT)
@@ -1325,6 +1330,8 @@ def main(argv: list[str] | None = None) -> int:
         return _features(args.json)
     if args.command == "playtest":
         return playtest.main(args)
+    if args.command == "share":
+        return share.main(args)
     if args.command == "feature":
         return _feature(args)
     if args.command == "status":
