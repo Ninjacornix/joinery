@@ -444,7 +444,10 @@ func _wizard(create: Button) -> void:
 		return
 	_check(FileAccess.file_exists(project.path_join("project.godot")), "Create a Godot project")
 	_check(FileAccess.file_exists(project.path_join("joinery.toml")), "Custom choices must save")
-	var config := FileAccess.get_file_as_string(project.path_join("joinery.toml"))
+	# Windows writes the file with CRLF line ends.
+	var config := FileAccess.get_file_as_string(project.path_join("joinery.toml")).replace(
+		"\r\n", "\n"
+	)
 	_check(config.contains('id = "hi-godot-godot-ai"'), "Save the selected alternative as custom")
 	_check(
 		config.contains("[history]") and config.contains("keep = 10\nmax_mb = 1024"),

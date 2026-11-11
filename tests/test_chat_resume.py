@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import uuid
 from pathlib import Path
 
@@ -53,6 +54,10 @@ def _argv(project: Path) -> list[list[str]]:
     return [json.loads(line) for line in log.read_text().splitlines()]
 
 
+@pytest.mark.skipif(
+    os.name == "nt",
+    reason="Claude Code is not supported on Windows; its fake is a POSIX script",
+)
 def test_claude_resumes_a_saved_session_across_processes(
     claude: Path, tmp_path: Path
 ) -> None:

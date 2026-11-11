@@ -265,9 +265,21 @@ def test_cli_stdio_conversation_and_eof_cleanup(
         assert process.stdout is not None and process.stdin is not None
 
         async def read() -> dict:
-            return json.loads(
-                await asyncio.wait_for(process.stdout.readline(), timeout=5)
-            )
+            try:
+                line = await asyncio.wait_for(process.stdout.readline(), timeout=20)
+            except TimeoutError:
+                process.kill()
+                err = await process.stderr.read() if process.stderr else b""
+                raise AssertionError(
+                    "the chat host stopped answering: "
+                    + err.decode(errors="replace")[-2000:]
+                ) from None
+            if not line:
+                err = await process.stderr.read() if process.stderr else b""
+                raise AssertionError(
+                    "the chat host exited: " + err.decode(errors="replace")[-2000:]
+                )
+            return json.loads(line)
 
         try:
             assert (await read())["state"] == "connected"
@@ -309,7 +321,12 @@ def test_cli_stdio_conversation_and_eof_cleanup(
             process.stdin.write(b'{"kind":"cancel"}\n')
             await process.stdin.drain()
             cancelled = await read()
-            while cancelled["kind"] in {"progress", "timing", "execution", "turn_state"}:
+            while cancelled["kind"] in {
+                "progress",
+                "timing",
+                "execution",
+                "turn_state",
+            }:
                 cancelled = await read()
             assert cancelled == {"kind": "done", "ok": False}
             process.stdin.close()
