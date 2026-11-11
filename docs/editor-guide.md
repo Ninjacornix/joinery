@@ -368,6 +368,48 @@ direction does the same. No model is needed to check.
   it, `--area palette` for one area, `--plan` for the changes Fix all would
   start).
 
+### Accessibility and performance
+
+`/access` checks how accessible the game is and `/perf [target]` how it runs on a
+target machine (ADR 0049, ADR 0050). Both are also in Settings (**Accessibility
+check**, **Performance check**) and on the Review tab's **Game checks** row, which
+shows their last scores. Each opens a card like the Match card: a headline, a score
+per area, the most serious findings in their own words, **Fix N things** and **Fix**
+per area. Both check the game, not the editor: stock Godot plays a seeded run
+headless, then the same seed in a window that never takes focus. No model is needed.
+
+- **Accessibility** reads every text and control on the HUD and on each menu and
+  settings page: text contrast against what it sits on (WCAG AA, or the bible's
+  `min_ui_contrast`), text size at 1080p (`[access] target_height`; the bible's
+  `min_text_px`, else 18 px), names for screen readers, colours a script switches
+  between that look alike with colour-blind vision, subtitles for voice, remapping,
+  controller support, hold or toggle, shake and flash settings, flashes faster than
+  three a second, pause, and assists.
+- **Performance** measures frame times (p50, p95, p99), draw calls, triangles in view,
+  texture memory, shader compilations, nodes, physics bodies, load time, memory
+  growth and each script's cost, against the target's budget: **High-end PC**,
+  **Mid-range PC** (default), **Low-end PC**, **Steam Deck** or **Web browser**, picked
+  on the card. Frame times measured here are scaled to the target, which is an
+  estimate. `[performance]` in `joinery.toml` sets the default `target` and any budget
+  (`[performance.web] draw_calls = 300`).
+- **Fix** makes each fix as a reviewed change. Joinery's own edits run in the app that
+  owns the file: a recolour within the bible's palette, a bigger font size, a name for
+  a screen reader, a texture resized in Krita or limited in its import settings,
+  LODs turned on, a model decimated in Blender, shadows off on extra lights, a
+  visibility range on repeated props. For code, the read-only accessibility or
+  performance agent reads the finding and the files and words the change, and a
+  worker makes it. What a game feature adds (the **Accessibility** settings page,
+  controller support) opens that feature's plan for you to apply.
+- The **Accessibility** feature adds one settings page to the game: text size, high
+  contrast, a colour-blind filter, screen shake, reduced motion, reduce flashing,
+  subtitles and their size, toggle instead of hold, game speed, and Remap controls.
+  Game code shows subtitles with `Subtitles.say("Over here!", 2.5, "Guard")`.
+- After an accept the game is checked again and the scores rise.
+  `[agents] access_check_every = 5` (or `perf_check_every`) checks after every five
+  accepted changes; both are off by default.
+- `joinery access --project <path>` and `joinery perf --project <path> --target web`
+  print the same (`--json`, `--area`, `--plan`, `--no-window`).
+
 ### Building a level from a sketch
 
 Draw the level on paper (or take a top-down screenshot), attach the picture with
@@ -499,6 +541,8 @@ again.
   softlocks and balance notes (see Playtests above).
 - `/match` checks the project against the art bible and offers to fix what
   drifts (see Making everything match above).
+- `/access` and `/perf [target]` check the game's accessibility and performance
+  (see Accessibility and performance above).
 - `/blockout [notes]` builds a greybox level from the sketch you attach (see
   Building a level from a sketch above).
 - `/brief` opens `design/brief.md` read-only, with **Ask Journeyman to change
@@ -922,6 +966,8 @@ uv run joinery brief --project /path/to/game --json # the brief's summary and su
 uv run joinery bible --project /path/to/game --upgrade   # bring an older bible up to date
 uv run joinery check bible --project /path/to/game  # gaps, reference board and suggestions
 uv run joinery match --project /path/to/game        # how far the project is from the bible, per area
+uv run joinery access --project /path/to/game       # how accessible the game is, per area
+uv run joinery perf --project /path/to/game --target steam-deck   # how it runs on a target machine
 uv run joinery check catalogue                      # every blueprint and feature is valid
 ```
 
