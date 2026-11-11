@@ -130,7 +130,10 @@ func _settings_persist() -> void:
 	var music: int = AudioServer.get_bus_index(&"Music")
 	play.expect(music > 0, "the Music bus exists")
 	play.expect_near(
-		AudioServer.get_bus_volume_db(music), linear_to_db(0.5), 0.01, "Music bus volume"
+		AudioServer.get_bus_volume_db(music),
+		float(settings.base_volume_db(&"Music")) + linear_to_db(0.5),
+		0.01,
+		"Music bus volume, on top of the layout's own"
 	)
 	settings.set_value("audio", "sfx", 0.0)
 	play.expect(AudioServer.is_bus_mute(AudioServer.get_bus_index(&"SFX")), "0 mutes SFX")

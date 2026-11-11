@@ -2,7 +2,8 @@ extends Node
 ## Player settings, saved to user://settings.cfg as soon as they change.
 ##
 ## Sections and keys the core applies:
-##   audio/master, audio/music, audio/sfx  linear 0-1 on buses Master, Music, SFX
+##   audio/master, audio/music, audio/sfx  linear 0-1 on buses Master, Music, SFX,
+##                                          on top of the bus layout's own volume
 ##   video/fullscreen, video/vsync          bool
 ##   access/screen_shake                    0-1, read by camera shake code
 ##   access/reduced_motion                  bool, read by tweens and effects
@@ -24,10 +25,17 @@ const BUSES := {"master": &"Master", "music": &"Music", "sfx": &"SFX"}
 var path: String = DEFAULT_PATH
 
 var _config: ConfigFile = ConfigFile.new()
+## Each bus's volume in the bus layout (dB), read once at start-up. The
+## player's level is added to it, so a mix made in the layout survives.
+var _base_db: Dictionary = {}
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	for bus_name: StringName in BUSES.values():
+		var index: int = AudioServer.get_bus_index(bus_name)
+		if index >= 0:
+			_base_db[bus_name] = AudioServer.get_bus_volume_db(index)
 	for argument: String in OS.get_cmdline_user_args():
 		if argument.begins_with(PATH_ARG):
 			path = argument.substr(PATH_ARG.length())
@@ -63,6 +71,11 @@ func set_value(section: String, key: String, value: Variant) -> void:
 
 func has_value(section: String, key: String) -> bool:
 	return _config.has_section_key(section, key)
+
+
+## The bus layout's own volume (dB) of a bus the player's sliders scale.
+func base_volume_db(bus_name: StringName) -> float:
+	return float(_base_db.get(bus_name, 0.0))
 
 
 ## Screen shake strength to multiply camera shake by (0 = off).
@@ -110,7 +123,9 @@ func _apply_volume(key: String) -> void:
 		return
 	var level: float = clampf(float(get_value("audio", key)), 0.0, 1.0)
 	AudioServer.set_bus_mute(bus, level <= 0.001)
-	AudioServer.set_bus_volume_db(bus, linear_to_db(maxf(level, 0.001)))
+	AudioServer.set_bus_volume_db(
+		bus, base_volume_db(BUSES[key]) + linear_to_db(maxf(level, 0.001))
+	)
 
 
 func _apply_video(key: String) -> void:
