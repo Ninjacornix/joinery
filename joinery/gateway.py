@@ -67,24 +67,38 @@ if TYPE_CHECKING:
     from joinery.turn import TurnController
 
 #: Native document operations: each saves, exports and records a recipe, and its
-#: result is imported into Godot before the next call can use it.
-NATIVE_OPS = frozenset(
-    {
-        "operate_document",
-        "transform_parts",
-        "operate_graph",
-        "operate_vector",
-        "set_material_value",
-        "adjust_map",
-        "bake_height_to_normal",
-        "make_map_editable",
-        "paint_map",
-        "replace_map",
-        "split_material",
-        "edit_bone",
-        "edit_shape_key",
-    }
-)
+#: result is imported into Godot before the next call can use it. Each names every
+#: app it runs, so a parallel task wanting one of them waits its turn (WorkerSlots).
+OP_APPS: dict[str, tuple[str, ...]] = {
+    # The call's own "tool" argument names the app.
+    "operate_document": (),
+    "transform_parts": ("blender",),
+    "operate_graph": ("material-maker",),
+    "operate_vector": ("inkscape",),
+    "set_material_value": ("blender",),
+    "adjust_map": ("blender",),
+    "bake_height_to_normal": ("blender",),
+    # Plus its editor: Krita, or Material Maker.
+    "make_map_editable": ("blender",),
+    "paint_map": ("blender", "krita"),
+    "replace_map": ("blender",),
+    "split_material": ("blender",),
+    "edit_bone": ("blender",),
+    "edit_shape_key": ("blender",),
+}
+NATIVE_OPS = frozenset(OP_APPS)
+
+
+def op_apps(tool: str, arguments: dict[str, Any]) -> tuple[str, ...]:
+    """Every app a native operation runs, in a stable order."""
+    apps = list(OP_APPS.get(tool, ()))
+    if tool == "operate_document":
+        apps.append(str(arguments.get("tool") or ""))
+    elif tool == "make_map_editable":
+        apps.append(str(arguments.get("editor") or "krita"))
+    return tuple(dict.fromkeys(app for app in apps if app))
+
+
 #: Files whose line-by-line diff the review's Details show.
 TEXT_SUFFIXES = frozenset(
     {".gd", ".tscn", ".tres", ".json", ".toml", ".gdshader", ".md"}
@@ -518,14 +532,13 @@ class ProjectGateway:
         ):
             # The tool server of this stage reads the prompt's part targets.
             part_targets.write_targets(self.transaction.stage, self.target_context)
-        owner = ""
-        if tool in NATIVE_OPS:
-            owner = str(arguments.get("tool", server.removeprefix("joinery-")))
-            self.progress("Working in " + owner.replace("-", " ").capitalize() + "…")
-        app = owner.replace("-", " ").capitalize()
+        apps = op_apps(tool, arguments) if tool in NATIVE_OPS else ()
+        if apps:
+            names = [self.slots.app_name(app) for app in apps]
+            self.progress("Working in " + " and ".join(names) + "…")
         async with self.slots.hold(
-            owner,
-            lambda: self.progress(f"Waiting for {app}: another task is using it…"),
+            apps,
+            lambda app: self.progress(f"Waiting for {app}: another task is using it…"),
         ):
             result = await connection.call(
                 tool,

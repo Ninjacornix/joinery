@@ -60,8 +60,12 @@ ADR 0035 already kept the turn controller free of globals so that a scheduler co
    review). Anyone else's live edit, or staged write to a scene that routes live, is refused
    and names the owner. A task's live preview is reviewed when its turn reaches review,
    never over the lead's file review, and decided on its own.
-7. **Shared workers.** Blender and Krita document operators take turns per worker image
-   (`WorkerSlots`); the waiting task says so in its step. Other apps run side by side, each
+7. **Shared workers.** Blender, Krita and Material Maker document operators take turns per
+   worker image (`WorkerSlots`). Each native operation declares every app it runs
+   (`OP_APPS` in the gateway: `paint_map` is Blender and Krita, `make_map_editable` Blender
+   and its editor) and holds all their slots for the whole call, taken in one global order
+   so no two operations wait on each other, and given back on any exit (error or Stop).
+   The waiting task's step names the app it waits for. Other apps run side by side, each
    task in its own staged worker.
 8. **Policy.** A task's provider is launched the same way as the lead's, so the same policy
    hook judges every call and reports a Rule Zero stop to the task's own endpoint. Any Rule

@@ -6,7 +6,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 import pytest
 from mcp.types import CallToolResult, TextContent
@@ -14,7 +14,7 @@ from mcp.types import CallToolResult, TextContent
 from bridge.crew import Crew
 from bridge.protocol import Done, Message, Prompt
 from joinery.claims import PathClaims, WorkerSlots, parallel_limit, project_paths
-from joinery.gateway import ProjectGateway
+from joinery.gateway import NATIVE_OPS, OP_APPS, ProjectGateway, op_apps
 from joinery.gateway_rpc import NO_NESTED_TASKS, GatewayRPC, rpc
 from joinery.mcp_runtime import ServerSpec
 from joinery.rebase import merge_lock
@@ -602,7 +602,7 @@ def test_document_operators_of_one_worker_image_take_turns() -> None:
         waited: list[str] = []
 
         async def op(name: str, tool: str) -> None:
-            async with slots.hold(tool, lambda: waited.append(name)):
+            async with slots.hold(tool, lambda app: waited.append(name + " " + app)):
                 order.append(name + " in")
                 await asyncio.sleep(0.01)
                 order.append(name + " out")
@@ -610,12 +610,181 @@ def test_document_operators_of_one_worker_image_take_turns() -> None:
         await asyncio.gather(
             op("one", "blender"), op("two", "krita"), op("three", "godot")
         )
-        assert waited == ["two"]
+        assert waited == ["two Krita"]
         return order
 
     order = run(go)
     assert order.index("one out") < order.index("two in")
     assert order.index("three in") < order.index("one out")
+
+
+def test_every_native_operation_names_the_apps_it_runs() -> None:
+    assert NATIVE_OPS == frozenset(OP_APPS)
+    for op in NATIVE_OPS:
+        assert op_apps(op, {"tool": "gimp"}), op
+    assert op_apps("paint_map", {}) == ("blender", "krita")
+    assert op_apps("make_map_editable", {}) == ("blender", "krita")
+    assert op_apps("make_map_editable", {"editor": "material-maker"}) == (
+        "blender",
+        "material-maker",
+    )
+    assert op_apps("operate_document", {"tool": "krita"}) == ("krita",)
+    assert op_apps("operate_graph", {}) == ("material-maker",)
+
+
+class SlowOps(FakeConnection):
+    """Native operations that stay in their app until the test lets them finish."""
+
+    gates: ClassVar[dict[str, asyncio.Event]] = {}
+    log: ClassVar[list[str]] = []
+
+    def __init__(self, spec: ServerSpec, project: Path) -> None:
+        super().__init__(spec, project)
+        self.tools = {"paint_map": object(), "operate_document": object()}
+
+    async def call(
+        self, tool: str, arguments: dict[str, Any], timeout: float = 0
+    ) -> CallToolResult:
+        self.log.append(tool + " in")
+        await self.gates[tool].wait()
+        self.log.append(tool + " out")
+        return CallToolResult(content=[TextContent(type="text", text="ok")])
+
+
+def test_a_krita_edit_waits_for_another_tasks_map_paint(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def imported(*_a: Any, **_k: Any) -> Result:
+        return Result(True, "", "", 0.0)
+
+    monkeypatch.setattr("joinery.gateway.run_offline", imported)
+    monkeypatch.setattr("joinery.gateway.MCPConnection", SlowOps)
+    SlowOps.log = []
+
+    async def go() -> None:
+        SlowOps.gates = {
+            "paint_map": asyncio.Event(),
+            "operate_document": asyncio.Event(),
+        }
+        main = wire(ProjectGateway(project))
+        said: list[tuple[str, str]] = []
+        try:
+            painter = wire(main.lane("t1", "Paint the crate"))
+            other = wire(main.lane("t2", "Retouch the sign"))
+            painter.progress = lambda text: said.append(("t1", text))
+            other.progress = lambda text: said.append(("t2", text))
+            paint = asyncio.create_task(
+                painter.call(
+                    "joinery-blender-ops",
+                    "paint_map",
+                    {"source": "art/sources/crate.blend", "material": "Wood"},
+                )
+            )
+            for _ in range(200):
+                if "paint_map in" in SlowOps.log or paint.done():
+                    break
+                await asyncio.sleep(0)
+            if paint.done():
+                paint.result()
+            assert "paint_map in" in SlowOps.log
+            edit = asyncio.create_task(
+                other.call(
+                    "joinery-paint",
+                    "operate_document",
+                    {"tool": "krita", "source": "art/sources/sign.kra"},
+                )
+            )
+            for _ in range(20):
+                await asyncio.sleep(0)
+            assert ("t1", "Working in Blender and Krita…") in said
+            assert ("t2", "Waiting for Krita: another task is using it…") in said
+            assert "operate_document in" not in SlowOps.log
+            SlowOps.gates["operate_document"].set()
+            SlowOps.gates["paint_map"].set()
+            await asyncio.gather(paint, edit)
+            assert SlowOps.log == [
+                "paint_map in",
+                "paint_map out",
+                "operate_document in",
+                "operate_document out",
+            ]
+        finally:
+            await main.close()
+
+    run(go)
+
+
+@pytest.fixture
+def three_images(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Apps a, b and c, each in its own worker image."""
+    monkeypatch.setattr(WorkerSlots, "key", staticmethod(lambda tool: tool))
+
+
+@pytest.mark.usefixtures("three_images")
+def test_operations_holding_several_slots_never_wait_on_each_other() -> None:
+    async def go() -> None:
+        slots = WorkerSlots()
+        inside: set[str] = set()
+
+        async def op(apps: list[str]) -> None:
+            async with slots.hold(apps):
+                assert not inside & set(apps)
+                inside.update(apps)
+                await asyncio.sleep(0.01)
+                inside.difference_update(apps)
+
+        # Taken in the order asked, these three would each hold one slot and
+        # wait for the next one forever.
+        for _ in range(5):
+            await asyncio.wait_for(
+                asyncio.gather(op(["a", "b"]), op(["b", "c"]), op(["c", "a"])), 2
+            )
+
+    run(go)
+
+
+@pytest.mark.usefixtures("three_images")
+def test_a_cancelled_operation_gives_back_every_slot() -> None:
+    async def go() -> None:
+        slots = WorkerSlots()
+        held = asyncio.Event()
+
+        async def hold_forever(apps: list[str]) -> None:
+            async with slots.hold(apps):
+                held.set()
+                await asyncio.Event().wait()
+
+        # Cancelled while it runs.
+        running = asyncio.create_task(hold_forever(["a", "b"]))
+        await held.wait()
+        running.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await running
+        # Cancelled while it waits, holding a and waiting for b.
+        held.clear()
+        holder = asyncio.create_task(hold_forever(["b"]))
+        await held.wait()
+        waited: list[str] = []
+        waiting = asyncio.create_task(
+            slots.hold(["a", "b"], waited.append).__aenter__()
+        )
+        for _ in range(50):
+            if waited:
+                break
+            await asyncio.sleep(0)
+        assert waited == ["B"]
+        waiting.cancel()
+        holder.cancel()
+        await asyncio.gather(waiting, holder, return_exceptions=True)
+
+        async def free() -> None:
+            async with slots.hold(["a", "b", "c"], lambda app: waited.append(app)):
+                pass
+
+        await asyncio.wait_for(free(), 1)
+        assert waited == ["B"]
+
+    run(go)
 
 
 # --- The scheduler ------------------------------------------------------------------
@@ -848,7 +1017,9 @@ def test_a_task_changes_the_scene_on_screen_once_the_main_request_is_idle(
         hold = asyncio.Event()
         test.steps = [goes_live(), goes_live(hold)]
         lamp = await crew.start("Lamp", "Move the lamp", origin="user", prompt=prompt)
-        chair = await crew.start("Chair", "Move the chair", origin="user", prompt=prompt)
+        chair = await crew.start(
+            "Chair", "Move the chair", origin="user", prompt=prompt
+        )
         assert lamp.job is not None
         await lamp.job
         # One live owner: the lamp's preview is on screen for the user.

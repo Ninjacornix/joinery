@@ -20,8 +20,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import tomllib
-from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from collections.abc import AsyncIterator, Callable, Iterable
+from contextlib import AsyncExitStack, asynccontextmanager
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO
 
@@ -37,7 +37,7 @@ UNCLAIMED = frozenset({"joinery.lock"})
 DEFAULT_PARALLEL = 3
 MAX_PARALLEL = 6
 #: Apps whose document operators can't run side by side in one worker image.
-SERIAL_TOOLS = frozenset({"blender", "krita"})
+SERIAL_TOOLS = frozenset({"blender", "krita", "material-maker"})
 #: The game manifest a feature change rewrites: one claim for every game feature.
 FEATURES = ".joinery/game-manifest.json"
 _FEATURE_LOCK = ".joinery/features.lock"
@@ -293,12 +293,17 @@ class PathClaims:
 class WorkerSlots:
     """One document operator at a time per worker image for apps that can't share one.
 
-    Blender and Krita keep a document open in the worker while an operator runs;
-    two tasks driving them at once would fight over it, so their calls queue.
+    Blender, Krita and Material Maker keep a document open in the worker while an
+    operator runs; two tasks driving them at once would fight over it, so their
+    calls queue. An operation that runs several apps (a Krita paint loaded into a
+    Blender model) holds every slot it needs for the whole call, taken in one
+    global order so two such operations never wait on each other.
     """
 
     def __init__(self) -> None:
         self._locks: dict[str, asyncio.Lock] = {}
+        #: The apps the call holding each slot runs.
+        self._holders: dict[str, tuple[str, ...]] = {}
 
     @staticmethod
     def key(tool: str) -> str:
@@ -307,16 +312,35 @@ class WorkerSlots:
         module = tool_modules.REGISTRY.get(tool)
         return (module.worker_image if module is not None else "") or tool
 
+    @staticmethod
+    def app_name(tool: str) -> str:
+        module = tool_modules.REGISTRY.get(tool)
+        return (
+            module.name if module is not None else tool.replace("-", " ").capitalize()
+        )
+
     @asynccontextmanager
     async def hold(
-        self, tool: str, waiting: Callable[[], None] = lambda: None
+        self,
+        tools: str | Iterable[str],
+        waiting: Callable[[str], None] = lambda _app: None,
     ) -> AsyncIterator[None]:
-        key = self.key(tool)
-        if not key:
-            yield
-            return
-        lock = self._locks.setdefault(key, asyncio.Lock())
-        if lock.locked():
-            waiting()
-        async with lock:
+        """Hold the slot of every app in `tools`; `waiting` names the app waited for."""
+        wanted: dict[str, list[str]] = {}
+        for tool in sorted({tools} if isinstance(tools, str) else set(tools)):
+            key = self.key(tool)
+            if key:
+                wanted.setdefault(key, []).append(tool)
+        async with AsyncExitStack() as stack:
+            for key in sorted(wanted):
+                apps = wanted[key]
+                lock = self._locks.setdefault(key, asyncio.Lock())
+                if lock.locked():
+                    held = self._holders.get(key, ())
+                    waiting(
+                        self.app_name(next((a for a in apps if a in held), apps[0]))
+                    )
+                await stack.enter_async_context(lock)
+                self._holders[key] = tuple(apps)
+                stack.callback(self._holders.pop, key, None)
             yield
