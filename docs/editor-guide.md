@@ -129,6 +129,43 @@ prints each change's state, summary, apps, times, files and the art bible's
 approval as JSON. The tab reads it when it is shown, when you come back to
 the editor and whenever a change is staged or decided; it never polls.
 
+### Several agents at once
+
+While Journeyman works on a request, more agents can work beside it, each on
+its own part (ADR 0036). Each makes its own change, and you review each one on
+its own.
+
+- **Run alongside**: type a message while Journeyman works and press **Run
+  alongside** beside Stop. The message starts at once as its own task instead
+  of waiting in the queue (Enter still queues it).
+- **Journeyman splits a request** itself when its parts are independent, such
+  as a chair model and a lamp model: it hands a part to a task with
+  `start_task`. It keeps dependent steps (a model and the scene that places
+  it), small requests and anything in the same files for itself.
+- Each task shows as a card above the message box: its title, the apps at
+  work, what it is doing, a timer and its own **Stop**. While two or more
+  agents work, the top of the sidebar says **3 agents working**.
+- When a task's change passes Joinery's checks its card says **Ready for
+  review**, and **Review** opens the Review tab, where the change is its own
+  row with **Accept** and **Discard**. Accepting one change never touches
+  another's. When the task is done its card leaves one line in the chat, such
+  as "Make a desk lamp: change accepted."
+- Two agents never change the same file. A task that tries gets a plain
+  answer ("`art/props/lamp.glb` is being changed by another task: Make a
+  desk lamp. Work on something else or wait.") and leaves it alone. If a
+  change you accepted meanwhile touched a file a task also changed, the task
+  redoes its part on top of yours before its change reaches you. Only
+  Journeyman's own request changes the scene on screen; tasks change other
+  scenes as files.
+- **Stop** on Journeyman's request asks once whether to stop the tasks too:
+  **Stop all** or **Keep them**.
+- Blender and Krita work on one document at a time, so tasks using them take
+  turns; the waiting task's card says so.
+- `[agents] parallel = 3` in `joinery.toml` is how many agents may work at
+  once, Journeyman included (at most 6). `parallel = 1` turns tasks off.
+  Each task is a separate session with your provider and uses its own
+  context and tokens. Saved chats keep each task and what became of it.
+
 ### The Timeline tab
 
 **Timeline**, beside Review in the bottom bar, shows how the project changed
