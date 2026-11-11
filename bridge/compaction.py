@@ -77,8 +77,11 @@ async def compact(
     emit: Callable[[dict[str, Any]], None],
     since: float = 0.0,
     seconds: float = SUMMARY_SECONDS,
+    chat_id: str = "",
 ) -> SessionSummary:
-    """Summarise the session and continue in a fresh provider session."""
+    """Summarise the session and continue in a fresh provider session.
+
+    ``chat_id`` is the chat summarised: the summary primes only its next prompt."""
     controller.begin_compaction()
     try:
         try:
@@ -95,7 +98,7 @@ async def compact(
         )
         store.save(summary)
         await bridge.new_session()
-        controller.primer = summary.text
+        controller.primer, controller.primer_chat = summary.text, chat_id
         controller.meter.reset()
         emit({"kind": "notice", "level": "info", "text": NOTICE})
         emit(Usage().model_dump())

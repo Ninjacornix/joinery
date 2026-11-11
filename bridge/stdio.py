@@ -22,7 +22,7 @@ from bridge.host import Bridge
 from bridge.models import Selection
 from bridge.protocol import Done, EditorAction, Message, Prompt
 from bridge.specialists import Specialists
-from bridge.turn_runner import run_turn
+from bridge.turn_runner import run_turn, settle_compaction
 from joinery import bible_lint, blueprints, brief, chat_attachments
 from joinery.art_approval import approve, review
 from joinery.editor_ops import validate_edit
@@ -297,6 +297,9 @@ async def _serve(
             attachments = chat_attachments.validate(
                 project, data.get("attachments", [])
             )
+            # A summary still being written belongs to the chat open now: it
+            # finishes before the sidebar's chat is opened.
+            await settle_compaction(controller)
             # The sidebar names the chat ("" for a new one); without one, the same chat.
             if "chat_id" in data:
                 switched = await recorder.switch(str(data["chat_id"]), bridge)
@@ -324,9 +327,16 @@ async def _serve(
                 emit,
                 timing,
                 lambda: compaction.compact(
-                    controller, agent, recorder, project, emit, session_start
+                    controller,
+                    agent,
+                    recorder,
+                    project,
+                    emit,
+                    session_start,
+                    chat_id=recorder.chat_id,
                 ),
                 request=str(data["text"]),
+                chat_id=recorder.chat_id,
             )
         except asyncio.CancelledError:
             outcome = "cancelled"

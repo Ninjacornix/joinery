@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable, Coroutine
+from pathlib import Path
 from typing import Any, Protocol
 
 from bridge.instructions import CONTINUE_AFTER_FAILED_SUBMIT
@@ -26,7 +27,7 @@ from bridge.protocol import (
     Usage,
 )
 from joinery.timing import TurnTiming
-from joinery.turn import MAX_CONTINUATIONS, SubmitResult, TurnController
+from joinery.turn import MAX_CONTINUATIONS, Problem, SubmitResult, TurnController
 
 
 class AgentBridge(Protocol):
@@ -38,16 +39,54 @@ class AgentBridge(Protocol):
 Emit = Callable[[dict[str, Any]], None]
 
 
+#: Each check's failure in plain words; the raw output stays with the agent.
+PLAIN = {
+    "protected": "it changed project settings only project setup may change",
+    "live_conflict": "it changed one scene both live and as a saved file",
+    "references": "{paths} {verb} a file the change doesn't include",
+    "assets": "an asset has no valid provenance record",
+    "dependencies": "it adds a package Joinery doesn't allow",
+    "art_bible": "it breaks the art direction's rules",
+    "godot_import": "Godot couldn't import it",
+    "tests": "the project's tests failed",
+}
+
+
+def _plain(problem: Problem) -> str:
+    paths = [Path(p).name for p in problem.paths[:2]]
+    text = PLAIN.get(problem.check, "")
+    if not text:
+        return ""
+    if "{paths}" in text:
+        if not paths:
+            return "it uses a file the change doesn't include"
+        return text.format(
+            paths=" and ".join(paths), verb="use" if len(paths) > 1 else "uses"
+        )
+    return text + (" (" + ", ".join(paths) + ")" if paths else "")
+
+
 def failure_notice(result: SubmitResult) -> dict[str, Any]:
-    """Joinery's own line when a change didn't pass: the agent's words aren't the last."""
-    problems = "; ".join(p.message[:240] for p in result.problems[:2])
-    return {
-        "kind": "notice",
-        "level": "warn",
-        "text": "Journeyman's change didn't pass Joinery's checks"
-        + (": " + problems.rstrip(".") if problems else "")
-        + ". Nothing was changed.",
-    }
+    """Joinery's own line when a change didn't pass: the agent's words aren't the last.
+
+    Plain words only; the checks' raw output went to the agent."""
+    if any(p.check in {"checks", "review"} for p in result.problems):
+        text = (
+            "Joinery couldn't check Journeyman's change, so nothing was changed. "
+            + (
+                "Make sure Docker is running, then ask again."
+                if any(p.check == "checks" for p in result.problems)
+                else "Ask again in a moment."
+            )
+        )
+    else:
+        reasons = [r for r in dict.fromkeys(map(_plain, result.problems)) if r]
+        text = (
+            "Journeyman's change didn't pass Joinery's checks"
+            + (": " + "; ".join(reasons[:2]) if reasons else "")
+            + ". Nothing was changed."
+        )
+    return {"kind": "notice", "level": "warn", "text": text}
 
 
 def continuation(prompt: Prompt, result: SubmitResult) -> Prompt:
@@ -57,6 +96,8 @@ def continuation(prompt: Prompt, result: SubmitResult) -> Prompt:
         update={
             "text": CONTINUE_AFTER_FAILED_SUBMIT.format(problems=problems),
             "attachments": (),
+            # The session already has the summary from this turn's first prompt.
+            "primer": "",
         }
     )
 
@@ -102,6 +143,22 @@ async def stream(
     return ok
 
 
+async def settle_compaction(controller: TurnController) -> None:
+    """Wait for a session summary still being written.
+
+    A Stop of the waiting request never cancels the summary itself (``wait``
+    doesn't cancel what it waits for), so it is saved and the next request
+    starts fresh."""
+    task = controller.compaction
+    if task is None:
+        return
+    if not task.done():
+        controller.gateway.progress("Summarising the session…")
+    await asyncio.wait({task})
+    if controller.compaction is task:
+        controller.compaction = None
+
+
 async def run_turn(
     controller: TurnController,
     bridge: AgentBridge,
@@ -111,23 +168,24 @@ async def run_turn(
     compact: Callable[[], Coroutine[Any, Any, Any]] | None = None,
     *,
     request: str = "",
+    chat_id: str = "",
 ) -> str:
     """Run one user request; returns its outcome ("done" or "failed").
+
+    A turn whose change was dropped (it failed its checks, or needs the user
+    first) is "failed" even when the provider finished well. The session
+    summary goes ahead of the prompt only in the chat it summarises.
 
     When the provider is done, a change the agent didn't submit is submitted for
     it. If that fails with problems the agent can fix, the agent is asked once
     more in the same turn; a change that still fails is dropped, and Joinery says
     so in its own line.
     """
-    if controller.compaction is not None:
-        # The session is being summarised while the user reviewed; wait for it.
-        if not controller.compaction.done():
-            controller.gateway.progress("Summarising the session…")
-        await asyncio.gather(controller.compaction, return_exceptions=True)
-        controller.compaction = None
-    if controller.primer:
+    # The session may be being summarised while the user reviewed; wait for it.
+    await settle_compaction(controller)
+    if controller.primer and controller.primer_chat == chat_id:
         prompt = prompt.model_copy(update={"primer": controller.primer})
-        controller.primer = ""
+    controller.primer = controller.primer_chat = ""
     controller.begin(request or prompt.text)
     controller.gateway.progress("Thinking through your request…")
     ok = await stream(controller, bridge, prompt, emit, timing)
@@ -143,10 +201,11 @@ async def run_turn(
             controller, bridge, continuation(prompt, result), emit, timing
         )
     last = controller.last_result
+    dropped = last is not None and last.final and last.status in {"failed", "needs_user"}
     if last is not None and last.status == "failed" and last.final:
         emit(failure_notice(last))
     emit(Done(ok=ok).model_dump())
     if compact is not None and controller.needs_compaction():
         # Runs while the user reviews; the next request waits for it.
         controller.compaction = asyncio.create_task(compact())
-    return "done" if ok else "failed"
+    return "done" if ok and not dropped else "failed"

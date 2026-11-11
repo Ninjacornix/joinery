@@ -12,10 +12,15 @@ from unittest.mock import AsyncMock
 import pytest
 
 from bridge import stdio
-from bridge.protocol import Done, EditorAction, Message, Prompt
+from bridge.instructions import SUMMARY_REQUEST
+from bridge.protocol import Done, EditorAction, Message, MessageDelta, Prompt, Usage
+from bridge.turn_runner import failure_notice, run_turn, settle_compaction
+from joinery import chats
 from joinery.gateway import ProjectGateway
 from joinery.runner import Result
+from joinery.timing import TurnTiming
 from joinery.transactions import FileTransaction
+from joinery.turn import Problem, SubmitResult
 
 SCENE = """[gd_scene load_steps=2 format=3]
 
@@ -48,6 +53,10 @@ class Host:
         self.editor_results: list[dict[str, Any]] = []
         self.scripts: list[Script] = []
         self.user_prompts = 1
+        #: The prompt lines the sidebar sends, by default "Make an ashtray".
+        self.lines: list[dict[str, Any]] = []
+        #: What the provider was asked to do, in order.
+        self.log: list[str] = []
         #: Lines the sidebar sends once ``when`` holds for the events so far.
         self.replies: list[
             tuple[Callable[[list[dict[str, Any]]], bool], dict[str, Any]]
@@ -65,7 +74,7 @@ class Host:
                 return False
 
             async def new_session(self) -> None:
-                pass
+                host.log.append("new_session")
 
             def bind_gateway(self, _path: Path) -> None:
                 pass
@@ -75,8 +84,10 @@ class Host:
 
             async def send(self, prompt: Any) -> AsyncIterator[Any]:
                 host.prompts.append(prompt)
+                host.log.append("send")
                 async for event in host.scripts.pop(0)(self):
                     yield event
+                host.log.append("sent")
 
             def editor_result(self, _id: str, result: dict[str, Any]) -> None:
                 host.editor_results.append(result)
@@ -121,9 +132,13 @@ class Host:
             stream.feed_data(json.dumps(line).encode() + b"\n")
 
         async def drive() -> None:
-            for _ in range(prompts):
+            for index in range(prompts):
                 done = sum(e.get("kind") == "done" for e in self.events)
-                send({"kind": "prompt", "text": "Make an ashtray"})
+                send(
+                    self.lines[index]
+                    if index < len(self.lines)
+                    else {"kind": "prompt", "text": "Make an ashtray"}
+                )
                 while sum(e.get("kind") == "done" for e in self.events) == done:
                     for when, line in list(self.replies):
                         if when(self.events):
@@ -226,8 +241,12 @@ def test_a_failed_auto_submit_asks_once_then_says_so(host: Host) -> None:
     notice = host.events[kinds.index("notice")]
     assert notice["level"] == "warn"
     assert notice["text"].startswith("Journeyman's change didn't pass Joinery's checks")
-    assert "scenes/ashtray.tscn uses art/models/ashtray.glb" in notice["text"]
+    assert "ashtray.tscn uses a file the change doesn't include" in notice["text"]
+    assert "Not submitted" not in notice["text"], "The agent's wording stays with it"
     assert notice["text"].endswith("Nothing was changed.")
+    assert host.prompts[1].primer == ""
+    timing = next(e for e in host.events if e.get("kind") == "timing")
+    assert timing["outcome"] == "failed", "A dropped change is no success"
     assert kinds.index("notice") < kinds.index("done") and kinds.count("done") == 1
     assert host.tx.state == "rejected"  # type: ignore[attr-defined]
 
@@ -341,3 +360,141 @@ def test_a_codex_live_edit_of_an_unsaved_scene_goes_to_review(host: Host) -> Non
     kinds = host.kinds()
     assert "editor_action" in kinds and "file_preview" not in kinds
     assert kinds.index("in_review") < kinds.index("done")
+
+
+def test_a_new_chat_waits_for_the_summary_and_starts_without_it(host: Host) -> None:
+    async def long_turn(bridge: Any) -> AsyncIterator[Any]:
+        yield Usage(context_used=850, context_window=1000)
+        yield Message(text="Done.")
+        yield Done(ok=True)
+
+    async def summary(bridge: Any) -> AsyncIterator[Any]:
+        await asyncio.sleep(0.3)
+        yield MessageDelta(text="- Harbour at dusk", new_message=True)
+        yield Done(ok=True)
+
+    async def new_chat(bridge: Any) -> AsyncIterator[Any]:
+        yield Done(ok=True)
+
+    host.lines = [
+        {"kind": "prompt", "text": "Make the harbour"},
+        {"kind": "prompt", "text": "Something else", "chat_id": ""},
+    ]
+    host.run(long_turn, summary, new_chat, prompts=2)
+    _first, asked, fresh = host.prompts
+    assert asked.text == SUMMARY_REQUEST
+    assert fresh.primer == "" and "Harbour at dusk" not in fresh.text
+    # The summary ends before the sidebar's new chat replaces the session.
+    assert host.log == [
+        "send",
+        "sent",
+        "send",
+        "sent",
+        "new_session",
+        "new_session",
+        "send",
+        "sent",
+    ]
+    chat_a = next(e["chat_id"] for e in host.events if e.get("mode") == "new")
+    meta, entries = chats.read(host.root, chat_a)
+    assert next(e["text"] for e in entries if e["type"] == "summary").startswith(
+        "- Harbour at dusk"
+    )
+    assert meta["handle"] == "", "Reopened later, chat A continues from its summary"
+
+
+def test_a_stop_while_waiting_keeps_the_summary_running() -> None:
+    from joinery.turn import TurnController
+
+    class Gateway:
+        turn: Any = None
+        progress: Any = staticmethod(lambda _text: None)
+
+    controller = TurnController(Gateway(), lambda _e: None)  # type: ignore[arg-type]
+
+    async def go() -> None:
+        release = asyncio.Event()
+
+        async def summarise() -> str:
+            await release.wait()
+            return "saved"
+
+        controller.compaction = asyncio.create_task(summarise())
+        waiting = asyncio.create_task(settle_compaction(controller))
+        await asyncio.sleep(0.01)
+        waiting.cancel()
+        await asyncio.gather(waiting, return_exceptions=True)
+        assert controller.compaction is not None
+        assert not controller.compaction.cancelled()
+        release.set()
+        assert await controller.compaction == "saved"
+
+    asyncio.run(go())
+
+
+def test_the_summary_primes_only_its_own_chat() -> None:
+    from joinery.turn import TurnController
+
+    class Gateway:
+        turn: Any = None
+        transaction: Any = None
+        art_gate: Any = None
+        progress: Any = staticmethod(lambda _text: None)
+
+    sent: list[Prompt] = []
+
+    class Agent:
+        async def send(self, prompt: Prompt) -> AsyncIterator[Any]:
+            sent.append(prompt)
+            yield Done(ok=True)
+
+        def editor_result(self, _id: str, _result: dict[str, Any]) -> None:
+            pass
+
+    controller = TurnController(Gateway(), lambda _e: None)  # type: ignore[arg-type]
+    prompt = Prompt(text="Hi", project_dir="/p")
+
+    async def go() -> None:
+        controller.primer, controller.primer_chat = "- Chat A", "a"
+        await run_turn(
+            controller, Agent(), prompt, lambda _e: None, TurnTiming(), chat_id="b"
+        )
+        controller.primer, controller.primer_chat = "- Chat A", "a"
+        await run_turn(
+            controller, Agent(), prompt, lambda _e: None, TurnTiming(), chat_id="a"
+        )
+
+    asyncio.run(go())
+    assert [p.primer for p in sent] == ["", "- Chat A"]
+    assert controller.primer == ""
+
+
+@pytest.mark.parametrize(
+    ("problems", "text"),
+    [
+        (
+            [Problem("godot_import", "Godot import/script validation failed: ERROR x")],
+            (
+                "Journeyman's change didn't pass Joinery's checks: Godot couldn't import "
+                "it. Nothing was changed."
+            ),
+        ),
+        (
+            [Problem("checks", "Joinery could not run its checks: [Errno 2] docker")],
+            (
+                "Joinery couldn't check Journeyman's change, so nothing was changed. "
+                "Make sure Docker is running, then ask again."
+            ),
+        ),
+        (
+            [Problem("tests", "The project's tests failed: ...", ["test/a_test.gd"])],
+            (
+                "Journeyman's change didn't pass Joinery's checks: the project's tests "
+                "failed (a_test.gd). Nothing was changed."
+            ),
+        ),
+    ],
+)
+def test_the_failure_line_is_plain(problems: list[Problem], text: str) -> None:
+    result = SubmitResult("failed", 3, 0, True, problems=problems)
+    assert failure_notice(result)["text"] == text

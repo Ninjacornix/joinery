@@ -218,7 +218,11 @@ class ChatRecorder:
 
     def save(self, summary: SessionSummary) -> None:
         """Keep a session summary in the open chat (a session_summary.SummaryStore);
-        without a saved chat it goes to .joinery/summaries."""
+        without a saved chat it goes to .joinery/summaries.
+
+        The provider session it summarises is about to be replaced, so the chat
+        forgets its handle: reopened later, it continues from the summary rather
+        than resuming the nearly full session."""
         if not self.chat_id or self._broken:
             self._summaries.save(summary)
             return
@@ -230,6 +234,7 @@ class ChatRecorder:
             "facts": summary.facts,
         }
         self._save(lambda: chats.append(self.project, self.chat_id, entry))
+        self._save(lambda: chats.update(self.project, self.chat_id, handle=""))
 
     def latest(self) -> SessionSummary | None:
         """The open chat's newest session summary."""

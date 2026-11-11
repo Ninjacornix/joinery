@@ -203,6 +203,8 @@ class TurnController:
         self.meter = ContextMeter()
         #: The session summary the next prompt carries after a fresh provider session.
         self.primer = ""
+        #: The saved chat the summary belongs to ("" for none).
+        self.primer_chat = ""
         self.compaction: asyncio.Task[Any] | None = None
         #: The last submit's result this turn, the agent's or Joinery's.
         self.last_result: SubmitResult | None = None
