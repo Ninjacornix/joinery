@@ -450,11 +450,42 @@ def export(
     return {**describe(manifest), "file": str(target), "bytes": target.stat().st_size}
 
 
+#: How a kit's contents read in a sentence, by kind and file type.
+_WORDS = (
+    ("model", "models", {".glb", ".gltf"}),
+    ("sound", "sounds", {".wav", ".ogg", ".flac"}),
+    ("picture", "pictures", {".png", ".jpg", ".jpeg", ".webp", ".exr"}),
+    ("material", "materials", {".tres", ".ptex"}),
+)
+
+
+def holds(manifest: Manifest) -> str:
+    """'3 models, 1 sound, 1 scene and 1 generator': what a kit is for, at a glance."""
+    found: dict[tuple[str, str], int] = {}
+    for content in manifest.contents:
+        suffix = PurePosixPath(content.path).suffix.lower()
+        if content.kind == "scene":
+            key = ("scene", "scenes")
+        elif content.kind == "generator":
+            key = ("generator", "generators")
+        elif content.kind in {"asset", "resource"}:
+            key = next(((a, b) for a, b, s in _WORDS if suffix in s), ("", ""))
+        else:
+            continue
+        if key[0]:
+            found[key] = found.get(key, 0) + 1
+    words = [f"{n} {one if n == 1 else many}" for (one, many), n in found.items()]
+    if len(words) > 1:
+        return ", ".join(words[:-1]) + " and " + words[-1]
+    return words[0] if words else "only source files"
+
+
 def describe(manifest: Manifest) -> dict[str, Any]:
     counts: dict[str, int] = {}
     for content in manifest.contents:
         counts[content.kind] = counts.get(content.kind, 0) + 1
     return {
+        "holds": holds(manifest),
         "name": manifest.name,
         "version": manifest.version,
         "author": manifest.author,

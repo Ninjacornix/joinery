@@ -334,6 +334,7 @@ def test_export_cli_plans_without_writing(tmp_path: Path) -> None:
     )
     assert code == 0, data
     assert data["counts"]["asset"] == 3 and data["size"] > 0
+    assert data["holds"] == "1 model, 1 picture and 1 scene"
     assert not list(tmp_path.glob("*.joinerykit"))
     code, data = cli(
         project, "export", "--name", "X", "--include", "art/reference/look.png"
