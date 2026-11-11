@@ -75,6 +75,7 @@ const PREF_CHOICES := {
 const ICONS := {
 	"menu": "GuiTabMenuHl",
 	"back": "Back",
+	"forward": "Forward",
 	"disclosure_closed": "GuiTreeArrowRight",
 	"disclosure_open": "GuiTreeArrowDown",
 	"close": "Close",
@@ -94,6 +95,7 @@ const ICONS := {
 	"sound": "AudioStreamPlayer",
 	"material": "StandardMaterial3D",
 	"scene": "PackedScene",
+	"animation": "Animation",
 	"chevron": "GuiOptionArrow",
 	"external": "ExternalLink",
 	"reload": "Reload",

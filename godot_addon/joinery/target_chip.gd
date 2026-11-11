@@ -9,7 +9,12 @@ const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
 ## Target kind -> icon name.
 const KIND_ICONS := {
-	"Object": "model", "Image": "image", "Audio": "audio", "Scene": "scene", "Material": "material"
+	"Object": "model",
+	"Image": "image",
+	"Audio": "audio",
+	"Scene": "scene",
+	"Material": "material",
+	"Animation": "animation",
 }
 ## Part kind -> target kind, which picks the chip icon.
 const PART_KINDS := {
@@ -18,6 +23,7 @@ const PART_KINDS := {
 	"texture": "Image",
 	"bone": "Object",
 	"shape_key": "Object",
+	"animation": "Animation",
 }
 ## Part kind -> the typed operations that change it (`joinery parts` lists the same, and
 ## knows more: a map with a Krita source is painted with paint_map). The agent reads them
@@ -28,6 +34,7 @@ const PART_OPS := {
 	"texture": "adjust_map,make_map_editable,replace_map,split_material",
 	"bone": "edit_bone",
 	"shape_key": "edit_shape_key",
+	"animation": "edit_action,make_cycle",
 }
 ## How each map role reads (the same words as `joinery parts`).
 const ROLE_NAMES := {
@@ -237,6 +244,8 @@ static func part_label(target: Dictionary) -> String:
 			return "%s · %s" % [target.get("bone", ""), context]
 		"shape_key":
 			return "%s · %s" % [target.get("shape_key", ""), context]
+		"animation":
+			return "%s · %s" % [target.get("action", ""), _model_name(target)]
 	return "%s · %s" % [object_name, _model_name(target)]
 
 
@@ -247,7 +256,7 @@ static func part_tooltip(target: Dictionary) -> String:
 			path.append(str(target[key]))
 	if str(target.get("part_kind", "")) == "texture":
 		path.append(_map_name(target))
-	for key: String in ["bone", "shape_key"]:
+	for key: String in ["bone", "shape_key", "action"]:
 		if not str(target.get(key, "")).is_empty():
 			path.append(str(target[key]))
 	var lines := PackedStringArray([" › ".join(path)])
