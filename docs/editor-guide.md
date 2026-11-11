@@ -113,19 +113,26 @@ Use `/tools` for actual MCP connection/probe status; diagnostics stay in Output.
 A review is made to be taken in at one look (ADR 0040). The same compact layout
 shows in the Review tab, the bottom panel and for every parallel task:
 
-- **The change itself**, as large as the panel allows:
+- **The change itself**, as large as the panel allows, with a small
+  **Before** and **After** tag on each side. The tags are the switch: click one
+  to show that side, click it again to see both alike. A change with no
+  original has a single **New** tag.
   - a texture, a selected material or map, or a live scene edit: one picture
     split by a line you can drag, the original on the left and the change on
-    the right;
-  - a model: its front and its far side next to each other;
+    the right. Scroll or pinch to zoom, drag to pan once zoomed (both sides
+    move together), double-click to fit again. Pixel art stays crisp;
+  - a model: the original and the change in 3D, side by side. Drag to turn
+    both, scroll or pinch to zoom, double-click to reset. The pictures Blender
+    rendered show first and stay if the model's exported file can't be loaded
+    in about a second;
+  - an animation: the original and the change playing side by side (in 3D
+    when the model's file loads), with one play/pause and scrub bar for both;
   - a sound: its waveform with play, so Before and After play A/B at the same
     position;
   - code and other text: only the lines that changed, removed above added.
 
   A change with several items gets a filmstrip of small tiles under it, the
   most important first; click a tile (or use Left and Right) to show it.
-  **Before** and **After** in the corner show one side in full; with neither
-  pressed a texture shows the split.
 - **One line of facts**: what changed in plain words, for example
   "Door 20% wider · wood darker · 2 files". The words come from Journeyman
   (`submit_for_review` takes up to three short `facts`), then from what the
@@ -135,13 +142,17 @@ shows in the Review tab, the bottom panel and for every parallel task:
   they pass); hover it for what ran. When a reviewer agent looked at the
   change, its notes follow as one line, the most serious first ("The hinge
   side lost its bevel · 1 more").
-- **Discard** and **Accept**, always on screen. **Details** beside them opens
-  everything else on demand: each file with its diff, the checks that ran and
-  every note.
+- **Details**, on its own line, opens everything else on demand: each file
+  with its diff, the checks that ran and every note.
+- **Discard** and **Accept** on the last line, always on screen. A scene edit
+  also offers **Open in editor**, which selects the changed nodes in the open
+  scene.
 
 With the focus in the review (click anywhere in it), **Enter** accepts,
 **Backspace** or **Delete** discards, and **A** or **B** flips between before
-and after.
+and after. Hovering or scrolling the change never takes the keyboard from the
+editor; after you click an animation, **Space** plays or pauses and **Left** /
+**Right** step a frame.
 
 In the chat, the request's card shows the waiting change as a tiny picture,
 the same line of facts and **Discard** / **Accept**, so a small change is

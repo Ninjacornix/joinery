@@ -55,3 +55,46 @@ most of the time one look at the change should be enough.
 - The viewport snapshot is whatever the 3D viewport last drew. With another main screen in front
   (the Joinery workspace) that frame can be older than the edit; the viewport itself stays the
   live truth.
+
+## Addendum: one Before/After control, and a change you can handle (2026-11-11)
+
+The panel showed Before and After twice (a switch in the header and a tag on each animation
+clip), squeezed the title and the switch onto one row and Details onto the actions row, and only
+let the user look at pictures of the change.
+
+1. **The tags on the media are the one Before/After control** (`review_sides.gd`). Each sits on
+   the side it names, so it says which side is which and switches to it at once: under each clip
+   or live model, on each half of a split picture, together under a model's renders (one side at
+   a time), over a sound's waveform. Clicking the side in focus again shows both alike where both
+   are on screen. A change with no original has one plain tag, **New**, on the media; the header
+   no longer has a switch or a New chip. A or B still flips.
+2. **One job per row**: the title alone; the media with its tags; facts, checks and notes;
+   **Details** as its own disclosure; then the actions, Discard and Accept on the trailing edge,
+   never squeezed below their text. Details keep the small control height so the media keeps
+   the room.
+3. **Models are live 3D** (`review_model_view.gd`). A `.blend` item names the GLB/glTF its recipe
+   exports on each side (`before_model`, `after_model`, from `review.plan`); the panel loads them
+   at runtime with `GLTFDocument`/`GLTFState` on a worker thread, textures embedded in memory,
+   so nothing is imported into the project or written to it. Each side gets a small
+   `SubViewport` with its own world, a neutral key and fill light and a ground; both share one
+   orbit framed on the two models' bounds together, so a size change shows. Drag orbits, the
+   wheel or a pinch zooms, a double-click resets. The renders show first; the live views
+   replace them only if the files load within about a second, and are freed when the item
+   changes or the panel hides.
+4. **Animations play under one transport** (`review_transport.gd`): play/pause and a scrub bar
+   drive both clips from one clock, Left and Right step a frame. When the item names GLB files
+   and actions (`before_action`, `after_action`), the models play the action live in 3D, posed
+   from the same clock.
+5. **Pictures zoom and pan** (`review_zoom.gd`): the wheel or a pinch zooms about the pointer,
+   a drag pans once zoomed (the split line still drags by its grip), a double-click fits. Both
+   sides draw from one view, so they stay lined up; zoomed-in pixel art is crisp. A new
+   picture uses the same view without a line.
+6. **A scene edit offers "Open in editor"** on the actions row: it selects the changed nodes in
+   the open scene (`review_snapshot.gd`, set by `scene_edits.gd`) and shows the first in the
+   Inspector. The snapshot stays the preview.
+7. **No focus is taken until the media is clicked.** Hovering, the wheel and playback never move
+   the keyboard focus; a click on the media gives the review its keys.
+
+Consequences: a model whose recipe exports no GLB, or a slow or broken file, keeps the renders;
+the live view shows the exported asset, so it can differ from Blender's Workbench render in
+lighting. Live views cost two small viewports while the panel shows, none when it is hidden.
