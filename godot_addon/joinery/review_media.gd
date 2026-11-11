@@ -651,6 +651,7 @@ func _show_swipe(item: Dictionary, swap: bool) -> void:
 		_fail()
 		return
 	_frame.show()
+	_set_ground(Color.TRANSPARENT)
 	for view: View in [_front, _back]:
 		view.hide()
 	var fresh := not _swipe.visible or _swipe.after != new
@@ -674,6 +675,7 @@ func _show_image(source: String, far: String, swap: bool) -> void:
 	if not far.is_empty() and FileAccess.file_exists(far):
 		back = _texture(far)
 	_frame.show()
+	_set_ground(_common_ground(picture, back))
 	var changed := _front.main.texture != picture or _front.far.texture != back
 	if swap and _front.visible and _front.main.texture != null and changed:
 		_back.set_pictures(picture, back)
@@ -686,6 +688,32 @@ func _show_image(source: String, far: String, swap: bool) -> void:
 	_back.hide()
 	_front.set_pictures(picture, back)
 	_front.show()
+
+
+## The background the shown pictures share (a model's two renders), else clear.
+static func _common_ground(picture: Texture2D, back: Texture2D) -> Color:
+	var colour := GLANCE.ground(picture)
+	if back != null and not GLANCE.ground(back).is_equal_approx(colour):
+		return Color.TRANSPARENT
+	return colour
+
+
+## Fill the frame with [param colour] (the pictures' own background); clear: the theme's.
+func _set_ground(colour: Color) -> void:
+	if colour.a <= 0.0:
+		_frame.remove_theme_stylebox_override("panel")
+		return
+	var box := get_theme_stylebox("panel", "JoineryMediaFrame").duplicate() as StyleBoxFlat
+	if box == null:
+		return
+	box.bg_color = colour
+	_frame.add_theme_stylebox_override("panel", box)
+
+
+## The frame's background now (the pictures' own, or the theme's).
+func frame_ground() -> Color:
+	var box := _frame.get_theme_stylebox("panel") as StyleBoxFlat
+	return box.bg_color if box != null else Color.TRANSPARENT
 
 
 func _show_audio(source: String, swap: bool) -> void:

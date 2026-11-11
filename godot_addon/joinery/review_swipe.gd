@@ -77,6 +77,11 @@ func fit(texture_size: Vector2) -> Rect2:
 
 func _draw() -> void:
 	var line := size.x * split
+	# Each side's own background runs to its edge of the frame: no empty bands beside it.
+	if before != null and split > 0.0:
+		_draw_ground(GLANCE.ground(before), Rect2(0.0, 0.0, line, size.y))
+	if after != null and split < 1.0:
+		_draw_ground(GLANCE.ground(after), Rect2(line, 0.0, size.x - line, size.y))
 	if before != null and split > 0.0:
 		_draw_part(before, 0.0, line)
 	if after != null and split < 1.0:
@@ -92,6 +97,22 @@ func _draw() -> void:
 	var grip := float(UI_THEME.space(self, 2))
 	draw_circle(Vector2(line, size.y / 2.0), grip + width, halo)
 	draw_circle(Vector2(line, size.y / 2.0), grip, ink)
+
+
+## [param colour] over [param rect], rounded like the frame where it meets the frame's edge.
+func _draw_ground(colour: Color, rect: Rect2) -> void:
+	if colour.a <= 0.0 or not rect.has_area():
+		return
+	var box := StyleBoxFlat.new()
+	box.bg_color = colour
+	var corner := UI_THEME.radius(self, "md")
+	var left := corner if rect.position.x <= 0.0 else 0
+	var right := corner if rect.end.x >= size.x else 0
+	box.corner_radius_top_left = left
+	box.corner_radius_bottom_left = left
+	box.corner_radius_top_right = right
+	box.corner_radius_bottom_right = right
+	draw_style_box(box, rect)
 
 
 ## Draw the part of [param texture] between x [param from] and [param to] (in this control).

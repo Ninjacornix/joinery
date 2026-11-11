@@ -426,6 +426,26 @@ func _check_scaling(panel: PANEL) -> void:
 	)
 	_check(absf(plan.size.x - sketch.size.x) <= 1.0, "The plan shares the space equally")
 	_check(sketch.texture_filter == CanvasItem.TEXTURE_FILTER_NEAREST, "A small sketch is crisp")
+	var sunken: Color = panel._media.get_theme_color("surface_sunken", "Joinery")
+	_check(
+		panel._media.frame_ground().is_equal_approx(sunken),
+		"A sketch and a plan with different grounds keep the frame's own"
+	)
+	var backdrop := Color8(56, 59, 66)
+	var model := [
+		{
+			"path": "art/sources/hammer.blend",
+			"media": "image",
+			"after": _image("h-front.png", backdrop, Vector2i(96, 96)),
+			"after_back": _image("h-back.png", backdrop, Vector2i(96, 96)),
+		}
+	]
+	panel.show_file_review("Make a hammer", "", model, [])
+	await _frames(3)
+	_check(
+		panel._media.frame_ground().to_html(false) == backdrop.to_html(false),
+		"Renders on one backdrop fill the frame with it: no empty bands"
+	)
 	panel.set_under_ways(true)
 	await _frames(3)
 	var under := float(panel._media._frame.custom_minimum_size.y)

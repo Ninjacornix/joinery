@@ -26,6 +26,8 @@ const CRISP_SIDE := 256
 const CRISP_COLOURS := 64
 ## Samples per side when counting a picture's colours.
 const CRISP_SAMPLE := 64
+## How far apart (0..1 per channel) a picture's edge colours may be and still be one ground.
+const GROUND_TOLERANCE := 0.03
 ## Severity order of reviewer notes, worst last.
 const SEVERITIES := ["info", "warn", "block"]
 
@@ -274,4 +276,44 @@ static func crisp(texture: Texture2D) -> bool:
 					break
 			found = colours.size() <= CRISP_COLOURS
 	texture.set_meta(&"joinery_crisp", found)
+	return found
+
+
+## The plain colour around a picture (a render's or a snapshot's background), or a clear
+## colour when its edges differ. The review fills the frame with it, so a picture narrower
+## than the frame doesn't sit as a box between empty bands. Remembered on the texture.
+static func ground(texture: Texture2D) -> Color:
+	if texture == null:
+		return Color.TRANSPARENT
+	if texture.has_meta(&"joinery_ground"):
+		return texture.get_meta(&"joinery_ground")
+	var found := Color.TRANSPARENT
+	var image := texture.get_image()
+	if image != null and not image.is_empty():
+		if image.is_compressed():
+			image = image.duplicate() as Image
+			image.decompress()
+		var right := image.get_width() - 1
+		var bottom := image.get_height() - 1
+		var points := [
+			Vector2i(0, 0),
+			Vector2i(right / 2, 0),
+			Vector2i(right, 0),
+			Vector2i(0, bottom / 2),
+			Vector2i(right, bottom / 2),
+			Vector2i(0, bottom),
+			Vector2i(right / 2, bottom),
+			Vector2i(right, bottom),
+		]
+		var first := image.get_pixelv(points[0])
+		found = first if first.a >= 0.99 else Color.TRANSPARENT
+		for point: Vector2i in points:
+			var colour := image.get_pixelv(point)
+			var apart := maxf(
+				absf(colour.r - first.r), maxf(absf(colour.g - first.g), absf(colour.b - first.b))
+			)
+			if apart > GROUND_TOLERANCE or colour.a < 0.99:
+				found = Color.TRANSPARENT
+				break
+	texture.set_meta(&"joinery_ground", found)
 	return found
