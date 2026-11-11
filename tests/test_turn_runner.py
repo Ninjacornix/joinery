@@ -47,6 +47,7 @@ class Host:
         self.prompts: list[Prompt] = []
         self.editor_results: list[dict[str, Any]] = []
         self.scripts: list[Script] = []
+        self.user_prompts = 1
         #: Lines the sidebar sends once ``when`` holds for the events so far.
         self.replies: list[
             tuple[Callable[[list[dict[str, Any]]], bool], dict[str, Any]]
@@ -114,7 +115,7 @@ class Host:
 
     async def _reader(self, _stream: Any) -> tuple[asyncio.StreamReader, Any]:
         stream = asyncio.StreamReader()
-        prompts = len(self.scripts)
+        prompts = self.user_prompts
 
         def send(line: dict[str, Any]) -> None:
             stream.feed_data(json.dumps(line).encode() + b"\n")
@@ -138,8 +139,9 @@ class Host:
         asyncio.get_running_loop().create_task(drive())
         return stream, type("T", (), {"close": lambda self: None})()
 
-    def run(self, *scripts: Script) -> None:
+    def run(self, *scripts: Script, prompts: int = 1) -> None:
         self.scripts = list(scripts)
+        self.user_prompts = prompts
         assert asyncio.run(stdio.serve(self.root, "codex")) == 0
 
     def stage(self, files: dict[str, str]) -> FileTransaction:
@@ -203,23 +205,55 @@ def test_joinery_submits_a_change_the_agent_left(host: Host) -> None:
     assert preview["origin"] == "joinery" and preview["summary"] == "Make an ashtray"
 
 
-def test_a_change_that_fails_its_checks_gets_joinerys_own_line(host: Host) -> None:
+def test_a_failed_auto_submit_asks_once_then_says_so(host: Host) -> None:
     async def agent(bridge: Any) -> AsyncIterator[Any]:
         tx = host.stage({"scenes/ashtray.tscn": SCENE})
         host.tx = tx  # type: ignore[attr-defined]
         yield Message(text="The ashtray will open for review.")
         yield Done(ok=True)
 
-    host.run(agent)
+    async def still_broken(bridge: Any) -> AsyncIterator[Any]:
+        yield Message(text="I couldn't make the model.")
+        yield Done(ok=True)
+
+    host.run(agent, still_broken)
+    assert len(host.prompts) == 2, "Exactly one continuation"
+    follow = host.prompts[1].text
+    assert "did not pass" in follow and "submit_for_review" in follow
+    assert "references: Not submitted: scenes/ashtray.tscn uses" in follow
     kinds = host.kinds()
-    assert "file_preview" not in kinds
+    assert "file_preview" not in kinds and kinds.count("notice") == 1
     notice = host.events[kinds.index("notice")]
     assert notice["level"] == "warn"
     assert notice["text"].startswith("Journeyman's change didn't pass Joinery's checks")
     assert "scenes/ashtray.tscn uses art/models/ashtray.glb" in notice["text"]
     assert notice["text"].endswith("Nothing was changed.")
-    assert kinds.index("notice") < kinds.index("done")
+    assert kinds.index("notice") < kinds.index("done") and kinds.count("done") == 1
     assert host.tx.state == "rejected"  # type: ignore[attr-defined]
+
+
+def test_the_continuation_can_fix_the_change(host: Host) -> None:
+    async def agent(bridge: Any) -> AsyncIterator[Any]:
+        host.stage({"scenes/ashtray.tscn": SCENE})
+        yield Done(ok=True)
+
+    async def fixed(bridge: Any) -> AsyncIterator[Any]:
+        assert host.gateway is not None and host.gateway.turn is not None
+        tx = host.gateway.transaction
+        assert tx is not None and tx.state == "staging"
+        (tx.stage / "art/models").mkdir(parents=True)
+        (tx.stage / "art/models/ashtray.glb").write_text("glTF")
+        result = await host.gateway.turn.submit("An ashtray with its model", "agent")
+        assert result.status == "in_review" and result.attempt == 2
+        yield Message(text="Fixed; it's on screen.")
+        yield Done(ok=True)
+
+    host.run(agent, fixed)
+    kinds = host.kinds()
+    assert "notice" not in kinds and kinds.count("file_preview") == 1
+    assert host.events[kinds.index("file_preview")]["summary"] == (
+        "An ashtray with its model"
+    )
 
 
 def test_a_failed_turn_rejects_its_change(host: Host) -> None:

@@ -53,3 +53,10 @@ REVIEW_GUIDE = (
     "To approve art direction the user types /art and clicks Approve these rules; "
     "accepting a saved draft alone is not approval."
 )
+
+#: Joinery's follow-up when the change an agent left didn't pass its checks.
+CONTINUE_AFTER_FAILED_SUBMIT = (
+    "Joinery checked the change you left and it did not pass:\n{problems}\n"
+    "Fix every problem, then call submit_for_review with one short line naming the "
+    "change. Don't ask the user to accept anything before it returns in_review."
+)

@@ -11,6 +11,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, Protocol
 
+from bridge.instructions import CONTINUE_AFTER_FAILED_SUBMIT
 from bridge.protocol import (
     AgentEvent,
     Done,
@@ -24,7 +25,7 @@ from bridge.protocol import (
     Usage,
 )
 from joinery.timing import TurnTiming
-from joinery.turn import SubmitResult, TurnController
+from joinery.turn import MAX_CONTINUATIONS, SubmitResult, TurnController
 
 
 class AgentBridge(Protocol):
@@ -46,6 +47,17 @@ def failure_notice(result: SubmitResult) -> dict[str, Any]:
         + (": " + problems.rstrip(".") if problems else "")
         + ". Nothing was changed.",
     }
+
+
+def continuation(prompt: Prompt, result: SubmitResult) -> Prompt:
+    """The same turn, asked once more: fix what the checks found and submit."""
+    problems = "\n".join(f"- {p.check}: {p.message}" for p in result.problems)
+    return prompt.model_copy(
+        update={
+            "text": CONTINUE_AFTER_FAILED_SUBMIT.format(problems=problems),
+            "attachments": (),
+        }
+    )
 
 
 async def stream(
@@ -98,11 +110,27 @@ async def run_turn(
     *,
     request: str = "",
 ) -> str:
-    """Run one user request; returns its outcome ("done" or "failed")."""
+    """Run one user request; returns its outcome ("done" or "failed").
+
+    When the provider is done, a change the agent didn't submit is submitted for
+    it. If that fails with problems the agent can fix, the agent is asked once
+    more in the same turn; a change that still fails is dropped, and Joinery says
+    so in its own line.
+    """
     controller.begin(request or prompt.text)
     controller.gateway.progress("Thinking through your request…")
     ok = await stream(controller, bridge, prompt, emit, timing)
-    await controller.end(ok)
+    asked = 0
+    while True:
+        result = await controller.end(ok, last=asked >= MAX_CONTINUATIONS)
+        if result is None or result.status != "failed" or result.final:
+            break
+        # Joinery submitted the change the agent left, and it failed: the agent
+        # gets one chance in this turn to fix it.
+        asked += 1
+        ok = await stream(
+            controller, bridge, continuation(prompt, result), emit, timing
+        )
     last = controller.last_result
     if last is not None and last.status == "failed" and last.final:
         emit(failure_notice(last))
