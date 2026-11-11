@@ -32,6 +32,7 @@ from joinery.api_profiles import list_public, runtime
 from joinery.chat_attachments import encoded
 from joinery.mcp_runtime import PolicyStop, validate_arguments
 from joinery.platform_support import launch_argv
+from joinery.roles import ROLE_ENV
 
 
 def _count(source: dict[str, Any], key: str) -> int:
@@ -92,6 +93,8 @@ class ACPSession:
         self.events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self.tasks: list[asyncio.Task[Any]] = []
         self.inspection_only = False
+        #: The agent role the policy hook judges this provider's calls by ("" = lead).
+        self.role = ""
         self.model_choices: list[ModelChoice] = []
         self.current_model = ""
         self.profile_model = ""
@@ -114,6 +117,8 @@ class ACPSession:
             env["JOINERY_POLICY_ENDPOINT"] = str(self.gateway_socket)
         if self.inspection_only:
             env["JOINERY_INSPECTION_ONLY"] = "1"
+        if self.role:
+            env[ROLE_ENV] = self.role
         extra: list[str] = []
         if profile_id:
             driver, extra, values = runtime(profile_id)

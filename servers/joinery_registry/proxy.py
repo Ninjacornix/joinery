@@ -5,16 +5,24 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from mcp.server import MCPServer
 from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from joinery import chat_attachments
 from joinery.editor_ops import SceneEdit
 from joinery.gateway_rpc import rpc
 from servers.errors import tool_errors
+
+
+class ReviewNoteArgument(BaseModel):
+    """One finding of a review."""
+
+    severity: Literal["info", "warn", "block"]
+    text: Annotated[str, Field(min_length=1, max_length=400)]
+    file: str | None = None
 
 
 def make_server(socket: Path) -> MCPServer[Any]:
@@ -98,6 +106,42 @@ def make_server(socket: Path) -> MCPServer[Any]:
     async def task_status(id: str) -> dict[str, Any]:
         """How a parallel task started with start_task is doing: state (working, in_review, accepted, discarded, done, failed, stopped), its current step, and its change. Check now and then; never wait in a loop."""
         return await rpc(socket, "task_status", {"id": id})
+
+    @server.tool()
+    @tool_errors
+    async def report_review(notes: list[ReviewNoteArgument]) -> dict[str, Any]:
+        """Reviewer agents only: report your review of the submitted change, once, then end your turn. notes: up to 12 findings, most important first, each {severity, text, file?}. severity 'block': the change is wrong and the author must fix it (breaks the request, the art bible, the game brief or the game); 'warn': worth the user's attention; 'info': a small remark. An empty list means nothing to note."""
+        return await rpc(
+            socket,
+            "report_review",
+            {"notes": [note.model_dump(exclude_none=True) for note in notes]},
+        )
+
+    @server.tool()
+    @tool_errors
+    async def report_diagnosis(
+        cause: Annotated[str, Field(min_length=1, max_length=1000)],
+        fix: Annotated[str, Field(max_length=4000)] = "",
+        targets: list[str] | None = None,
+        reproduced: bool = False,
+    ) -> dict[str, Any]:
+        """Debugger agents only: report what causes the error, once, then end your turn. cause: what goes wrong and why, in plain words. fix: the complete change a worker agent should make (it does not see this conversation); empty when no project change fixes it. targets: project paths the fix changes. reproduced: you saw the error in reproduce_error's run."""
+        return await rpc(
+            socket,
+            "report_diagnosis",
+            {
+                "cause": cause,
+                "fix": fix,
+                "targets": targets or [],
+                "reproduced": reproduced,
+            },
+        )
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True))
+    @tool_errors
+    async def reproduce_error(scene: str = "") -> dict[str, Any]:
+        """Debugger agents only: run the project headless in Joinery's offline worker (no network, a throwaway copy) for a few seconds and return the errors and output it printed. scene: a res:// scene to run, or empty for the main scene."""
+        return await rpc(socket, "reproduce", {"scene": scene})
 
     @server.tool()
     @tool_errors

@@ -15,10 +15,13 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal
 
+from joinery.debugging import diagnosis_from
 from joinery.gateway import ProjectGateway
 from joinery.mcp_runtime import PolicyStop
+from joinery.peer_review import notes_from
 from joinery.platform_support import private_directory
 from joinery.read_access import read_only
+from joinery.roles import READ_ONLY_ROLES, spec
 
 
 def search_tools(data: dict[str, Any], query: str) -> dict[str, Any]:
@@ -110,8 +113,15 @@ class GatewayRPC:
         transport: Literal["unix", "tcp"] | None = None,
         inspection_only: bool = False,
         worker: bool = False,
+        role: str = "",
     ) -> None:
         self.gateway = gateway
+        #: The agent role this endpoint serves (joinery.roles); "" for a specialist.
+        self.role = spec(role).role if role else ""
+        if self.role in READ_ONLY_ROLES:
+            inspection_only = True
+        if self.role == "worker":
+            worker = True
         self.transport = transport or ("tcp" if os.name == "nt" else "unix")
         # Unix socket names have a short OS limit. Windows uses its user's temp
         # directory instead; its ACL is tightened before creating the endpoint.
@@ -144,6 +154,10 @@ class GatewayRPC:
             None
         )
         self.task_status: Callable[[str], dict[str, Any]] | None = None
+        #: What the reviewer or debugger reported (report_review, report_diagnosis).
+        self.reports: list[dict[str, Any]] = []
+        #: Run the project headless offline to reproduce an error (the debugger only).
+        self.reproduce: Callable[[str], Awaitable[dict[str, Any]]] | None = None
 
     async def start(self) -> None:
         if self.transport == "tcp":
@@ -312,6 +326,36 @@ class GatewayRPC:
                 if self.start_task is None:
                     raise ValueError("Parallel tasks are not available here.")
                 data = await self.start_task(task_request(params))
+            elif method == "report_review":
+                if self.role != "reviewer":
+                    raise ValueError("Only the reviewer reports a review.")
+                notes = notes_from(params)
+                self.reports.append({"notes": [note.as_dict() for note in notes]})
+                data = {
+                    "recorded": len(notes),
+                    "next": "Your review is recorded. End your turn now.",
+                }
+            elif method == "report_diagnosis":
+                if self.role != "debugger":
+                    raise ValueError("Only the debugger reports a diagnosis.")
+                found = diagnosis_from(params)
+                self.reports.append(
+                    {
+                        "cause": found.cause,
+                        "fix": found.fix,
+                        "targets": found.targets,
+                        "reproduced": found.reproduced,
+                    }
+                )
+                data = {
+                    "recorded": True,
+                    "next": "Your diagnosis is recorded. End your turn now; a worker "
+                    "makes the fix and the user reviews it.",
+                }
+            elif method == "reproduce":
+                if self.role != "debugger" or self.reproduce is None:
+                    raise ValueError("Only the debugger reproduces errors.")
+                data = await self.reproduce(str(params.get("scene", "") or ""))
             elif method == "task_status":
                 if self.task_status is None:
                     raise ValueError("Parallel tasks are not available here.")

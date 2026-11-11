@@ -30,6 +30,7 @@ from joinery.api_profiles import list_public, runtime
 from joinery.catalog import ROOT
 from joinery.editor_ops import SCENE_TOOL, validate_edit
 from joinery.platform_support import launch_argv
+from joinery.roles import ROLE_ENV
 from joinery.wiring import _command_str
 
 
@@ -95,6 +96,8 @@ class CodexSession:
         self._turn_ready = asyncio.Event()
         self._turn_ready.set()
         self.inspection_only = False
+        #: The agent role the policy hook judges this provider's calls by ("" = lead).
+        self.role = ""
         self.profile_model = ""
 
     async def connect(self, project: Path, profile_id: str = "") -> None:
@@ -109,6 +112,8 @@ class CodexSession:
             env["JOINERY_POLICY_ENDPOINT"] = str(self.gateway_socket)
         if self.inspection_only:
             env["JOINERY_INSPECTION_ONLY"] = "1"
+        if self.role:
+            env[ROLE_ENV] = self.role
         if profile_id:
             driver, args, extra = runtime(profile_id)
             if driver != "codex":

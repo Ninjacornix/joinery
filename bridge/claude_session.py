@@ -32,6 +32,7 @@ from bridge.provider_process import (
 from joinery.catalog import ROOT
 from joinery.chat_attachments import encoded
 from joinery.platform_support import launch_argv
+from joinery.roles import ROLE_ENV
 from joinery.wiring import _command_str
 
 
@@ -147,6 +148,8 @@ class ClaudeSession:
         self.started = False
         self.process: asyncio.subprocess.Process | None = None
         self.inspection_only = False
+        #: The agent role the policy hook judges this provider's calls by ("" = lead).
+        self.role = ""
         self.effort_supported = False
 
     async def connect(self, project: Path, profile_id: str = "") -> None:
@@ -255,6 +258,8 @@ class ClaudeSession:
         if self.inspection_only:
             env["JOINERY_INSPECTION_ONLY"] = "1"
             args += ["--disallowedTools", "Task", "Agent"]
+        if self.role:
+            env[ROLE_ENV] = self.role
         self.process = await asyncio.create_subprocess_exec(
             *readonly_command(launch_argv(args[0], args[1:]), self.project),
             cwd=self.project,

@@ -54,6 +54,10 @@ class AgentAdapter(ABC):
             "This provider has no read-only specialist transport."
         )
 
+    def assign_role(self, role: str) -> None:
+        """Run as ``role`` (joinery.roles): its policy hook judges every call by it."""
+        raise NotImplementedError("This provider can't run agent roles.")
+
     async def cancel(self) -> None:
         pass
 
@@ -100,6 +104,9 @@ class _SessionAdapter(AgentAdapter):
 
     def restrict_to_inspection(self) -> None:
         self.session.inspection_only = True
+
+    def assign_role(self, role: str) -> None:
+        self.session.role = role
 
     async def run(self, message: SidebarMessage) -> AsyncIterator[AgentEvent]:
         from bridge.protocol import Prompt
@@ -151,6 +158,9 @@ class CodexAdapter(AgentAdapter):
 
     def restrict_to_inspection(self) -> None:
         self.session.inspection_only = True
+
+    def assign_role(self, role: str) -> None:
+        self.session.role = role
 
     async def run(self, message: SidebarMessage) -> AsyncIterator[AgentEvent]:
         from bridge.protocol import Prompt

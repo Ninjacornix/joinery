@@ -51,6 +51,7 @@ from joinery.policy import (
     user_only_violation,
 )
 from joinery.read_access import read_only
+from joinery.roles import ROLE_ENV, role_violation
 
 # Env vars an agent may set to tell the hook its project directory, in order.
 _PROJECT_DIR_ENVS = ("CLAUDE_PROJECT_DIR", "CODEX_PROJECT_DIR")
@@ -186,8 +187,41 @@ def mcp_violation(
     return None
 
 
+def rule_zero(event: Event) -> Verdict | None:
+    """The call's own verdict, whatever the role: Rule Zero and the allowlist."""
+    if event.kind == "mcp":
+        return mcp_violation(
+            event.server, event.tool, event.project_dir, event.arguments
+        )
+    if event.kind == "bash":
+        return command_violation(event.command, load_denylist()) or user_only_violation(
+            event.command
+        )
+    if event.kind == "fetch":
+        return url_violation(event.url, load_denylist())
+    return None
+
+
 def violation(raw: dict[str, Any]) -> Verdict | None:
     event = normalise_event(raw)
+    role = os.environ.get(ROLE_ENV, "")
+    if role:
+        # Rule Zero first: a forbidden asset service stops every agent's turn,
+        # whichever role tried it. Then what the role itself may do.
+        verdict = rule_zero(event)
+        if verdict is not None and verdict.severity == Severity.STOP:
+            return verdict
+        values = raw.get("tool_input") or raw.get("args") or {}
+        refused = role_violation(
+            role,
+            event.kind,
+            event.server,
+            event.tool,
+            event.command,
+            str(raw.get("tool_name") or raw.get("tool") or ""),
+            values if isinstance(values, dict) else {},
+        )
+        return refused or verdict
     if os.environ.get("JOINERY_INSPECTION_ONLY") == "1":
         values = raw.get("tool_input") or raw.get("args") or {}
         allowed = event.kind == "other"
@@ -222,17 +256,7 @@ def violation(raw: dict[str, Any]) -> Verdict | None:
                 Severity.DENY,
                 "This specialist is read-only. Use the main thread for changes.",
             )
-    if event.kind == "mcp":
-        return mcp_violation(
-            event.server, event.tool, event.project_dir, event.arguments
-        )
-    if event.kind == "bash":
-        return command_violation(event.command, load_denylist()) or user_only_violation(
-            event.command
-        )
-    if event.kind == "fetch":
-        return url_violation(event.url, load_denylist())
-    return None
+    return rule_zero(event)
 
 
 _RULE_ZERO = (

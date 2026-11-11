@@ -398,6 +398,37 @@ def _feature(args: argparse.Namespace) -> int:
         lock.release()
 
 
+def _reviewer(args: argparse.Namespace) -> int:
+    """`joinery reviewer`: the Settings page's Reviewer agent switch and model."""
+    from joinery.roles import reviewer_settings, set_reviewer
+
+    project = args.project.resolve()
+    try:
+        if args.set is not None or args.model is not None:
+            set_reviewer(
+                project,
+                enabled=None if args.set is None else args.set == "on",
+                model=args.model,
+            )
+        settings = reviewer_settings(project)
+    except (OSError, ValueError) as exc:
+        if args.json:
+            print(json.dumps({"error": str(exc)}))
+        else:
+            print(str(exc), file=sys.stderr)
+        return 1
+    data = {"enabled": settings.enabled, "model": settings.model, "rounds": settings.rounds}
+    if args.json:
+        print(json.dumps(data))
+    else:
+        print(
+            "Reviewer agent: "
+            + ("on" if settings.enabled else "off")
+            + (f" ({settings.model})" if settings.model else " (the author's model)")
+        )
+    return 0
+
+
 def _feature_change(args: argparse.Namespace, lock: claims.FeatureLock) -> int:
     project = args.project.resolve()
     try:
@@ -841,6 +872,15 @@ def _parser() -> argparse.ArgumentParser:
         "agents", help="list supported agents and gate status"
     )
     agents_cmd.add_argument("--json", action="store_true", help="agent menu data")
+    reviewer_cmd = commands.add_parser(
+        "reviewer", help="show or change the agent that reviews each change"
+    )
+    reviewer_cmd.add_argument("--project", type=Path, default=Path.cwd())
+    reviewer_cmd.add_argument("--set", choices=["on", "off"], default=None)
+    reviewer_cmd.add_argument(
+        "--model", default=None, help="the reviewer's model; empty for the author's"
+    )
+    reviewer_cmd.add_argument("--json", action="store_true")
     workspace = commands.add_parser(
         "workspace", help="list assets and desktop viewers as JSON"
     )
@@ -1190,6 +1230,8 @@ def main(argv: list[str] | None = None) -> int:
             print(f"setup: {exc}", file=sys.stderr)
             return 1
         return _setup(args.tools, args.project, payload_text, args)
+    if args.command == "reviewer":
+        return _reviewer(args)
     if args.command == "agents":
         if args.json:
             print(

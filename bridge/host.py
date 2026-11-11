@@ -16,6 +16,7 @@ from bridge.adapters import AgentAdapter, adapter_for
 from bridge.models import ModelChoice, route
 from bridge.protocol import AgentEvent, Execution, Models, Prompt, SidebarMessage
 from joinery.agents import get
+from joinery.roles import spec
 from joinery.wiring import unwireable
 
 
@@ -26,7 +27,9 @@ class GateUnavailable(RuntimeError):
 class Bridge:
     """Routes one sidebar session to one agent, with the gate enforced first."""
 
-    def __init__(self, agent_id: str, *, inspection_only: bool = False) -> None:
+    def __init__(
+        self, agent_id: str, *, inspection_only: bool = False, role: str = ""
+    ) -> None:
         self.agent = get(agent_id)
         if agent_id in unwireable():
             # Fail-closed: never run an agent whose Rule Zero gate cannot hold.
@@ -36,6 +39,14 @@ class Bridge:
             )
         self._adapter: AgentAdapter = adapter_for(agent_id)
         self.model_choices: list[ModelChoice] = []
+        if role:
+            # The role's own transport: read-only roles get the specialists' one.
+            self.role = spec(role).role
+            self._adapter.assign_role(self.role)
+            if spec(role).read_only:
+                inspection_only = True
+        else:
+            self.role = "lead"
         if inspection_only:
             self._adapter.restrict_to_inspection()
 
