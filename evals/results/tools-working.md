@@ -57,6 +57,7 @@ fingerprinted against the recipe.
 | Blender | `native_documents.py blender` | Generated albedo painted, repainted, untouched: 0.25 → 0.75 → 0.75 in the .blend and the PNG | clean | PASS | 32 |
 | Blender + MPFB2 | `native_documents.py blender-mpfb` | MPFB2 human (> 10 000 vertices) through a recipe, GLB | clean | PASS | 17 |
 | Blender + MPFB2 + Rigify | `blender_rig.py` (new) | Human + `rigify.human_toes` meta-rig with weights, generated rig: 1 090 bones, 209 deform; GLB skin = exactly the 209 `DEF-` bones; 19 158 source vertices → 14 517 exported (helpers out), 8 shape keys kept as morph targets; `Wave` action on `upper_arm_fk.L` exports as 209 deform-bone channels; crate with Subdivision + `Dent` → 384 vertices, 1 morph target | 2 recipes clean | PASS | 40 |
+| Blender + Krita + Material Maker | `part_edits.py` (new, through the MCP server) | Hammer: `steel_rough` made a Krita document (map pixels identical, nothing in the model changed), painted with a fill, a vector stroke and a levels filter layer (only `image:steel_rough` changed; GLB roughness texture follows); `wood_base` replaced with the Krita export (pixels equal); `steel_base` made a Material Maker graph (albedo export linked); Steel split for `Head.001` (changed: `object:Head.001`, the new material and its 3 copied maps), then inverting the copy's map changed only that map; `Dent` set/renamed, a key made from the mix and deleted (GLB targets `["Dented"]`). Arm rig: `Mid` → `Elbow` (only `Rig` and the skinned `Arm`'s vertex groups changed), rest/parent/scale-chain change only `Rig`, GLB joints follow; a key from the bent pose. Godot imports both GLBs without an error | 4 current recipes clean (Blender, Krita, Material Maker) | PASS | ~600 |
 | Krita | `creative_updates.py krita` | Exact red/blue pixels, layers kept, `.kra` + PNG, review reject/accept/revert | clean | PASS | 76 |
 | Krita | `native_documents.py krita` | New document, added paint layer read back by inspect | clean | PASS | 35 |
 | GIMP | `gimp_native.py` | `.xcf` with `height`/`albedo` layers and `left_half` channel; edit only `height` inside the channel (left 128 → 255, right 128, albedo byte-identical); per-layer PNG exports; failing script and unknown layer refused, nothing recorded | 2 recipes byte-identical (`.xcf` and PNGs) | PASS | 130 |
@@ -118,9 +119,17 @@ operations (`inspect_music` read-only).
   `_tool_argv` has no GIMP branch (and still has a dead Aseprite one).
   `gimp_native.py` replays through `tools.get("gimp").replay_argv`, which is
   byte-identical; dispatching `_tool_argv` through the tool modules closes it.
-- MPFB2's macro shape keys (`$md-…`) reach the GLB as 8 morph targets. They are
-  MPFB2's own body-shape controls, not game expressions; whether to bake them
-  away before export is a product call, not done here.
+- (Done since: MPFB2's macro shape keys are baked into the exported mesh by
+  default; `blender_rig.py` now checks 8 → 0 morph targets, 3.25 MB → 1.07 MB
+  GLB, and 8 kept with `keep_macro_shape_keys`, remembered by the next edit.)
+- `paint_map` has no brush engine: Krita 5.2.9's scripting has no headless,
+  reproducible brush API, so strokes are vector paths. No masks or
+  selections yet beyond a fill rectangle.
+- A map made a Material Maker graph starts as an image node into the
+  material; the graph is changed with `operate_graph` and relinked with
+  `replace_map`, not with a typed graph operation.
+- `make_map_editable` and `paint_map` run Krita while the gateway's slot holds
+  "blender-ops", so a parallel Krita task is not told to wait for them.
 - The default suite has 5 failures outside the tool packages
   (`tests/test_fork_patches.py` for patches 0012/0013 and
   `tests/test_ui_tokens.py`), from editor UI work in progress in the same tree.

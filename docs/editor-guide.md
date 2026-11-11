@@ -471,6 +471,27 @@ viewport, Alt+click picks the material under the pointer (on stock Godot only
 while the model's root is selected). Typed edits then stay inside that part,
 and review says what else changed.
 
+What you can ask for depends on the part:
+
+- **A map** ("make the steel rougher", "paint a worn edge on the left"):
+  Journeyman adjusts its pixels, or first makes it an editable source, a Krita
+  painting (or a Material Maker graph for procedural changes) under
+  `art/sources/maps/<model>/` that starts from the map as it is. Painting then
+  adds layers (fills, strokes, filter layers) you can open in Krita and hide or
+  change; the model's map follows. A map can also take an image made in Krita,
+  GIMP or Material Maker.
+- **A material shared by several objects** ("make a copy for Head only"): the
+  named objects get their own copy, with copies of its maps, so later edits
+  change only them.
+- **A bone** (rename, move its rest position, change its parent, scale a chain)
+  and **a shape key** (set its value, rename, delete, or make a new one from the
+  current mix or the rig's pose).
+
+MPFB2 humans: their body-shape sliders (shape keys named `$md-…`) are baked into
+the game's mesh on export, so the model in the game has the body you made and
+no extra morph targets. Expressions and other shape keys stay. Ask to keep the
+body-shape keys if the game changes the body at run time; the model remembers.
+
 For an installation with a matching Joinery editor already built or bundled:
 
 ```sh
@@ -732,7 +753,8 @@ agreement does not claim that recipe replay has passed.
 CLI equivalents: `joinery workspace --project <path>` and
 `joinery open art/painting.kra --tool krita --project <path> --dry-run`.
 `joinery parts <model> --project <path>` lists the objects, materials and maps
-of a model (a GLB or its source document). `joinery history usage|compact
+of a model (a GLB or its source document); `--json` adds each part's typed
+operations (`ops`) and a map's editable source (`editable`). `joinery history usage|compact
 --project <path>` shows or frees the space kept for undoing accepted changes.
 `joinery history policy --project <path> [--keep N] [--max-mb M] [--dry-run]`
 reads or sets `[history]` in `joinery.toml` and removes what a smaller choice
