@@ -19,6 +19,7 @@ shows exactly what would be pushed and needs neither butler nor a login.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import platform
@@ -181,6 +182,16 @@ def _unpack(archive: Path, folder: Path) -> None:
             target.write_bytes(bundle.read(info))
 
 
+def _cannot_run(error: OSError) -> str:
+    """Why butler would not start, said so the user can fix it."""
+    if sys.platform == "darwin" and error.errno == getattr(errno, "EBADARCH", 86):
+        return (
+            "butler is an Intel program, and this Mac needs Rosetta to run it. "
+            "Install Rosetta once with: softwareupdate --install-rosetta"
+        )
+    return f"butler didn't start: {error.strerror or error}"
+
+
 def signed_in() -> str | None:
     """How butler will sign in: 'BUTLER_API_KEY', 'butler login', or None."""
     if os.environ.get("BUTLER_API_KEY"):
@@ -324,14 +335,17 @@ def publish(
     if result["signed_in"] is None:
         raise PublishError(LOGIN_HINT)
     for step in steps:
-        done = subprocess.run(
-            step["argv"],
-            capture_output=True,
-            text=True,
-            errors="replace",
-            check=False,
-            timeout=3600,
-        )
+        try:
+            done = subprocess.run(
+                step["argv"],
+                capture_output=True,
+                text=True,
+                errors="replace",
+                check=False,
+                timeout=3600,
+            )
+        except OSError as error:
+            raise PublishError(_cannot_run(error)) from error
         step["ok"] = done.returncode == 0
         step["output"] = (done.stdout + done.stderr).strip()[-1200:]
         if not step["ok"]:

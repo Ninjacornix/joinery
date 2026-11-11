@@ -88,8 +88,9 @@ written down.
 - The first build needs the export templates; offline users without them see
   how large the download is and decide.
 - Store media needs a display and Docker; without them the commands say so.
-- butler's hashes must be recorded in a reviewed change before Joinery
-  installs it; until then a user can install butler themselves and point
-  `JOINERY_BUTLER` at it.
+- butler 15.24.0 is pinned for macOS, Linux and Windows (x86-64 only:
+  itch.io publishes no ARM builds). On Apple Silicon it runs through Rosetta;
+  without Rosetta, Publish says how to install it. A user can still install
+  butler themselves and point `JOINERY_BUTLER` at it.
 - Joinery never uploads anything on its own: every network use in this
   feature is an explicit user action.

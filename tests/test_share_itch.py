@@ -238,3 +238,28 @@ def test_publish_without_butler_asks_for_consent(
     with pytest.raises(PublishError, match="install-butler"):
         share_itch.publish(built_project(tmp_path), "me/moss", None)
     assert not any(p.is_file() for p in (tmp_path / "cache").rglob("*"))
+
+
+def test_repo_policy_pins_every_platform() -> None:
+    for key, pinned in share_itch.load_butler().platforms.items():
+        assert len(pinned.sha256) == 64 and pinned.size > 1_000_000, key
+
+
+def test_butler_that_will_not_start_says_why(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = built_project(tmp_path)
+    monkeypatch.setenv("JOINERY_BUTLER", str(tmp_path / "butler"))
+    (tmp_path / "butler").write_text("")
+    monkeypatch.setenv("BUTLER_API_KEY", FAKE_KEY)
+
+    def intel_only(*args: object, **kwargs: object) -> None:
+        raise OSError(86, "Bad CPU type in executable")
+
+    monkeypatch.setattr(share_itch.subprocess, "run", intel_only)
+    monkeypatch.setattr(share_itch.sys, "platform", "darwin")
+    with pytest.raises(PublishError, match="softwareupdate --install-rosetta"):
+        share_itch.publish(project, "me/moss", ["web"])
+    monkeypatch.setattr(share_itch.sys, "platform", "linux")
+    with pytest.raises(PublishError, match="didn't start"):
+        share_itch.publish(project, "me/moss", ["web"])

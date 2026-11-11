@@ -23,15 +23,15 @@ source = "https://github.com/itchio/butler"
 
 [platforms.darwin-amd64]
 url = "https://broth.itch.zone/butler/darwin-amd64/15.24.0/archive/default"
-sha256 = ""
-size = 0
+sha256 = "94c176f408e8a785f72da4daa35c15212b033b4c29c742bac5420e3e3aa9face"
+size = 9539178
 
 [platforms.linux-amd64]
 url = "https://broth.itch.zone/butler/linux-amd64/15.24.0/archive/default"
-sha256 = ""
-size = 0
+sha256 = "bee1d708b5ed3dc7efcda3b5416ad5ca87a04d7e5fb6ebada510f3ba0cba3b69"
+size = 9213596
 
 [platforms.windows-amd64]
 url = "https://broth.itch.zone/butler/windows-amd64/15.24.0/archive/default"
-sha256 = ""
-size = 0
+sha256 = "03ddb047b62bf40319897ef539853d2f08ea2636002eed0e245c4a5668268240"
+size = 9461459
