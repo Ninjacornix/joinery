@@ -102,6 +102,9 @@ OP_APPS: dict[str, tuple[str, ...]] = {
     "make_cycle": ("blender",),
     "edit_action": ("blender",),
     "animation_pass": ("blender",),
+    # Adaptive music: every stem of a track through FluidSynth and Surge XT.
+    "compose_track": ("surge-xt",),
+    "edit_track": ("surge-xt",),
 }
 NATIVE_OPS = frozenset(OP_APPS)
 #: Key prefix of a read-only agent's connection on the stage, beside the staged ones.
