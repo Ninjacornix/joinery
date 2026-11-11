@@ -4,6 +4,7 @@ import asyncio
 import json
 import sys
 from pathlib import Path, PurePosixPath, PureWindowsPath
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -16,6 +17,7 @@ from joinery.gateway import ProjectGateway, _map_paths
 from joinery.gateway_rpc import GatewayRPC, rpc
 from joinery.mcp_runtime import MCPConnection, PolicyStop, ServerSpec, validate_schema
 from joinery.transactions import FileTransaction
+from joinery.turn import TurnController
 
 
 def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
@@ -397,6 +399,9 @@ def test_unapproved_bible_gives_the_structured_art_gate_not_an_error(
     async def run() -> None:
         gateway = ProjectGateway(project(tmp_path, monkeypatch))
         gateway.request_summary = "Make the steel rougher"
+        events: list[dict[str, Any]] = []
+        turn = TurnController(gateway, events.append)
+        turn.begin("Make the steel rougher")
         connection = _FakeConnection(seen)
         monkeypatch.setattr(gateway, "connection", AsyncMock(return_value=connection))
         try:
@@ -413,13 +418,14 @@ def test_unapproved_bible_gives_the_structured_art_gate_not_an_error(
             }
             assert "how your game should look" in result.content[0].text
             assert gateway.transaction is None, "Nothing is staged behind the gate"
-            gate = await gateway.finish()
-            assert gate is not None and gate["kind"] == "art_gate"
+            # The turn ends with nothing staged: the sidebar gets the art gate card.
+            assert await turn.end(True) is None
+            (gate,) = [e for e in events if e["kind"] == "art_gate"]
             assert (
                 gate["needs_art_approval"]
                 and gate["resume"] == "Make the steel rougher"
             )
-            assert await gateway.finish() is None, "The gate is reported once"
+            assert gateway.art_gate is None, "The gate is reported once"
         finally:
             await gateway.close()
 

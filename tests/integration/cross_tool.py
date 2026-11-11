@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from joinery.gateway import ProjectGateway, result_text
+from joinery.submission import check_and_open
 from joinery.transactions import FileTransaction
 
 
@@ -30,7 +31,7 @@ async def main() -> None:
                 scene = '[gd_scene load_steps=2 format=3]\n[ext_resource type="PackedScene" path="res://art/models/fixture.glb" id="1"]\n[node name="FixtureLevel" type="Node3D"]\n[node name="Fixture" parent="." instance=ExtResource("1")]\n'
                 result = await gateway.call("godot", "write_file", {"projectPath": str(project), "filePath": "fixture.tscn", "content": scene})
                 assert not result.is_error, result_text(result)
-                preview = await gateway.finish()
+                preview = await check_and_open(gateway)
                 assert preview and preview["media"]
                 assert not (project / "fixture.tscn").exists()
                 await gateway.decide(preview["transaction_id"], True)

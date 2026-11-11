@@ -8,6 +8,7 @@ from bridge.codex_session import CodexSession
 from bridge.protocol import Done, Message, MessageDelta, Prompt
 from joinery.gateway import ProjectGateway
 from joinery.gateway_rpc import GatewayRPC
+from joinery.submission import check_and_open
 from joinery.wiring import write_agent_wiring
 
 
@@ -39,7 +40,7 @@ async def main() -> None:
                     done = event.ok
             assert done
             assert not (project / "gateway_fixture.tscn").exists()
-            preview = await gateway.finish()
+            preview = await check_and_open(gateway)
             assert preview, "The model must actually operate the gateway"
             assert (
                 gateway.transaction

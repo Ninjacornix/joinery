@@ -3,6 +3,7 @@ import tempfile
 from pathlib import Path
 
 from joinery.gateway import ProjectGateway, result_text
+from joinery.submission import check_and_open
 
 
 async def main():
@@ -23,7 +24,7 @@ async def main():
             r = await g.call("godot", "game_get_scene_tree", {})
             print(result_text(r), flush=True)
             assert not r.is_error
-            preview = await g.finish()
+            preview = await check_and_open(g)
             assert preview is None, preview
             assert "McpInteractionServer" not in (p / "project.godot").read_text()
             print("Owned offline runtime inspection/cleanup: PASS")

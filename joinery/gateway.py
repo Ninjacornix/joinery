@@ -95,7 +95,7 @@ def _reference_only(arguments: Any) -> bool:
     """Every project asset path in the arguments is a reference board, and one is.
 
     Lets a creative tool make a reference board before the bible is approved.
-    `finish` still refuses any other asset change without approval, so this
+    The submit checks still refuse any other asset change without approval, so this
     only decides whether the call may start.
     """
     paths: list[str] = []
@@ -178,7 +178,7 @@ class ProjectGateway:
         self.editor_context: dict[str, str] = {}
         #: The prompt's selection targets; part targets scope typed part edits.
         self.target_context: tuple[dict[str, str], ...] = ()
-        #: Set when a call needed an approved art bible; finish() reports it.
+        #: Set when a call needed an approved art bible; the turn's end reports it.
         self.art_gate: dict[str, Any] | None = None
         self.runtime_owned = False
         self.runtime_config: str | None = None
@@ -542,46 +542,6 @@ class ProjectGateway:
             "message": ART_GATE_MESSAGE,
         }
         return self.art_gate
-
-    async def finish(self) -> dict[str, Any] | None:
-        """The review of this turn's changes, or the art gate when it stopped there.
-
-        Returns a ``file_preview``, an ``art_gate`` result
-        ``{needs_art_approval, resume, message}`` when asset work needs an
-        approved art bible first (nothing is applied), or None.
-        """
-        gate, self.art_gate = self.art_gate, None
-        preview = await self._finish()
-        if preview is not None and preview.get("kind") == "art_gate":
-            return preview
-        if gate is not None:
-            if preview is None:
-                return gate
-            preview["art_gate"] = {k: v for k, v in gate.items() if k != "kind"}
-        return preview
-
-    async def _finish(self) -> dict[str, Any] | None:
-        tx = self.transaction
-        if tx is None:
-            return None
-        checked = await self.submit_checks(set())
-        if not checked.changes:
-            await self.cancel()
-            return None
-        if checked.gate is not None:
-            # Nothing is applied: the stage is dropped and the user is asked.
-            self.art_gate = None
-            await self.cancel()
-            return checked.gate
-        if checked.problems:
-            raise ValueError("; ".join(p.message for p in checked.problems))
-        preview = self.open_review(tx.summary)
-        _tx_id, _media, jobs = self._media_jobs
-        self._media_jobs = ("", [], [])
-        with self.span("review_media"):
-            await render(jobs, strict=True)
-        preview.pop("media_pending", None)
-        return preview
 
     async def submit_checks(self, live_scenes: set[str]) -> submission.Validation:
         """Check the staged change as it stands now (``submission.validate``).

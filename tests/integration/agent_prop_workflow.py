@@ -28,6 +28,7 @@ from joinery.gateway_rpc import GatewayRPC
 from joinery.lockfile import check_assets
 from joinery.recipe import rebuild_all
 from joinery.runner import SandboxRunner
+from joinery.submission import check_and_open
 from joinery.transactions import inventory
 from joinery.wiring import write_agent_wiring
 
@@ -237,7 +238,7 @@ async def main(metrics_path: Path) -> None:
                     first = await stage(
                         "create_native_verify", geometry(gateway.transaction.stage, 1.0)
                     )
-                    preview = await stage("create_review", gateway.finish())
+                    preview = await stage("create_review", check_and_open(gateway))
                     assert preview and preview["media"]
                     await stage(
                         "create_accept", gateway.decide(preview["transaction_id"], True)
@@ -262,7 +263,7 @@ async def main(metrics_path: Path) -> None:
                     )
                     assert changed["Grip"] == first["Grip"]
                     assert changed["Head"]["position"] == first["Head"]["position"]
-                    preview = await stage("update_reject_review", gateway.finish())
+                    preview = await stage("update_reject_review", check_and_open(gateway))
                     assert preview
                     await stage(
                         "reject", gateway.decide(preview["transaction_id"], False)
@@ -281,7 +282,7 @@ async def main(metrics_path: Path) -> None:
                         geometry(gateway.transaction.stage, 1.5),
                     )
                     assert changed["Grip"] == first["Grip"]
-                    preview = await stage("update_accept_review", gateway.finish())
+                    preview = await stage("update_accept_review", check_and_open(gateway))
                     assert preview
                     await stage(
                         "update_accept", gateway.decide(preview["transaction_id"], True)

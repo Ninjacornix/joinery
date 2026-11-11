@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 
 from joinery.gateway import ProjectGateway, result_text
+from joinery.submission import check_and_open
 
 
 async def main() -> None:
@@ -41,7 +42,7 @@ async def main() -> None:
                 },
             )
             assert not result.is_error, result_text(result)
-            preview = await gateway.finish()
+            preview = await check_and_open(gateway)
             assert preview
             await gateway.decide(preview["transaction_id"], False)
             assert not (project / "level.tscn").exists()
@@ -55,7 +56,7 @@ async def main() -> None:
                 },
             )
             assert not result.is_error, result_text(result)
-            preview = await gateway.finish()
+            preview = await check_and_open(gateway)
             assert preview
             await gateway.decide(preview["transaction_id"], True)
             assert (project / "level.tscn").is_file()

@@ -14,6 +14,7 @@ from bridge.instructions import REVIEW_GUIDE
 from joinery import submission
 from joinery.gateway import ProjectGateway
 from joinery.runner import Result
+from joinery.submission import check_and_open
 from joinery.transactions import FileTransaction
 
 
@@ -60,7 +61,7 @@ def test_the_review_skips_an_import_godot_just_did(
 
     async def go() -> dict[str, Any] | None:
         try:
-            return await gateway.finish()
+            return await check_and_open(gateway)
         finally:
             await gateway.close()
 
@@ -83,7 +84,7 @@ def test_the_review_imports_again_after_a_later_edit(
 
     async def go() -> dict[str, Any] | None:
         try:
-            return await gateway.finish()
+            return await check_and_open(gateway)
         finally:
             await gateway.close()
 

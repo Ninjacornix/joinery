@@ -14,6 +14,7 @@ import pytest
 from joinery.art_approval import approve
 from joinery.gateway import ProjectGateway, _reference_only
 from joinery.runner import Result
+from joinery.submission import check_and_open
 from joinery.transactions import FileTransaction
 
 BIBLE = """# Art Bible
@@ -77,7 +78,7 @@ def begin(root: Path) -> tuple[ProjectGateway, FileTransaction]:
 def finish(gateway: ProjectGateway, _tx: FileTransaction) -> dict[str, Any] | None:
     async def run() -> dict[str, Any] | None:
         try:
-            return await gateway.finish()
+            return await check_and_open(gateway)
         finally:
             await gateway.close()
 

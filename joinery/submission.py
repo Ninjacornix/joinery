@@ -362,3 +362,35 @@ async def run_tests(
             + (got.output[-4000:] or "GUT exited with an error."),
         )
     ]
+
+
+async def check_and_open(gateway: ProjectGateway) -> dict[str, Any] | None:
+    """Check the gateway's stage and open its review, renders done, with no agent turn.
+
+    For scripts that drive the gateway directly (the integration checks): returns
+    the ``file_preview``, the art gate when asset work needs approval first (the
+    stage is dropped), or None when nothing changed. Any problem raises.
+    """
+    from joinery.review import render
+
+    if gateway.transaction is None:
+        return None
+    checked = await gateway.submit_checks(set())
+    if not checked.changes:
+        await gateway.cancel()
+        return None
+    if checked.gate is not None:
+        gateway.art_gate = None
+        await gateway.cancel()
+        return checked.gate
+    if checked.problems:
+        raise ValueError("; ".join(p.message for p in checked.problems))
+    preview = gateway.open_review(gateway.transaction.summary)
+    gate, gateway.art_gate = gateway.art_gate, None
+    if gate is not None:
+        preview["art_gate"] = {k: v for k, v in gate.items() if k != "kind"}
+    _identifier, _media, jobs = gateway._media_jobs
+    gateway._media_jobs = ("", [], [])
+    await render(jobs, strict=True)
+    preview.pop("media_pending", None)
+    return preview

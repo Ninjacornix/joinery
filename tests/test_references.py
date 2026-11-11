@@ -14,6 +14,7 @@ from joinery import references
 from joinery.cli import main
 from joinery.gateway import ProjectGateway
 from joinery.runner import Result
+from joinery.submission import check_and_open
 from joinery.transactions import FileTransaction
 
 SCENE = """[gd_scene load_steps=2 format=3 uid="uid://bashtrayscene"]
@@ -75,7 +76,7 @@ def test_a_scene_without_its_model_is_refused(
     root = project(tmp_path, monkeypatch)
     gateway, _tx = finish(root, {"scenes/props/ashtray.tscn": SCENE})
     with pytest.raises(ValueError) as error:
-        run(gateway.finish())
+        run(check_and_open(gateway))
     message = str(error.value)
     assert "scenes/props/ashtray.tscn uses art/models/ashtray.glb" in message
     assert "same change" in message and message.startswith("Not submitted: ")
@@ -90,7 +91,7 @@ def test_a_scene_staged_with_its_model_reaches_review(
         root,
         {"scenes/props/ashtray.tscn": SCENE, "art/models/ashtray.glb": "glTF"},
     )
-    preview = run(gateway.finish())
+    preview = run(check_and_open(gateway))
     assert preview is not None and preview["kind"] == "file_preview"
     run(gateway.close())
 
@@ -102,7 +103,7 @@ def test_a_model_already_in_the_project_is_fine(
     (root / "art/models").mkdir(parents=True)
     (root / "art/models/ashtray.glb").write_text("glTF")
     gateway, _tx = finish(root, {"scenes/props/ashtray.tscn": SCENE})
-    assert run(gateway.finish())["kind"] == "file_preview"
+    assert run(check_and_open(gateway))["kind"] == "file_preview"
     run(gateway.close())
 
 
@@ -118,7 +119,7 @@ def test_a_moved_file_found_by_its_uid_is_not_missing(
         'path="res://art/models', 'uid="uid://bglb" path="res://art/models'
     )
     gateway, _tx = finish(root, {"scenes/props/ashtray.tscn": scene})
-    assert run(gateway.finish())["kind"] == "file_preview"
+    assert run(check_and_open(gateway))["kind"] == "file_preview"
     run(gateway.close())
 
 
@@ -132,7 +133,7 @@ def test_deleting_a_model_a_scene_still_uses_is_refused(
     gateway, tx = finish(root, {})
     (tx.stage / "art/models/ashtray.glb").unlink()
     with pytest.raises(ValueError, match="room.tscn uses art/models/ashtray.glb"):
-        run(gateway.finish())
+        run(check_and_open(gateway))
     run(gateway.close())
 
 
