@@ -19,23 +19,23 @@ it. Games made with Joinery are plain Godot projects and open in stock Godot.
 
 ## Status
 
-Version 0.2. Early software, unsigned builds.
+Version 0.3. Early software, unsigned builds.
 
-- Tested: the 0.1 builds for macOS (Apple Silicon), Linux and Windows passed
-  their editor, review, undo and exported-game checks on native machines. 0.2
-  runs the same checks when its tag is pushed. On 2026-11-10 every built-in
+- Tested: the 0.2.0 builds for macOS (Apple Silicon), Linux and Windows passed
+  their editor, review, undo and exported-game checks on native machines, and
+  0.3 runs the same checks when its tag is pushed. On 2026-11-10 every built-in
   tool passed a real create, edit and export run with networking off, and the
   recipes from those runs rebuilt their assets
   ([results](evals/results/tools-working.md)).
 - Tested with a live agent: the full path from a chat request to an accepted
-  Blender model in a Godot scene, with Codex, for 0.1. The 0.2 additions
-  (starting points, features, brief, part selection) are tested without a
-  model.
+  Blender model in a Godot scene, with Codex, for 0.1, and day-to-day use with
+  Codex while 0.3 was built. The new parts (submit_for_review, saved chats,
+  images, the Review and Timeline tabs) are tested with fake agents.
 - Not yet verified live: Claude Code, Gemini CLI and opencode. On Windows only
   Codex is supported.
 
 What changed in this version, and what is still missing:
-[0.2.0 release notes](docs/releases/0.2.0.md).
+[0.3.0 release notes](docs/releases/0.3.0.md).
 
 ## How a change works
 
