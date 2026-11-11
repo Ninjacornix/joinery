@@ -16,7 +16,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, BinaryIO, Protocol
 
-from bridge import compaction
+from bridge import compaction, mixer_save
 from bridge.chat_record import ChatRecorder
 from bridge.check_runner import Checks
 from bridge.crew import Crew
@@ -881,6 +881,10 @@ async def _serve(
                         [str(a) for a in data.get("areas") or []],
                         [str(f) for f in data.get("findings") or []],
                     )
+                elif data.get("kind") == "mixer_save":
+                    # The Mixer tab's Save mix: a reviewed change of the bus layout
+                    # and the music tracks' layer mix (bridge/mixer_save.py).
+                    await mixer_save.start(crew, project, data, task_prompt())
                 elif data.get("kind") == "match_cancel":
                     assert matcher is not None
                     await matcher.stop()
