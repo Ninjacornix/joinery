@@ -177,8 +177,8 @@ jobs:
         # The glob takes in every addon script, the part picker, parts panel
         # and sidebar pieces included; tests/godot holds their GDScript tests.
         run: uvx --from gdtoolkit==4.5.0 gdlint godot_addon/joinery/*.gd tests/godot
-      - name: Lint blueprint and feature game code
-        run: uvx --from gdtoolkit==4.5.0 gdlint blueprints features
+      - name: Lint blueprint and feature game code and the playtest bot
+        run: uvx --from gdtoolkit==4.5.0 gdlint blueprints features joinery/playtest_bot tests/fixtures/playtest_game
       - name: Play every blueprint and feature in the built engine
         if: runner.os != 'Windows'
         env:

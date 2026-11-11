@@ -1,0 +1,28 @@
+; A tiny custom game (no Joinery game core) with faults planted on purpose, for the
+; playtest bot's tests. See main.gd.
+
+config_version=5
+
+[application]
+
+config/name="Playtest Fixture"
+run/main_scene="res://main.tscn"
+
+[input]
+
+move_left={
+"deadzone": 0.2,
+"events": []
+}
+move_right={
+"deadzone": 0.2,
+"events": []
+}
+move_up={
+"deadzone": 0.2,
+"events": []
+}
+move_down={
+"deadzone": 0.2,
+"events": []
+}
