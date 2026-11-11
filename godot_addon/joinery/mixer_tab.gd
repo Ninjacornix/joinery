@@ -38,7 +38,7 @@ var _snapshot: AudioBusLayout
 var _strips: Dictionary = {}
 var _status: HBoxContainer
 var _note: Label
-var _strip_row: HBoxContainer
+var _strip_row: HFlowContainer
 var _content: HFlowContainer
 var _missing: PanelContainer
 var _sent := false
@@ -89,6 +89,7 @@ func _init() -> void:
 	bar.add_child(save_button)
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	UI_MOTION.rubber_band(scroll)
 	add_child(scroll)
 	var gutter := MarginContainer.new()
@@ -288,7 +289,8 @@ func _build_buses() -> VBoxContainer:
 	_missing.name = "Missing"
 	(_missing.find_child("Action", true, false) as Button).pressed.connect(add_missing_buses)
 	group.add_child(_missing)
-	_strip_row = HBoxContainer.new()
+	# Strips wrap onto a second row in a narrow panel rather than scroll sideways.
+	_strip_row = HFlowContainer.new()
 	_strip_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_strip_row.name = "Strips"
 	_strip_row.theme_type_variation = "JoineryRow"
