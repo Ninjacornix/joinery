@@ -482,11 +482,20 @@ async def _serve(
                     raise TypeError("Invalid chat message.")
                 owned = crew.owner(str(data.get("transaction_id", "")))
                 if data.get("kind") == "decision" and owned is not None:
-                    emit(
-                        await crew.decide(
+                    try:
+                        decided = await crew.decide(
                             owned.transaction_id, bool(data.get("accept", False))
                         )
-                    )
+                    except (OSError, ValueError) as exc:
+                        # The task's row in the Review tab says why, in place.
+                        decided = {
+                            "kind": "notice",
+                            "level": "warn",
+                            "text": str(exc),
+                            "task_id": owned.id,
+                            "transaction_id": owned.transaction_id,
+                        }
+                    emit(decided)
                 elif data.get("kind") == "decision":
                     # Allowed while the agent still writes its last words: once a
                     # change is in review the agent can't change anything more.
@@ -550,6 +559,8 @@ async def _serve(
                         waiting.set_result(result)
                 elif data.get("kind") == "cancel" and data.get("task_id"):
                     await crew.stop(str(data["task_id"]))
+                elif data.get("kind") == "cancel_tasks":
+                    await crew.stop_all()
                 elif data.get("kind") == "cancel":
                     if data.get("all"):
                         await crew.stop_all()

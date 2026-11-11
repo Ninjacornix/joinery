@@ -10,9 +10,8 @@ extends VBoxContainer
 ## change can still be put back.
 ##
 ## The list comes from `joinery transactions list` (command_job.gd), read when the tab is
-## shown, when the editor gets focus back, whenever a turn ends and whenever a change is
-## staged or decided; it never polls. The change Journeyman just made shows the moment it
-## passes Joinery's checks; its before and after renders arrive afterwards.
+## shown, on focus, when a turn ends and when a change is staged or decided; it never polls.
+## Each parallel task's change is its own row, decided through the chat that runs the task.
 ## [signal count_changed] carries the number of things waiting, for the tab's badge.
 
 ## The number of things waiting for the user changed (the tab reads "Review 2").
@@ -102,6 +101,9 @@ var _count := -1
 var _jobs: Dictionary = {}
 var _list_again := false
 var _slash: Object
+## The chat (chat_bridge.gd), and its parallel tasks' changes: decided through the chat.
+var _chat: Object
+var _task_ids: Dictionary = {}
 var _legacy_button: Button
 ## True when the bottom panel opened by itself for the live review, so it closes again after.
 var _opened_itself := false
@@ -250,14 +252,16 @@ func review_closed() -> bool:
 	return close
 
 
-## Follow Journeyman's chat ([param chat], chat_bridge.gd): its change shows here as soon as
-## it passes Joinery's checks, and the list is read again whenever a turn ends or a change is
-## decided.
+## Follow Journeyman's chat ([param chat], chat_bridge.gd): its change shows as soon as it
+## passes Joinery's checks; the list is read again when a turn ends or a change is decided.
 func follow(chat: Object) -> void:
+	_chat = chat
 	var links := {
 		"file_preview": show_live,
 		"completed": func(_ok: bool) -> void: refresh(),
 		"file_decision": func(_event: Dictionary) -> void: refresh(),
+		"task_event": _on_task_event,
+		"task_review": show_task,
 	}
 	for signal_name: String in links:
 		if chat.has_signal(signal_name):
@@ -269,6 +273,38 @@ func show_live(event: Dictionary) -> void:
 	var summary := str(event.get("summary", "File changes"))
 	set_live({"id": str(event.get("transaction_id", "")), "summary": summary})
 	refresh()
+
+
+## A parallel task's change passed its checks, was decided, or its decision failed.
+func _on_task_event(event: Dictionary) -> void:
+	var id := str(event.get("transaction_id", ""))
+	match str(event.get("kind", "")):
+		"file_preview":
+			_task_ids[id] = true
+		"file_decision":
+			_task_ids.erase(id)
+			_busy.erase(id)
+			if event.get("accepted", false):
+				var paths := PackedStringArray()
+				for change: Variant in event.get("changes", []):
+					paths.append(str((change as Dictionary).get("path", "")))
+				changes_applied.emit(id, paths, event.get("changes", []))
+		"notice":
+			if _busy.has(id):
+				_busy.erase(id)
+				_errors[id] = str(event.get("text", ""))
+		_:
+			return
+	refresh()
+	_render()
+
+
+## Show the list with the files of the task change [param id] open under its row.
+func show_task(id: String) -> void:
+	_open_files[id] = true
+	show_list()
+	refresh()
+	_render()
 
 
 func _list_after_result() -> void:
@@ -850,6 +886,9 @@ func _decide(id: String, accepted: bool, live: bool) -> void:
 	_errors.erase(id)
 	_render()
 	decision_requested.emit(id, accepted, live)
+	if _task_ids.has(id) and _chat != null:
+		_chat.call("decide_files", id, accepted)
+		return
 	if live:
 		# Decided exactly as the full review's own buttons would.
 		if _detail != null and _detail.has_method("decide"):

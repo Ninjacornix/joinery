@@ -222,6 +222,7 @@ func _states(light: bool, width: int) -> void:
 	await _shot("queued-paused", light, width, chat)
 	for index: int in 2:
 		queue.call("remove", queue.call("first"))
+	await _parallel(light, width, chat)
 
 	chat.append_agent_text("I widened **Door** by 20% in Blender and darkened the wood.", true)
 	chat.finish_agent_response(true)
@@ -342,6 +343,47 @@ func _states(light: bool, width: int) -> void:
 
 ## Images with a message: the shared view, a pasted screenshot and a chosen file in the
 ## composer, then on the sent request's card.
+## Agents working alongside Journeyman: a card per task, the header's count, Run alongside in
+## the composer, and Stop asking whether to stop the tasks too.
+func _parallel(light: bool, width: int, chat: Control) -> void:
+	var tasks: Node = chat.get("_tasks")
+	var backend: Node = load("res://addons/joinery/chat_bridge.gd").new()
+	backend.set("parallel", 4)
+	tasks.set("bridge", backend)
+	var lamp := {"kind": "task", "task_id": "t1", "title": "Make a desk lamp", "state": "working"}
+	lamp["apps"] = ["blender"]
+	tasks.call("on_event", lamp)
+	tasks.call(
+		"on_event",
+		{"kind": "progress", "task_id": "t1", "text": "Bevelling the lamp shade in Blender"}
+	)
+	tasks.call("card", "t1").call("set_elapsed", 38)
+	var rug := {"kind": "task", "task_id": "t2", "title": "Paint a rug texture", "state": "working"}
+	rug["apps"] = ["krita"]
+	tasks.call("on_event", rug)
+	rug["state"] = "in_review"
+	rug["transaction_id"] = "fixture"
+	tasks.call("on_event", rug)
+	var prompt: TextEdit = chat.get("_prompt")
+	prompt.text = "Add a small side table"
+	prompt.text_changed.emit()
+	var header: Node = chat.get("_header")
+	_check(header.call("agents_text") == "2 agents working", "The header counts the agents")
+	var alongside: Button = chat.get("_composer").get("alongside_button")
+	_check(alongside.visible, "Run alongside is offered while Journeyman works")
+	await _shot("parallel", light, width, chat)
+	chat.call("_request_cancel")
+	await _shot("parallel-stop", light, width, chat)
+	prompt.text = ""
+	tasks.call("_drop_offer")
+	for id: String in ["t1", "t2"]:
+		tasks.call("_remove", id)
+	tasks.set("bridge", null)
+	backend.free()
+	var composer: Node = chat.get("_composer")
+	composer.get("stop").disabled = false
+
+
 func _images(light: bool, width: int) -> void:
 	var built := _build(light)
 	var host: Control = built[0]

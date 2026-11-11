@@ -8,20 +8,15 @@ extends PanelContainer
 ## decisions are made only there. The persona is always "Journeyman"; the provider (Codex,
 ## Claude…) is named only in the lost-connection banner and in Settings.
 ##
-## Sending is optimistic: the request card appears at once in a "sending" state (Stop already
-## in Send's slot) and resolves when Journeyman picks it up, or offers Retry. A request
-## lost with the connection turns the header dot red and disables Send, leaving Retry as the
-## one action; once the banner shows Reconnect, the card says only "Not sent" until it is
-## back. While a step is live on the card the footer stays out of the way. A chat bridge added
-## as a child is attached automatically ([method attach_bridge]) for send receipts, notices,
-## transaction ids, the art gate, approvals and the game's suggestions.
-##
+## Sending is optimistic: the request card appears at once as "sending" (Stop in Send's slot)
+## and resolves when Journeyman picks it up, or offers Retry. A request lost with the
+## connection turns the header dot red and disables Send, leaving Retry as the one action. A
+## chat bridge added as a child is attached automatically ([method attach_bridge]).
 ## While a request runs or a change waits for review, Send queues the message (sidebar_queue.gd);
-## queued messages go out one at a time once nothing is in the way ([method _drain]).
-##
-## "/feature add|remove <id>" shows a plan card from `joinery feature … --plan`; the feature is
-## applied only when the user presses Apply on it. "/brief" opens design/brief.md read-only.
-## Suggestions from the game brief arrive one line at a time and are never acted on unasked.
+## queued messages go out one at a time once nothing is in the way ([method _drain]). Agents
+## working alongside (parallel tasks) have their own cards above the footer (sidebar_tasks.gd).
+## "/feature add|remove <id>" shows a plan card; the feature is applied only on Apply. "/brief"
+## opens design/brief.md read-only. Brief suggestions arrive one line at a time, never acted on.
 
 signal setup_requested
 signal focus_toggle_requested
@@ -55,6 +50,7 @@ const COMPOSER_SCRIPT := preload("res://addons/joinery/sidebar_composer.gd")
 const MENU_SCRIPT := preload("res://addons/joinery/command_menu.gd")
 const SLASH_SCRIPT := preload("res://addons/joinery/slash_commands.gd")
 const CHATS_SCRIPT := preload("res://addons/joinery/chat_sessions.gd")
+const TASKS_SCRIPT := preload("res://addons/joinery/sidebar_tasks.gd")
 const REVIEW_PATH := "res://addons/joinery/review_panel.gd"
 const ART_DIALOG := preload("res://addons/joinery/art_review_dialog.gd")
 const REVIEW_WAIT := "Queue a message for after the review…"
@@ -64,12 +60,10 @@ const DISCARDED := "Discarded. Your files were not touched."
 const BRIEF_PATH := "res://design/brief.md"
 ## Minimum dock width in multiples of the font size.
 const MIN_EM := 24
-## The same below the Inspector in Godot's classic layout, where the column is shared and a
-## wider sidebar would push the editor past a laptop-sized window.
+## The same below the Inspector (classic layout): a wider shared column crowds a laptop screen.
 const SHARED_MIN_EM := 19
 
-## Minimum width in multiples of the font size: [constant MIN_EM], or
-## [constant SHARED_MIN_EM] when the sidebar shares its column.
+## Minimum width in font sizes: [constant MIN_EM], or [constant SHARED_MIN_EM] when shared.
 var min_em := MIN_EM
 
 ## "connected", "connecting", "error" or "none" (no account connected yet).
@@ -84,6 +78,7 @@ var _settings: SETTINGS_SCRIPT
 ## Saved chats: the Chats page, New chat, restoring a chat (chat_sessions.gd).
 var _chats: CHATS_SCRIPT
 var _footer: FOOTER_SCRIPT
+var _tasks: TASKS_SCRIPT
 var _composer: COMPOSER_SCRIPT
 var _prompt: TextEdit
 var _chips: HFlowContainer
@@ -184,6 +179,7 @@ func _ready() -> void:
 	add_child(_slash)
 	_review = _make_review()
 	_chats = CHATS_SCRIPT.attach(self, _header.row, _content)
+	_tasks = TASKS_SCRIPT.attach(self, _content, _footer)
 	_settings = SETTINGS_SCRIPT.attach(self, _header.row, _content)
 	_show_connection()
 	_settings.apply_all()
@@ -236,11 +232,12 @@ func _input(event: InputEvent) -> void:
 # --- Bridge ------------------------------------------------------------------------------------
 
 
-## Listen to a chat bridge for send receipts, Joinery notices and transaction ids. The plugin's
-## own wiring of the other bridge signals is unchanged.
+## Listen to a chat bridge for receipts, notices, transaction ids and parallel tasks.
 func attach_bridge(bridge: Node) -> void:
 	_bridge = bridge
+	_tasks.bridge = bridge
 	var links := {
+		"task_event": _tasks.on_event,
 		"sent": _on_sent,
 		"notice": _on_notice,
 		"file_preview": _on_bridge_preview,
@@ -687,6 +684,7 @@ func _request_cancel() -> void:
 	_composer.stopping()
 	_sync()
 	cancel_requested.emit()
+	_tasks.offer_stop_all()
 
 
 ## A transient caption ("Focus mode on · /focus to undo") over the bottom of the transcript
@@ -788,6 +786,7 @@ func _show_connection(detail := "") -> void:
 func set_chat_busy(busy: bool) -> void:
 	var was_busy := _busy
 	_busy = busy
+	_tasks.set_main_busy(busy)
 	if busy:
 		_started_msec = Time.get_ticks_msec()
 		_last_elapsed = -1

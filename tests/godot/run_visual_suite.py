@@ -59,6 +59,8 @@ SIDEBAR_STATES = (
     "submitting",
     "queued",
     "queued-paused",
+    "parallel",
+    "parallel-stop",
     "review-waiting",
     "accepted",
     "conversation",

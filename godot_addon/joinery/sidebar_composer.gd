@@ -11,6 +11,10 @@ extends PanelContainer
 ## it. The draft stays in the field.
 ## Its border tweens to the accent while the field has focus.
 ##
+## While Journeyman works, "Run alongside" sits beside Stop when the field has text and the
+## project allows parallel tasks ([method set_alongside]): it starts the message as its own task
+## beside the request (ADR 0036), where Enter would queue it.
+##
 ## Images go with the message as thumbnails above the chips (sidebar_attachments.gd): the eye
 ## button ("Share my view") adds a screenshot of the editor viewport the user is looking at;
 ## the paperclip opens a file dialog; pasting an image (Cmd/Ctrl+V) or image files, and dropping
@@ -26,6 +30,8 @@ extends PanelContainer
 
 signal submitted(text: String)
 signal stop_pressed
+## "Run alongside": start [param text] as a parallel task now instead of queueing it.
+signal alongside(text: String)
 ## A target chip was pressed: open [param path] where it is made.
 signal target_opened(path: String)
 ## Something to tell the user in the status footer ("Share my view" failed, the limit…).
@@ -47,6 +53,8 @@ var prompt: TextEdit
 var options: MenuButton
 var send: Button
 var stop: Button
+## "Run alongside", beside Stop while Journeyman works.
+var alongside_button: Button
 ## "Share my view": a screenshot of the editor viewport goes with the next message.
 var view: Button
 ## Attach images from disk (a file dialog).
@@ -58,6 +66,8 @@ var _focus_tween: Tween
 var _focused := false
 var _busy := false
 var _locked := false
+## The project allows parallel tasks, and another one can start now.
+var _alongside_ok := false
 ## "connected", "connecting", "error" or "none", as the dock reports it.
 var _connection := "connected"
 var _restyling := false
@@ -115,6 +125,17 @@ func _init() -> void:
 	push.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	push.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	controls.add_child(push)
+	alongside_button = UI.quiet("Run alongside")
+	alongside_button.tooltip_text = (
+		"Start this as its own task now, beside the request Journeyman is working on. "
+		+ "Its change is reviewed on its own."
+	)
+	alongside_button.accessibility_name = "Run this message alongside as a parallel task"
+	alongside_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	UI_MOTION.press_feedback(alongside_button)
+	alongside_button.pressed.connect(_on_alongside)
+	alongside_button.hide()
+	controls.add_child(alongside_button)
 	# Send and Stop share one slot: a MarginContainer stacks its children.
 	var slot := MarginContainer.new()
 	slot.size_flags_vertical = Control.SIZE_SHRINK_END
@@ -321,7 +342,33 @@ func route_drop(files: PackedStringArray, over_composer: bool) -> void:
 			handler.call(files)
 
 
+## Offer "Run alongside" while Journeyman works ([param allowed]: the project allows another
+## parallel task now).
+func set_alongside(allowed: bool) -> void:
+	_alongside_ok = allowed
+	_sync_send()
+
+
+func _on_alongside() -> void:
+	var text := prompt.text.strip_edges()
+	if text.is_empty() or not alongside_button.visible:
+		return
+	alongside.emit(text)
+
+
 func _sync_send() -> void:
+	var offer := (
+		_busy
+		and _alongside_ok
+		and not _locked
+		and _connection == "connected"
+		and not prompt.text.strip_edges().is_empty()
+	)
+	if offer != alongside_button.visible:
+		if offer:
+			UI_MOTION.enter(alongside_button)
+		else:
+			alongside_button.hide()
 	send.disabled = _locked or _connection != "connected" or prompt.text.strip_edges().is_empty()
 	options.disabled = _busy or _connection != "connected"
 	options.focus_mode = Control.FOCUS_NONE if options.disabled else Control.FOCUS_ALL

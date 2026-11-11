@@ -13,6 +13,7 @@ extends Node
 ## Continuing is the chat host's job: the next prompt names the chat, and the host resumes the
 ## provider's own session or starts a fresh one from a summary, which the transcript says.
 
+const TASKS := preload("sidebar_tasks.gd")
 const STORE := preload("chat_store.gd")
 const PAGE := preload("chats_page.gd")
 const UI := preload("ui_components.gd")
@@ -271,6 +272,12 @@ func render(entries: Array) -> void:
 				_transcript.call("show_timing", timing)
 				if card != null:
 					card.call("finish", outcome)
+			"task":
+				# A parallel task's outcome, as the sidebar said it when it finished.
+				var ending := str(TASKS.ENDINGS.get(str(entry.get("state", "")), ""))
+				if not ending.is_empty():
+					var line := "%s: %s" % [str(entry.get("title", "Task")), ending]
+					_transcript.call("add_notice", line, "info")
 			"session":
 				if str(entry.get("mode", "")) == "summary":
 					_transcript.call(

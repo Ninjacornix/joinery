@@ -193,6 +193,9 @@ func _connect_chat(settings: EditorSettings) -> void:
 	_chat = CHAT_SCRIPT.new()
 	_chat.context_provider = _editor_context
 	_review_tab.follow(_chat)
+	_chat.task_review.connect(
+		func(_id: String) -> void: make_bottom_panel_item_visible(_review_tab)
+	)
 	_chat.editor_action.connect(_on_editor_action)
 	_flow = FLOW_SCRIPT.new()
 	add_child(_flow)

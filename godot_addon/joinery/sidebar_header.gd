@@ -10,6 +10,9 @@ extends VBoxContainer
 ## Under the row, one quiet line can name an app that needs something, with its fix and a
 ## "Check again" link ([method show_readiness]).
 ##
+## While several agents work at once (parallel tasks, ADR 0036) the row says how many, quietly:
+## "3 agents working" with the activity dots ([method show_agents]).
+##
 ## Beside the menu, a small ring shows how full the conversation's context is, with token use
 ## on hover ([member usage]); it appears only once the provider reports usage.
 
@@ -42,6 +45,9 @@ var _banner_kind := ""
 var _readiness: HBoxContainer
 var _readiness_text: Label
 var _readiness_action: Button
+## How many agents work now (shown from two up), and the connection state the row last showed.
+var _agents := 0
+var _state := "connected"
 
 
 func _init() -> void:
@@ -111,6 +117,7 @@ func _init() -> void:
 ## send already offers Retry.
 func show_state(state: String, agent: String, detail := "", with_banner := true) -> void:
 	var named := agent if not agent.is_empty() else "Journeyman"
+	_state = state
 	_indicator.set("running", state == "connecting")
 	# Healthy is quiet: nothing but the menu.
 	_dot.visible = state == "error"
@@ -118,6 +125,8 @@ func show_state(state: String, agent: String, detail := "", with_banner := true)
 	_dot.tooltip_text = detail if state == "error" and not detail.is_empty() else "Not connected"
 	_name.text = str({"connecting": "Connecting…", "error": "Not connected"}.get(state, ""))
 	_name.tooltip_text = _name.text
+	if state == "connected":
+		_show_count()
 	if state == "none":
 		_show_banner("none", "Connect Journeyman to your account to start.", "Connect")
 	elif state == "error" and with_banner:
@@ -126,6 +135,37 @@ func show_state(state: String, agent: String, detail := "", with_banner := true)
 	elif _banner.visible:
 		UI_MOTION.exit(_banner)
 		_banner_kind = ""
+
+
+## [param count] agents work now, Journeyman's own request included. From two up the row says
+## "3 agents working" while connected; one or none leaves it quiet.
+func show_agents(count: int) -> void:
+	_agents = count
+	if _state == "connected":
+		_show_count()
+
+
+## The agent count line ("" when fewer than two work).
+func agents_text() -> String:
+	return _name.text if _agents >= 2 and _state == "connected" else ""
+
+
+func _show_count() -> void:
+	var several := _agents >= 2
+	var text := "%d agents working" % _agents if several else ""
+	if _name.text == text:
+		return
+	var counting := _name.text.ends_with(" agents working")
+	_name.tooltip_text = "Journeyman and its parallel tasks" if several else ""
+	_indicator.set("running", several)
+	if several and counting:
+		# The number rolls like an odometer; the words stay put.
+		UI_MOTION.roll_number(_name, _agents, "%d agents working")
+		return
+	_name.text = text
+	_name.set_meta("_joinery_value", _agents)
+	if several:
+		UI_MOTION.fade_in(_name)
 
 
 ## One line about an app that needs something ("Blender needs Docker. Start Docker Desktop,

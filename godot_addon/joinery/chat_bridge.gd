@@ -41,6 +41,12 @@ signal usage_received(event: Dictionary)
 ## The host opened a chat for the next prompt: {chat_id, mode ("new", "resumed" or "summary"),
 ## message}. A new chat names its id here.
 signal chat_changed(event: Dictionary)
+## Anything from a parallel task (ADR 0036), tagged with its task_id: its state ({kind: "task",
+## state, title, step, apps, transaction_id, message…}), its steps, its words and its change.
+## None of these reach the signals above, which belong to Journeyman's own request.
+signal task_event(event: Dictionary)
+## The user asked to see a task's change ([param transaction_id]) in the Review tab.
+signal task_review(transaction_id: String)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 const ATTACHMENTS := preload("chat_attachments.gd")
@@ -51,6 +57,8 @@ var context_provider: Callable
 var view_provider := Callable(EDITOR_VIEW, "capture")
 ## The saved chat each prompt continues ("" starts a new one); the host names a new chat's id.
 var chat_id := ""
+## Turns that may run at once, Journeyman's own included ([agents] parallel); 1 = no tasks.
+var parallel := 1
 var _job: RefCounted
 var _connected := false
 var _pending: Dictionary = {}
@@ -137,6 +145,48 @@ func submit(text: String, targets: Array) -> void:
 		busy_changed.emit(false)
 
 
+## Run [param text] as a parallel task beside the request Journeyman is working on.
+func start_task(text: String, targets: Array) -> bool:
+	if _job == null or not _connected:
+		return false
+	var scene_targets: Array = []
+	var images: Array[String] = []
+	for target: Variant in targets:
+		if ATTACHMENTS.is_attachment(target):
+			images.append(str(target["path"]))
+		else:
+			scene_targets.append(target)
+	var line := {
+		"kind": "task_start",
+		"text": text,
+		"targets": scene_targets.duplicate(true),
+		"selection": _selection.duplicate(),
+		"editor_context":
+		context_provider.call(scene_targets) if context_provider.is_valid() else {},
+	}
+	if not images.is_empty():
+		line["attachments"] = images
+	_job.send_line(JSON.stringify(line))
+	return true
+
+
+## Stop one parallel task.
+func cancel_task(task_id: String) -> void:
+	if _job != null and _connected:
+		_job.send_line(JSON.stringify({"kind": "cancel", "task_id": task_id}))
+
+
+## Stop every parallel task (Journeyman's own request is stopped with [method cancel_turn]).
+func cancel_tasks() -> void:
+	if _job != null and _connected:
+		_job.send_line(JSON.stringify({"kind": "cancel_tasks"}))
+
+
+## Show a task's change in the Review tab.
+func show_task_review(transaction_id: String) -> void:
+	task_review.emit(transaction_id)
+
+
 func _send_pending() -> void:
 	if not _pending.is_empty() and _job != null:
 		_job.send_line(JSON.stringify(_pending))
@@ -175,8 +225,12 @@ func _process(_delta: float) -> void:
 
 
 func _handle(event: Dictionary) -> void:
+	if not str(event.get("task_id", "")).is_empty():
+		task_event.emit(event)
+		return
 	match str(event.get("kind", "")):
 		"connection":
+			parallel = int(event.get("parallel", 1))
 			models_received.emit(event.get("models", []))
 			_connected = event.get("state") == "connected"
 			if not _connected:
