@@ -52,6 +52,7 @@ ENTRY_TYPES = {
     "turn",
     "session",
     "summary",
+    "task",
 }
 
 
@@ -300,7 +301,10 @@ def change_states(project: Path, ids: list[str]) -> dict[str, dict[str, Any]]:
 
 
 def turns(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The chat as turns: {request, reply, changes, outcome}, oldest first."""
+    """The chat as turns: {request, reply, changes, tasks, outcome}, oldest first.
+
+    ``tasks`` are the parallel tasks started during the turn, {task_id, title,
+    state}, each with the last state recorded for it."""
     result: list[dict[str, Any]] = []
     for entry in entries:
         kind = entry.get("type")
@@ -310,11 +314,20 @@ def turns(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "request": str(entry.get("text", "")),
                     "reply": [],
                     "changes": [],
+                    "tasks": [],
                     "outcome": "",
                 }
             )
         elif not result:
             continue
+        elif kind == "task" and entry.get("task_id"):
+            known = {t["task_id"]: t for turn in result for t in turn["tasks"]}
+            task = known.get(str(entry["task_id"]))
+            if task is None:
+                task = {"task_id": str(entry["task_id"]), "title": "", "state": ""}
+                result[-1]["tasks"].append(task)
+            task["title"] = str(entry.get("title", "")) or task["title"]
+            task["state"] = str(entry.get("state", "")) or task["state"]
         elif kind == "agent":
             result[-1]["reply"].append(str(entry.get("text", "")))
         elif kind == "change" and entry.get("transaction_id"):
@@ -344,6 +357,18 @@ _STATE_WORDS = {
     "review": "never reviewed",
     "staging": "never reviewed",
     "gone": "no longer on record",
+}
+
+
+#: How a parallel task's last state reads in a summary.
+_TASK_WORDS = {
+    "started": "never finished",
+    "in_review": "its change was never reviewed",
+    "accepted": "its change was accepted",
+    "discarded": "its change was discarded",
+    "done": "finished without a change",
+    "failed": "failed",
+    "stopped": "stopped",
 }
 
 
@@ -385,6 +410,9 @@ def summary(project: Path, meta: dict[str, Any], entries: list[dict[str, Any]]) 
             lines.append(
                 f"   Change {change['transaction_id'][:8]} ({label}): {words}."
             )
+        for task in turn["tasks"]:
+            words = _TASK_WORDS.get(task["state"], task["state"])
+            lines.append(f'   Parallel task "{_short(task["title"], 80)}": {words}.')
         if turn["outcome"] and turn["outcome"] != "done":
             lines.append(f"   That turn {turn['outcome']}.")
     lines.append("The user's new message follows.")

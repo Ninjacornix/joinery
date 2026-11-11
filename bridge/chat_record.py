@@ -18,6 +18,11 @@ from typing import Any, Protocol
 from joinery import chats
 from joinery.session_summary import FileSummaryStore, SessionSummary
 
+#: Task states worth a line in the saved chat.
+TASK_OUTCOMES = frozenset(
+    {"in_review", "accepted", "discarded", "done", "failed", "stopped"}
+)
+
 
 class Sessions(Protocol):
     """What the recorder needs from the bridge."""
@@ -47,6 +52,8 @@ class ChatRecorder:
         self._broken = False
         #: Where a session summary goes when no chat can be saved.
         self._summaries = FileSummaryStore(project)
+        #: The last state recorded for each parallel task.
+        self._tasks: dict[str, str] = {}
 
     async def switch(self, chat_id: str, sessions: Sessions) -> dict[str, Any] | None:
         """Open [chat_id] before a prompt ("" starts a new chat). Returns the event that
@@ -144,6 +151,9 @@ class ChatRecorder:
         if not self.chat_id or self._broken:
             return
         kind = event.get("kind")
+        if event.get("task_id"):
+            self._observe_task(event)
+            return
         if kind == "message_delta":
             if event.get("new_message") and self._reply:
                 self._flush()
@@ -204,6 +214,34 @@ class ChatRecorder:
                 "model": self._model,
             }
             self._save(lambda: chats.append(self.project, self.chat_id, turn))
+
+    def _observe_task(self, event: dict[str, Any]) -> None:
+        """A parallel task's events: only its start, its change and its outcome are kept;
+        its own words stay on its card."""
+        if event.get("kind") != "task":
+            return
+        state = str(event.get("state", ""))
+        task_id = str(event.get("task_id", ""))
+        started = state == "working" and task_id not in self._tasks
+        if not started and state not in TASK_OUTCOMES:
+            return
+        if state == "in_review" and self._tasks.get(task_id) == "in_review":
+            return
+        self._tasks[task_id] = state
+        entry: dict[str, Any] = {
+            "type": "task",
+            "task_id": task_id,
+            "title": str(event.get("title", "")),
+            "state": "started" if started else state,
+            "origin": str(event.get("origin", "")),
+        }
+        if started:
+            entry["request"] = str(event.get("request", ""))
+        for key in ("transaction_id", "summary", "message"):
+            if event.get(key):
+                entry[key] = str(event[key])
+        # Not flushed: the chat's own reply may still be streaming beside it.
+        self._save(lambda: chats.append(self.project, self.chat_id, entry))
 
     def finish(self, sessions: Sessions) -> None:
         """After a turn: remember the provider's handle so the chat can be resumed."""
