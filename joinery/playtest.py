@@ -59,12 +59,17 @@ class Options:
     screenshots: bool = False
     out: Path | None = None
     extra_env: dict[str, str] = field(default_factory=dict)
+    #: Play an exported game's pack (the .pck a build ships) instead of the project.
+    pack: Path | None = None
 
     def public(self) -> dict[str, Any]:
         data = asdict(self)
         data["project"] = str(self.project)
         data.pop("out")
         data.pop("extra_env")
+        data.pop("pack")
+        if self.pack is not None:
+            data["pack"] = str(self.pack)
         return data
 
 
@@ -262,12 +267,17 @@ def run(
     out.mkdir(parents=True, exist_ok=True)
     godot = godot_binary()
     env = _env(out, options.extra_env)
-    _ensure_imported(godot, project, env)
+    if options.pack is None:
+        _ensure_imported(godot, project, env)
+    where = (
+        ["--main-pack", str(options.pack)]
+        if options.pack is not None
+        else ["--path", str(project)]
+    )
     command = [
         str(godot),
         "--headless",
-        "--path",
-        str(project),
+        *where,
         "--fixed-fps",
         "60",
         "--script",
@@ -320,8 +330,28 @@ def _screenshots(
     frames = sorted({f for f in frames if f > 0})[:SHOTS_LIMIT]
     if not frames:
         return
-    shots_dir = out / "shots"
-    shots_dir.mkdir(exist_ok=True)
+    taken = replay_shots(options, frames, out / "shots", (binary, extra))
+    report["screenshots"] = [str(p) for p in taken.values() if p.is_file()]
+    for item in report["items"]:
+        if item.get("t") is None:
+            continue
+        nearest = min(frames, key=lambda f: abs(f - int(float(item["t"]) * 60)))
+        if taken[nearest].is_file() and abs(nearest - float(item["t"]) * 60) <= 60:
+            item["shot"] = str(taken[nearest])
+
+
+def replay_shots(
+    options: Options,
+    frames: list[int],
+    shots_dir: Path,
+    window: tuple[Path, dict[str, str]],
+    resolution: str = "960x540",
+) -> dict[int, Path]:
+    """Replay `options.seed` in a window and save a picture at each frame (60 a second)."""
+    binary, extra = window
+    project = options.project.resolve()
+    shots_dir.mkdir(parents=True, exist_ok=True)
+    frames = sorted(set(frames))
     replay = Options(
         project=project,
         seconds=min(options.seconds, frames[-1] / 60 + 1),
@@ -337,7 +367,7 @@ def _screenshots(
         "--fixed-fps",
         "60",
         "--resolution",
-        "960x540",
+        resolution,
         # Without vsync the replay runs as fast as it can draw, not in real time.
         "--disable-vsync",
         "--script",
@@ -347,14 +377,7 @@ def _screenshots(
     ]
     env = _env(shots_dir, {**options.extra_env, **extra})
     _play(command, env, replay.seconds * 6 + 120, None, replay.seconds, None)
-    taken = {f: shots_dir / f"shot_{f:06d}.png" for f in frames}
-    report["screenshots"] = [str(p) for p in taken.values() if p.is_file()]
-    for item in report["items"]:
-        if item.get("t") is None:
-            continue
-        nearest = min(frames, key=lambda f: abs(f - int(float(item["t"]) * 60)))
-        if taken[nearest].is_file() and abs(nearest - float(item["t"]) * 60) <= 60:
-            item["shot"] = str(taken[nearest])
+    return {f: shots_dir / f"shot_{f:06d}.png" for f in frames}
 
 
 async def run_async(
