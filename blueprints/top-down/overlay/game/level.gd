@@ -175,6 +175,26 @@ func load_state(state: Dictionary) -> void:
 	_set_controls(true)
 	hud.set_score(score)
 	hud.set_wave(wave, WAVES.size())
+	# Players load after the level; once everything is in, a state that was
+	# saved after the fight ended shows its result again.
+	_end_if_over.call_deferred()
+
+
+## Ends the fight when the restored state is already decided: every player
+## down (lost) or the last wave cleared (won). Without this, a save made on
+## the result screen would load a dead player and no way on.
+func _end_if_over() -> void:
+	if completed or failed or not is_inside_tree() or not Game.session().is_authority():
+		return
+	var players: Array[Node] = Game.players()
+	if not players.is_empty() and players.all(_is_down):
+		_fail()
+	elif wave >= WAVES.size() and not _wave_running and enemies().is_empty():
+		_complete()
+
+
+static func _is_down(player: Node) -> bool:
+	return int(player.get(&"health")) <= 0
 
 
 func _spawn_markers() -> Array[Node2D]:
