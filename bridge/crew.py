@@ -4,7 +4,9 @@ A task is one more agent turn, run exactly like the chat's own (``run_turn``) wi
 its own turn controller, its own provider session (the chat's provider, model and
 effort), its own gateway lane and so its own staged change, reviewed on its own.
 The user starts one with "Run alongside" while Journeyman works; the lead agent
-starts one with ``start_task``. Tasks can't start tasks.
+starts one with ``start_task``. Tasks can't start tasks. Variants of one request
+(bridge.variants, ADR 0042) are tasks too; they wait in a queue while every turn
+the project allows is taken.
 
 Nothing here knows which provider runs: the same scheduler serves Codex, Claude
 Code, Gemini CLI and opencode, and every task's provider runs the same policy hook
@@ -46,8 +48,8 @@ LiveEdit = Callable[
     [ProjectGateway, TurnController, dict[str, Any], str],
     Awaitable[dict[str, Any]],
 ]
-#: The states a task card shows; the last four are final.
-WORKING, IN_REVIEW = "working", "in_review"
+#: The states a task card shows; the last five are final.
+WORKING, IN_REVIEW, QUEUED = "working", "in_review", "queued"
 FINAL = frozenset({"accepted", "discarded", "done", "failed", "stopped"})
 
 
@@ -102,6 +104,12 @@ class Task:
     ended: float = 0.0
     job: asyncio.Task[None] | None = None
     agent: TaskBridge | None = None
+    #: A variant of one request (ADR 0042): its group, its direction and its number.
+    group: str = ""
+    direction: str = ""
+    variant: int = 0
+    #: The prompt a queued task starts from once a turn is free.
+    work: Prompt | None = None
     _reply: list[str] = field(default_factory=list)
 
     def event(self) -> dict[str, Any]:
@@ -127,6 +135,15 @@ class Task:
             "elapsed_s": int((self.ended or time.time()) - self.started),
             "context_used": meter.used,
             "context_window": meter.window,
+            **(
+                {
+                    "variant_group": self.group,
+                    "direction": self.direction,
+                    "variant": self.variant,
+                }
+                if self.group
+                else {}
+            ),
         }
 
 
@@ -168,9 +185,14 @@ class Crew:
         reviewer: Callable[[ProjectGateway, TurnController], Reviewer | None]
         | None = None,
         debugger: Diagnose | None = None,
+        lead_busy: Callable[[], bool] = lambda: True,
     ) -> None:
         self.gateway = gateway
-        self.emit = emit
+        self._out = emit
+        #: Told of every task's state as it changes (bridge.variants follows its groups).
+        self.observers: list[Callable[[Task], None]] = []
+        #: The chat's own request is running a turn now, so it takes one of the turns.
+        self._lead_busy = lead_busy
         self.agent = agent
         self.profile = profile
         #: Turns at once, the chat's own included; 1 turns tasks off.
@@ -186,6 +208,14 @@ class Crew:
         #: A provider's own live edit waiting for the editor: {request id: task}.
         self._editor: dict[str, Task] = {}
 
+    def emit(self, event: dict[str, Any]) -> None:
+        self._out(event)
+        if event.get("kind") == "task":
+            task = self.tasks.get(str(event.get("task_id", "")))
+            if task is not None:
+                for observer in list(self.observers):
+                    observer(task)
+
     # --- Asking -------------------------------------------------------------------------
 
     @property
@@ -198,6 +228,14 @@ class Crew:
 
     def working(self) -> list[Task]:
         return [t for t in self.tasks.values() if t.state == WORKING]
+
+    def queued(self) -> list[Task]:
+        return [t for t in self.tasks.values() if t.state == QUEUED]
+
+    def capacity(self) -> int:
+        """How many more turns may start now: the limit counts the chat's own."""
+        busy = len(self.working()) + (1 if self._lead_busy() else 0)
+        return self.limit - busy
 
     def owner(self, transaction_id: str) -> Task | None:
         """The task whose change ``transaction_id`` is in review.
@@ -336,6 +374,47 @@ class Crew:
             lane.timing = None
         await self._conclude(task, outcome)
 
+    def add(
+        self,
+        title: str,
+        request: str,
+        *,
+        origin: Literal["user", "lead"],
+        prompt: Prompt,
+        text: str,
+        targets: list[str] | tuple[str, ...] = (),
+        group: str = "",
+        direction: str = "",
+        variant: int = 0,
+    ) -> Task:
+        """A task that waits its turn: it starts at once when a turn is free
+        (:meth:`pump`), otherwise when one is. ``text`` is what its agent is told."""
+        if self.limit <= 1:
+            raise ValueError(
+                "Parallel tasks are off for this project ([agents] parallel = 1 in "
+                "joinery.toml), so there is no one to try other ways."
+            )
+        task = self._prepare(title, request, origin, prompt, targets, group=group)
+        task.direction, task.variant = direction, variant
+        task.state, task.step = QUEUED, "Waiting for a free agent…"
+        task.work = prompt.model_copy(update={"text": text, "primer": ""})
+        self.tasks[task.id] = task
+        self.emit(task.event())
+        return task
+
+    def pump(self) -> None:
+        """Start queued tasks, oldest first, while the project has turns free."""
+        for task in self.queued():
+            if self.capacity() <= 0:
+                return
+            if task.work is None:
+                continue
+            work, task.work = task.work, None
+            task.state, task.step = WORKING, f"Starting {self.provider}…"
+            task.started = time.time()
+            self.emit(task.event())
+            task.job = asyncio.create_task(self._run(task, work))
+
     def _open(
         self,
         title: str,
@@ -346,14 +425,35 @@ class Crew:
         *,
         error: str = "",
     ) -> Task:
+        """A new task, on its card at once."""
+        task = self._prepare(title, request, origin, prompt, targets, error=error)
+        self.tasks[task.id] = task
+        self.emit(task.event())
+        return task
+
+    def _prepare(
+        self,
+        title: str,
+        request: str,
+        origin: Literal["user", "lead", "debug", "match"],
+        prompt: Prompt,
+        targets: list[str] | tuple[str, ...] = (),
+        *,
+        error: str = "",
+        group: str = "",
+    ) -> Task:
         """A new task's lane, turn and card; its claims on ``targets`` first. A task
-        about an ``error`` starts as its debugger."""
+        about an ``error`` starts as its debugger. A variant joins ``group`` first,
+        so it shares the files its group's other variants hold."""
         reserved = _reserved(targets)
         claims = self.gateway.claims
-        path, held_by = claims.first_conflict(set(reserved), "")
-        if path:
-            raise ValueError(refusal(path, held_by))
         task_id = uuid.uuid4().hex
+        if group:
+            claims.join(task_id, group)
+        path, held_by = claims.first_conflict(set(reserved), task_id)
+        if path:
+            claims.leave(task_id)
+            raise ValueError(refusal(path, held_by))
         lane = self.gateway.lane(task_id, title)
         lane.claims.claim(task_id, reserved)
         lane.editor_context = dict(prompt.editor_context)
@@ -366,18 +466,17 @@ class Crew:
         )
         if self._reviewer is not None:
             controller.reviewer = self._reviewer(lane, controller)
-        task = Task(task_id, title, request, origin, lane, controller)
+        task = Task(task_id, title, request, origin, lane, controller, group=group)
         task.step = f"Starting {self.provider}…"
         if error:
             task.role, task.error, task.step = "debugger", error, "Reading the error…"
         holder.append(task)
         lane.progress = lambda text: self._progress(task, text)
         live = self._live
-        if live is not None:
+        if live is not None and not group:
             # Once the main request is idle, a task may change the scene on screen.
+            # Variants never do: they are alternatives, and only one owns the scene.
             lane.edit_scene = lambda payload: live(lane, controller, payload, task_id)
-        self.tasks[task_id] = task
-        self.emit(task.event())
         return task
 
     # --- Debugging ----------------------------------------------------------------------
@@ -458,6 +557,7 @@ class Crew:
         task.step = ""
         await self._finish(task)
         self.emit(task.event())
+        self.pump()
 
     # --- Running ------------------------------------------------------------------------
 
@@ -527,6 +627,7 @@ class Crew:
             await self._finish(task)
         task.apps = list(task.apps)
         self.emit(task.event())
+        self.pump()
 
     def _emit(self, task: Task, event: dict[str, Any]) -> None:
         kind = event.get("kind")
@@ -608,13 +709,18 @@ class Crew:
         if task is None:
             raise ValueError("No task has that id.")
         job = task.job
-        if task.state == WORKING and job is not None and not job.done():
+        if task.state == QUEUED:
+            task.state, task.step, task.work = "stopped", "", None
+            task.ended = time.time()
+            await self._finish(task)
+            self.emit(task.event())
+        elif task.state == WORKING and job is not None and not job.done():
             job.cancel()
             await asyncio.gather(job, return_exceptions=True)
 
     async def stop_all(self) -> int:
-        """Stop every task still working; returns how many were stopped."""
-        running = self.working()
+        """Stop every task still working or waiting; returns how many were stopped."""
+        running = self.queued() + self.working()
         await asyncio.gather(
             *(self.stop(task.id) for task in running), return_exceptions=True
         )

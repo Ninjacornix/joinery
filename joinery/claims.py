@@ -10,6 +10,10 @@ until the user decides the change (or it is dropped).
 and :mod:`joinery.rebase` merges it instead. Folders are never claimed either, nor
 the empty ``.gdignore`` markers that every change making a source folder writes.
 
+Variants of one request (ADR 0042) are alternatives, not rivals: tasks in one
+*variant group* may claim the same files, since at most one of them is ever
+accepted. Against every other task their claims are as exclusive as any.
+
 Game features are one claim for the whole project (:data:`FEATURES`): a change
 that adds or removes a feature rewrites the carried game manifest, so only one
 change at a time may. ``joinery feature add|remove`` takes the same claim from
@@ -201,6 +205,10 @@ class PathClaims:
         self.titles: dict[str, str] = {}
         #: Claimed file -> task id.
         self.owners: dict[str, str] = {}
+        #: Claimed file -> the other tasks of the owner's variant group holding it too.
+        self.sharers: dict[str, set[str]] = {}
+        #: Task id -> its variant group, for tasks that are variants of one request.
+        self.groups: dict[str, str] = {}
         #: Bumped on every accepted change, so a stage knows the project moved.
         self.generation = 0
         #: The one task changing the scene on screen live ("" for no one); held
@@ -213,6 +221,20 @@ class PathClaims:
     def unregister(self, task: str) -> None:
         self.release(task)
         self.titles.pop(task, None)
+        self.groups.pop(task, None)
+
+    def join(self, task: str, group: str) -> None:
+        """``task`` is one variant of ``group``: it shares files with the others."""
+        self.groups[task] = group
+
+    def leave(self, task: str) -> None:
+        """``task`` is no longer a variant: its claims are exclusive again."""
+        self.groups.pop(task, None)
+
+    def alternatives(self, one: str, other: str) -> bool:
+        """``one`` and ``other`` are variants of the same request."""
+        group = self.groups.get(one, "")
+        return bool(group) and group == self.groups.get(other, "")
 
     def contended(self) -> bool:
         """More than one task works now, so staged files must be claimed."""
@@ -221,7 +243,7 @@ class PathClaims:
     def holder(self, path: str, task: str) -> str:
         """The title of the other task holding ``path`` ("" when free or ours)."""
         owner = self.owners.get(path, "")
-        if not owner or owner == task:
+        if not owner or owner == task or self.alternatives(owner, task):
             return ""
         return self.titles.get(owner, "another task")
 
@@ -240,18 +262,35 @@ class PathClaims:
             if path in UNCLAIMED or PurePosixPath(path).name == MARKER:
                 continue
             title = self.holder(path, task)
+            owner = self.owners.get(path, "")
             if title:
                 refused[path] = title
+            elif owner and owner != task:
+                # Another variant of the same request holds it: both may.
+                self.sharers.setdefault(path, set()).add(task)
             else:
                 self.owners[path] = task
         return refused
 
     def held(self, task: str) -> list[str]:
-        return sorted(p for p, owner in self.owners.items() if owner == task)
+        return sorted(
+            p
+            for p, owner in self.owners.items()
+            if owner == task or task in self.sharers.get(p, ())
+        )
 
     def release(self, task: str) -> None:
         for path in self.held(task):
-            del self.owners[path]
+            sharers = self.sharers.get(path, set())
+            if self.owners.get(path) == task and sharers:
+                # The file stays claimed by the variants still holding it.
+                self.owners[path] = sharers.pop()
+            elif self.owners.get(path) == task:
+                del self.owners[path]
+            else:
+                sharers.discard(task)
+            if not sharers:
+                self.sharers.pop(path, None)
         if self.features_holder() == "" and self._features is not None:
             self._features.release()
             self._features = None
