@@ -863,7 +863,9 @@ def describe(project: Path | None = None) -> dict[str, Any]:
     rows = []
     for kit in every(project).values():
         folder = kit.folder
-        shared = {"from": kit.credit, "presets": list(kit.presets)} if kit.credit else {}
+        shared = (
+            {"from": kit.credit, "presets": list(kit.presets)} if kit.credit else {}
+        )
         rows.append(
             {
                 "id": kit.id,

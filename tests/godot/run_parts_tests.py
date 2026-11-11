@@ -27,7 +27,7 @@ sys.path.insert(0, str(ROOT))
 
 from run_startup_test import crash, scratch_folder
 
-from joinery import kit_preview, kits, parts
+from joinery import kit_preview, parts
 from joinery.locking import GLB_IMPORT, write_lock
 from joinery.workspace import index
 
