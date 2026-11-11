@@ -1,8 +1,9 @@
 # gdlint: disable=max-public-methods
 @tool
 extends VBoxContainer
-## The Review panel's stage: one before/after view sized to the panel, and a filmstrip under it
-## when the change has several items. Each kind shows the way it is judged fastest:
+## The Review panel's stage: one before/after view that fills the stage edge to edge, and a
+## filmstrip under it when the change has several items. Each kind shows the way it is judged
+## fastest:
 ##
 ## - Textures, part views and scene snapshots: one frame split by a line you can drag
 ##   (review_swipe.gd), the original left, the change right. Before and After slide the line
@@ -18,15 +19,16 @@ extends VBoxContainer
 ## - Animations: the original and the change as two looping clips side by side
 ##   (review_clip.gd), or the models themselves playing the action live when their GLB files
 ##   load; Before and After dim the other side. One play/pause and scrub bar drives both
-##   (review_transport.gd); Left and Right step a frame.
+##   (review_transport.gd); it floats over the foot of the stage (review_overlay.gd) and fades
+##   out when the pointer leaves. Left and Right step a frame.
 ##
-## The one Before/After control is the pair of tags on the media (review_sides.gd): each sits on
-## the side it names and switches to it; a change with no original has one tag, "New".
+## The one Before/After control is the pill floating in the stage's corner (review_sides.gd):
+## Before | After | Both; a change with no original has one badge, "New".
 ##
-## Pictures fill the frame, keeping their shape: a pair shares its width. Pixel art and small
-## or flat pictures (a sketch, a plan, a 32 px texture) are blown up crisp, photos and renders
-## smooth (review_glance.gd's picture_filter). The frame grows with the panel's width, so a
-## wide panel shows a large picture rather than a thin strip.
+## Pictures fill the stage, keeping their shape: a pair shares its width. The stage fills with
+## the pictures' own background (review_glance.gd's ground), so a picture narrower than the
+## stage shows no empty bands; pixel art and small or flat pictures are blown up crisp, photos
+## and renders smooth (picture_filter).
 ##
 ## A side whose file is not written yet shows a pulsing "Rendering preview…" frame until it
 ## appears; the renders start when the change passes its checks, so the review is on screen
@@ -52,6 +54,8 @@ const MODEL_VIEW := preload("review_model_view.gd")
 const TRANSPORT := preload("review_transport.gd")
 const View := preload("review_view.gd")
 const AUDIO_STAGE := preload("review_audio_stage.gd")
+const ITEMS := preload("review_items.gd")
+const OVERLAY := preload("review_overlay.gd")
 ## Seconds to wait for a preview file before giving up.
 const LOAD_TIMEOUT := 120.0
 ## Seconds between checks for a preview file that is still being written.
@@ -59,26 +63,11 @@ const POLL := 0.25
 const NO_PREVIEW := "No preview. Open Details to see the file changes."
 ## Files Image.load reads; anything else (a .kra, a .blend) has no preview of its own.
 const IMAGE_FORMATS := ["png", "jpg", "jpeg", "webp", "svg", "bmp", "tga", "exr", "hdr"]
-## The picture frame's height as a share of its width, between [constant FRAME_MIN] and
-## [constant FRAME_MAX] large control heights.
-const FRAME_SHARE := 0.3
+## The least height of the picture frame, in large control heights; it fills the stage.
 const FRAME_MIN := 2.0
-const FRAME_MAX := 5.0
-## The tallest the frame grows under a row of ways (variant_strip.gd), which takes the rest.
-const FRAME_UNDER_WAYS := 3.0
 
 ## The side on show: "before", "after", or "compare" (a split picture).
 var side := "after"
-## Pixels the panel's own rows under the media take; the picture is that much shorter.
-var reserve := 0.0:
-	set(value):
-		reserve = value
-		_size_frame()
-## The tallest the picture frame grows, in large control heights.
-var frame_max := FRAME_MAX:
-	set(value):
-		frame_max = value
-		_size_frame()
 var _items: Array = []
 var _index := 0
 var _textures := {}
@@ -97,6 +86,7 @@ var _clip: CLIP
 var _sides: SIDES
 var _model: MODEL_VIEW
 var _transport: TRANSPORT
+var _overlay: OVERLAY
 ## Which item the live models were loaded for.
 var _live_key := ""
 ## True once the user picked a side for the item on show.
@@ -132,6 +122,11 @@ func _init() -> void:
 	_model = MODEL_VIEW.new()
 	_model.loaded.connect(_on_live)
 	_frame.add_child(_model)
+	_transport = TRANSPORT.new()
+	_transport.attach(_clip, _model)
+	_overlay = OVERLAY.new(_transport)
+	_overlay.watch(_frame)
+	_frame.add_child(_overlay)
 	_sides = SIDES.new()
 	_sides.chosen.connect(_on_chosen)
 	_frame.add_child(_sides)
@@ -140,9 +135,6 @@ func _init() -> void:
 	# The clips and live views are laid out after the frame: place the tags once they are.
 	for row: Container in [_clip, _model]:
 		row.sort_children.connect(_queue_place)
-	_transport = TRANSPORT.new()
-	_transport.attach(_clip, _model)
-	add_child(_transport)
 	_diff = DIFF.new()
 	_diff.hide()
 	add_child(_diff)
@@ -163,6 +155,10 @@ func _init() -> void:
 	rendering.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 	waiting.add_child(rendering)
 	_failure = UI.label(NO_PREVIEW, "JoineryCaption", true)
+	# Says so in the middle of the stage, where the picture would be.
+	_failure.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_failure.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_failure.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_failure.hide()
 	add_child(_failure)
 	_strip = FILMSTRIP.new()
@@ -176,8 +172,6 @@ func _notification(what: int) -> void:
 		var tall := float(UI_THEME.control_h(self, "lg") * 2)
 		for area: Control in [_audio_box, _diff]:
 			area.custom_minimum_size.y = tall
-		_size_frame()
-	elif what == NOTIFICATION_RESIZED:
 		_size_frame()
 	elif what == NOTIFICATION_VISIBILITY_CHANGED:
 		_resume.call_deferred()
@@ -198,18 +192,12 @@ func _resume() -> void:
 		_show_current(false)
 
 
-## The picture frame (and the loading frame in its place) grows with the width.
+## The picture frame (and the loading frame in its place) fills the stage, never shorter than
+## FRAME_MIN large control heights.
 func _size_frame() -> void:
 	if not is_inside_tree():
 		return
-	var large := float(UI_THEME.control_h(self, "lg"))
-	var tall := clampf(size.x * FRAME_SHARE, large * FRAME_MIN, large * frame_max)
-	# Rows under the picture (the playback bar, the panel's own) come out of its height, so the
-	# review needs no more room than one picture would.
-	var under := reserve
-	if _transport.visible:
-		under += _transport.get_combined_minimum_size().y + get_theme_constant("separation")
-	tall = floorf(maxf(tall - under, large * FRAME_MIN))
+	var tall := floorf(float(UI_THEME.control_h(self, "lg")) * FRAME_MIN)
 	for area: Control in [_frame, _loading]:
 		if not is_equal_approx(area.custom_minimum_size.y, tall):
 			area.custom_minimum_size.y = tall
@@ -390,6 +378,13 @@ func sides() -> SIDES:
 	return _sides
 
 
+## Size the pictures, clips and live views from [param area] (the review's stage), so the
+## stage can shrink as well as grow.
+func set_room(area: Control) -> void:
+	for part: Control in [_front, _back, _clip, _model]:
+		part.set("room", area)
+
+
 ## The live 3D view of models.
 func model_view() -> MODEL_VIEW:
 	return _model
@@ -403,6 +398,11 @@ func clip() -> CLIP:
 ## Play/pause and the scrub bar of an animation.
 func transport() -> TRANSPORT:
 	return _transport
+
+
+## What floats over the stage: the transport's bar.
+func overlay() -> OVERLAY:
+	return _overlay
 
 
 ## The picture on show (null for audio, text, while loading, or on failure). For a split
@@ -502,53 +502,28 @@ func stop_audio() -> void:
 
 ## "image", "model", "audio", "clip" (an animation) or "text" for a media [param item].
 static func kind_of(item: Dictionary) -> String:
-	var media := str(item.get("media", "image"))
-	if media in ["audio", "text", "clip"]:
-		return media
-	if item.has("before_back") or item.has("after_back"):
-		return "model"
-	var extension := str(item.get("path", "")).get_extension().to_lower()
-	if extension in DETAILS.KINDS["model"] and not item.has("part"):
-		return "model"
-	return "image"
+	return ITEMS.kind_of(item)
 
 
-## True when [param item] shows both sides at once: a split picture (texture, part view or scene
-## snapshot) or two clips. Model renders have their own framing per side, so they crossfade;
-## live models are side by side ([method _both_at_once]).
+## True when [param item] shows both sides at once (review_items.gd).
 static func swipes(item: Dictionary) -> bool:
-	return (
-		kind_of(item) in ["image", "clip"]
-		and _paired(item)
-		and not item.has("error")
-		and not item.has("reference")
-	)
+	return ITEMS.swipes(item)
 
 
 static func _paired(item: Dictionary) -> bool:
-	return item.has("before") and item.has("after")
+	return ITEMS.paired(item)
 
 
 func _both_at_once(item: Dictionary) -> bool:
 	return swipes(item) or (_model.is_live() and _paired(item) and _live_key == _live_key_of(item))
 
 
-## What identifies the live models of [param item] ("" when it names no GLB files).
 static func _live_key_of(item: Dictionary) -> String:
-	if not kind_of(item) in ["model", "clip"]:
-		return ""
-	var files := "%s|%s" % [item.get("before_model", ""), item.get("after_model", "")]
-	if files == "|":
-		return ""
-	return "%s#%s|%s" % [item.get("path", ""), item.get("part", ""), files]
+	return ITEMS.live_key(item)
 
 
 static func _item_name(item: Dictionary) -> String:
-	if kind_of(item) == "text":
-		return str(item.get("path", "Text changes"))
-	var label := str(item.get("label", ""))
-	var file := str(item.get("path", "")).get_file()
-	return file if label.is_empty() else "%s · %s" % [label, file]
+	return ITEMS.name_of(item)
 
 
 func _tile_specs() -> Array:
@@ -623,9 +598,7 @@ func _show_current(swap: bool) -> void:
 	_show_item(swap)
 	var item: Dictionary = _items[_index]
 	var playing := kind_of(item) == "clip" and _frame.visible and not _failure.visible
-	if playing != _transport.visible:
-		_transport.visible = playing
-		_size_frame()
+	_transport.visible = playing
 	_queue_place()
 
 
@@ -819,12 +792,8 @@ func _show_image(source: String, far: String, swap: bool) -> void:
 	_front.show()
 
 
-## The background the shown pictures share (a model's two renders), else clear.
 static func _common_ground(picture: Texture2D, back: Texture2D) -> Color:
-	var colour := GLANCE.ground(picture)
-	if back != null and not GLANCE.ground(back).is_equal_approx(colour):
-		return Color.TRANSPARENT
-	return colour
+	return ITEMS.common_ground(picture, back)
 
 
 ## Fill the frame with [param colour] (the pictures' own background); clear: the theme's.
@@ -931,7 +900,9 @@ func _place_sides() -> void:
 		_sides.reparent(host, false)
 		_sides.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	host.move_child(_sides, -1)
-	_sides.show_sides(item.has("before") and not item.has("reference"), item.has("after"))
+	_sides.show_sides(
+		item.has("before") and not item.has("reference"), item.has("after"), _both_at_once(item)
+	)
 	_sides.set_side(side)
 	var rects := _side_rects(host)
 	_sides.place(rects[0], rects[1])

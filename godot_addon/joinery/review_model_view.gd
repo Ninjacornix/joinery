@@ -41,6 +41,13 @@ var orbit := HOME
 var zoom := 1.0
 ## Load on a worker thread (tests may load inline).
 var threaded := true
+## The area whose width this may take (the review's stage). Sizing from it, not from this
+## control's own width, lets the stage shrink: widths set from our own size would hold it.
+var room: Control:
+	set(value):
+		room = value
+		if value != null and not value.resized.is_connected(_refit):
+			value.resized.connect(_refit)
 var _views: Array[SubViewportContainer] = []
 var _cameras: Array[Camera3D] = []
 var _players: Array[AnimationPlayer] = []
@@ -460,13 +467,22 @@ func _aim() -> void:
 			camera.basis = Basis.looking_at(-direction, Vector3.UP)
 
 
+## The width the views share: the stage's when known, else this control's.
+func _room_width() -> float:
+	return room.size.x if room != null and room.is_inside_tree() else size.x
+
+
+func _refit() -> void:
+	_fit()
+
+
 ## Each view is as tall as the frame and a little wider than square; the views share the
 ## width when the frame is narrow.
 func _fit() -> void:
 	if _views.is_empty():
 		return
 	var gap := float(get_theme_constant("separation"))
-	var share := (size.x - gap * (_views.size() - 1)) / _views.size()
+	var share := (_room_width() - gap * (_views.size() - 1)) / _views.size()
 	var width := floorf(maxf(minf(size.y * 1.25, share), 0.0))
 	for view: SubViewportContainer in _views:
 		view.custom_minimum_size.x = width

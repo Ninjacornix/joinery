@@ -8,6 +8,14 @@ const GLANCE := preload("review_glance.gd")
 var main: TextureRect
 var far: TextureRect
 
+## The area whose width this may take (the review's stage). Sizing from it, not from this
+## control's own width, lets the stage shrink: widths set from our own size would hold it.
+var room: Control:
+	set(value):
+		room = value
+		if value != null and not value.resized.is_connected(_refit):
+			value.resized.connect(_refit)
+
 
 func _init() -> void:
 	theme_type_variation = "JoineryRowTight"
@@ -19,6 +27,10 @@ func _init() -> void:
 	far = _picture()
 	resized.connect(func() -> void: set_pictures(main.texture, far.texture))
 	hide()
+
+
+func _refit() -> void:
+	set_pictures(main.texture, far.texture)
 
 
 func set_pictures(front: Texture2D, back: Texture2D) -> void:
@@ -40,7 +52,8 @@ func _fit(picture: TextureRect) -> void:
 		return
 	picture.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	var width := size.y * texture.get_width() / texture.get_height()
-	width = minf(width, (size.x - get_theme_constant("separation")) / 2.0)
+	var wide := room.size.x if room != null and room.is_inside_tree() else size.x
+	width = minf(width, (wide - get_theme_constant("separation")) / 2.0)
 	if not is_equal_approx(picture.custom_minimum_size.x, width):
 		picture.custom_minimum_size.x = maxf(0.0, floorf(width))
 

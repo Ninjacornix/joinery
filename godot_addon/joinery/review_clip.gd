@@ -28,6 +28,13 @@ const NOTICE := 0.05
 var clock := 0.0
 ## False while paused.
 var playing := true
+## The area whose width this may take (the review's stage). Sizing from it, not from this
+## control's own width, lets the stage shrink: widths set from our own size would hold it.
+var room: Control:
+	set(value):
+		room = value
+		if value != null and not value.resized.is_connected(_refit):
+			value.resized.connect(_refit)
 var _sides: Array[ClipSide] = []
 
 
@@ -115,6 +122,10 @@ func _init() -> void:
 	resized.connect(_fit)
 
 
+func _refit() -> void:
+	_fit()
+
+
 ## The clips fill the frame like a picture: each as tall as the frame, at its own aspect, and
 ## the shown clips share the width when the frame is too narrow for that.
 func _fit() -> void:
@@ -125,7 +136,8 @@ func _fit() -> void:
 	if shown.is_empty():
 		return
 	var gap := float(get_theme_constant("separation"))
-	var share := (size.x - gap * (shown.size() - 1)) / shown.size()
+	var wide := room.size.x if room != null and room.is_inside_tree() else size.x
+	var share := (wide - gap * (shown.size() - 1)) / shown.size()
 	for side_view: ClipSide in shown:
 		var width := floorf(maxf(minf(size.y * side_view.aspect(), share), 0.0))
 		if not is_equal_approx(side_view.custom_minimum_size.x, width):
