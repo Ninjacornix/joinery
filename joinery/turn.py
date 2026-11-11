@@ -17,6 +17,7 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
+from joinery.claims import LEAD_BUSY, live_refusal
 from joinery.transactions import inventory
 
 if TYPE_CHECKING:
@@ -283,10 +284,26 @@ class TurnController:
         """``scene_path`` was changed live this turn, so it can't also be staged."""
         return _res(scene_path) in self.live_scenes
 
+    def idle(self) -> bool:
+        """Nothing running and nothing on screen for the user."""
+        return self.state is TurnState.IDLE and not self.review_open and not (
+            self.live_edits
+        )
+
     def admit_live_edit(self, editor_context: Mapping[str, str]) -> str:
         """Allow one live edit of the scene on screen, or raise why not. Returns the
-        scene. That scene always routes live (:func:`scene_route`), saved or not."""
+        scene. That scene always routes live (:func:`scene_route`), saved or not.
+
+        One agent changes the scene on screen at a time (ADR 0036): the first live
+        edit makes this turn its owner until the user decides the preview. A task
+        may only once the main request is idle.
+        """
         self.admit_mutation()
+        if self.gateway.is_lane and not self.gateway.lead_idle():
+            raise ValueError(LEAD_BUSY)
+        holder = self.gateway.claims.claim_live(self.gateway.task_id)
+        if holder:
+            raise ValueError(live_refusal(holder))
         scene = editor_context.get("scene_path", "")
         tx = self.gateway.transaction
         if (
@@ -305,6 +322,11 @@ class TurnController:
         if ok:
             self.live_scenes.add(_res(scene))
             self.live_edits += 1
+        elif not self.live_edits:
+            # Nothing on screen after all: the scene is free again.
+            claims = self.gateway.claims
+            if claims.live == self.gateway.task_id:
+                claims.release_live()
 
     def expect_live(self, request_id: str, scene: str) -> None:
         """A live edit was sent to the editor; :meth:`live_result` records its answer."""

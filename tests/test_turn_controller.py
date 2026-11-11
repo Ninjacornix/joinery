@@ -8,6 +8,7 @@ from typing import Any
 
 import pytest
 
+from joinery.claims import PathClaims
 from joinery.submission import Validation
 from joinery.turn import (
     ContextMeter,
@@ -120,6 +121,9 @@ class FakeGateway:
         self.call_lock = asyncio.Lock()
         self.cancelled = 0
         self.progress: Any = lambda _text: None
+        self.claims = PathClaims()
+        self.is_lane = False
+        self.task_id = "main"
 
     async def submit_checks(self, _live: set[str]) -> Validation:
         return Validation()

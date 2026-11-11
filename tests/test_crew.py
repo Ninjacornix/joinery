@@ -19,6 +19,7 @@ from joinery.gateway_rpc import NO_NESTED_TASKS, GatewayRPC, rpc
 from joinery.mcp_runtime import ServerSpec
 from joinery.rebase import merge_lock
 from joinery.runner import Result
+from joinery.turn import TurnController
 
 LOCK_A = 'version = 1\n\n[[asset]]\npath = "art/a.png"\nsha256 = "aa"\norigin = "tool-created"\ntool = "krita"\nrecipe = "art/a.recipe.json"\n'
 LOCK_B = 'version = 1\n\n[[asset]]\npath = "art/b.png"\nsha256 = "bb"\norigin = "tool-created"\ntool = "krita"\nrecipe = "art/b.recipe.json"\n'
@@ -207,12 +208,24 @@ def test_claims_end_with_the_decision(project: Path) -> None:
 
 
 def test_a_task_never_stages_the_scene_on_screen(project: Path) -> None:
+    """It changes it live when it may, and otherwise leaves it alone."""
+
     async def go() -> None:
         main = wire(ProjectGateway(project))
         try:
             main.editor_context = {"scene_path": "res://scenes/level.tscn"}
             lane = wire(main.lane("t1", "Lamp"))
-            with pytest.raises(ValueError, match="only the main request"):
+            with pytest.raises(ValueError, match="changing it live now"):
+                await lane.call(
+                    "godot", "add_node", {"scenePath": "res://scenes/level.tscn"}
+                )
+
+            async def live(_payload: dict[str, Any]) -> dict[str, Any]:
+                return {"success": True}
+
+            # With the main request idle and the scene free, the task goes live.
+            lane.edit_scene = live
+            with pytest.raises(ValueError, match="change it live with edit_scene"):
                 await lane.call(
                     "godot", "add_node", {"scenePath": "res://scenes/level.tscn"}
                 )
@@ -658,6 +671,8 @@ Step = Callable[[ProjectGateway], AsyncIterator[Any]]
 class CrewTest:
     def __init__(self, project: Path, limit: int = 3) -> None:
         self.project = project
+        #: The live edits the editor applied: (task id, payload).
+        self.live: list[tuple[str, dict[str, Any]]] = []
         self.events: list[dict[str, Any]] = []
         self.prompts: list[Prompt] = []
         self.steps: list[Step] = []
@@ -684,7 +699,21 @@ class CrewTest:
             bridge=lambda agent: Script(self, agent),
             endpoint=endpoint,
             on_stop=on_stop,
+            live=self.live_edit,
         )
+
+    async def live_edit(
+        self,
+        lane: ProjectGateway,
+        turn: TurnController,
+        payload: dict[str, Any],
+        owner: str,
+    ) -> dict[str, Any]:
+        """The chat host's live edit, with an editor that always applies it."""
+        scene = turn.admit_live_edit(lane.editor_context)
+        self.live.append((owner, payload))
+        turn.record_live_edit(scene, True)
+        return {"success": True}
 
     def prompt(self) -> Prompt:
         return Prompt(text="", project_dir=str(self.project))
@@ -779,6 +808,99 @@ def test_a_task_card_starts_with_the_provider_then_its_first_step(
             if e["kind"] == "progress" and e.get("task_id") == task.id
         ]
         assert steps[0] == "Thinking through your request…"
+        await crew.close()
+        await test.gateway.close()
+
+    run(go)
+
+
+def goes_live(gate: asyncio.Event | None = None) -> Step:
+    async def step(lane: ProjectGateway) -> AsyncIterator[Any]:
+        if gate is not None:
+            await gate.wait()
+        assert lane.edit_scene is not None and lane.turn is not None
+        try:
+            await lane.edit_scene({"operations": []})
+        except ValueError as exc:
+            yield Message(text=str(exc))
+            yield Done(ok=True)
+            return
+        result = await lane.turn.submit("Moved the lamp")
+        yield Message(text=f"Live edit ({result.status}).")
+        yield Done(ok=True)
+
+    return step
+
+
+def test_a_task_changes_the_scene_on_screen_once_the_main_request_is_idle(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("joinery.editor_ops.validate_edit", lambda *_a: None)
+    test = CrewTest(project)
+
+    async def go() -> None:
+        crew = test.crew()
+        main_turn = TurnController(test.gateway, lambda _e: None)
+        test.gateway.editor_context = {"scene_path": "res://level.tscn"}
+        prompt = test.prompt().model_copy(
+            update={"editor_context": {"scene_path": "res://level.tscn"}}
+        )
+        hold = asyncio.Event()
+        test.steps = [goes_live(), goes_live(hold)]
+        lamp = await crew.start("Lamp", "Move the lamp", origin="user", prompt=prompt)
+        chair = await crew.start("Chair", "Move the chair", origin="user", prompt=prompt)
+        assert lamp.job is not None
+        await lamp.job
+        # One live owner: the lamp's preview is on screen for the user.
+        assert lamp.state == "in_review" and lamp.event()["live"] is True
+        assert test.gateway.claims.live == lamp.id
+        hold.set()
+        assert chair.job is not None
+        await chair.job
+        assert chair.message.startswith(
+            "The scene on screen is being changed live by another task: Lamp."
+        )
+        # The main request waits too.
+        main_turn.begin("Paint the walls")
+        with pytest.raises(ValueError, match="another task: Lamp"):
+            main_turn.admit_live_edit({"scene_path": "res://level.tscn"})
+        await main_turn.cancel()
+        # The user accepts the preview: the scene is handed back.
+        assert test.gateway.claims.release_live() == lamp.id
+        assert await crew.live_decided(lamp.id, True)
+        assert lamp.state == "accepted"
+        assert main_turn.admit_live_edit is not None
+        main_turn.begin("Paint the walls")
+        assert main_turn.admit_live_edit({"scene_path": "res://level.tscn"}) == (
+            "res://level.tscn"
+        )
+        assert [owner for owner, _ in test.live] == [lamp.id]
+        await crew.close()
+        await test.gateway.close()
+
+    run(go)
+
+
+def test_a_task_stages_while_the_main_request_works(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("joinery.editor_ops.validate_edit", lambda *_a: None)
+    test = CrewTest(project)
+
+    async def go() -> None:
+        crew = test.crew()
+        main_turn = TurnController(test.gateway, lambda _e: None)
+        main_turn.begin("Build the level")
+        prompt = test.prompt().model_copy(
+            update={"editor_context": {"scene_path": "res://level.tscn"}}
+        )
+        test.steps = [goes_live()]
+        task = await crew.start("Lamp", "Move the lamp", origin="user", prompt=prompt)
+        assert task.job is not None
+        await task.job
+        assert task.message.startswith("The main request is working")
+        assert test.gateway.claims.live == "" and test.live == []
+        await main_turn.cancel()
         await crew.close()
         await test.gateway.close()
 

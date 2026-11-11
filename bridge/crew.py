@@ -31,6 +31,11 @@ from joinery.timing import TurnTiming
 from joinery.turn import TurnController
 
 Emit = Callable[[dict[str, Any]], None]
+#: The chat host's live edit: (lane, its turn, the edit, the task id) -> the editor's answer.
+LiveEdit = Callable[
+    [ProjectGateway, TurnController, dict[str, Any], str],
+    Awaitable[dict[str, Any]],
+]
 #: The states a task card shows; the last four are final.
 WORKING, IN_REVIEW = "working", "in_review"
 FINAL = frozenset({"accepted", "discarded", "done", "failed", "stopped"})
@@ -80,6 +85,7 @@ class Task:
     started: float = field(default_factory=time.time)
     ended: float = 0.0
     job: asyncio.Task[None] | None = None
+    agent: TaskBridge | None = None
     _reply: list[str] = field(default_factory=list)
 
     def event(self) -> dict[str, Any]:
@@ -94,6 +100,8 @@ class Task:
             "step": self.step,
             "message": self.message,
             "transaction_id": self.transaction_id,
+            #: Its change includes a live edit of the scene on screen.
+            "live": self.controller.live_edits > 0,
             "summary": self.summary,
             "apps": list(self.apps),
             "started": self.started,
@@ -119,6 +127,7 @@ class Crew:
             [ProjectGateway, Callable[[str], Awaitable[None]]], TaskEndpoint
         ],
         on_stop: Callable[[str], Awaitable[None]],
+        live: LiveEdit | None = None,
     ) -> None:
         self.gateway = gateway
         self.emit = emit
@@ -129,7 +138,10 @@ class Crew:
         self._bridge = bridge
         self._endpoint = endpoint
         self._on_stop = on_stop
+        self._live = live
         self.tasks: dict[str, Task] = {}
+        #: A provider's own live edit waiting for the editor: {request id: task}.
+        self._editor: dict[str, Task] = {}
 
     # --- Asking -------------------------------------------------------------------------
 
@@ -212,6 +224,10 @@ class Crew:
         task.step = f"Starting {self.provider}…"
         holder.append(task)
         lane.progress = lambda text: self._progress(task, text)
+        live = self._live
+        if live is not None:
+            # Once the main request is idle, a task may change the scene on screen.
+            lane.edit_scene = lambda payload: live(lane, controller, payload, task_id)
         self.tasks[task_id] = task
         self.emit(task.event())
         work = prompt.model_copy(
@@ -234,7 +250,7 @@ class Crew:
         outcome = "failed"
         try:
             await endpoint.start()
-            agent = self._bridge(self.agent)
+            agent = task.agent = self._bridge(self.agent)
             agent.bind_gateway(endpoint.path)
             await agent.connect(lane.project, self.profile)
             outcome = await run_turn(
@@ -273,7 +289,8 @@ class Crew:
                 await endpoint.close()
         task.ended = time.time()
         task.step = ""
-        if task.controller.review_open and task.controller.review_id:
+        controller = task.controller
+        if controller.review_open and (controller.review_id or controller.live_edits):
             task.transaction_id = task.controller.review_id
             task.state = IN_REVIEW
         else:
@@ -296,6 +313,11 @@ class Crew:
                 task.message = text[:300]
         elif kind == "notice":
             task.message = str(event.get("text", ""))[:300]
+        elif kind == "editor_action":
+            # The editor applies it like the chat's own; the answer comes back here.
+            self._editor[str(event.get("request_id", ""))] = task
+            self.emit({**event, "owner": task.id})
+            return
         elif kind == "file_preview":
             task.transaction_id = str(event.get("transaction_id", ""))
             task.summary = str(event.get("summary", ""))
@@ -327,6 +349,28 @@ class Crew:
         await self._finish(task)
         self.emit(task.event())
         return {**decision, "task_id": task.id}
+
+    def editor_result(self, request_id: str, result: dict[str, Any]) -> bool:
+        """The editor answered a task's own live edit; False when none waits."""
+        task = self._editor.pop(request_id, None)
+        if task is None:
+            return False
+        task.controller.live_result(request_id, bool(result.get("success", False)))
+        if task.agent is not None:
+            task.agent.editor_result(request_id, result)
+        return True
+
+    async def live_decided(self, task_id: str, accepted: bool) -> bool:
+        """The user decided the live preview ``task_id`` left on screen."""
+        task = self.tasks.get(task_id)
+        if task is None:
+            return False
+        task.controller.live_decided()
+        if task.state == IN_REVIEW and not task.transaction_id:
+            task.state = "accepted" if accepted else "discarded"
+            await self._finish(task)
+            self.emit(task.event())
+        return True
 
     async def stop(self, task_id: str) -> None:
         task = self.tasks.get(task_id)

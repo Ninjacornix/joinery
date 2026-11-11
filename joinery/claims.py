@@ -50,6 +50,20 @@ def refusal(path: str, title: str) -> str:
     return f"{path} is being changed by another task: {title}. Work on something else or wait."
 
 
+def live_refusal(title: str) -> str:
+    return (
+        f"The scene on screen is being changed live by another task: {title}. "
+        "Change a scene that isn't open, or wait until that change is decided."
+    )
+
+
+#: A task asked to change the scene on screen while the main request works.
+LEAD_BUSY = (
+    "The main request is working, so it keeps the scene on screen. Change a scene "
+    "that isn't open, or leave this to the main request."
+)
+
+
 def features_refusal(title: str) -> str:
     return (
         f"Game features are being changed by another task: {title}. "
@@ -186,6 +200,9 @@ class PathClaims:
         self.owners: dict[str, str] = {}
         #: Bumped on every accepted change, so a stage knows the project moved.
         self.generation = 0
+        #: The one task changing the scene on screen live ("" for no one); held
+        #: from its first live edit until the user decides the preview.
+        self.live = ""
 
     def register(self, task: str, title: str) -> None:
         self.titles[task] = title
@@ -235,6 +252,18 @@ class PathClaims:
         if self.features_holder() == "" and self._features is not None:
             self._features.release()
             self._features = None
+
+    def claim_live(self, task: str) -> str:
+        """Make ``task`` the scene's live owner; the holder's title if another is."""
+        if self.live in {"", task}:
+            self.live = task
+            return ""
+        return self.titles.get(self.live, "another task")
+
+    def release_live(self) -> str:
+        """The live preview was decided or dropped; returns who held the scene."""
+        owner, self.live = self.live, ""
+        return owner
 
     def features_holder(self) -> str:
         """The task holding the game-features claim in this process ("" for none)."""

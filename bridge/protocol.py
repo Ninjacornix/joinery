@@ -158,6 +158,8 @@ class EditorAction(_Msg):
     payload: dict[str, object]
     context: dict[str, str]
     targets: tuple[str, ...]
+    #: The parallel task making this live edit ("" for the chat's own request).
+    owner: str = ""
 
 
 AgentEvent = (

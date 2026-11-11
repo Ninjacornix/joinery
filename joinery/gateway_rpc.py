@@ -259,10 +259,12 @@ class GatewayRPC:
             elif method == "editor_edit":
                 if self.inspection_only:
                     raise ValueError("Specialists cannot change the live editor.")
-                if self.worker:
-                    raise ValueError(TASK_LIVE)
                 if self.gateway.edit_scene is None:
-                    raise ValueError("No live editor is connected to this gateway.")
+                    raise ValueError(
+                        TASK_LIVE
+                        if self.worker
+                        else "No live editor is connected to this gateway."
+                    )
                 data = await self.gateway.edit_scene(params)
             elif method == "submit":
                 if self.inspection_only:

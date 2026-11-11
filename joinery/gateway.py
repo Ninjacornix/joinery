@@ -80,10 +80,10 @@ TEXT_SUFFIXES = frozenset(
 LIVE_SCENE = (
     "This scene is on screen or has unsaved edits; change it live with edit_scene."
 )
-#: A task tried to stage the scene on screen; only the main request changes it.
+#: A task tried to stage the scene on screen while it can't change it live.
 LANE_LIVE_SCENE = (
-    "This scene is on screen or has unsaved edits, and only the main request "
-    "changes it live. Change a scene that isn't open, or leave this to the main request."
+    "This scene is on screen or has unsaved edits, and the main request or another "
+    "task is changing it live now. Change a scene that isn't open, or wait."
 )
 ART_GATE_MESSAGE = (
     "Before Journeyman makes anything, agree how your game should look. "
@@ -294,6 +294,21 @@ class ProjectGateway:
         root.claims.register(task_id, title)
         return child
 
+    def lead_idle(self) -> bool:
+        """The chat's own request has nothing running and nothing on screen."""
+        turn = self._root.turn
+        return turn is None or turn.idle()
+
+    def may_go_live(self) -> bool:
+        """This agent may change the scene on screen live now (ADR 0036)."""
+        if not self.is_lane:
+            return True
+        return (
+            self.edit_scene is not None
+            and self.lead_idle()
+            and self.claims.live in {"", self.task_id}
+        )
+
     @property
     def call_lock(self) -> asyncio.Lock:
         """Held for every tool call; a submit holds it while the change is checked."""
@@ -420,7 +435,7 @@ class ProjectGateway:
                 or (self.turn is not None and self.turn.edited_live(scene))
             )
         ):
-            raise ValueError(LANE_LIVE_SCENE if self.is_lane else LIVE_SCENE)
+            raise ValueError(LIVE_SCENE if self.may_go_live() else LANE_LIVE_SCENE)
         named = project_paths(arguments, self.project) if not readonly else set()
         if not readonly and self.claims.contended():
             path, title = self.claims.first_conflict(named, self.task_id)

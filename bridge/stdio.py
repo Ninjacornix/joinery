@@ -199,13 +199,19 @@ async def _serve(
     controller = TurnController(gateway, emit, agent_id)
     session_start = time.time()
 
-    async def edit_scene(payload: dict[str, Any]) -> dict[str, Any]:
-        context = gateway.editor_context
+    async def live_edit(
+        lane: ProjectGateway,
+        turn: TurnController,
+        payload: dict[str, Any],
+        owner: str = "",
+    ) -> dict[str, Any]:
+        """One live edit of the scene on screen, by the chat's request or a task."""
+        context = lane.editor_context
         known = json.loads(context.get("selection_instances", "{}"))
         edit = validate_edit(project, payload, tuple(known))
-        if active is None or active.done():
+        if not owner and (active is None or active.done()):
             raise ValueError("Editor actions require an active user request.")
-        scene = controller.admit_live_edit(context)
+        scene = turn.admit_live_edit(context)
         request_id = uuid.uuid4().hex
         future: asyncio.Future[dict[str, Any]] = (
             asyncio.get_running_loop().create_future()
@@ -217,14 +223,20 @@ async def _serve(
                 payload=edit.model_dump(mode="json"),
                 context=context,
                 targets=tuple(known),
+                owner=owner,
             ).model_dump()
         )
+        ok = False
         try:
             result = await asyncio.wait_for(future, 30)
-            controller.record_live_edit(scene, bool(result.get("success")))
+            ok = bool(result.get("success"))
             return result
         finally:
+            turn.record_live_edit(scene, ok)
             editor_calls.pop(request_id, None)
+
+    async def edit_scene(payload: dict[str, Any]) -> dict[str, Any]:
+        return await live_edit(gateway, controller, payload)
 
     gateway.edit_scene = edit_scene
     view_calls: dict[str, asyncio.Future[dict[str, Any]]] = {}
@@ -440,6 +452,7 @@ async def _serve(
             bridge=lambda agent: Bridge(agent),
             endpoint=lambda lane, stop: GatewayRPC(lane, stop, worker=True),
             on_stop=policy_stop,
+            live=live_edit,
         )
 
         async def lead_start(request: dict[str, Any]) -> dict[str, Any]:
@@ -537,7 +550,13 @@ async def _serve(
                     # The sidebar resumes a request the art gate held.
                     emit({"kind": "art_approved", "sha256": expected_sha256})
                 elif data.get("kind") == "live_decision":
-                    controller.live_decided()
+                    # The preview on screen was decided: its owner hears, and the
+                    # scene is free for the next agent.
+                    owner = gateway.claims.release_live()
+                    if not await crew.live_decided(
+                        owner, bool(data.get("accepted", True))
+                    ):
+                        controller.live_decided()
                 elif data.get("kind") == "editor_result":
                     result = data.get("result")
                     if not isinstance(result, dict):
@@ -545,7 +564,7 @@ async def _serve(
                     request_id = str(data.get("request_id", ""))
                     if request_id in editor_calls:
                         editor_calls[request_id].set_result(result)
-                    else:
+                    elif not crew.editor_result(request_id, result):
                         controller.live_result(
                             request_id, bool(result.get("success", False))
                         )
