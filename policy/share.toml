@@ -1,0 +1,16 @@
+# Store media (`joinery share media`) is made by tools in the offline creative
+# worker: ffmpeg encodes the trailer, Krita composes the cover. These are the
+# exact Debian package versions the worker image carries (apt pins and
+# GPG-verifies them, see sandbox/Dockerfile). Media is made only when the
+# worker's versions match, so a recipe replays with the same tools; after a
+# reviewed worker rebuild that changes them, update them here.
+#
+# No generative tool takes part: the pictures come from the game itself
+# (seeded playtester runs), the text from the game's own name.
+
+[worker]
+ffmpeg = "7:7.1.5-0+deb13u1"
+krita = "1:5.2.9+dfsg-1+deb13u1"
+# Fonts for the trailer's title card and the cover's title.
+font = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+font_family = "DejaVu Sans"
