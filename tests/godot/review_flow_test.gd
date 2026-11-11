@@ -3,6 +3,7 @@ extends SceneTree
 ## the preview, a file review opens on file_preview, and renders reach the panel and card.
 
 const FLOW := preload("res://addons/joinery/review_flow.gd")
+const CARD := preload("res://addons/joinery/sidebar_change_card.gd")
 
 var _failed := false
 
@@ -142,6 +143,14 @@ func _run() -> void:
 	_check(plugin._review_tab.panel.media == rendered, "The panel takes the renders")
 	_check(plugin._dock.card.media == rendered, "The card takes its thumbnail")
 	_check(plugin._file_review["media"] == rendered, "The held review has them too")
+
+	# A review opens before its renders exist: the real card waits for review_media quietly.
+	var card: VBoxContainer = CARD.new("Weather the crate")
+	root.add_child(card)
+	card.set_ready([{"path": "art/crate.blend", "media": "image", "after": "/x/not_yet.png"}])
+	_check(card._thumb.texture == null, "No thumbnail before the render exists")
+	_check(not card._ready_row.visible, "No empty picture row while the render runs")
+	card.queue_free()
 
 	flow.queue_free()
 	chat.queue_free()

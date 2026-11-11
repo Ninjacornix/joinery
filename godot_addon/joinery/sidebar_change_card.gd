@@ -449,7 +449,12 @@ func set_ready(media: Array = []) -> void:
 	_outcome.hide()
 	var texture: Texture2D = null
 	for item: Dictionary in media:
-		if item.get("media") == "image" and item.has("after"):
+		# A render still running has no file yet; review_media brings it.
+		if (
+			item.get("media") == "image"
+			and item.has("after")
+			and FileAccess.file_exists(str(item["after"]))
+		):
 			var image := Image.load_from_file(str(item["after"]))
 			if image != null and not image.is_empty():
 				texture = ImageTexture.create_from_image(image)

@@ -248,6 +248,36 @@ func _check_renders_arrive(panel: PANEL) -> void:
 	while panel._media.is_loading() and Time.get_ticks_msec() < deadline:
 		await process_frame
 	_check(panel._media.texture() != null, "An arrived render shows in place")
+	# A render slower than the wait still shows once it arrives.
+	var slow := _cache.path_join("slow_render.png")
+	DirAccess.remove_absolute(slow)
+	var pending := [{"path": "art/chair.blend", "media": "image", "after": slow}]
+	panel.show_file_review("Round the chair", "", pending, [])
+	await _frames()
+	panel._media._stop_waiting()
+	panel._media._fail()
+	_image("slow_render.png", Color(0.3, 0.3, 0.6))
+	panel.update_media(pending)
+	await _frames()
+	_check(not panel._media.is_failed(), "A late render clears the no-preview line")
+	_check(panel._media.texture() != null, "A late render shows after the wait gave up")
+	# Only the After render failed: never show the Before as if it were the change.
+	var half := [
+		{
+			"path": "art/lamp.blend",
+			"media": "image",
+			"before": _cache.path_join("lamp.png"),
+			"error": "Blender crashed",
+		}
+	]
+	panel.show_file_review("Brighten the lamp", "", half, [])
+	await _frames()
+	_check(panel._media.is_failed(), "A failed After render says so")
+	_check(panel._media.texture() == null, "The Before is not shown as the change")
+	_check(
+		panel._media._failure.text == "No preview of the change. Blender crashed",
+		"It names the missing side and why"
+	)
 
 
 func _check_loading(panel: PANEL) -> void:

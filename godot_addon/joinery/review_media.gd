@@ -138,7 +138,7 @@ func show_media(media: Array) -> void:
 
 
 ## The renders of the shown items are done: take each item's final sides, or its error. An
-## item already on screen stays where it is.
+## item already on screen stays where it is, and is shown again even after its wait timed out.
 func update_media(media: Array) -> void:
 	if _items.is_empty():
 		show_media(media)
@@ -150,12 +150,7 @@ func update_media(media: Array) -> void:
 			var shown: Dictionary = _items[index]
 			if shown.get("path") == item.get("path") and shown.get("part") == item.get("part"):
 				_items[index] = (item as Dictionary).duplicate()
-	var current: Dictionary = _items[_index]
-	if current.has("error") and not (current.has("before") or current.has("after")):
-		_stop_waiting()
-		_fail(str(current["error"]))
-	elif not _waiting.is_empty():
-		_show_current(false)
+	_show_current(false)
 
 
 ## Stop audio, drop loaded previews and forget the items.
@@ -292,6 +287,11 @@ func _show_current(swap: bool) -> void:
 		_stop_waiting()
 		_fail(str(item.get("error", "")))
 		return
+	if item.has("error") and not item.has(side):
+		# That side's render failed: say so rather than show the other side as if it were it.
+		_stop_waiting()
+		_fail(str(item["error"]), side)
+		return
 	var chosen := side if item.has(side) else ("after" if item.has("after") else "before")
 	var source := str(item[chosen])
 	_failure.hide()
@@ -410,9 +410,17 @@ func _stop_waiting() -> void:
 	_loading.hide()
 
 
-## No preview: [param reason] (a render's error) says why, or the generic line.
-func _fail(reason := "") -> void:
+## No preview: [param reason] (a render's error) says why, or the generic line. [param missing]
+## names the side that failed when the other one exists.
+func _fail(reason := "", missing := "") -> void:
 	_frame.hide()
 	_audio_box.hide()
-	_failure.text = NO_PREVIEW if reason.is_empty() else "No preview. " + reason
+	var lead := "No preview."
+	if missing == "after":
+		lead = "No preview of the change."
+	elif missing == "before":
+		lead = "No preview of the original."
+	_failure.text = NO_PREVIEW if reason.is_empty() and missing.is_empty() else lead
+	if not reason.is_empty():
+		_failure.text += " " + reason
 	_failure.show()
