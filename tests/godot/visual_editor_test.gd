@@ -70,6 +70,7 @@ func _run() -> void:
 	await _reviews(dock)
 	await _approvals()
 	await _timeline()
+	await _share()
 	await _tools()
 	await _panels(base, dock)
 	await _dialogs()
@@ -635,6 +636,144 @@ func _render_model(ground := Color("3a3d42")) -> Image:
 	await _frames(6)
 	var image := viewport.get_texture().get_image()
 	viewport.queue_free()
+	return image
+
+
+## The Share tab: the templates offer before a first build, a finished build with its media
+## and page text, and the publish confirmation naming the itch.io page and channels.
+func _share() -> void:
+	var tab: Control
+	for node: Node in EditorInterface.get_base_control().find_children("Share", "", true, false):
+		if node.get_script() == load("res://addons/joinery/share_tab.gd"):
+			tab = node as Control
+	_check(tab != null, "The Share tab exists")
+	if tab == null:
+		return
+	tab.set("cli_enabled", false)
+	_plugin.make_bottom_panel_item_visible(tab)
+	var cache := OS.get_cache_dir().path_join("joinery-visual")
+	DirAccess.make_dir_recursive_absolute(cache)
+	var shots: Array = []
+	for index: int in 5:
+		var path := cache.path_join("share-shot-%d.png" % index)
+		_scene_picture(index).save_png(path)
+		shots.append(path)
+	var cover := cache.path_join("share-cover.png")
+	var cover_image := _scene_picture(2)
+	cover_image.resize(630, 500)
+	cover_image.save_png(cover)
+	var page := (
+		"<!-- Drafted by Joinery. -->\n\n# Harbour Watch\n\nKeep the lamps lit until the "
+		+ "boats are home.\n\n## About\n\n- 30 s: climb to a lamp, light it, watch the "
+		+ "fog.\n\n## Controls\n\n| Action | Keyboard and mouse |\n|---|---|\n| Jump | "
+		+ "Space |\n| Light | E |\n\n## Features\n\n_Write this part._\n"
+	)
+	var status := {
+		"name": "Harbour Watch",
+		"targets": [{"id": "web"}, {"id": "windows"}, {"id": "macos"}, {"id": "linux"}],
+		"templates": {"ready": false, "download_gb": 1.3},
+		"build": null,
+		"media": {"screenshots": [], "trailer": {}, "cover": null},
+		"page": null,
+		"itch": {"butler": null, "version": "15.24.0", "pinned": true, "signed_in": "butler login"},
+	}
+	tab.call("apply_status", status)
+	var dock := tab.get_parent() as Control
+	var bottom: Control = dock.get_parent() as Control if dock != null else tab
+	var split: SplitContainer
+	var walker: Node = bottom
+	while walker != null and split == null:
+		walker = walker.get_parent()
+		split = walker as SplitContainer
+	var offset := split.split_offset if split != null else 0
+	if split != null:
+		split.split_offset = offset - 420
+	await get_tree().create_timer(0.3).timeout
+	await _shot("share-empty", [bottom])
+	status["templates"] = {"ready": true}
+	status["build"] = {
+		"changes": ["Added the Web export preset", "Added the macOS export preset"],
+		"targets":
+		{
+			"web":
+			{
+				"label": "Web",
+				"ok": true,
+				"size": 10_326_066,
+				"warnings": [],
+				"boot": {"ran": false, "detail": "Plays in a browser; try it on itch.io."},
+			},
+			"windows":
+			{
+				"label": "Windows",
+				"ok": true,
+				"size": 48_204_112,
+				"warnings": [],
+				"boot": {"ran": false, "detail": "Built here; start it on a Windows computer."},
+			},
+			"macos":
+			{
+				"label": "macOS",
+				"ok": true,
+				"size": 60_560_573,
+				"warnings": [],
+				"boot": {"ran": true, "ok": true, "detail": "Started and quit cleanly."},
+				"playtest":
+				{"status": "played", "summary": "Played 0:30 (seed 4242): nothing to report."},
+			},
+		},
+	}
+	status["media"] = {
+		"seed": 777,
+		"screenshots": shots,
+		"cover": cover,
+		"trailer": {"preview": null, "seconds": 31.5, "sound": "Silent."},
+	}
+	status["page"] = page
+	status["itch"] = {
+		"butler": null,
+		"version": "15.24.0",
+		"pinned": true,
+		"signed_in": "butler login",
+		"target": "harbour-studio/harbour-watch",
+	}
+	tab.call("apply_status", status)
+	await get_tree().create_timer(0.3).timeout
+	await _shot("share-built", [bottom])
+	var publish: Button = tab.get("_publish_button")
+	publish.pressed.emit()
+	var dialog: Window = tab.call("publish_dialog")
+	(
+		dialog
+		. call(
+			"apply_dry_run",
+			{
+				"steps":
+				[
+					{"channel": "web", "file": "harbour-watch-web.zip", "size": 10_326_066},
+					{"channel": "windows", "file": "harbour-watch-windows.zip", "size": 48_204_112},
+					{"channel": "mac", "file": "harbour-watch-macos.zip", "size": 60_560_573},
+				]
+			}
+		)
+	)
+	await get_tree().create_timer(0.3).timeout
+	await _shot("share-publish", [dialog], dialog)
+	dialog.hide()
+	if split != null:
+		split.split_offset = offset
+	_plugin.hide_bottom_panel()
+	await _frames()
+
+
+## A small flat-shaded "game frame": sky, sea, a pier and a lamp, varied by [param index].
+func _scene_picture(index: int) -> Image:
+	var image := Image.create(320, 180, false, Image.FORMAT_RGB8)
+	image.fill(Color("9fb8c8").darkened(0.06 * index))
+	image.fill_rect(Rect2i(0, 110 - index * 4, 320, 70 + index * 4), Color("2f5d73"))
+	image.fill_rect(Rect2i(40 + index * 30, 96, 140, 12), Color("8a6a48"))
+	image.fill_rect(Rect2i(150 + index * 12, 52, 8, 46), Color("3b3b3b"))
+	image.fill_rect(Rect2i(144 + index * 12, 44, 20, 12), Color("f2c14e"))
 	return image
 
 
