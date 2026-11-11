@@ -34,6 +34,7 @@ from joinery import (
     references,
     setup_imports,
     share,
+    sound_pass,
     timeline,
 )
 from joinery.agents import all_agents
@@ -1027,6 +1028,10 @@ def _parser() -> argparse.ArgumentParser:
     checks_cli.add_perf(
         commands.add_parser("perf", help="measure how the game runs against a target machine")
     )
+    sound_cmd = commands.add_parser(
+        "sound-pass", help="list the sounds the level and player are missing"
+    )
+    sound_pass.add_arguments(sound_cmd)
     playtest_cmd = commands.add_parser(
         "playtest", help="play the game headless with a bot and report what goes wrong"
     )
@@ -1433,6 +1438,8 @@ def main(argv: list[str] | None = None) -> int:
         return kits_cli.main(args)
     if args.command == "kit":
         return kit_share_cli.main(args)
+    if args.command == "sound-pass":
+        return sound_pass.main(args)
     if args.command == "feature":
         return _feature(args)
     if args.command == "steam":
