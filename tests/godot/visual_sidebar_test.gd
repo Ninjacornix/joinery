@@ -263,6 +263,7 @@ func _states(light: bool, width: int) -> void:
 	await _frames(2)
 	await _images(light, width)
 	await _changes(light, width)
+	await _saved_chats(light, width)
 	built = _build(light)
 	host = built[0]
 	chat = built[1]
@@ -534,3 +535,106 @@ func _documents(light: bool, width: int, chat: Control) -> void:
 	brief.hide()
 	brief.queue_free()
 	await _frames(2)
+
+
+## A saved chat, written as the chat host writes it ([param seconds_ago]: its last turn).
+func _save_chat(chat_id: String, meta: Dictionary, entries: Array, seconds_ago: int) -> void:
+	var folder := ProjectSettings.globalize_path("res://.joinery/chats")
+	DirAccess.make_dir_recursive_absolute(folder)
+	var updated := Time.get_datetime_string_from_unix_time(
+		int(Time.get_unix_time_from_system()) - seconds_ago
+	)
+	var lines := PackedStringArray(
+		[JSON.stringify(meta.merged({"type": "chat", "id": chat_id, "updated": updated}))]
+	)
+	for entry: Dictionary in entries:
+		lines.append(JSON.stringify(entry))
+	var file := FileAccess.open(folder.path_join(chat_id + ".jsonl"), FileAccess.WRITE)
+	file.store_string("\n".join(lines) + "\n")
+	file.close()
+
+
+## Saved chats: the latest one back after the editor reopened, the Chats list (and renaming a
+## chat in it), and an older chat open read-only with Continue.
+func _saved_chats(light: bool, width: int) -> void:
+	var accepted := "a".repeat(32)
+	var reverted := "b".repeat(32)
+	_save_chat(
+		"20261110-090000-aaaaaa",
+		{"title": REQUEST, "provider": "codex", "handle": "thread-1"},
+		[
+			{"type": "user", "text": REQUEST},
+			{"type": "step", "text": "Opening door.blend in Blender"},
+			{"type": "step", "text": "Exporting the model…"},
+			{
+				"type": "agent",
+				"text": "I widened **Door** by 20% in Blender and darkened the wood."
+			},
+			{"type": "change", "transaction_id": accepted, "state": "accepted"},
+			{"type": "turn", "outcome": "done", "total_ms": 72000},
+			{"type": "user", "text": "Then add a brass handle on the left side."},
+			{"type": "agent", "text": "The handle is on the left, in brass."},
+			{"type": "change", "transaction_id": reverted, "state": "accepted"},
+			{"type": "turn", "outcome": "done", "total_ms": 41000},
+		],
+		7200
+	)
+	_save_chat(
+		"20261107-090000-bbbbbb",
+		{"title": "Make the harbour lamps flicker in the wind", "provider": "claude"},
+		[
+			{"type": "user", "text": "Make the harbour lamps flicker in the wind"},
+			{"type": "agent", "text": "The lamps flicker now, faster when the wind rises."},
+			{"type": "change", "transaction_id": "c".repeat(32), "state": "accepted"},
+			{"type": "turn", "outcome": "done", "total_ms": 38000},
+		],
+		3 * 86400
+	)
+	_save_chat(
+		"20261101-090000-cccccc",
+		{"title": "Rope coils for the pier", "provider": "gemini"},
+		[{"type": "user", "text": "Rope coils for the pier"}],
+		9 * 86400
+	)
+	var built := _build(light)
+	var host: Control = built[0]
+	var chat: Control = built[1]
+	await _frames()
+	chat.set_chat_agent("codex")
+	chat.set_chat_state("connected", "Codex connected")
+	var sessions: Node = chat.get("_chats")
+	# Nothing runs in the background; the states come from here.
+	sessions.set("runner", func(_args: PackedStringArray, _done: Callable) -> void: pass)
+	sessions.call("restore_latest")
+	(
+		sessions
+		. call(
+			"show_states",
+			{
+				"transactions":
+				[
+					{"id": accepted, "state": "accepted", "revertible": true},
+					{"id": reverted, "state": "reverted", "revertible": false},
+				]
+			}
+		)
+	)
+	_check(sessions.call("current_id") == "20261110-090000-aaaaaa", "The latest chat is back")
+	await _shot("chat-restored", light, width, chat)
+	sessions.call("open_list")
+	await _shot("chats", light, width, chat)
+	var page: Node = sessions.get("page")
+	var row: Node = page.call("row_for", "20261107-090000-bbbbbb")
+	row.call("begin_rename")
+	await _shot("chats-rename", light, width, chat)
+	row.get("_field").call("hide")
+	row.get("title").call("show")
+	sessions.call("open_chat", "20261107-090000-bbbbbb")
+	sessions.call("show_states", {"transactions": []})
+	_check(sessions.get("viewing"), "An older chat opens read-only")
+	await _shot("chat-earlier", light, width, chat)
+	host.queue_free()
+	await _frames(2)
+	var folder := ProjectSettings.globalize_path("res://.joinery/chats")
+	for file_name: String in DirAccess.get_files_at(folder):
+		DirAccess.remove_absolute(folder.path_join(file_name))

@@ -54,6 +54,7 @@ const FOOTER_SCRIPT := preload("res://addons/joinery/sidebar_footer.gd")
 const COMPOSER_SCRIPT := preload("res://addons/joinery/sidebar_composer.gd")
 const MENU_SCRIPT := preload("res://addons/joinery/command_menu.gd")
 const SLASH_SCRIPT := preload("res://addons/joinery/slash_commands.gd")
+const CHATS_SCRIPT := preload("res://addons/joinery/chat_sessions.gd")
 const REVIEW_PATH := "res://addons/joinery/review_panel.gd"
 const ART_DIALOG := preload("res://addons/joinery/art_review_dialog.gd")
 const REVIEW_WAIT := "Queue a message for after the review…"
@@ -80,6 +81,8 @@ var _content: VBoxContainer
 var _header: HEADER_SCRIPT
 var _transcript: HISTORY_SCRIPT
 var _settings: SETTINGS_SCRIPT
+## Saved chats: the Chats page, New chat, restoring a chat (chat_sessions.gd).
+var _chats: CHATS_SCRIPT
 var _footer: FOOTER_SCRIPT
 var _composer: COMPOSER_SCRIPT
 var _prompt: TextEdit
@@ -180,6 +183,7 @@ func _ready() -> void:
 	_slash.bible_upgraded.connect(_on_bible_upgraded)
 	add_child(_slash)
 	_review = _make_review()
+	_chats = CHATS_SCRIPT.attach(self, _header.row, _content)
 	_settings = SETTINGS_SCRIPT.attach(self, _header.row, _content)
 	_show_connection()
 	_settings.apply_all()
@@ -854,10 +858,6 @@ func show_agent_message(text: String) -> void:
 func finish_agent_response(_ok: bool) -> void:
 	_transcript.finish_response()
 	_assistant_open = false
-
-
-func log_system(what: String) -> void:
-	print("[Joinery] ", what)
 
 
 func _card() -> Control:

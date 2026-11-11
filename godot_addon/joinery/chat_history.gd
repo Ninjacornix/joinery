@@ -443,6 +443,22 @@ func _toggle_details(summary: Button, details: Label) -> void:
 		details.hide()
 
 
+## Empty the conversation for another chat: every turn, reply and notice goes and the empty
+## state shows again. Queued messages stay.
+func clear() -> void:
+	for child: Node in _body.get_children():
+		if child != _empty and child != queue and child != _caption_room:
+			_body.remove_child(child)
+			child.queue_free()
+	_messages.clear()
+	_cards.clear()
+	_log.clear()
+	_turn = null
+	_last_notice = ""
+	_empty.show()
+	_follow = true
+
+
 func _hide_empty() -> void:
 	if _empty != null and _empty.visible:
 		_empty.hide()

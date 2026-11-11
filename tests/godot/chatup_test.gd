@@ -407,9 +407,6 @@ func _run() -> void:
 		"Chat must start wide enough to read comfortably"
 	)
 	_check(chat.name == "Journeyman", "Restore the earlier sidebar identity")
-	var before: String = chat._transcript.get_parsed_text()
-	chat.log_system("Viewport toolbar shown.")
-	_check(chat._transcript.get_parsed_text() == before, "System logs must not enter chat")
 	chat.set_resource_target("res://audio/sfx/door_creak.wav", "AudioStreamWAV")
 	_check(chat._chips.visible, "Selected audio must be visible in the composer")
 	_check(

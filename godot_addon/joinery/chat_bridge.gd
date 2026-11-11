@@ -33,6 +33,9 @@ signal suggestions(items: Array)
 ## Token use as the provider reports it: {model, model_name, context_used, context_window,
 ## input_tokens, output_tokens, cached_tokens} (0 = not reported). {} when a new session starts.
 signal usage_received(event: Dictionary)
+## The host opened a chat for the next prompt: {chat_id, mode ("new", "resumed" or "summary"),
+## message}. A new chat names its id here.
+signal chat_changed(event: Dictionary)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 const ATTACHMENTS := preload("chat_attachments.gd")
@@ -41,6 +44,8 @@ var context_provider: Callable
 ## Captures the editor's viewport for the agent's view_editor tool; returns editor_view.gd's
 ## result. Tests replace it.
 var view_provider := Callable(EDITOR_VIEW, "capture")
+## The saved chat each prompt continues ("" starts a new one); the host names a new chat's id.
+var chat_id := ""
 var _job: RefCounted
 var _connected := false
 var _pending: Dictionary = {}
@@ -109,6 +114,7 @@ func submit(text: String, targets: Array) -> void:
 		"text": text,
 		"targets": scene_targets.duplicate(true),
 		"selection": _selection.duplicate(),
+		"chat_id": chat_id,
 		"editor_context":
 		context_provider.call(scene_targets) if context_provider.is_valid() else {},
 	}
@@ -116,7 +122,7 @@ func submit(text: String, targets: Array) -> void:
 		_pending["attachments"] = images
 	busy_changed.emit(true)
 	if _job == null:
-		var pending := _pending
+		var pending := _pending.duplicate(true)
 		reconnect()
 		_pending = pending
 	if _connected:
@@ -211,6 +217,9 @@ func _handle(event: Dictionary) -> void:
 			art_approved.emit(str(event.get("sha256", "")))
 		"suggestions":
 			suggestions.emit(event.get("items", []))
+		"chat":
+			chat_id = str(event.get("chat_id", ""))
+			chat_changed.emit(event)
 		"file_decision":
 			file_decision.emit(event)
 		"editor_action":

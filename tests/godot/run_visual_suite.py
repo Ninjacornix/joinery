@@ -70,6 +70,10 @@ SIDEBAR_STATES = (
     "settings-compact",
     "settings-policy",
     "settings-policy-custom",
+    "chat-restored",
+    "chats",
+    "chats-rename",
+    "chat-earlier",
 )
 # Captured at the wide width only: the art direction and game brief documents.
 SIDEBAR_WIDE = ("art-direction", "art-board", "brief")

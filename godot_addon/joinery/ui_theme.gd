@@ -99,6 +99,9 @@ const ICONS := {
 	"reload": "Reload",
 	"view": "GuiVisibilityVisible",
 	"attach": "Load",
+	"chats": "History",
+	"compose": "Add",
+	"rename": "Edit",
 }
 const DARK := {
 	"surface": Color("202123"),
