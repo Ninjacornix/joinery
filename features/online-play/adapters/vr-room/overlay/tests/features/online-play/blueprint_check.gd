@@ -37,3 +37,9 @@ func client_verify(level: Node) -> void:
 	)
 	play.unwatch(_finished)
 	play.expect(bool(level.get(&"completed")), "the level is complete for the client too")
+	var page: Control = play.menus.current_page()
+	play.expect(page != null and page.name == "WinScreen", "the client sees the win page")
+	# The win page opens through the menus; close it as a player would, so
+	# the pause checks that follow start from the game.
+	play.menus.close_all()
+	await tree.process_frame
