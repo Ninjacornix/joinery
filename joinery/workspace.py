@@ -16,6 +16,7 @@ from joinery.catalog import load_catalog, load_project_tools, selection_ids
 from joinery.desktop import TOOLS, launch, launcher, overrides, project_file
 from joinery.lockfile import (
     ASSET_DIRS,
+    KITS_DIR,
     NOT_ASSET_PATHS,
     NOT_ASSETS,
     AssetEntry,
@@ -145,8 +146,11 @@ def _scene_models(project: Path) -> set[str]:
 def _is_asset(path: str) -> bool:
     """The asset gate's own rule (lockfile.asset_files) for one project path."""
     pure = Path(path)
+    parts = pure.parts
+    # An imported kit keeps its own art/ and audio/ under kits/<folder>/.
+    kit = len(parts) > 3 and parts[0] == KITS_DIR and parts[2] in ASSET_DIRS
     return (
-        pure.parts[0] in ASSET_DIRS
+        (parts[0] in ASSET_DIRS or kit)
         and pure.suffix != ".import"
         and pure.name not in NOT_ASSETS
         and path not in NOT_ASSET_PATHS

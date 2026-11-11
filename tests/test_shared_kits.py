@@ -655,3 +655,16 @@ def test_installed_record_reads_back(tmp_path: Path) -> None:
     raw = tomllib.loads((target / "kits/harbour/installed.toml").read_text())
     assert raw["folder"] == "kits/harbour" and raw["slug"] == "harbour"
     assert (target / "kits/harbour/kit.toml").read_bytes() == kit_archive.read(kit).raw
+
+
+def test_a_kit_waiting_for_review_shows_in_the_asset_workspace(tmp_path: Path) -> None:
+    from joinery.workspace import index
+
+    project = project_a(tmp_path)
+    kit = make_kit(tmp_path, project)
+    target = project_b(tmp_path)
+    code, data = cli(target, "import", str(kit))
+    assert code == 0 and data["state"] == "review", data
+    shown = {a["path"]: a for a in index(target)["assets"]}
+    glb = shown["kits/harbour/art/environment/rocks_01.glb"]
+    assert glb["pending"] == data["transaction_id"]
