@@ -71,6 +71,7 @@ audit ran on macOS.
 | Application | Alpha automation | Evidence and boundary |
 | --- | --- | --- |
 | Blender 5.2.1 | Native `.blend` source editing, GLB export, registered source resolution and replay | Real Codex create/edit/scene-instance/review workflow; reject restores originals; native geometry and Godot import verified. GLB exports apply modifiers (a Mask, Subdivision or geometry-nodes model exports as Blender shows it) and keep every shape key as a morph target; the saved `.blend` keeps its modifiers. An MPFB2 human with a Rigify rig exports exactly its deform bones |
+| Parametric kits (Blender 5.2.1) | Rock, crate, barrel, fence, hut, tree and bush kits: hand-written bmesh generators with typed parameters (`kit_make`, `kit_batch`, `kit_edit`, `kit_list`), and `scatter` into a saved scene ([ADR 0044](adr/0044-parametric-kits.md)) | Every kit made with its defaults and with every parameter at its lowest and highest in the real worker: inside the bible's triangle budgets (one barrel reduced from 812 to 776 of 800), bottom-centre, scale 1, palette colours; a set of ten different rocks in one run, changed with `kit_edit` keeping its names; twenty rocks scattered on a hill beside a Path3D; Godot imports every model and loads the scene; all 23 recipes replay to the same fingerprints. Flat colours, no UVs; scatter writes instanced scenes, not a MultiMesh |
 | Krita 5.2.9 | Native `.kra` painted layers and PNG export | Actual red/blue pixels, layer retention, create/edit/replay/reject/accept/revert verified |
 | Material Maker 1.8 | Native `.ptex` graph and Godot material/texture export | Connected shader exports real red/blue texture pixels; roughness changes, replay and transaction lifecycle verified. An image input is recorded in the recipe's sources with a relative path; an unrecorded input is refused. Shutdown warnings remain |
 | Inkscape 1.4 | Editable SVG and PNG export | Stable element ID, actual exported pixels, replay and transaction lifecycle verified; the pinned MCP adds read-only analysis tools |
@@ -128,6 +129,7 @@ The addon still loads on stock Godot 4.7; some parts need the patched editor.
 | --- | --- | --- |
 | New-project wizard (starting points, features, Steam) | Project Manager wizard | `joinery new --blueprint` makes the same project |
 | Part selection (ADR 0028) | Workspace parts list and viewport Alt+click | Parts list works fully; Alt+click only while the model's root is selected |
+| Kits section (ADR 0044) | Asset workspace Kits tab with Blender previews | The same (addon only) |
 | Steam projects | GodotSteam 4.23 loads in the editor and game | The same; Joinery lists the extension for startup loading, which avoids a crash on the first import |
 
 Models exported by Joinery embed their textures in the GLB
