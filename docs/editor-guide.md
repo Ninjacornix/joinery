@@ -732,6 +732,46 @@ From a terminal: `joinery kits list`, `joinery kits preview --kit rock
 `joinery kits edit --asset art/environment/rock.glb --params '{"size": 2}'`
 (`--yes` accepts the change at once).
 
+### Shared kits
+
+Things you made in one game can go into the next as a shared kit: a
+`.joinerykit` file with the models, sounds, materials and prefab scenes you
+pick, the recipes that make them, kit generators with their presets, and who
+made them under which licence. You move the file yourself (to another project
+or to a friend); Joinery never downloads one.
+
+At the top of the Kits tab:
+
+- **Export kit…** asks for a name, a version, a licence (your game's, unless
+  you pick another) and what goes in: prefab scenes, kit generators and assets.
+  What they need comes along (a recipe's script and inputs, the models a scene
+  places), and the dialog says what the kit holds and how big it is, or why
+  something can't go: a reference image, a file with no `joinery.lock` entry,
+  or a scene with a script. Assets made with a custom tool go only when you
+  turn on **Include assets made with a custom tool**, and stay marked as such.
+  **Save kit…** writes the file.
+- **Import kit…** opens a `.joinerykit` and shows its name, author, licence,
+  what it holds and where it goes (`kits/<name>/`), before anything changes.
+  **Add to project** leaves it as one change in the Review tab. Every file is
+  checked against the kit's SHA-256 list first; a changed or unsafe kit is
+  refused.
+- Each imported kit has a row with its version, author and licence.
+  **Update…** opens a newer file of the same kit and shows what changes;
+  **Remove** takes it out again (both reviewed). A kit a scene still uses
+  can't be removed until the scene stops using it.
+
+An imported kit's assets keep their licence: `joinery.lock` names the kit, its
+author and licence, and `joinery rebuild` makes them again from their recipes.
+Its generators join the Kits list ("Harbour rock") for you and for Journeyman,
+with their presets. The Share build's licence notes list every kit you
+imported. Journeyman can use imported kits but never imports, exports or
+removes one.
+
+From a terminal: `joinery kit export --project . --name Harbour --include
+scenes/harbour.tscn --generator rock --out ~/harbour.joinerykit` (`--plan`
+shows what would go in), `joinery kit import --project . ~/harbour.joinerykit`,
+`joinery kit remove --project . --name Harbour` and `joinery kit list --project .`.
+
 ### Starting from a blueprint
 
 `joinery new` makes the same project as the Project Manager's new-project
