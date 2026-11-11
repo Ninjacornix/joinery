@@ -360,6 +360,7 @@ class Crew:
         decision = await task.controller.decide(transaction_id, accept)
         task.state = "accepted" if accept else "discarded"
         task.message = str(decision.get("message", ""))
+        task.step = ""
         job = task.job
         if job is None or job.done():
             await self._finish(task)
