@@ -108,9 +108,24 @@ _USER_IMPORT = re.compile(
 )
 
 
+#: Publishing a game is the user's own act: the Share page's Publish button, or
+#: their terminal. An agent never runs `joinery share itch`, nor butler itself.
+_USER_PUBLISH = re.compile(
+    r"\bjoinery\b(?:\s+\S+)*?\s+share\s+itch\b"
+    r"|(?:^|[\s/\\\"'])butler(?:\.exe)?[\"']?\s+(?:\S+\s+)*?(?:push|login|logout|upgrade)\b",
+    re.IGNORECASE,
+)
+
+
 def user_only_violation(command: str) -> Verdict | None:
     """Refuse commands only the user runs, from the editor."""
     for segment in _SEGMENTS.split(command):
+        if _USER_PUBLISH.search(segment):
+            return Verdict(
+                Severity.DENY,
+                "Publishing to itch.io is the user's own choice: they press Publish on "
+                "the Share page. Tell the user the builds are ready instead.",
+            )
         if _USER_ONLY.search(segment):
             return Verdict(
                 Severity.DENY,

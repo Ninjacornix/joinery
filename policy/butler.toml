@@ -1,0 +1,37 @@
+# butler, itch.io's own upload tool, which `joinery share itch` runs to publish
+# a game the user built. It is a third-party binary, so it follows the GodotSteam
+# model (docs/adr/0027-godotsteam.md, docs/adr/0046-share-your-game.md):
+#
+# - installed only after the user's explicit consent (`--install-butler`, or the
+#   install button in the Share page's publish dialog), never on its own;
+# - one pinned version, downloaded from itch.io's official broth server for this
+#   platform, its SHA-256 checked before the archive is opened;
+# - kept in Joinery's cache (~/.cache/joinery/butler/<version>/), never in a
+#   project.
+#
+# Joinery never stores an itch.io key: butler uses the user's own
+# BUTLER_API_KEY, or the login they made themselves with `butler login`.
+#
+# A platform whose sha256 is empty is not pinned yet and is refused. To pin
+# one, a reviewed change downloads the archive once, from the URL below, and
+# records its SHA-256 and size here.
+
+name = "butler"
+version = "15.24.0"
+licence = "MIT"
+source = "https://github.com/itchio/butler"
+
+[platforms.darwin-amd64]
+url = "https://broth.itch.zone/butler/darwin-amd64/15.24.0/archive/default"
+sha256 = ""
+size = 0
+
+[platforms.linux-amd64]
+url = "https://broth.itch.zone/butler/linux-amd64/15.24.0/archive/default"
+sha256 = ""
+size = 0
+
+[platforms.windows-amd64]
+url = "https://broth.itch.zone/butler/windows-amd64/15.24.0/archive/default"
+sha256 = ""
+size = 0
