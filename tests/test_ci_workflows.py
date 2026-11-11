@@ -152,3 +152,15 @@ def test_actions_are_pinned_by_commit(name: str) -> None:
         if action.startswith("./"):
             continue
         assert re.fullmatch(r"[\w.-]+/[\w./-]+@[0-9a-f]{40}", action), action
+
+
+def test_a_push_to_main_runs_the_quick_checks_only() -> None:
+    """Pushes to main stay cheap: Linux checks, no workers, no native editors."""
+    text = _workflow("ci.yml")
+    quick = "(github.event_name == 'push' && github.ref == 'refs/heads/main')"
+    assert "paths-ignore:" in text and "'docs/**'" in text
+    assert "cancel-in-progress: ${{ github.event_name == 'push'" in text
+    assert f"{quick} || github.event_name == 'pull_request') && '[\"ubuntu-24.04\"]'" in text
+    # The heavy jobs skip quick runs; a release (workflow_call) still runs them.
+    assert text.count(f"!({quick} || github.event_name == 'pull_request')") == 2
+    assert "type: choice" in text and "windows-2025" in text

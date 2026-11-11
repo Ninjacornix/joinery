@@ -1,21 +1,44 @@
 name: CI
 
 on:
+  # A push to main gets the quick run: the secrets scan and the Linux checks.
+  # The other two systems, the creative workers and the native editors run
+  # when asked (workflow_dispatch, one system at a time if you like) and in
+  # every release. Docs-only pushes run nothing.
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'evals/results/**'
   pull_request:
   workflow_dispatch:
     inputs:
+      os:
+        description: Which systems run the checks
+        type: choice
+        options: [all, ubuntu-24.04, macos-15, windows-2025]
+        default: all
+      assets:
+        description: Build the creative workers and run their round trips
+        type: boolean
+        default: false
       native:
         description: Build and exercise the three native editors
         type: boolean
-        default: true
+        default: false
   workflow_call:
     inputs:
       native:
         description: Release callers run their native matrix separately
         type: boolean
         default: true
+
+# A newer push to the same branch replaces a quick run still going. Release and
+# hand-started runs are never cancelled.
+concurrency:
+  group: ci-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' || github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -61,7 +84,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-2025]
+        # Quick runs (a push to main, a pull request): Linux only. Release runs
+        # get all three; a hand-started run gets what it asks for.
+        os: ${{ fromJSON(((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'pull_request') && '["ubuntu-24.04"]' || (inputs.os && inputs.os != 'all') && format('["{0}"]', inputs.os) || '["ubuntu-24.04","macos-15","windows-2025"]') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     env:
@@ -88,6 +113,8 @@ jobs:
       - run: uv run joinery check all
       - name: Retain test evidence
         if: always()
+        # Evidence only: an artifact service outage must not fail the checks.
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: unit-results-${{ matrix.os }}
@@ -97,6 +124,8 @@ jobs:
           if-no-files-found: ignore
 
   assets:
+    # Two hours of worker builds: release runs, or when asked.
+    if: ${{ !((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'pull_request') && (github.event_name != 'workflow_dispatch' || inputs.assets) }}
     runs-on: ubuntu-24.04
     timeout-minutes: 120
     steps:
@@ -156,6 +185,8 @@ jobs:
         run: uv run python tests/integration/assistant_latency.py --all-native
       - name: Retain native worker performance evidence
         if: always()
+        # Evidence only: an artifact service outage must not fail the checks.
+        continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: creative-worker-latency
@@ -165,5 +196,6 @@ jobs:
   native:
     # Called workflows retain the caller event name. Test the actual input so
     # release push runs can disable this duplicate matrix too.
-    if: ${{ toJSON(inputs.native) != 'false' }}
+    # Quick runs skip them; a hand-started run asks for them.
+    if: ${{ !((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'pull_request') && toJSON(inputs.native) != 'false' }}
     uses: ./.github/workflows/native.yml

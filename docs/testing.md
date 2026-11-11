@@ -344,3 +344,17 @@ native workflows. See the [support matrix](support-matrix.md) for capability
 boundaries and [execution report](../evals/results/program-regressions.md) for
 measured results. The [complete program/MCP evidence matrix](../evals/results/all-mcp-programs.md)
 records the broader upstream and native probe outcomes, including failures.
+
+## CI usage
+
+A push to `main` runs only the quick checks: the secrets scan and the Linux
+test suite (docs-only pushes run nothing, and a newer push cancels a quick run
+still going). macOS, Windows, the creative workers and the native editors run
+in every release, or by hand, one system at a time if that is all you need:
+
+```bash
+gh workflow run ci.yml -f os=windows-2025                 # Windows checks only
+gh workflow run ci.yml -f os=all -f assets=true -f native=true   # everything
+gh workflow run native.yml -f runtimes=false \
+  -f editors='{"include":[{"os":"windows-2025","target":"windows-x86_64","archive":"zip","jobs":4}]}'
+```
