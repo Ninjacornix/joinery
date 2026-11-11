@@ -199,7 +199,7 @@ class ChatRecorder:
         if not self.chat_id or self._broken:
             return
         self._used = True
-        fields = {"handle": sessions.handle}
+        fields = {"handle": sessions.handle, "updated": chats.now()}
         if self._model:
             fields["model"] = self._model
         self._save(lambda: chats.update(self.project, self.chat_id, **fields))

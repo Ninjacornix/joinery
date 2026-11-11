@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import os
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, ClassVar
@@ -60,7 +59,8 @@ def test_titles_listing_rename_and_delete(tmp_path: Path) -> None:
     assert len(title) <= chats.TITLE_CHARS + 1 and title.endswith("…")
     first = chats.create(tmp_path, "First", "codex")
     second = chats.create(tmp_path, "Second", "claude")
-    os.utime(tmp_path / ".joinery/chats" / f"{first}.jsonl", (1, 1))
+    # The host stamps the chat after every turn; the list is newest first.
+    chats.update(tmp_path, first, updated="2026-01-01T09:00:00+00:00")
     chats.append(tmp_path, second, {"type": "user", "text": "Second"})
     listed = chats.listing(tmp_path)
     assert [c["id"] for c in listed] == [second, first]

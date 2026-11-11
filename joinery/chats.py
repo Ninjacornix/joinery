@@ -152,6 +152,7 @@ def create(project: Path, title: str, provider: str, profile: str = "") -> str:
             "id": chat_id,
             "title": title_from(title) or "New chat",
             "created": now(),
+            "updated": now(),
             "provider": provider,
             "profile": profile,
             "model": "",
@@ -204,8 +205,8 @@ def _trim(path: Path) -> None:
 
 
 def update(project: Path, chat_id: str, **fields: str) -> dict[str, Any]:
-    """Change the chat line's title, provider, profile, model or handle."""
-    allowed = {"title", "provider", "profile", "model", "handle"}
+    """Change the chat line's title, provider, profile, model, handle or last activity."""
+    allowed = {"title", "provider", "profile", "model", "handle", "updated"}
     if not set(fields) <= allowed:
         raise ValueError("Only a chat's title and session can change.")
     path = path_for(project, chat_id)
@@ -255,8 +256,9 @@ def listing(project: Path) -> list[dict[str, Any]]:
                 "id": str(meta.get("id", path.stem)),
                 "title": str(meta.get("title", "")),
                 "created": str(meta.get("created", "")),
-                "updated": datetime.fromtimestamp(stamp, UTC).isoformat(
-                    timespec="seconds"
+                "updated": str(
+                    meta.get("updated")
+                    or datetime.fromtimestamp(stamp, UTC).isoformat(timespec="seconds")
                 ),
                 "provider": str(meta.get("provider", "")),
                 "turns": sum(1 for r in records if r.get("type") == "user"),
