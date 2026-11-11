@@ -334,6 +334,36 @@ direction does the same. No model is needed to check.
   it, `--area palette` for one area, `--plan` for the changes Fix all would
   start).
 
+### Building a level from a sketch
+
+Draw the level on paper (or take a top-down screenshot), attach the picture with
+the paperclip, paste or drop, and send `/blockout`, or just "build this level"
+(ADR 0043). Words after the command go along: `/blockout the tower is 2 m up`.
+
+- Journeyman reads the sketch and writes a **layout**: rooms, walls with doors
+  and windows, corridors, stairs, platforms, the spawn (draw an X), the goal (a
+  star), coins, pickups, checkpoints and hazards. With no measure on the sketch
+  a door gap counts as about 1 m (2 tiles in a 2D game). Your sketch is only a
+  reference; it is never copied into the game.
+- Joinery checks the layout first: closed rooms, sizes the player fits through,
+  stairs that aren't too steep, and that the spawn reaches every goal with your
+  starting point's own player (how high it jumps, how wide it is). Journeyman
+  fixes whatever the check finds before you see anything.
+- The level is built as a greybox scene, `game/<name>_blockout.tscn`: CSG boxes
+  with collision in 3D, solid rectangles in 2D, a named node for every room,
+  wall piece and marker, and the spawn and markers in the groups the game and
+  the playtest bot use. Then a bot walks it in Godot from the spawn to every
+  goal.
+- The review shows your sketch and the plan of the level side by side. The
+  first fact is the walk: **Walkable: spawn reaches 3 of 3 goals**. Accept or
+  Discard as with any change. To play it, open the scene and press Play Scene.
+- To change it, just ask: "move the door to the north wall", "make room B
+  bigger". The layout in `design/blockouts/<name>.toml` is the source;
+  Journeyman edits it and rebuilds, and the review shows the earlier plan and
+  the new one. Edit the TOML yourself and run `joinery blockout build
+  design/blockouts/<name>.toml --project .` to rebuild the same way
+  (`check` only checks it, `walk` walks it in Godot).
+
 ### The Timeline tab
 
 **Timeline**, beside Review in the bottom bar, shows how the project changed
@@ -433,6 +463,8 @@ again.
   softlocks and balance notes (see Playtests above).
 - `/match` checks the project against the art bible and offers to fix what
   drifts (see Making everything match above).
+- `/blockout [notes]` builds a greybox level from the sketch you attach (see
+  Building a level from a sketch above).
 - `/brief` opens `design/brief.md` read-only, with **Ask Journeyman to change
   it**. With no brief, **Write the brief** drafts one from the starting point.
 - `/tools` gives each app's state and its one action (for example Start Docker
