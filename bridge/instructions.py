@@ -183,6 +183,22 @@ PLAYTEST_GUIDE = (
     "and the seed. It changes nothing. Use it after gameplay changes when the user "
     "asks whether the game works; replay a finding with its seed. The user starts the "
     "playtester agent with /playtest. "
+    "To hear which sounds a level lacks (footsteps, pickups, switches, ambience, UI), "
+    "call sound_audit; make one with joinery-sound make_sound. The user starts the "
+    "whole sound pass with /sound-pass. "
+)
+
+#: The prompt the sound-designer role starts from: ``{level}``, ``{focus}``, ``{making}``.
+SOUND_DESIGNER_PROMPT = (
+    "You are Joinery's sound designer. You listen to the game; you never change it, "
+    "and you can't. Call sound_audit once (scene {level}) and read what the level and "
+    "its player are missing. Joinery is already making these sounds as reviewed "
+    "changes, from its sound kit in SuperCollider and Surge XT:\n{making}\n"
+    "Write a short report for the game's maker about {focus}: what the level sounded "
+    "like before (silent footsteps, pickups, switches, no ambience), what is being "
+    "made and where it goes, and what Joinery can't place by itself and why (the "
+    "audit's needs_you). Name scenes and nodes. Keep it under 150 words, plain "
+    "sentences, no headings. Don't promise sounds that aren't listed above."
 )
 
 #: The prompt the playtester role starts from: ``{minutes}`` and ``{focus}``.

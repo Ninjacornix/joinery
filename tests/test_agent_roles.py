@@ -239,6 +239,7 @@ def test_roles_have_their_own_turns_and_time_boxes() -> None:
         "accessibility",
         "performance",
         "designer",
+        "sound-designer",
     }
     assert spec("designer").turn == "design" and spec("designer").read_only
     assert spec("lead").turn == "chat" and not spec("lead").read_only

@@ -16,6 +16,9 @@ Every agent Joinery runs has one role:
 * ``designer``: reads the brief, design documents, scenes and scripts for what breaks
   the game or goes against its own brief, and reports each finding with evidence
   through ``report_design`` (the design check). Read-only.
+* ``sound-designer``: listens to the level with ``sound_audit`` and writes a short
+  report of what is missing and what the sound pass makes. Read-only; the sounds
+  themselves are made by scripted tasks, each a reviewed change.
 
 The role reaches the provider's policy hook as ``JOINERY_AGENT_ROLE`` and the
 gateway endpoint as its ``role``; both judge each call against the same tables
@@ -46,12 +49,21 @@ Role = Literal[
     "accessibility",
     "performance",
     "designer",
+    "sound-designer",
 ]
 ROLES: tuple[Role, ...] = get_args(Role)
 #: The policy hook reads the role from here; absent means ``lead``.
 ROLE_ENV = "JOINERY_AGENT_ROLE"
 READ_ONLY_ROLES: frozenset[str] = frozenset(
-    {"reviewer", "debugger", "playtester", "accessibility", "performance", "designer"}
+    {
+        "reviewer",
+        "debugger",
+        "playtester",
+        "accessibility",
+        "performance",
+        "designer",
+        "sound-designer",
+    }
 )
 
 #: joinery-registry tools every read-only role may call.
@@ -68,6 +80,8 @@ PLAYTEST = "playtest"
 #: The accessibility and performance checks: read-only, so the lead and workers may too.
 ACCESS_CHECK = "access_check"
 PERF_CHECK = "perf_check"
+#: What the level is missing to sound like a game: read-only, so any role may.
+SOUND_AUDIT = "sound_audit"
 ROLE_ONLY = frozenset({REVIEW_REPORT, DIAGNOSIS_REPORT, REPRODUCE, DESIGN_REPORT})
 #: Only the lead starts more agents: parallel tasks and variants.
 LEAD_ONLY = frozenset({"start_task", "start_variants"})
@@ -79,7 +93,9 @@ class RoleSpec:
 
     role: Role
     #: How Joinery runs its turn: the chat's own, a task, a timed review or a diagnosis.
-    turn: Literal["chat", "task", "review", "diagnosis", "playtest", "check", "design"]
+    turn: Literal[
+        "chat", "task", "review", "diagnosis", "playtest", "check", "design", "sound"
+    ]
     read_only: bool
     #: joinery-registry tools beyond the shared ones ("*" for every tool).
     registry: frozenset[str]
@@ -150,6 +166,14 @@ SPECS: dict[str, RoleSpec] = {
         REGISTRY_READS | {DESIGN_REPORT},
         300,
         "Reading the design…",
+    ),
+    "sound-designer": RoleSpec(
+        "sound-designer",
+        "sound",
+        True,
+        REGISTRY_READS | {SOUND_AUDIT},
+        240,
+        "Listening to the level…",
     ),
 }
 
@@ -307,6 +331,11 @@ def refusal(role: str) -> str:
         return (
             f"The {role} agent only reads. Write the fix as your reply; a worker "
             "makes the change and the user reviews it."
+        )
+    if role == "sound-designer":
+        return (
+            "The sound designer only listens and reads. Call sound_audit, then write "
+            "your report; Joinery makes the sounds as reviewed changes."
         )
     return "This agent's role can't make that call."
 

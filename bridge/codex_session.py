@@ -170,6 +170,8 @@ class CodexSession:
                 'mcp_servers.joinery-registry.tools.access_check.approval_mode="approve"',
                 "-c",
                 'mcp_servers.joinery-registry.tools.perf_check.approval_mode="approve"',
+                "-c",
+                'mcp_servers.joinery-registry.tools.sound_audit.approval_mode="approve"',
             ]
             # The read-only roles' reports; the policy hook lets only each role call its own.
             for tool in (

@@ -28,6 +28,7 @@ from bridge.models import Selection
 from bridge.playtester import Playtester, gameplay_change
 from bridge.protocol import Done, EditorAction, Message, Prompt
 from bridge.reviewer import Debugger, ReviewAgent
+from bridge.sound_pass import SoundPassRun
 from bridge.specialists import Specialists
 from bridge.turn_runner import run_turn, settle_compaction
 from bridge.variants import Variants, parse_command
@@ -202,6 +203,7 @@ async def _serve(
     designer: Designer | None = None
     matcher: MatchRun | None = None
     checks: Checks | None = None
+    sounder: SoundPassRun | None = None
     #: The last request's model choice, which the tasks it starts use too.
     selection: dict[str, Any] = {}
     try:
@@ -287,6 +289,8 @@ async def _serve(
         if checks is not None:
             for run in checks.runs.values():
                 await run.stop()
+        if sounder is not None:
+            await sounder.stop()
         if crew is not None:
             await crew.stop_all()
         if playtester is not None:
@@ -539,6 +543,8 @@ async def _serve(
                 endpoint.playtest = playtester.tool
             if checks is not None:
                 endpoint.checks = checks.tool
+            if sounder is not None:
+                endpoint.sound_audit = sounder.tool
             return endpoint
 
         def after_decision(decision: dict[str, Any]) -> None:
@@ -659,6 +665,20 @@ async def _serve(
             lambda argv, root: run_offline(argv, root, 600, readonly=True),
             task_prompt,
         )
+
+        # The sound pass: its sounds as scripted tasks, its report by the
+        # sound designer in its own read-only role (joinery.roles).
+        sounder = SoundPassRun(
+            crew,
+            project,
+            emit,
+            task_prompt,
+            agent=agent_id,
+            profile=profile_id,
+            bridge=lambda agent: role_bridge(agent, "sound-designer"),
+            endpoint=lambda: role_endpoint(gateway, "sound-designer"),
+        )
+        rpc_server.sound_audit = sounder.tool
 
         # Accessibility and performance (ADR 0049, 0050): the checks' tools and fixes.
         checks = Checks(
@@ -898,6 +918,15 @@ async def _serve(
                     await start_variants(data, "user")
                 elif str(data.get("kind", "")).startswith("variants_"):
                     await variants_action(data)
+                elif data.get("kind") == "sound_pass_start":
+                    assert sounder is not None
+                    sounder.start(
+                        str(data.get("focus", "") or ""),
+                        str(data.get("scene", "") or ""),
+                    )
+                elif data.get("kind") == "sound_pass_cancel":
+                    assert sounder is not None
+                    await sounder.stop()
                 elif data.get("kind") == "debug_start":
                     # /debug, or Debug on the offer after a new error in Output.
                     await crew.debug(debug_request(data), task_prompt(data))
@@ -938,6 +967,8 @@ async def _serve(
             await matcher.stop()
         if checks is not None:
             await checks.close()
+        if sounder is not None:
+            await sounder.stop()
         if crew is not None:
             await crew.close()
         if playtester is not None:

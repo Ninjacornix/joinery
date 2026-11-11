@@ -222,6 +222,14 @@ def make_server(socket: Path) -> MCPServer[Any]:
             )
         return result
 
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True))
+    @tool_errors
+    async def sound_audit(
+        scene: Annotated[str, Field(max_length=300)] = "",
+    ) -> dict[str, Any]:
+        """Listen to the game without playing it: which sounds the level and its player are missing (footsteps per floor surface, jump and land, pickups, hits, doors and switches, ambience, UI clicks), what is already there, the sound Joinery's kit would make for each and where it would go, ranked by the latest playtest. scene: a level as res://…, default the project's level. Changes nothing."""
+        return await rpc(socket, "sound_audit", {"scene": scene})
+
     @server.tool()
     @tool_errors
     async def report_review(notes: list[ReviewNoteArgument]) -> dict[str, Any]:

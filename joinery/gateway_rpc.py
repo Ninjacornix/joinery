@@ -184,9 +184,11 @@ class GatewayRPC:
         #: Run the project headless offline to reproduce an error (the debugger only).
         self.reproduce: Callable[[str], Awaitable[dict[str, Any]]] | None = None
         #: Play the game headless with the playtest bot (read-only, so every agent may).
-        self.playtest: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None = (
-            None
-        )
+        self.playtest: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None = None
+        #: What the level is missing to sound like a game (read-only, any agent may).
+        self.sound_audit: (
+            Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None
+        ) = None
         #: The accessibility and performance checks (read-only): kind, params -> report.
         self.checks: (
             Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None
@@ -435,13 +437,17 @@ class GatewayRPC:
                 if self.role and not registry_allowed(self.role, method):
                     raise ValueError(refusal(self.role))
                 data = await self.checks(method.removesuffix("_check"), params)
+            elif method == "sound_audit":
+                if self.sound_audit is None:
+                    raise ValueError("The sound pass is not available here.")
+                data = await self.sound_audit(params)
             elif method == "task_status":
                 if self.task_status is None:
                     raise ValueError("Parallel tasks are not available here.")
                 data = self.task_status(str(params.get("id", "")))
             else:
                 raise ValueError(
-                    "The model interface supports inventory, schema, call, submit, blockout, playtest and the checks; no approval methods."
+                    "The model interface supports inventory, schema, call, submit, blockout, playtest, the checks and sound_audit; no approval methods."
                 )
             response = {"ok": True, "result": data}
         except PolicyStop as exc:
