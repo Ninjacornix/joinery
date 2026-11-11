@@ -8,18 +8,25 @@ until the user decides the change (or it is dropped).
 
 ``joinery.lock`` is shared bookkeeping, not anyone's work: it is never claimed,
 and :mod:`joinery.rebase` merges it instead. Folders are never claimed either.
+
+Game features are one claim for the whole project (:data:`FEATURES`): a change
+that adds or removes a feature rewrites the carried game manifest, so only one
+change at a time may. ``joinery feature add|remove`` takes the same claim from
+its own process (:class:`FeatureLock`).
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import tomllib
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, BinaryIO
 
 from joinery import tools as tool_modules
+from joinery.platform_support import lock_file, unlock_file
 
 #: The task id of the chat's own request (the lead).
 MAIN = "main"
@@ -31,10 +38,83 @@ DEFAULT_PARALLEL = 3
 MAX_PARALLEL = 6
 #: Apps whose document operators can't run side by side in one worker image.
 SERIAL_TOOLS = frozenset({"blender", "krita"})
+#: The game manifest a feature change rewrites: one claim for every game feature.
+FEATURES = ".joinery/game-manifest.json"
+_FEATURE_LOCK = ".joinery/features.lock"
+_FEATURE_HOLDER = ".joinery/features.holder"
 
 
 def refusal(path: str, title: str) -> str:
+    if path == FEATURES:
+        return features_refusal(title)
     return f"{path} is being changed by another task: {title}. Work on something else or wait."
+
+
+def features_refusal(title: str) -> str:
+    return (
+        f"Game features are being changed by another task: {title}. "
+        "Wait until that change is decided, then try again."
+    )
+
+
+class FeatureLock:
+    """The game-features claim across processes: the chat host's agents and
+    ``joinery feature add|remove`` take it in turn. An OS lock, so a crashed
+    holder never keeps it."""
+
+    def __init__(self, project: Path) -> None:
+        self.project = project
+        self._file: BinaryIO | None = None
+
+    def take(self, title: str) -> str:
+        """Hold the claim for ``title``; returns the holder's title when it is taken."""
+        if self._file is not None:
+            return ""
+        path = self.project / _FEATURE_LOCK
+        path.parent.mkdir(parents=True, exist_ok=True)
+        stream = path.open("a+b")
+        try:
+            lock_file(stream)
+        except (BlockingIOError, PermissionError, OSError):
+            stream.close()
+            return self.holder(self.project) or "another change"
+        self._file = stream
+        with contextlib.suppress(OSError):
+            (self.project / _FEATURE_HOLDER).write_text(title, encoding="utf-8")
+        return ""
+
+    def release(self) -> None:
+        stream, self._file = self._file, None
+        if stream is None:
+            return
+        with contextlib.suppress(OSError):
+            (self.project / _FEATURE_HOLDER).unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            unlock_file(stream)
+        stream.close()
+
+    @staticmethod
+    def holder(project: Path) -> str:
+        """Who holds the claim now ("" when no one does)."""
+        path = project / _FEATURE_LOCK
+        if not path.is_file():
+            return ""
+        try:
+            with path.open("a+b") as stream:
+                try:
+                    lock_file(stream)
+                except (BlockingIOError, PermissionError):
+                    pass
+                else:
+                    unlock_file(stream)
+                    return ""
+        except OSError:
+            return ""
+        try:
+            text = (project / _FEATURE_HOLDER).read_text(encoding="utf-8").strip()
+        except OSError:
+            text = ""
+        return text[:120] or "another change"
 
 
 def parallel_limit(project: Path) -> int:
@@ -96,7 +176,10 @@ def project_paths(arguments: Any, *roots: Path) -> set[str]:
 class PathClaims:
     """Claims of every task working on one project, shared by their gateways."""
 
-    def __init__(self) -> None:
+    def __init__(self, project: Path | None = None) -> None:
+        #: The project, for the game-features claim other processes see.
+        self.project = project
+        self._features: FeatureLock | None = None
         #: Each task working now: {task id: title}.
         self.titles: dict[str, str] = {}
         #: Claimed file -> task id.
@@ -149,6 +232,33 @@ class PathClaims:
     def release(self, task: str) -> None:
         for path in self.held(task):
             del self.owners[path]
+        if self.features_holder() == "" and self._features is not None:
+            self._features.release()
+            self._features = None
+
+    def features_holder(self) -> str:
+        """The task holding the game-features claim in this process ("" for none)."""
+        return self.owners.get(FEATURES, "")
+
+    def claim_features(self, task: str) -> str:
+        """Take the game-features claim for ``task``.
+
+        Returns the holder's title when another task, or ``joinery feature`` in
+        another process, has it; "" once ``task`` holds it.
+        """
+        owner = self.features_holder()
+        if owner == task:
+            return ""
+        if owner:
+            return self.titles.get(owner, "another task")
+        if self.project is not None:
+            lock = FeatureLock(self.project)
+            held_by = lock.take(self.titles.get(task, "another task"))
+            if held_by:
+                return held_by
+            self._features = lock
+        self.owners[FEATURES] = task
+        return ""
 
 
 class WorkerSlots:

@@ -51,6 +51,9 @@ NOT_REVERTIBLE = (
 #: stage rewrites the game manifest there. Accept carries it into the project,
 #: reject drops it with the stage, and revert puts the earlier one back.
 CARRIED = (".joinery/game-manifest.json",)
+#: Where a transaction keeps the CARRIED records as they were when it began, so
+#: a record changed by another accepted change meanwhile is merged, not replaced.
+CARRIED_BASE = "carried-base"
 
 
 class ProjectLease:
@@ -297,6 +300,9 @@ class FileTransaction:
         self.directory.mkdir(parents=True, mode=0o700)
         try:
             clone_tree(self.project, self.stage)
+            for path in CARRIED:
+                if (self.project / path).is_file():
+                    copy_file(self.project / path, self.directory / CARRIED_BASE / path)
             # The stage is the starting point: an edit to the project while the
             # tools work is caught on accept instead of reviewed as theirs.
             self.base = inventory(self.stage, include_dirs=self.include_dirs)
@@ -504,6 +510,7 @@ class FileTransaction:
                 continue
             target = self.project / path
             before = _sha256(target) if target.is_file() else ""
+            self._merge_carried(path, before)
             after = _sha256(staged)
             if before == after:
                 continue
@@ -525,6 +532,24 @@ class FileTransaction:
             finally:
                 if os.path.exists(temp):
                     os.unlink(temp)
+
+    def _merge_carried(self, path: str, now: str) -> None:
+        """Another change rewrote the project's ``path`` since this one began: put
+        this change's own edits on top of it in the stage, entry by entry."""
+        base = self.directory / CARRIED_BASE / path
+        if not now or (base.is_file() and _sha256(base) == now):
+            return
+        from joinery.rebase import merge_manifest  # Late: rebase imports this module.
+
+        try:
+            merged = merge_manifest(
+                base.read_text(encoding="utf-8") if base.is_file() else "{}",
+                (self.project / path).read_text(encoding="utf-8"),
+                (self.stage / path).read_text(encoding="utf-8"),
+            )
+        except (OSError, ValueError):
+            return
+        (self.stage / path).write_text(merged, encoding="utf-8")
 
     def _uncarry(self) -> None:
         """Put back each CARRIED record this transaction replaced."""

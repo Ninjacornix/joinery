@@ -22,10 +22,12 @@ from joinery.art_approval import approved, review
 from joinery.authoring import run_offline
 from joinery.catalog import blocked_tools, load_catalog, load_project_tools
 from joinery.claims import (
+    FEATURES,
     MAIN,
     MAIN_TITLE,
     PathClaims,
     WorkerSlots,
+    features_refusal,
     project_paths,
     refusal,
 )
@@ -211,7 +213,7 @@ class ProjectGateway:
         #: One connect at a time per app: lanes share the project's connections.
         self._connecting: dict[str, asyncio.Lock] = {}
         #: Which task changes which file, shared by every lane of this project.
-        self.claims = PathClaims()
+        self.claims = PathClaims(self.project)
         self.slots = WorkerSlots()
         self.task_id = MAIN
         self.title = MAIN_TITLE
@@ -539,6 +541,8 @@ class ProjectGateway:
             )
         if result.is_error and result_text(result).startswith("Rule Zero STOP:"):
             raise PolicyStop(result_text(result))
+        if not readonly:
+            self._claim_features()
         if not readonly and self.claims.contended():
             self._claim_written(named)
         if (
@@ -626,6 +630,25 @@ class ProjectGateway:
                 self._watch = StageWatch(tx.stage, tx.id)
             self._changed = changed
             return self._claim(tx, restore=restore)
+
+    def _claim_features(self) -> None:
+        """A stage that changed game features holds the project's one claim on them.
+
+        Another agent, or ``joinery feature`` in another process, holding it
+        means the call is refused and the stage's game manifest put back.
+        """
+        tx = self.transaction
+        if tx is None or tx.state != "staging" or not (tx.stage / FEATURES).is_file():
+            return
+        holder = self.claims.claim_features(self.task_id)
+        if not holder:
+            return
+        (tx.stage / FEATURES).unlink(missing_ok=True)
+        raise ValueError(
+            features_refusal(holder)
+            + " The game manifest was left as the project has it; the rest of the "
+            "call stands."
+        )
 
     def _watch_stage(self) -> None:
         """Before a call while others work: know the stage as it is now."""

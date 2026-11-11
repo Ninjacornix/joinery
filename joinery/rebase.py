@@ -73,6 +73,45 @@ def merge_lock(theirs: str, mine: str, touched: set[str]) -> str:
     return text
 
 
+def _merge3(base: Any, theirs: Any, mine: Any) -> Any:
+    """``mine``'s edits since ``base`` applied on top of ``theirs``."""
+    if isinstance(mine, dict) and isinstance(theirs, dict):
+        old = base if isinstance(base, dict) else {}
+        result = dict(theirs)
+        for key in mine.keys() | old.keys():
+            if key not in mine:
+                result.pop(key, None)
+            elif key not in old or mine[key] != old[key]:
+                result[key] = (
+                    _merge3(old.get(key), theirs[key], mine[key])
+                    if key in theirs
+                    else mine[key]
+                )
+        return result
+    if isinstance(mine, list) and isinstance(theirs, list):
+        earlier = base if isinstance(base, list) else []
+        dropped = [item for item in earlier if item not in mine]
+        kept = [item for item in theirs if item not in dropped]
+        return kept + [
+            item for item in mine if item not in earlier and item not in kept
+        ]
+    return theirs if mine == base else mine
+
+
+def merge_manifest(base: str, theirs: str, mine: str) -> str:
+    """The game manifest with this change's feature edits on top of the project's.
+
+    ``base`` is the manifest when the change began, ``theirs`` the project's now.
+    Features and units this change added or removed follow it; everything else
+    stays as the project has it. Raises ValueError when one can't be read.
+    """
+    merged = _merge3(json.loads(base), json.loads(theirs), json.loads(mine))
+    if not isinstance(merged, dict):
+        # A damaged file, like unreadable JSON: callers catch ValueError.
+        raise ValueError("The game manifest is not an object.")  # noqa: TRY004
+    return json.dumps(merged, indent=2, sort_keys=True) + "\n"
+
+
 def _take(tx: FileTransaction, path: str, value: str) -> bool:
     """Make the stage's ``path`` what the project has (``value``); False if it can't."""
     target = tx.stage / path

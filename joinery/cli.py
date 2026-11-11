@@ -18,6 +18,7 @@ from joinery import (
     blueprints,
     brief,
     chats,
+    claims,
     connection,
     game_setup,
     history,
@@ -390,6 +391,14 @@ def _decide(
 
 
 def _feature(args: argparse.Namespace) -> int:
+    lock = claims.FeatureLock(args.project.resolve())
+    try:
+        return _feature_change(args, lock)
+    finally:
+        lock.release()
+
+
+def _feature_change(args: argparse.Namespace, lock: claims.FeatureLock) -> int:
     project = args.project.resolve()
     try:
         if args.action == "list":
@@ -405,6 +414,10 @@ def _feature(args: argparse.Namespace) -> int:
             return 0
         if not args.id:
             raise ValueError("Name the feature.")
+        # One change to game features at a time, with the chat's agents too.
+        holder = claims.FeatureLock.holder(project)
+        if holder:
+            raise ValueError(claims.features_refusal(holder))
         if args.plan:
             print(
                 json.dumps(
@@ -421,6 +434,9 @@ def _feature(args: argparse.Namespace) -> int:
             else:
                 _print_step(step)
             return 1 if step["state"] == "failed" else 0
+        held_by = lock.take(f"{args.action.capitalize()} {args.id}")
+        if held_by:
+            raise ValueError(claims.features_refusal(held_by))
         tx = game_setup.stage_feature(project, args.action, args.id)
     except (OSError, ValueError) as exc:
         if args.json:

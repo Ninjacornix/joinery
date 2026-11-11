@@ -26,7 +26,8 @@ LOCK_B = 'version = 1\n\n[[asset]]\npath = "art/b.png"\nsha256 = "bb"\norigin = 
 
 class FakeConnection:
     """A tool's MCP server: ``write`` writes the file named in its call; ``touch``
-    writes ``a.txt`` into the folder it is given, a path the call never names."""
+    writes ``a.txt`` into the folder it is given, a path the call never names;
+    ``manifest`` rewrites the game manifest below the root it is given."""
 
     def __init__(self, spec: ServerSpec, _project: Path) -> None:
         self.spec = spec
@@ -41,6 +42,9 @@ class FakeConnection:
         if tool == "touch":
             target = Path(arguments["folder"]) / "a.txt"
             text = "touched\n"
+        elif tool == "manifest":
+            target = Path(arguments["root"]) / ".joinery/game-manifest.json"
+            text = '{"features": ["controller"]}'
         else:
             target = Path(arguments["path"])
             text = arguments["text"]
@@ -325,6 +329,124 @@ def test_a_task_says_connecting_on_its_own_card(project: Path) -> None:
             await main.close()
 
     run(go)
+
+
+MANIFEST = ".joinery/game-manifest.json"
+
+
+def manifest(features: list[str]) -> str:
+    units = {name: {"files": [f"features/{name}.gd"]} for name in features}
+    return json.dumps({"features": features, "format": 1, "units": units})
+
+
+def test_game_features_are_one_claim_for_the_whole_project(project: Path) -> None:
+    async def go() -> None:
+        main = wire(ProjectGateway(project))
+        try:
+            steam = wire(main.lane("a", "Add Steam"))
+            pad = wire(main.lane("b", "Controller support"))
+            await write(steam, MANIFEST, manifest(["steam"]))
+            await write(steam, "notes/steam.txt", "steam\n")
+            assert main.claims.features_holder() == "a"
+            with pytest.raises(ValueError) as refused:
+                await write(pad, MANIFEST, manifest(["controller"]))
+            assert str(refused.value).startswith(
+                "Game features are being changed by another task: Add Steam."
+            )
+            # Named in the call, so refused before anything ran.
+            assert pad.transaction is None
+            # Written without being named: put back after the call.
+            with pytest.raises(ValueError, match="another task: Add Steam"):
+                await pad.call("joinery-sound", "manifest", {"root": str(project)})
+            assert pad.transaction is not None
+            assert not (pad.transaction.stage / MANIFEST).exists()
+            # `joinery feature` in another process sees it too.
+            from joinery.claims import FeatureLock
+
+            assert FeatureLock.holder(project) == "Add Steam"
+            assert steam.transaction is not None
+            steam.transaction.review()
+            await steam.decide(steam.transaction.id, False)
+            assert FeatureLock.holder(project) == ""
+            await write(pad, MANIFEST, manifest(["controller"]))
+            assert main.claims.features_holder() == "b"
+        finally:
+            await main.close()
+        assert FeatureLock.holder(project) == ""
+
+    run(go)
+
+
+def test_an_agent_waits_for_a_feature_change_applying_elsewhere(project: Path) -> None:
+    from joinery.claims import FeatureLock
+
+    async def go() -> None:
+        cli = FeatureLock(project)
+        assert cli.take("Add online-play") == ""
+        main = wire(ProjectGateway(project))
+        try:
+            with pytest.raises(ValueError, match="another task: Add online-play"):
+                await write(main, MANIFEST, manifest(["online-play"]))
+            cli.release()
+            await write(main, MANIFEST, manifest(["online-play"]))
+            assert FeatureLock.holder(project) == "the main request"
+        finally:
+            await main.close()
+
+    run(go)
+
+
+def test_the_feature_command_names_the_agent_holding_game_features(
+    project: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from joinery import cli
+    from joinery.claims import FeatureLock
+
+    held = FeatureLock(project)
+    assert held.take("Make a lamp") == ""
+    try:
+        code = cli.main(
+            ["feature", "add", "controller", "--project", str(project), "--json"]
+        )
+    finally:
+        held.release()
+    assert code == 1
+    error = json.loads(capsys.readouterr().out)["error"]
+    assert error.startswith("Game features are being changed by another task:")
+    assert "Make a lamp" in error
+
+
+def test_the_game_manifest_is_merged_entry_by_entry(project: Path) -> None:
+    from joinery.rebase import merge_manifest
+    from joinery.transactions import FileTransaction
+
+    merged = json.loads(
+        merge_manifest(
+            manifest(["save-load"]),
+            manifest(["save-load", "steam"]),
+            manifest(["controller"]),
+        )
+    )
+    assert merged["features"] == ["steam", "controller"]
+    assert set(merged["units"]) == {"steam", "controller"}
+    # Accepting a change carries its feature on top of one accepted meanwhile.
+    (project / ".joinery").mkdir(exist_ok=True)
+    (project / MANIFEST).write_text(manifest(["save-load"]))
+    tx = FileTransaction(project)
+    tx.begin("Add controller support")
+    (tx.stage / ".joinery").mkdir()
+    (tx.stage / MANIFEST).write_text(manifest(["save-load", "controller"]))
+    (tx.stage / "notes/pad.txt").write_text("pad\n")
+    (project / MANIFEST).write_text(manifest(["save-load", "steam"]))
+    tx.review()
+    tx.accept()
+    carried = json.loads((project / MANIFEST).read_text())
+    assert carried["features"] == ["save-load", "steam", "controller"]
+    tx.revert()
+    assert json.loads((project / MANIFEST).read_text())["features"] == [
+        "save-load",
+        "steam",
+    ]
 
 
 # --- Following the project ------------------------------------------------------------

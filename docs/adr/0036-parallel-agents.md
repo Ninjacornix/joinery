@@ -35,7 +35,13 @@ ADR 0035 already kept the turn controller free of globals so that a scheduler co
    is refused before it runs; a call that wrote one anyway has that file put back. Both read
    "`<path>` is being changed by another task: `<title>`. Work on something else or wait."
    Claims last until the change is decided or dropped. `joinery.lock` is never claimed: it is
-   shared bookkeeping, merged entry by entry. Folders are never claimed.
+   shared bookkeeping, merged entry by entry. Folders are never claimed. Game features are one
+   claim for the whole project: a stage that rewrites `.joinery/game-manifest.json` holds it,
+   and so does `joinery feature add|remove` (the sidebar's `/feature`) while it applies, through
+   an OS lock other processes see. Anyone else touching game features meanwhile is refused with
+   "Game features are being changed by another task: `<title>`. Wait until that change is
+   decided, then try again." Accepting a change merges its manifest edits on top of the
+   project's, feature by feature, like the lock.
 5. **Following the project.** Accepting a change bumps a counter. A stage that is behind it
    follows the project before its next write and at submit (`joinery/rebase.py`): files it did
    not touch are brought in, the lock is merged, a folder both made is the same folder. A file
@@ -68,5 +74,3 @@ ADR 0035 already kept the turn controller free of globals so that a scheduler co
   before/after panel remains the lead's.
 - Claims are checked by path. A tool that writes a file its arguments don't name is caught
   after the call, so it may have done other work first.
-- Two tasks adding or removing game features at once still race on the carried game manifest;
-  feature changes stay with the lead.
