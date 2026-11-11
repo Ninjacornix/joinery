@@ -1,0 +1,55 @@
+# A level blockout. Joinery builds the greybox scene from this file;
+# edit it and rebuild (ADR 0043). Plan: x right (east), y down (south).
+version = 1
+name = "keep"
+mode = "3d"
+
+[spawn]
+at = [3, 4]
+
+[[rooms]]
+id = "hall"
+rect = [0, 0, 8, 6]
+
+[[rooms]]
+id = "vault"
+rect = [8, 0, 6, 6]
+
+[[rooms]]
+id = "tower"
+rect = [0, 12, 6, 6]
+floor = 1.5
+
+[[openings]]
+room = "hall"
+wall = "east"
+at = 3
+
+[[corridors]]
+id = "link"
+rect = [2, 6, 2, 3]
+
+[[stairs]]
+id = "steps"
+rect = [2, 9, 2, 3]
+up = "south"
+bottom = 0
+top = 1.5
+
+[[platforms]]
+id = "ledge"
+rect = [10, 4, 2, 1.5]
+top = 0.8
+
+[[markers]]
+kind = "goal"
+at = [3, 15]
+id = "exit"
+
+[[markers]]
+kind = "coin"
+at = [11, 3]
+
+[[markers]]
+kind = "pickup"
+at = [11, 4.7]

@@ -1,0 +1,53 @@
+# A level blockout. Joinery builds the greybox scene from this file;
+# edit it and rebuild (ADR 0043). Plan: x right (east), y down (south).
+version = 1
+name = "dungeon"
+mode = "2d-topdown"
+units = "tiles"
+
+[spawn]
+at = [4, 4]
+
+[[rooms]]
+id = "entry"
+rect = [0, 0, 10, 8]
+
+[[rooms]]
+id = "hall"
+rect = [16, 0, 12, 10]
+
+[[rooms]]
+id = "crypt"
+rect = [16, 14, 12, 8]
+
+[[corridors]]
+id = "east_way"
+rect = [10, 3, 6, 2]
+
+[[corridors]]
+id = "down"
+rect = [21, 10, 2, 4]
+
+[[platforms]]
+id = "pillar_a"
+rect = [19, 3, 2, 2]
+
+[[platforms]]
+id = "pillar_b"
+rect = [23, 5, 2, 2]
+
+[[markers]]
+kind = "pickup"
+at = [8, 1.5]
+
+[[markers]]
+kind = "pickup"
+at = [26, 2]
+
+[[markers]]
+kind = "hazard"
+at = [22, 17]
+
+[[markers]]
+kind = "goal"
+at = [25, 19]

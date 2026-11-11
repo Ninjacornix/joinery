@@ -35,6 +35,7 @@ from joinery.agents import get as get_agent
 from joinery.api_profiles import configure as configure_api
 from joinery.auth import for_agent
 from joinery.bible import BIBLE_PATH, grouped, write_from_answers_file
+from joinery.blockout import command as blockout_command
 from joinery.catalog import (
     CONFIG_PATH,
     ROOT,
@@ -972,6 +973,10 @@ def _parser() -> argparse.ArgumentParser:
         "share", help="build the game for players, make store media, publish"
     )
     share.add_arguments(share_cmd)
+    blockout_cmd = commands.add_parser(
+        "blockout", help="check, rebuild or walk a level blockout layout"
+    )
+    blockout_command.add_arguments(blockout_cmd)
     setup = commands.add_parser("setup", help="change a project's tools")
     setup.add_argument("--tools", help="comma-separated ids; skips the menu")
     setup.add_argument("--project", type=Path, default=ROOT)
@@ -1343,6 +1348,8 @@ def main(argv: list[str] | None = None) -> int:
         return share.main(args)
     if args.command == "match":
         return match_cli.main(args)
+    if args.command == "blockout":
+        return blockout_command.main(args)
     if args.command == "feature":
         return _feature(args)
     if args.command == "status":

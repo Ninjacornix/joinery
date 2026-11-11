@@ -1,0 +1,48 @@
+# A level blockout. Joinery builds the greybox scene from this file;
+# edit it and rebuild (ADR 0043). Plan: x right (east), y down (south).
+version = 1
+name = "cliffs"
+mode = "2d-side"
+units = "tiles"
+
+[spawn]
+at = [3, 10]
+
+[[rooms]]
+id = "cave"
+rect = [0, 0, 44, 12]
+
+[[openings]]
+room = "cave"
+wall = "south"
+at = 30
+width = 3
+kind = "gap"
+
+[[platforms]]
+id = "step"
+rect = [12, 10, 4, 2]
+
+[[platforms]]
+id = "ledge"
+rect = [18, 8, 6, 1]
+
+[[platforms]]
+id = "pit_floor"
+rect = [28, 14, 4, 1]
+
+[[markers]]
+kind = "coin"
+at = [21, 7]
+
+[[markers]]
+kind = "checkpoint"
+at = [26, 11]
+
+[[markers]]
+kind = "hazard"
+at = [30, 13]
+
+[[markers]]
+kind = "goal"
+at = [40, 11]

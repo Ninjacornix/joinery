@@ -1,0 +1,58 @@
+# A level blockout. Joinery builds the greybox scene from this file;
+# edit it and rebuild (ADR 0043). Plan: x right (east), y down (south).
+version = 1
+name = "house"
+mode = "3d"
+
+[spawn]
+at = [2, 9]
+facing = "east"
+
+[[rooms]]
+id = "living"
+polygon = [[0, 0], [7, 0], [7, 5], [4, 5], [4, 11], [0, 11]]
+
+[[rooms]]
+id = "kitchen"
+rect = [7, 0, 5, 5]
+
+[[rooms]]
+id = "bedroom"
+rect = [4, 5, 8, 6]
+
+[[openings]]
+room = "kitchen"
+wall = "west"
+at = 2.5
+
+[[openings]]
+room = "living"
+wall = "e3"
+at = 3
+
+[[openings]]
+room = "kitchen"
+wall = "north"
+width = 2
+kind = "window"
+
+[[openings]]
+room = "living"
+wall = "e5"
+at = 5
+width = 1.5
+kind = "window"
+
+[[platforms]]
+id = "table"
+rect = [8.5, 1.5, 2, 1.2]
+top = 0.75
+
+[[markers]]
+kind = "coin"
+at = [10, 4]
+
+[[markers]]
+kind = "goal"
+at = [10, 8.5]
+id = "bed"
