@@ -222,6 +222,50 @@ results, and Gemini CLI or opencode when they send usage over ACP. An agent
 that reports nothing shows no ring; one that reports tokens but not its
 context window shows an empty ring with the counts.
 
+### Saved chats
+
+Every conversation with Journeyman is saved in your project as you go, one
+file per chat in `.joinery/chats/` (kept out of git and out of Godot's
+import). A chat keeps your requests with their targets, the paths of any
+images you attached (the images themselves stay in `.joinery/attachments/`),
+Journeyman's replies and steps, the changes it proposed and how each turn
+ended, plus which agent answered. A chat file stays under 1 MB by dropping
+its oldest turns, and a project keeps its 100 most recent chats.
+
+When you open the editor again, your most recent chat is back in the sidebar,
+and the next message continues it. The two buttons in the sidebar header,
+left of the menu, are **Chats** and **New chat**:
+
+- **New chat** clears the conversation; your next message starts a new chat
+  with a fresh agent session.
+- **Chats** lists this project's chats, newest first: the title (your first
+  request, until you rename it with the pencil), which agent answered and when
+  it was last used. The open chat says **Open**. Choosing another chat shows
+  it read-only, with **Continue** where the message box was; Continue makes it
+  the open chat.
+
+Change cards in a restored chat show what became of each change now, as
+`joinery transactions list` reports it: accepted (with **Revert** while its
+restore data is kept), **Too old to revert**, reverted, discarded, or not
+reviewed.
+
+How a chat continues depends on the agent:
+
+| Agent | Continuing a saved chat |
+| --- | --- |
+| Codex | Resumes the same Codex thread (app-server `thread/resume`). |
+| Claude Code | Resumes the same session (`--resume`), while Claude Code still keeps it for this project. |
+| Gemini CLI, opencode | Reopens the session with ACP `session/load` when the agent offers it. |
+
+When the agent can't resume (an agent without session loading, a session the
+agent no longer has, another agent or API connection than the one that saved
+the chat), a fresh session starts with a short summary of the chat's last
+turns and what became of each change, and the conversation says "Continued
+with a summary; the agent starts fresh."
+
+`joinery chats list|show|rename|delete --project <game>` reads and manages the
+same files from the command line.
+
 ### Picking a part of a model
 
 In the Tools workspace, a model's parts list shows its objects, materials and
