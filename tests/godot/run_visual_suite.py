@@ -417,6 +417,7 @@ def editor(theme: str, capture: Path, logs: Path) -> Harness:
         shutil.copyfile(TESTS / "ui_checks.gd", check / "ui_checks.gd")
         shutil.copyfile(TESTS / "visual_animation.gd", check / "visual_animation.gd")
         shutil.copyfile(TESTS / "visual_sound.gd", check / "visual_sound.gd")
+        shutil.copyfile(TESTS / "visual_review.gd", check / "visual_review.gd")
         (check / "plugin.cfg").write_text(
             '[plugin]\nname="Visual check"\ndescription="Test"\nauthor="Joinery"\n'
             'version="1"\nscript="test.gd"\n'

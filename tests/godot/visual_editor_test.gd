@@ -8,6 +8,7 @@ extends EditorPlugin
 var _checks: GDScript
 var _animation: GDScript
 var _sound: GDScript
+var _review: GDScript
 var _theme := "dark"
 var _failed := false
 var _plugin: EditorPlugin
@@ -17,6 +18,7 @@ func _enter_tree() -> void:
 	_checks = load(get_script().resource_path.get_base_dir().path_join("ui_checks.gd"))
 	_animation = load(get_script().resource_path.get_base_dir().path_join("visual_animation.gd"))
 	_sound = load(get_script().resource_path.get_base_dir().path_join("visual_sound.gd"))
+	_review = load(get_script().resource_path.get_base_dir().path_join("visual_review.gd"))
 	# Windowed runs animate; captures must show end states.
 	load("res://addons/joinery/ui_motion.gd").set_enabled(false)
 	var theme := OS.get_environment("JOINERY_VISUAL_THEME")
@@ -212,6 +214,7 @@ func _reviews(dock: Control) -> void:
 		)
 	)
 	await _shot("review-image", [panel, dock])
+	await _review.narrow(self, panel, dock)
 	dock.hide_edit_review()
 	await _frames()
 	# The review opens as soon as the checks pass; the render fills in when it is done.
@@ -379,50 +382,8 @@ func _glance_reviews(
 	await _shot("review-filmstrip", [panel, dock])
 	dock.hide_edit_review()
 	await _frames()
-	await _blockout_review(dock, panel)
+	await _review.blockout(self, dock, panel)
 	await _clip_review(dock, panel, cache)
-
-
-## A level built from the user's sketch: the sketch and the plan side by side (ADR 0043). The
-## suite copies a fixture sketch and the plan Joinery draws for it into the project.
-func _blockout_review(dock: Control, panel: Control) -> void:
-	var sketch := ProjectSettings.globalize_path("res://blockout_fixture/keep.png")
-	var plan := ProjectSettings.globalize_path("res://blockout_fixture/keep-plan.png")
-	_check(FileAccess.file_exists(sketch) and FileAccess.file_exists(plan), "Blockout fixture")
-	(
-		dock
-		. show_file_review(
-			"Build the keep from my sketch",
-			"+ design/blockouts/keep.toml\n+ game/keep_blockout.tscn",
-			[
-				{
-					"path": "design/blockouts/keep.toml",
-					"media": "image",
-					"label": "Blockout",
-					"after": plan,
-					"reference": sketch,
-				}
-			],
-			[
-				{"path": "design/blockouts/keep.toml", "change": "created"},
-				{"path": "game/keep_blockout.tscn", "change": "created"},
-				{"path": "game/blockout/blockout_level.gd", "change": "created"},
-			],
-		)
-	)
-	(
-		panel
-		. call(
-			"show_glance",
-			{
-				"facts": ["Walkable: spawn reaches 3 of 3 goals"],
-				"checks": {"ran": ["references", "Godot import"], "skipped": ["tests"]},
-			}
-		)
-	)
-	await _shot("review-blockout", [panel, dock])
-	dock.hide_edit_review()
-	await _frames()
 
 
 ## The Review tab's list of approvals, with fixture changes, then with none.
