@@ -620,8 +620,8 @@ def test_glb_bones_names_and_material_factors_are_measured(tmp_path: Path) -> No
     assert problems == [
         "art/characters/hero.glb: 3 bones in a skin, over the art bible's 2 budget",
         (
-            "art/characters/hero.glb: names 'cube.001' do not follow the art bible's "
-            "naming pattern ^[A-Z][A-Za-z0-9]*(_[A-Z][A-Za-z0-9]*){0,2}$"
+            "art/characters/hero.glb: node names 'cube.001'; mesh names 'cube.001' "
+            "do not follow the art bible's naming pattern ^[A-Z][A-Za-z0-9]*(_[A-Z][A-Za-z0-9]*){0,2}$"
         ),
         "art/characters/hero.glb: material 'Shiny_Plastic' roughness 0.10, the art bible allows 0.4-0.95",
         (
@@ -747,8 +747,8 @@ def test_blend_budgets_scale_pivot_and_materials_fail(tmp_path: Path) -> None:
         ),
         "art/props/crate.blend: 'Crate.001' texel density 400 px/m, the art bible asks for 256 ± 20%",
         (
-            "art/props/crate.blend: names 'Crate.001' do not follow the art bible's naming "
-            "pattern ^[A-Z][A-Za-z0-9]*(_[A-Z][A-Za-z0-9]*){0,2}$"
+            "art/props/crate.blend: object names 'Crate.001' do not follow the art bible's "
+            "naming pattern ^[A-Z][A-Za-z0-9]*(_[A-Z][A-Za-z0-9]*){0,2}$"
         ),
         "art/props/crate.blend: material 'Gold' roughness 0.20, the art bible allows 0.4-0.95",
         (

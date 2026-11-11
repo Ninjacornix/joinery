@@ -1276,17 +1276,24 @@ def _material_problems(
     return problems
 
 
-def _name_problems(path: str, names: Iterable[str], rules: NamingRules) -> list[str]:
+def _name_problems(
+    path: str, names: dict[str, Iterable[str]], rules: NamingRules
+) -> list[str]:
+    """One line naming each kind of name (objects, meshes, materials) that is off."""
     pattern = _folder_value(rules.nodes, path)
     if pattern is None:
         return []
     compiled = re.compile(pattern)
-    bad = sorted({n for n in names if n and not compiled.fullmatch(n)})
+    bad = []
+    for kind, found in names.items():
+        off = sorted({n for n in found if n and not compiled.fullmatch(n)})
+        if off:
+            bad.append(f"{kind} {_few(off)}")
     if not bad:
         return []
     return [
         (
-            f"{path}: names {_few(bad)} do not follow the art bible's naming "
+            f"{path}: {'; '.join(bad)} do not follow the art bible's naming "
             f"pattern {pattern}"
         )
     ]
@@ -1392,9 +1399,15 @@ def _glb_problems(path: str, data: bytes, rules: BibleRules) -> list[str]:
             problem = _texel_problem(path, repr(node), density, texel)
             if problem:
                 problems.append(problem)
-    names_found = [n.name for n in measured.nodes if not n.joint]
-    names_found += measured.meshes + [m.name for m in measured.materials]
-    problems += _name_problems(path, names_found, rules.naming)
+    problems += _name_problems(
+        path,
+        {
+            "node names": [n.name for n in measured.nodes if not n.joint],
+            "mesh names": measured.meshes,
+            "material names": [m.name for m in measured.materials],
+        },
+        rules.naming,
+    )
     if materials:
         for material in measured.materials:
             problems += _material_problems(
@@ -1434,7 +1447,10 @@ def blend_problems(path: str, measured: BlendMeasure, rules: BibleRules) -> list
     """Art bible problems in one measured `.blend` file."""
     models = rules.models
     problems: list[str] = []
-    meshes = [o for o in measured.objects if o.type == "MESH"]
+    # Rig control shapes (Rigify's WGT- objects) stay in the source to draw the
+    # rig and never reach the GLB: the checks judge what ships.
+    objects = [o for o in measured.objects if not o.widget]
+    meshes = [o for o in objects if o.type == "MESH"]
     budget = _folder_value(models.max_triangles, path)
     triangles = sum(o.triangles for o in meshes)
     if budget is not None and triangles > budget:
@@ -1450,7 +1466,7 @@ def blend_problems(path: str, measured: BlendMeasure, rules: BibleRules) -> list
                     f"deform bones, over the art bible's {bones} budget"
                 )
     if models.applied_scale:
-        scaled = [o.name for o in measured.objects if _scale_off(o.scale)]
+        scaled = [o.name for o in objects if _scale_off(o.scale)]
         if scaled:
             problems.append(
                 f"{path}: scale is not applied on {_few(scaled)}; the art bible "
@@ -1479,10 +1495,15 @@ def blend_problems(path: str, measured: BlendMeasure, rules: BibleRules) -> list
                 problem = _texel_problem(path, repr(obj.name), obj.texel_density, texel)
                 if problem:
                     problems.append(problem)
-    names = [o.name for o in measured.objects]
-    names += [o.mesh for o in meshes if o.mesh]
-    names += [m.name for m in measured.materials]
-    problems += _name_problems(path, names, rules.naming)
+    problems += _name_problems(
+        path,
+        {
+            "object names": [o.name for o in objects],
+            "mesh data names": [o.mesh for o in meshes if o.mesh],
+            "material names": [m.name for m in measured.materials],
+        },
+        rules.naming,
+    )
     if _in_folders(rules.materials.folders, path):
         for material in measured.materials:
             luminance = (

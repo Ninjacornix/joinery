@@ -84,10 +84,23 @@ def measure_mesh(obj, depsgraph):
     finally:
         evaluated.to_mesh_clear()
 
+def rig_widgets():
+    # Rigify's control shapes (WGT-...): face-less meshes a bone draws as its
+    # custom shape. They are rig internals, and the GLB export leaves them out.
+    shapes = set()
+    for rig in bpy.data.objects:
+        if rig.type == 'ARMATURE' and rig.pose is not None:
+            shapes.update(b.custom_shape.name for b in rig.pose.bones if b.custom_shape)
+    return {
+        name for name in shapes
+        if bpy.data.objects[name].type == 'MESH' and not bpy.data.objects[name].data.polygons
+    }
+
 def measure():
     depsgraph = bpy.context.evaluated_depsgraph_get()
     objects = []
     armatures = []
+    widgets = rig_widgets()
     for obj in bpy.data.objects:
         if obj.type not in {'MESH', 'ARMATURE'}:
             continue
@@ -107,6 +120,7 @@ def measure():
             'triangles': 0,
             'mesh': None,
             'texel_density': None,
+            'widget': obj.name in widgets,
         }
         if obj.type == 'MESH':
             row['mesh'] = obj.data.name
@@ -175,6 +189,8 @@ class BlendObject(_Strict):
     mesh: str | None = None
     #: Texture pixels per metre, from faces whose material has a base colour image.
     texel_density: float | None = None
+    #: A rig control shape (Rigify's WGT- objects): never exported, never checked.
+    widget: bool = False
 
 
 class BlendArmature(_Strict):
