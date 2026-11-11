@@ -31,9 +31,10 @@ the model runtime and keep the user's subscription.
    `idle → working → submitting → in_review → decided → idle`, plus `compacting`. Every
    mutation path calls `admit_mutation()`: the gateway's tool calls, `edit_scene` over the RPC,
    and Codex's dynamic scene tool. Once the change is in review, nothing more can change.
-2. **Scene routing in the core.** `scene_route()` decides how a scene is changed. A scene that
-   is open with unsaved edits, or that has no saved file yet, is edited live. Every other
-   scene, including an open saved scene, is a staged file. The staged Godot write path, the
+2. **Scene routing in the core.** `scene_route()` decides how a scene is changed. The scene on
+   screen (`editor_context.scene_path`), a scene open with unsaved edits, and a scene that has
+   no saved file yet are edited live, so the viewport is the before and after. Every other
+   scene is a staged file. The staged Godot write path, the
    live-edit admission and the submit check (`live_conflict`) all use it.
 3. **`submit_for_review` is the agent's hand-off.** It is one MCP tool on the
    `joinery-registry` proxy, backed by the gateway RPC method `submit`, the same for all four
@@ -70,9 +71,11 @@ never compacts.
 - The review shows up as soon as the checks pass; renders no longer block it.
 - The user can accept while the agent is still writing its last sentence. This is safe
   because nothing can change after `in_review`.
-- Saved scenes are no longer edited live. Small tweaks to an open saved scene are slower, but
-  every saved-scene change is one reviewable transaction. The routing is one function, so the
-  rule can be changed in one place.
+- The scene on screen stays live even when it is saved. Staging it would make its review a
+  `.tscn` text diff with no picture (the review renders only art and audio), while the
+  viewport kept showing the old scene; a glanceable review needs the picture. Scenes not on
+  screen are staged, so each of their changes is one reviewable transaction. The routing is
+  one function, so the rule can be changed in one place.
 - `review_preparing` is gone. New host→addon events: `turn_state`, `review_media`, `notice`.
 - Staged apps are closed for each submit, so a failed submit restarts them if the agent keeps
   working. This costs seconds, but no app writes while the change is checked.

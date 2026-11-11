@@ -32,6 +32,9 @@ UNSAVED = {"unsaved_scenes": json.dumps(["res://levels/room.tscn"])}
         ("res://levels/hall.tscn", UNSAVED, "staged"),
         ("res://levels/room.tscn", {}, "staged"),
         ("res://levels/room.tscn", {"unsaved_scenes": "not json"}, "staged"),
+        ("res://levels/room.tscn", {"scene_path": "res://levels/room.tscn"}, "live"),
+        ("levels/room.tscn", {"scene_path": "res://levels/room.tscn"}, "live"),
+        ("res://levels/hall.tscn", {"scene_path": "res://levels/room.tscn"}, "staged"),
     ],
 )
 def test_scene_route(scene: str, context: dict[str, str], route: str) -> None:
@@ -185,11 +188,10 @@ def test_a_request_while_a_review_is_open_only_looks() -> None:
     assert states(events)[-2:] == ["working", "in_review"]
 
 
-def test_a_live_edit_of_a_saved_scene_is_refused() -> None:
+def test_the_scene_on_screen_is_edited_live_saved_or_not() -> None:
     turn, _events, _gateway = controller()
     turn.begin("Rename the lamp")
-    with pytest.raises(ValueError, match="This scene is saved"):
-        turn.admit_live_edit({"scene_path": "res://room.tscn"})
+    assert turn.admit_live_edit({"scene_path": "res://room.tscn"}) == "res://room.tscn"
     unsaved = {"scene_path": "res://levels/room.tscn", **UNSAVED}
     assert turn.admit_live_edit(unsaved) == "res://levels/room.tscn"
     assert turn.admit_live_edit({"scene_path": ""}) == ""

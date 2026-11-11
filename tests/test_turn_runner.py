@@ -294,8 +294,13 @@ def test_the_user_can_accept_while_the_agent_is_still_writing(host: Host) -> Non
     assert positions == sorted(positions)
 
 
-def test_a_codex_live_edit_of_a_saved_scene_is_refused(host: Host) -> None:
+def test_a_codex_live_edit_is_refused_once_the_change_is_submitted(
+    host: Host,
+) -> None:
     async def agent(bridge: Any) -> AsyncIterator[Any]:
+        host.stage({"a.gd": "extends Node\n"})
+        assert host.gateway is not None and host.gateway.turn is not None
+        await host.gateway.turn.submit("A script", "agent")
         yield EditorAction(
             request_id="edit-1",
             payload={"summary": "Rename", "operations": []},
@@ -306,7 +311,7 @@ def test_a_codex_live_edit_of_a_saved_scene_is_refused(host: Host) -> None:
 
     host.run(agent)
     assert host.editor_results[0]["success"] is False
-    assert "This scene is saved" in host.editor_results[0]["message"]
+    assert "submitted for review" in host.editor_results[0]["message"]
     assert "editor_action" not in host.kinds()
 
 

@@ -65,10 +65,11 @@ drops it and says so in its own line ("Journeyman's change didn't pass Joinery's
 checks: … Nothing was changed."), so you are never left waiting for a review
 that will not come.
 
-A scene open with unsaved edits, or a new scene not saved yet, is changed live
-in the viewport; its Accept and Discard appear once the change is submitted.
-Every saved scene, open or not, is changed as a staged file and reloads when
-you accept. One request never changes the same scene both ways.
+The scene on screen is changed live in the viewport, so you see the change
+before you decide; its Accept and Discard appear once the change is submitted.
+So is any scene with unsaved edits, and a new scene not saved yet. Every other
+scene is changed as a staged file and reloads when you accept. One request
+never changes the same scene both ways.
 
 When a conversation nears the model's context limit, Joinery asks Journeyman for
 a short summary, adds what it recorded (changes accepted, discarded and still

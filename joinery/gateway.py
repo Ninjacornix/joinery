@@ -58,7 +58,9 @@ NATIVE_OPS = frozenset(
 TEXT_SUFFIXES = frozenset(
     {".gd", ".tscn", ".tres", ".json", ".toml", ".gdshader", ".md"}
 )
-LIVE_SCENE = "This scene is open with unsaved edits; change it live with edit_scene."
+LIVE_SCENE = (
+    "This scene is on screen or has unsaved edits; change it live with edit_scene."
+)
 ART_GATE_MESSAGE = (
     "Before Journeyman makes anything, agree how your game should look. "
     "Review the look, then approve these rules."

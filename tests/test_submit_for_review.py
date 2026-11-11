@@ -226,6 +226,18 @@ def test_a_godot_write_to_an_unsaved_scene_is_refused(session: Session) -> None:
         )
 
 
+def test_a_godot_write_to_the_scene_on_screen_is_refused(session: Session) -> None:
+    session.turn.begin("Make the lamp brighter")
+    session.gateway.editor_context = {"scene_path": "res://room.tscn"}
+    session.gateway.connection = AsyncMock()  # type: ignore[method-assign]
+    with pytest.raises(ValueError, match="on screen or has unsaved edits"):
+        session.run(
+            lambda: session.gateway.call(
+                "godot", "write_file", {"scenePath": "room.tscn"}
+            )
+        )
+
+
 def test_deciding_ends_the_turn(session: Session) -> None:
     session.turn.begin("Make an ashtray")
     tx = session.stage({"a.gd": "extends Node\n"})

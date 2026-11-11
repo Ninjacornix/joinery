@@ -68,11 +68,14 @@ def scene_route(
 ) -> Literal["live", "staged"]:
     """How a change to ``scene_path`` is made: in the live editor or as a staged file.
 
-    A scene open with unsaved edits, or one that has no saved file yet (an empty
-    path), is edited live; its saved file can't be accepted while the editor
-    holds newer edits. Every other scene is a staged file change.
+    The scene on screen is edited live, so the viewport shows the change before
+    the user decides. So is a scene open with unsaved edits, or one that has no
+    saved file yet (an empty path): its saved file can't be accepted while the
+    editor holds newer edits. Every other scene is a staged file change.
     """
     if not scene_path.removeprefix("res://"):
+        return "live"
+    if _res(scene_path) == _res(editor_context.get("scene_path", "")):
         return "live"
     try:
         unsaved = json.loads(editor_context.get("unsaved_scenes", "[]") or "[]")
@@ -267,14 +270,10 @@ class TurnController:
         return _res(scene_path) in self.live_scenes
 
     def admit_live_edit(self, editor_context: Mapping[str, str]) -> str:
-        """Allow one live edit of the open scene, or raise why not. Returns the scene."""
+        """Allow one live edit of the scene on screen, or raise why not. Returns the
+        scene. That scene always routes live (:func:`scene_route`), saved or not."""
         self.admit_mutation()
         scene = editor_context.get("scene_path", "")
-        if scene_route(scene, editor_context) == "staged":
-            raise ValueError(
-                "This scene is saved; change it as a staged file with the Godot "
-                "tools (call_tool on godot), not live with edit_scene."
-            )
         tx = self.gateway.transaction
         if (
             scene
