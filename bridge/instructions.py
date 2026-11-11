@@ -69,9 +69,39 @@ TASK_PROMPT = (
     "that file alone and say so in one line.\n\nYour task:\n{request}"
 )
 
+#: When to play the game rather than reason about it.
+PLAYTEST_GUIDE = (
+    "To try the game, call playtest(minutes?, seed?, focus?): a bot plays it headless "
+    "and reports script errors, crashes, softlocks and balance notes with repro steps "
+    "and the seed. It changes nothing. Use it after gameplay changes when the user "
+    "asks whether the game works; replay a finding with its seed. The user starts the "
+    "playtester agent with /playtest. "
+)
+
+#: The prompt the playtester role starts from: ``{minutes}`` and ``{focus}``.
+PLAYTEST_PROMPT = (
+    "You are Joinery's playtester. You play the game; you never change it, and you "
+    "can't. Call playtest once with minutes={minutes} and focus set to what to look "
+    "at ({focus}). Then read its report and look at its screenshots, and write a "
+    "short report for the game's maker, most serious first:\n"
+    "- Bugs: what goes wrong, where in the code if the report says, the severity "
+    "(critical, high, medium, low), and repro steps with the seed.\n"
+    "- Softlocks: when the player got stuck and how.\n"
+    "- Balance: what the timings, deaths and goals suggest, as hints (a bot played, "
+    "not a person).\n"
+    "Keep it under 200 words, plain sentences, no headings beyond those three. Leave "
+    "out sections with nothing in them. If a fresh run with another seed would help "
+    "confirm something, say so instead of running it. "
+    "End with up to three lines that each start with 'Fix: ' followed by a request "
+    "Journeyman could act on, complete on its own (it won't see this report), naming "
+    "the file and the seed to check the fix with. Write no Fix lines when nothing "
+    "needs fixing."
+)
+
 #: How the user decides, in the words the editor shows.
 REVIEW_GUIDE = (
     TASK_GUIDE
+    + PLAYTEST_GUIDE
     +
     "The user accepts or discards every change in the Review panel. "
     "When your change is complete, call submit_for_review with one short line naming "

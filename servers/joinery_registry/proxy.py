@@ -107,6 +107,30 @@ def make_server(socket: Path) -> MCPServer[Any]:
         """How a parallel task started with start_task is doing: state (working, in_review, accepted, discarded, done, failed, stopped), its current step, and its change. Check now and then; never wait in a loop."""
         return await rpc(socket, "task_status", {"id": id})
 
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True))
+    @tool_errors
+    async def playtest(
+        minutes: Annotated[float | None, Field(ge=0.25, le=10)] = None,
+        seed: Annotated[int | None, Field(ge=0)] = None,
+        focus: Annotated[str, Field(max_length=200)] = "",
+    ) -> CallToolResult:
+        """Play the game headless in stock Godot with a bot that uses the game's own controls, for `minutes` of game time (default from the project), and report what went wrong: script errors, crashes, freezes, softlocks, falls out of the world, frame hitches, broken save/load and text that doesn't fit, plus balance notes from timings and deaths. Each item has a severity and repro steps with the seed; pass the same seed to replay a run exactly. focus: words naming what to aim for. Changes nothing. Screenshots are context only, never assets."""
+        data = await rpc(
+            socket,
+            "playtest",
+            {"minutes": minutes, "seed": seed, "focus": focus},
+        )
+        result = CallToolResult(content=[TextContent(type="text", text=json.dumps(data))])
+        for shot in [str(p) for p in data.get("screenshots", [])][:3]:
+            try:
+                media, encoded = chat_attachments.encoded(Path(shot))
+            except (OSError, ValueError):
+                continue
+            result.content.append(
+                ImageContent(type="image", data=encoded, mime_type=media)
+            )
+        return result
+
     @server.tool()
     @tool_errors
     async def report_review(notes: list[ReviewNoteArgument]) -> dict[str, Any]:

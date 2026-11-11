@@ -156,6 +156,8 @@ class CodexSession:
                 'mcp_servers.joinery-registry.tools.start_task.approval_mode="approve"',
                 "-c",
                 'mcp_servers.joinery-registry.tools.task_status.approval_mode="approve"',
+                "-c",
+                'mcp_servers.joinery-registry.tools.playtest.approval_mode="approve"',
             ]
             # The reviewer's and debugger's reports; the policy hook lets only them call these.
             for tool in ("report_review", "report_diagnosis", "reproduce_error"):

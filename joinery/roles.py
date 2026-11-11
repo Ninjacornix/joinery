@@ -8,6 +8,8 @@ Every agent Joinery runs has one role:
 * ``reviewer``: reads a submitted change and reports findings. Read-only.
 * ``debugger``: reads errors and logs, reproduces offline and proposes a fix for a
   worker to make. Read-only.
+* ``playtester``: plays the game headless with ``playtest`` and writes a report of
+  bugs, softlocks and balance notes (ADR 0038). Read-only.
 
 The role reaches the provider's policy hook as ``JOINERY_AGENT_ROLE`` and the
 gateway endpoint as its ``role``; both judge each call against the same tables
@@ -29,11 +31,11 @@ from typing import Any, Literal, get_args
 from joinery.policy import Severity, Verdict
 from joinery.read_access import read_only
 
-Role = Literal["lead", "worker", "reviewer", "debugger"]
+Role = Literal["lead", "worker", "reviewer", "debugger", "playtester"]
 ROLES: tuple[Role, ...] = get_args(Role)
 #: The policy hook reads the role from here; absent means ``lead``.
 ROLE_ENV = "JOINERY_AGENT_ROLE"
-READ_ONLY_ROLES: frozenset[str] = frozenset({"reviewer", "debugger"})
+READ_ONLY_ROLES: frozenset[str] = frozenset({"reviewer", "debugger", "playtester"})
 
 #: joinery-registry tools every read-only role may call.
 REGISTRY_READS = frozenset(
@@ -43,6 +45,8 @@ REGISTRY_READS = frozenset(
 REVIEW_REPORT = "report_review"
 DIAGNOSIS_REPORT = "report_diagnosis"
 REPRODUCE = "reproduce_error"
+#: Play the game headless: read-only, so the lead, workers and the playtester may.
+PLAYTEST = "playtest"
 ROLE_ONLY = frozenset({REVIEW_REPORT, DIAGNOSIS_REPORT, REPRODUCE})
 
 
@@ -52,7 +56,7 @@ class RoleSpec:
 
     role: Role
     #: How Joinery runs its turn: the chat's own, a task, a timed review or a diagnosis.
-    turn: Literal["chat", "task", "review", "diagnosis"]
+    turn: Literal["chat", "task", "review", "diagnosis", "playtest"]
     read_only: bool
     #: joinery-registry tools beyond the shared ones ("*" for every tool).
     registry: frozenset[str]
@@ -89,6 +93,15 @@ SPECS: dict[str, RoleSpec] = {
         REGISTRY_READS | {DIAGNOSIS_REPORT, REPRODUCE},
         240,
         "Reading the error…",
+    ),
+    "playtester": RoleSpec(
+        "playtester",
+        "playtest",
+        True,
+        REGISTRY_READS | {PLAYTEST},
+        # A run of up to 10 minutes of game time, its screenshots and the write-up.
+        1200,
+        "Playing the game…",
     ),
 }
 
@@ -226,6 +239,11 @@ def refusal(role: str) -> str:
         return (
             "The debugger only reads and reproduces offline. Report the cause and the "
             "fix with report_diagnosis; a worker makes the change."
+        )
+    if role == "playtester":
+        return (
+            "The playtester only plays and reads. Call playtest, then write your "
+            "report; Journeyman makes the fixes the user asks for."
         )
     return "This agent's role can't make that call."
 

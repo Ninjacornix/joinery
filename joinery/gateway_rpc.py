@@ -158,6 +158,8 @@ class GatewayRPC:
         self.reports: list[dict[str, Any]] = []
         #: Run the project headless offline to reproduce an error (the debugger only).
         self.reproduce: Callable[[str], Awaitable[dict[str, Any]]] | None = None
+        #: Play the game headless with the playtest bot (read-only, so every agent may).
+        self.playtest: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None = None
 
     async def start(self) -> None:
         if self.transport == "tcp":
@@ -356,13 +358,17 @@ class GatewayRPC:
                 if self.role != "debugger" or self.reproduce is None:
                     raise ValueError("Only the debugger reproduces errors.")
                 data = await self.reproduce(str(params.get("scene", "") or ""))
+            elif method == "playtest":
+                if self.playtest is None:
+                    raise ValueError("Playtests are not available here.")
+                data = await self.playtest(params)
             elif method == "task_status":
                 if self.task_status is None:
                     raise ValueError("Parallel tasks are not available here.")
                 data = self.task_status(str(params.get("id", "")))
             else:
                 raise ValueError(
-                    "The model interface supports inventory, schema, call and submit; no approval methods."
+                    "The model interface supports inventory, schema, call, submit and playtest; no approval methods."
                 )
             response = {"ok": True, "result": data}
         except PolicyStop as exc:

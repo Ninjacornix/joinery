@@ -21,11 +21,12 @@ from bridge.chat_record import ChatRecorder
 from bridge.crew import Crew
 from bridge.host import Bridge
 from bridge.models import Selection
+from bridge.playtester import Playtester, gameplay_change
 from bridge.protocol import Done, EditorAction, Message, Prompt
 from bridge.reviewer import Debugger, ReviewAgent
 from bridge.specialists import Specialists
 from bridge.turn_runner import run_turn, settle_compaction
-from joinery import bible_lint, blueprints, brief, chat_attachments, chats
+from joinery import bible_lint, blueprints, brief, chat_attachments, chats, playtest
 from joinery.art_approval import approve, review
 from joinery.claims import parallel_limit
 from joinery.debugging import debug_request
@@ -182,6 +183,7 @@ async def _serve(
     active: asyncio.Task[None] | None = None
     specialists: Specialists | None = None
     crew: Crew | None = None
+    playtester: Playtester | None = None
     #: The last request's model choice, which the tasks it starts use too.
     selection: dict[str, Any] = {}
     try:
@@ -264,6 +266,8 @@ async def _serve(
         # A Rule Zero stop in any agent stops every agent: no task routes around it.
         if crew is not None:
             await crew.stop_all()
+        if playtester is not None:
+            await playtester.stop()
         if bridge is not None:
             with contextlib.suppress(Exception):
                 await bridge.cancel()
@@ -471,6 +475,35 @@ async def _serve(
             return await specialists.inspect(jobs)
 
         rpc_server.delegate = delegate
+        # The playtester plays read-only, like an inspection specialist.
+        playtester = Playtester(
+            project,
+            emit,
+            agent=agent_id,
+            profile=profile_id,
+            bridge=lambda agent: role_bridge(agent, "playtester"),
+            endpoint=lambda: role_endpoint(gateway, "playtester"),
+        )
+        rpc_server.playtest = playtester.tool
+
+        def task_endpoint(lane: ProjectGateway, stop: Any) -> GatewayRPC:
+            endpoint = GatewayRPC(lane, stop, role="worker")
+            if playtester is not None:
+                endpoint.playtest = playtester.tool
+            return endpoint
+
+        def after_decision(decision: dict[str, Any]) -> None:
+            """``[agents] playtest_after_change``: play after an accepted gameplay change."""
+            if (
+                playtester is None
+                or not decision.get("accepted")
+                or playtester.busy()
+                or not gameplay_change(list(decision.get("changes", [])))
+                or not playtest.config(project)["playtest_after_change"]
+            ):
+                return
+            playtester.start(origin="after_change")
+
         crew = Crew(
             gateway,
             emit_task,
@@ -478,7 +511,7 @@ async def _serve(
             profile=profile_id,
             limit=parallel_limit(project),
             bridge=lambda agent: Bridge(agent, role="worker"),
-            endpoint=lambda lane, stop: GatewayRPC(lane, stop, role="worker"),
+            endpoint=task_endpoint,
             on_stop=policy_stop,
             live=live_edit,
             reviewer=reviewer_for,
@@ -539,6 +572,7 @@ async def _serve(
                             "transaction_id": owned.transaction_id,
                         }
                     emit(decided)
+                    after_decision(decided)
                 elif data.get("kind") == "decision":
                     # Allowed while the agent still writes its last words: once a
                     # change is in review the agent can't change anything more.
@@ -551,6 +585,7 @@ async def _serve(
                     emit(decision)
                     if "art_review" in decision:
                         emit(art_review_event(project))
+                    after_decision(decision)
                 elif data.get("kind") == "rollback_decision":
                     emit(gateway.rollback_decision(str(data.get("transaction_id", ""))))
                 elif data.get("kind") == "art_review":
@@ -622,6 +657,10 @@ async def _serve(
                         await asyncio.gather(active, return_exceptions=True)
                         emit(Done(ok=False).model_dump())
                     await controller.cancel()
+                elif data.get("kind") == "playtest_start":
+                    playtester.start(str(data.get("focus", "")))
+                elif data.get("kind") == "playtest_cancel":
+                    await playtester.stop(str(data.get("playtest_id", "")))
                 elif data.get("kind") == "task_start":
                     text = str(data.get("text", "")).strip()
                     if not text:
@@ -670,6 +709,8 @@ async def _serve(
     finally:
         if crew is not None:
             await crew.close()
+        if playtester is not None:
+            await playtester.close()
         if active is not None and not active.done():
             active.cancel()
             await asyncio.gather(active, return_exceptions=True)
