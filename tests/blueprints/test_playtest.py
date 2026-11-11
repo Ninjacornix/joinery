@@ -28,6 +28,7 @@ STYLES = {
     "platformer-2d": "platformer",
     "top-down": "topdown",
     "puzzle-cards": "generic",
+    "vr-room": "3d",
 }
 SLOW = pytest.mark.skipif(
     os.environ.get("JOINERY_PLAYTEST_SLOW") != "1",
