@@ -319,3 +319,32 @@ def test_the_contrast_check_covers_both_themes_and_every_accent() -> None:
         p = _palette(theme, "brass")
         for bg in ("surface", "surface_sunken"):
             assert contrast(p["border_subtle"], p[bg]) >= 1.5, (theme, bg)
+
+
+#: The Journeyman sidebar's rows, which share one gutter (ui_theme.GUTTER, held by the
+#: dock's JoineryDock panel). A JoineryInset in one of them adds a second text edge.
+SIDEBAR_ROWS = (
+    "journeyman_dock.gd",
+    "sidebar_header.gd",
+    "sidebar_footer.gd",
+    "sidebar_queue.gd",
+    "sidebar_change_card.gd",
+    "sidebar_review_row.gd",
+    "sidebar_composer.gd",
+    "chat_history.gd",
+    "chat_sessions.gd",
+)
+
+
+def test_the_sidebar_rows_add_no_inset_of_their_own() -> None:
+    hits = [
+        f"{name}:{number} {line.strip()}"
+        for name in SIDEBAR_ROWS
+        for number, line in enumerate(
+            (ADDON / name).read_text(encoding="utf-8").splitlines(), 1
+        )
+        if '"JoineryInset"' in line
+    ]
+    assert not hits, "Sidebar rows sit on the dock's gutter:\n" + "\n".join(hits)
+    theme = (ADDON / "ui_theme.gd").read_text(encoding="utf-8")
+    assert re.search(r"^const GUTTER := \d+$", theme, re.MULTILINE)

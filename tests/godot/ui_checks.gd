@@ -9,10 +9,12 @@ extends RefCounted
 ## Each finding prints one line: "UI-CHECK <screen> <kind> <node path> <detail>".
 ## Sizes are compared in logical pixels: the editor's interface scale is removed.
 ##
-## Two things are allowed on purpose and never reported:
+## Three things are allowed on purpose and never reported:
 ##   - text trimmed with an ellipsis when the control (or a near ancestor) carries the full
 ##     text as a tooltip, such as a long file name on a chip;
 ##   - ALLOWED entries: stock Godot controls Joinery does not style, each with its reason.
+##   - a sidebar row marked with the "joinery_gutter" meta reaching into the dock's gutter,
+##     as long as it stays inside the dock.
 
 const MIN_TARGET := 24.0
 const BODY_CONTRAST := 4.5
@@ -538,6 +540,14 @@ static func _overflow(control: Control, window: Rect2, clip: Rect2) -> String:
 	var parent := control.get_parent() as Control
 	if parent != null and not control.top_level and not parent is ScrollContainer:
 		var outer := parent.get_global_rect()
+		# Marked sidebar rows reach into the dock's gutter on purpose (the transcript's
+		# scrollbar, icon buttons' glyph padding): they need only stay inside the dock.
+		if control.has_meta("joinery_gutter"):
+			var dock := control.get_parent()
+			while dock != null and not dock is PanelContainer:
+				dock = dock.get_parent()
+			if dock != null:
+				outer = (dock as Control).get_global_rect()
 		var spill := _spill(rect, outer)
 		if spill != Vector2.ZERO:
 			return (

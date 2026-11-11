@@ -58,6 +58,7 @@ CASES = {
     "complex_models_setting_test.gd": "complex models setting: ok",
     "mixer_test.gd": "mixer: ok",
     "sound_pass_card_test.gd": "sound pass card: ok",
+    "sidebar_margins_test.gd": "sidebar margins: ok",
     # Last: it puts the shared disposable project under git.
     "timeline_test.gd": "timeline: ok",
 }
