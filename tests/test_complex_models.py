@@ -198,6 +198,13 @@ def test_a_prop_scene_of_primitives_is_flagged() -> None:
     assert [(f.name, len(f.shapes)) for f in found] == [("Lamp", 3)]
 
 
+def test_a_sound_added_beside_old_shapes_does_not_make_them_new() -> None:
+    # The sound pass adds a SoundCue to a greybox prop: the prop's shapes are as they
+    # were, though the scene is no longer only shapes and so names them differently.
+    cue = '\n[node name="UseSound" type="Node" parent="."]\ntrigger = &"switched"\n'
+    assert changed_findings(LAMP, LAMP + cue, "scenes/props/lamp.tscn") == []
+
+
 def test_csg_parts_count_and_combiners_group_them() -> None:
     table = """[gd_scene format=3]
 

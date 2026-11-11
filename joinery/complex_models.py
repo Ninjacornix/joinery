@@ -109,6 +109,9 @@ PROP_TYPES = frozenset(
         *CSG_GROUPS,
     }
 )
+#: Nodes that add nothing to see (a sound, a timer, a script holder): a prop scene
+#: with one is still a scene of one object.
+SILENT_TYPES = frozenset({"Node", "AudioStreamPlayer", "AudioStreamPlayer3D", "Timer"})
 #: Shapes sharing a space this close (metres) are parts of one object.
 TOUCH = 0.1
 FIX = (
@@ -398,7 +401,9 @@ def scene_findings(text: str, file: str = "") -> list[Finding]:
         return sizes[path] is not None or nodes[path].kind in CSG_GROUPS
 
     prop_scene = all(
-        not n.instance and n.kind in PROP_TYPES for p, n in nodes.items() if p != "."
+        not n.instance and n.kind in PROP_TYPES
+        for p, n in nodes.items()
+        if p != "." and n.kind not in SILENT_TYPES
     )
     groups: dict[str, list[Shape]] = {}
     for path, node in nodes.items():
@@ -417,7 +422,9 @@ def scene_findings(text: str, file: str = "") -> list[Finding]:
             transform = _compose(transform, _local(link))
         bounds = _bounds(transform, size)
         groups.setdefault(owner, []).append(
-            Shape(path, node.name, bounds.centre, bounds.half, node.section.body())
+            Shape(
+                path, node.name, bounds.centre, bounds.half, node.section.body().strip()
+            )
         )
     found: list[Finding] = []
     for owner, shapes in groups.items():
