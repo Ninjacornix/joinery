@@ -1,0 +1,16 @@
+; A heavy 3D scene with performance problems planted on purpose, for joinery perf's
+; tests: 24 copies of one mesh with no visibility range, six shadowed omni lights and a
+; script that loops 300 000 times every frame. The tests add an oversized texture and a
+; model with LODs turned off. Technical fixture; no game art.
+
+config_version=5
+
+[application]
+
+config/name="Perf Fixture"
+run/main_scene="res://main.tscn"
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
