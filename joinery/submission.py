@@ -24,6 +24,7 @@ from joinery.catalog import load_catalog
 from joinery.deps import check_deps
 from joinery.lockfile import check_assets
 from joinery.policy import load_denylist
+from joinery.runner import Result
 from joinery.transactions import DIRECTORY, FileTransaction
 from joinery.turn import Problem, scene_route
 
@@ -314,6 +315,7 @@ async def checks(
                     tx.stage,
                     OFFLINE_SECONDS,
                 )
+            worker_ready(got)
             if _broken(got.output, got.ok):
                 found.append(
                     Problem(
@@ -336,6 +338,21 @@ async def checks(
     return problems
 
 
+#: What Docker prints when the offline worker itself can't start.
+WORKER_DOWN = (
+    "Cannot connect to the Docker daemon",
+    "docker daemon is not running",
+    "error during connect",
+    "Unable to find image",
+)
+
+
+def worker_ready(got: Result) -> None:
+    """Raise when the offline worker never ran: no change can fix that."""
+    if not got.ok and any(sign in got.stderr for sign in WORKER_DOWN):
+        raise RuntimeError("Docker isn't running, so Joinery's checks could not start.")
+
+
 async def run_tests(
     stage: Path, folders: list[str], timed: Any = None
 ) -> list[Problem]:
@@ -353,6 +370,7 @@ async def run_tests(
     ]
     with timed("review_tests") if timed is not None else nullcontext():
         got = await run_offline(argv, stage, OFFLINE_SECONDS)
+    worker_ready(got)
     if got.ok and "SCRIPT ERROR:" not in got.output:
         return []
     return [

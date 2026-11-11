@@ -290,3 +290,115 @@ def test_the_proxy_offers_submit_for_review_with_a_short_summary() -> None:
     assert schema["required"] == ["summary"]
     assert schema["properties"]["summary"]["minLength"] == 1
     assert schema["properties"]["summary"]["maxLength"] == 160
+
+
+def test_a_stop_ends_the_checks_and_leaves_the_next_turn_alone(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    started = asyncio.Event()
+    ended: list[str] = []
+
+    async def offline(*_a: Any, **_k: Any) -> Result:
+        started.set()
+        try:
+            await asyncio.sleep(60)
+        except asyncio.CancelledError:
+            ended.append("cancelled")
+            raise
+        return Result(True, "", "", 0.0)
+
+    monkeypatch.setattr("joinery.submission.run_offline", offline)
+    session.turn.begin("Make an ashtray")
+    tx = session.stage({"a.gd": "extends Node\n"})
+
+    async def go() -> Any:
+        # The agent's submit runs in the RPC task, not in the turn's task.
+        submit = asyncio.create_task(session.turn.submit("Ashtray"))
+        await started.wait()
+        await session.turn.cancel()
+        assert ended == ["cancelled"], "The checks stop before the stage goes"
+        assert not session.gateway.call_lock.locked()
+        session.turn.begin("What is this lamp?")
+        return await submit
+
+    result = session.run(go)
+    assert result.final and [p.check for p in result.problems] == ["stopped"]
+    assert tx.state == "rejected" and session.turn.last_result is None
+    assert session.turn.state is TurnState.WORKING and session.turn.attempts == 0
+
+
+def test_a_review_that_cannot_open_drops_the_change(
+    session: Session, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    session.turn.begin("Make an ashtray")
+    tx = session.stage({"a.gd": "extends Node\n"})
+
+    def locked(_summary: str) -> dict[str, Any]:
+        raise PermissionError("a.gd is locked by another program")
+
+    monkeypatch.setattr(session.gateway, "open_review", locked)
+    result = session.run(lambda: session.turn.submit("Ashtray"))
+    assert result.status == "failed" and result.final
+    assert [p.check for p in result.problems] == ["review"]
+    assert tx.state == "rejected" and session.turn.state is TurnState.IDLE
+    assert not session.turn.review_open
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        FileNotFoundError("docker"),
+        Result(False, "", "Cannot connect to the Docker daemon at unix://", 0.0),
+    ],
+)
+def test_checks_joinery_cannot_run_are_final_at_once(
+    session: Session, monkeypatch: pytest.MonkeyPatch, fault: Any
+) -> None:
+    async def offline(*_a: Any, **_k: Any) -> Result:
+        if isinstance(fault, BaseException):
+            raise fault
+        return fault  # type: ignore[no-any-return]
+
+    monkeypatch.setattr("joinery.submission.run_offline", offline)
+    session.turn.begin("Make an ashtray")
+    session.stage({"a.gd": "extends Node\n"})
+    result = session.run(lambda: session.turn.submit("Ashtray"))
+    assert result.status == "failed" and result.final and result.attempt == 1
+    (problem,) = result.problems
+    assert problem.check == "checks" and not problem.fixable
+
+
+def test_an_unchanged_stage_is_not_checked_again(session: Session) -> None:
+    session.turn.begin("Make an ashtray")
+    session.stage({"scenes/ashtray.tscn": SCENE})
+    runs: list[int] = []
+    checks = session.gateway.submit_checks
+
+    async def counted(live: set[str]) -> Any:
+        runs.append(1)
+        return await checks(live)
+
+    session.gateway.submit_checks = counted  # type: ignore[method-assign]
+
+    async def go() -> Any:
+        await session.turn.submit("Ashtray")
+        return await session.turn.end(True, last=False)
+
+    result = session.run(go)
+    assert len(runs) == 1 and session.turn.attempts == 1
+    assert result.status == "failed" and not result.final
+    assert [p.check for p in result.problems] == ["references"]
+
+
+def test_a_changed_stage_is_checked_again_at_the_end(session: Session) -> None:
+    session.turn.begin("Make an ashtray")
+    tx = session.stage({"scenes/ashtray.tscn": SCENE})
+
+    async def go() -> Any:
+        await session.turn.submit("Ashtray")
+        (tx.stage / "art/models").mkdir(parents=True)
+        (tx.stage / "art/models/ashtray.glb").write_text("glTF")
+        return await session.turn.end(True, last=False)
+
+    result = session.run(go)
+    assert result.status == "in_review" and session.turn.attempts == 2

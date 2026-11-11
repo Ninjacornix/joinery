@@ -13,12 +13,15 @@ import asyncio
 import json
 import uuid
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
+from joinery.transactions import inventory
+
 if TYPE_CHECKING:
     from joinery.gateway import ProjectGateway
+    from joinery.submission import Validation
 
 
 class TurnState(StrEnum):
@@ -150,7 +153,11 @@ class SubmitResult:
 
 #: What the agent is told to do next, by outcome.
 NEXT_FIX = "Fix each problem, then call submit_for_review again."
-NEXT_STOP = "Stop and tell the user plainly what failed. Nothing was changed."
+NEXT_STOP = (
+    "Stop. Joinery tells the user in its own line that the change failed its checks "
+    "and nothing was changed; don't repeat that. Say in one short sentence what you "
+    "would try differently, or nothing."
+)
 NEXT_REVIEW = (
     "The change is on screen for the user. Say in a sentence or two what changed "
     "and make no more changes this turn."
@@ -201,6 +208,10 @@ class TurnController:
         self.last_result: SubmitResult | None = None
         #: Live edits the editor is applying: {request id: scene}.
         self._live_requests: dict[str, str] = {}
+        #: The submit checks running now, so a Stop can end them.
+        self._checks: asyncio.Task[Validation] | None = None
+        #: The stage and live edits as the last fixable failure found them.
+        self._checked: tuple[dict[str, str], int] | None = None
         gateway.turn = self
 
     # --- State -----------------------------------------------------------------------
@@ -228,6 +239,7 @@ class TurnController:
         self.turn_id = uuid.uuid4().hex
         self.attempts = 0
         self.last_result = None
+        self._checked = None
         self.request = request
         self.requests = [*self.requests, request.strip()[:160]][-10:]
         if not self.review_open:
@@ -333,32 +345,84 @@ class TurnController:
         """Check the turn's change and, when it passes, put it in front of the user.
 
         Fixable problems leave the stage as it is so the agent can fix them; the
-        last allowed attempt, or a problem no fix can pass, drops it.
+        last allowed attempt, or a problem no fix can pass, drops it. A submit
+        whose turn was stopped while its checks ran returns "stopped" and leaves
+        the turn that runs now alone.
         """
+        turn = self.turn_id
         result = await self._submit(summary, origin)
-        self.last_result = result
+        if self.turn_id == turn:
+            self.last_result = result
+            self._checked = self._fingerprint() if not result.final else None
         return result
+
+    def _fingerprint(self) -> tuple[dict[str, str], int] | None:
+        """What the stage and the live edits are now, to tell an unchanged change."""
+        tx = self.gateway.transaction
+        if tx is None or tx.state != "staging":
+            return ({}, self.live_edits)
+        try:
+            return (inventory(tx.stage), self.live_edits)
+        except (OSError, ValueError):
+            return None
+
+    async def _run_checks(self) -> Validation:
+        async with self.gateway.call_lock:
+            return await self.gateway.submit_checks(self.live_scenes)
+
+    async def _stop_checks(self) -> None:
+        """Stop checks still running, before the stage they read is thrown away."""
+        checks, self._checks = self._checks, None
+        if checks is not None and not checks.done():
+            checks.cancel()
+            await asyncio.wait({checks})
+
+    def _stopped(self) -> SubmitResult:
+        return self._result(
+            "failed", True, problems=[Problem("stopped", "The turn was stopped.")]
+        )
 
     async def _submit(self, summary: str, origin: str) -> SubmitResult:
         self.admit_mutation()
         if not self._staged() and not self.live_edits:
             return self._result("nothing_to_review", False, next=NEXT_NOTHING)
+        turn = self.turn_id
         self.attempts += 1
         self._to(TurnState.SUBMITTING)
-        gate: dict[str, Any] | None = None
+        checks = asyncio.create_task(self._run_checks())
+        self._checks = checks
         try:
-            async with self.gateway.call_lock:
-                checked = await self.gateway.submit_checks(self.live_scenes)
+            # The checks run in their own task, so a Stop can end them (cancel)
+            # whichever task this submit runs in.
+            await asyncio.wait({checks})
+        except asyncio.CancelledError:
+            await self._stop_checks()
+            raise
+        if checks.cancelled() or self.turn_id != turn:
+            return self._stopped()
+        if self._checks is checks:
+            self._checks = None
+        if self.state is not TurnState.SUBMITTING:
+            return self._stopped()
+        gate: dict[str, Any] | None = None
+        error = checks.exception()
+        if error is None:
+            checked = checks.result()
             found, problems, gate = checked.changes, checked.problems, checked.gate
-        except (OSError, RuntimeError, ValueError, TimeoutError) as exc:
+        elif isinstance(error, (OSError, RuntimeError, ValueError, TimeoutError)):
             tx = self.gateway.transaction
             found = tx.diff() if tx is not None and tx.state == "staging" else []
-            problems = [Problem("checks", f"Joinery could not run its checks: {exc}")]
-        if self.state is not TurnState.SUBMITTING:
-            # Stopped while the checks ran.
-            return self._result(
-                "failed", True, problems=[Problem("stopped", "The turn was stopped.")]
-            )
+            # Joinery's own failure: no change the agent makes can pass it.
+            problems = [
+                Problem(
+                    "checks",
+                    f"Joinery could not run its checks: {error}",
+                    fixable=False,
+                )
+            ]
+        else:
+            await self._drop("failed")
+            raise error
         changes = [{"path": c["path"], "change": c["change"]} for c in found]
         if gate is not None:
             self.gateway.art_gate = None
@@ -397,16 +461,23 @@ class TurnController:
             self._to(TurnState.WORKING)
             self.attempts -= 1
             return self._result("nothing_to_review", False, next=NEXT_NOTHING)
-        preview: dict[str, Any] | None = None
-        if found:
-            preview = self.gateway.open_review(summary.strip() or self.request)
-            gate, self.gateway.art_gate = self.gateway.art_gate, None
-            if gate is not None:
-                preview["art_gate"] = {k: v for k, v in gate.items() if k != "kind"}
-            preview["origin"] = origin
-            self.review_id = str(preview["transaction_id"])
-        elif self.gateway.transaction is not None:
-            await self.gateway.cancel()  # an empty stage beside a live edit
+        try:
+            preview = await self._open(summary, found, origin)
+        except Exception as exc:  # noqa: BLE001 - never leave the turn submitting.
+            await self._drop("failed")
+            return self._result(
+                "failed",
+                True,
+                changes=changes,
+                problems=[
+                    Problem(
+                        "review",
+                        f"Joinery could not open the review: {exc}",
+                        fixable=False,
+                    )
+                ],
+                next=NEXT_STOP,
+            )
         self.review_open = True
         if preview is not None:
             self.emit(preview)
@@ -420,12 +491,38 @@ class TurnController:
             next=NEXT_REVIEW,
         )
 
+    async def _open(
+        self, summary: str, found: list[dict[str, str]], origin: str
+    ) -> dict[str, Any] | None:
+        """The checked change's ``file_preview``; None for a live edit alone."""
+        if not found:
+            if self.gateway.transaction is not None:
+                await self.gateway.cancel()  # an empty stage beside a live edit
+            return None
+        preview = self.gateway.open_review(summary.strip() or self.request)
+        gate, self.gateway.art_gate = self.gateway.art_gate, None
+        if gate is not None:
+            preview["art_gate"] = {k: v for k, v in gate.items() if k != "kind"}
+        preview["origin"] = origin
+        self.review_id = str(preview["transaction_id"])
+        return preview
+
+    def _unchanged_failure(self) -> SubmitResult | None:
+        """The last submit's fixable failure, when nothing changed since it."""
+        last = self.last_result
+        if last is None or last.status != "failed" or last.final:
+            return None
+        if self._checked is None or self._checked != self._fingerprint():
+            return None
+        return replace(last)
+
     async def end(self, ok: bool, *, last: bool = True) -> SubmitResult | None:
         """The provider finished its turn (``Done``).
 
-        A change the agent left without submitting is submitted on its behalf.
-        With ``last`` a fixable failure of that submit is final too: no one is
-        left to fix it.
+        A change the agent left without submitting is submitted on its behalf;
+        when nothing changed since its own submit failed, that failure stands
+        rather than running the same checks again. With ``last`` a fixable
+        failure is final too: no one is left to fix it.
         """
         if self.state is not TurnState.WORKING:
             return None  # submitted already, or decided while the agent finished
@@ -436,11 +533,14 @@ class TurnController:
             self._to(TurnState.IN_REVIEW)
             return None
         if self._staged() or self.live_edits:
-            result = await self.submit(self.request[:160], "joinery")
+            result = self._unchanged_failure() or await self.submit(
+                self.request[:160], "joinery"
+            )
             if result.status == "failed" and not result.final and last:
                 await self._drop("failed")
                 result.final = True
                 result.next = NEXT_STOP
+            self.last_result = result
             return result
         if self.gateway.transaction is not None:
             await self.gateway.cancel()  # a stage with no changes
@@ -467,6 +567,7 @@ class TurnController:
             await self._abandon(reason)
 
     async def _abandon(self, reason: str) -> None:
+        await self._stop_checks()
         if self.review_open:
             # The change on screen came from an earlier turn; it stays.
             self._to(TurnState.IN_REVIEW, reason)
@@ -475,6 +576,7 @@ class TurnController:
 
     async def _drop(self, reason: str) -> None:
         """Throw this turn's change away: the stage and the live preview."""
+        await self._stop_checks()
         await self.gateway.cancel()
         self.gateway.art_gate = None
         self.live_scenes.clear()
