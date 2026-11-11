@@ -291,6 +291,49 @@ coins`. The playtester is your provider in the read-only `playtester` role (ADR
   takes focus. Where nothing can draw (Linux without a display) the report
   has no pictures.
 
+### Making everything match
+
+`/match` checks the whole project against the approved art bible's checked
+rules and fixes what drifts, as reviewed changes (ADR 0045). **Make it match**
+in Settings, on the Review tab's art bible row and at the foot of the art
+direction does the same. No model is needed to check.
+
+- A **Match** card shows above the message box with the other agents at work:
+  one headline (**9 things drift from the art bible**), one row per area with a
+  bar and its score (**Palette 72%**: the share of textures on the palette), and
+  the three most serious findings, each with what was measured and what the
+  bible asks (`wall.png 100% off-palette → ≤ 5%`). **Show all** lists the rest;
+  hovering one says how it would be fixed.
+- Areas: **Palette** (CIEDE2000 distance of textures to the palette),
+  **Textures** (size limits, power of two, texel density of models),
+  **Models** (applied scale, pivots, triangle and bone budgets), **Materials**
+  (roughness and metallic ranges), **Lighting** (each Environment's tonemap,
+  exposure, fog, glow and colour grading against `[environment]` in the
+  bible), **UI** (theme and style colours on the palette, the fonts `[ui]
+  fonts` lists, text size) and **Sound** (loudness and true peak).
+- **Fix N things** makes every fix Joinery can make; **Fix** on an area makes
+  only that area's. Each fix is done in the app that owns the file, with a
+  typed operation and a recipe: a palette-map layer or a resize in Krita, apply
+  scale, pivot, decimate, texel density or a material value in Blender, a
+  loudness edit on the rendered sound, the Environment's or theme's values
+  through Godot. Fixes are grouped into small changes ("Remap 6 textures to
+  the palette", "Normalise 9 sounds to −16 LUFS"), one file in one change
+  only, and run side by side as tasks with their own cards, as many at once as
+  `[agents] parallel` allows. Each change is checked, read by the reviewer and
+  waits in the Review tab like any other; nothing is accepted for you.
+- While they run, the card says **Making 5 changes… 2 ready to review** with
+  **Review** and its own **Stop**. After you accept one the project is checked
+  again and the scores rise in place.
+- **N need you** counts what Joinery won't change itself (a file you imported,
+  a texture made in GIMP, a bone budget); hover it for each reason. **N kept
+  as they are** counts what you protected: `[match] exclude = ["art/wip"]`
+  (folders or files) and `[match] final = ["art/props/crate.blend"]` in
+  `joinery.toml`, or `joinery match --project <path> --final <file>`. A final
+  source protects what it exports.
+- `joinery match --project <path>` prints the same audit (`--json` for all of
+  it, `--area palette` for one area, `--plan` for the changes Fix all would
+  start).
+
 ### The Timeline tab
 
 **Timeline**, beside Review in the bottom bar, shows how the project changed
@@ -388,6 +431,8 @@ again.
   goes wrong (see Reviewer and debugger agents).
 - `/playtest [what to aim for]` plays the game with a bot and reports bugs,
   softlocks and balance notes (see Playtests above).
+- `/match` checks the project against the art bible and offers to fix what
+  drifts (see Making everything match above).
 - `/brief` opens `design/brief.md` read-only, with **Ask Journeyman to change
   it**. With no brief, **Write the brief** drafts one from the starting point.
 - `/tools` gives each app's state and its one action (for example Start Docker
@@ -685,6 +730,7 @@ uv run joinery brief --project /path/to/game        # write design/brief.md (set
 uv run joinery brief --project /path/to/game --json # the brief's summary and suggestions
 uv run joinery bible --project /path/to/game --upgrade   # bring an older bible up to date
 uv run joinery check bible --project /path/to/game  # gaps, reference board and suggestions
+uv run joinery match --project /path/to/game        # how far the project is from the bible, per area
 uv run joinery check catalogue                      # every blueprint and feature is valid
 ```
 
