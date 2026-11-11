@@ -148,6 +148,8 @@ class Validation:
     gate: dict[str, Any] | None = None
     #: Checks that did not apply to this change ("tests" without GUT).
     skipped: list[str] = field(default_factory=list)
+    #: The checks that ran, in plain words ("art bible", "tests"), for the review.
+    ran: list[str] = field(default_factory=list)
 
 
 async def validate(
@@ -209,6 +211,7 @@ async def validate(
         found.problems.append(
             Problem("references", references.refusal(gaps), sorted(gaps))
         )
+    found.ran.append("references")
     asset_changes = [
         change["path"]
         for change in changes
@@ -227,6 +230,7 @@ async def validate(
             found.gate = gateway.art_gate_event()
             return found
         problems = check_assets(tx.stage, load_catalog())
+        found.ran.append("provenance")
         if problems:
             found.problems.append(
                 Problem(
@@ -240,6 +244,7 @@ async def validate(
         # UI themes and scenes are checked for text contrast and size.
         rules = bible_ok and ui_changes(tx.stage, changes)
     problems = check_deps(tx.stage, load_denylist())
+    found.ran.append("dependencies")
     if problems:
         found.problems.append(
             Problem(
@@ -256,11 +261,21 @@ async def validate(
     tests = gut_dirs(tx.stage) if godot else []
     if godot and not tests:
         found.skipped.append("tests")
+    importing = godot and not gateway.import_current(tx)
+    found.ran += [
+        name
+        for name, on in (
+            ("art bible", rules),
+            ("Godot import", importing or bool(tests)),
+            ("tests", bool(tests)),
+        )
+        if on
+    ]
     found.problems += await checks(
         tx,
         changes,
         rules=rules,
-        godot=godot and not gateway.import_current(tx),
+        godot=importing,
         tests=tests,
         span=gateway.span,
     )

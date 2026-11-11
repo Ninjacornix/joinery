@@ -278,7 +278,12 @@ class GatewayRPC:
                     raise ValueError(
                         "Give one short line (1 to 160 characters) naming what changed."
                     )
-                submitted = await self.gateway.turn.submit(summary, "agent")
+                facts = params.get("facts") or []
+                if not isinstance(facts, list) or not all(
+                    isinstance(fact, str) for fact in facts
+                ):
+                    raise ValueError("facts is a list of short phrases.")
+                submitted = await self.gateway.turn.submit(summary, "agent", facts)
                 data = submitted.as_tool_result()
             elif method == "delegate":
                 if self.inspection_only or self.delegate is None:

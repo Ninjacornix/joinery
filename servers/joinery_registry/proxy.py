@@ -74,9 +74,10 @@ def make_server(socket: Path) -> MCPServer[Any]:
     @tool_errors
     async def submit_for_review(
         summary: Annotated[str, Field(min_length=1, max_length=160)],
+        facts: Annotated[list[str], Field(max_length=3)] | None = None,
     ) -> dict[str, Any]:
-        """Hand your finished change to Joinery. Joinery checks it (art bible rules, Godot import, missing res:// files, asset provenance, project tests). status 'in_review': the user now sees it; make no more changes this turn. 'failed' and not final: fix every problem listed and submit again (attempts_left). 'needs_user', or final: stop and tell the user plainly what failed. summary: one short line in the user's words naming what changed."""
-        return await rpc(socket, "submit", {"summary": summary})
+        """Hand your finished change to Joinery. Joinery checks it (art bible rules, Godot import, missing res:// files, asset provenance, project tests). status 'in_review': the user now sees it; make no more changes this turn. 'failed' and not final: fix every problem listed and submit again (attempts_left). 'needs_user', or final: stop and tell the user plainly what failed. summary: one short line in the user's words naming what changed. facts: optional, up to 3 tiny plain phrases of what visibly changed, with numbers when known ('door 20% wider', 'wood darker')."""
+        return await rpc(socket, "submit", {"summary": summary, "facts": facts or []})
 
     @server.tool()
     @tool_errors

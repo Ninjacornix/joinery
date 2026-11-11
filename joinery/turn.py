@@ -215,6 +215,10 @@ class TurnController:
         self._checks: asyncio.Task[Validation] | None = None
         #: The stage and live edits as the last fixable failure found them.
         self._checked: tuple[dict[str, str], int] | None = None
+        #: What the passing checks covered, for the review's quiet status line.
+        self._passed: dict[str, list[str]] = {}
+        #: The agent's plain words on what visibly changed, for the review.
+        self._facts: list[str] = []
         gateway.turn = self
 
     # --- State -----------------------------------------------------------------------
@@ -243,6 +247,7 @@ class TurnController:
         self.attempts = 0
         self.last_result = None
         self._checked = None
+        self._facts = []
         self.request = request
         self.requests = [*self.requests, request.strip()[:160]][-10:]
         if not self.review_open:
@@ -364,16 +369,22 @@ class TurnController:
         )
 
     async def submit(
-        self, summary: str, origin: Literal["agent", "joinery"] = "agent"
+        self,
+        summary: str,
+        origin: Literal["agent", "joinery"] = "agent",
+        facts: list[str] | None = None,
     ) -> SubmitResult:
         """Check the turn's change and, when it passes, put it in front of the user.
 
         Fixable problems leave the stage as it is so the agent can fix them; the
         last allowed attempt, or a problem no fix can pass, drops it. A submit
         whose turn was stopped while its checks ran returns "stopped" and leaves
-        the turn that runs now alone.
+        the turn that runs now alone. ``facts`` are the agent's few plain words on
+        what visibly changed ("door 20% wider"); the review shows them in one line.
         """
         turn = self.turn_id
+        if facts is not None or origin == "agent":
+            self._facts = [f.strip()[:40] for f in facts or [] if f.strip()][:3]
         result = await self._submit(summary, origin)
         if self.turn_id == turn:
             self.last_result = result
@@ -433,6 +444,7 @@ class TurnController:
         if error is None:
             checked = checks.result()
             found, problems, gate = checked.changes, checked.problems, checked.gate
+            self._passed = {"ran": checked.ran, "skipped": checked.skipped}
         elif isinstance(error, (OSError, RuntimeError, ValueError, TimeoutError)):
             tx = self.gateway.transaction
             found = tx.diff() if tx is not None and tx.state == "staging" else []
@@ -528,6 +540,9 @@ class TurnController:
         if gate is not None:
             preview["art_gate"] = {k: v for k, v in gate.items() if k != "kind"}
         preview["origin"] = origin
+        preview["checks"] = self._passed
+        if self._facts:
+            preview["facts"] = self._facts
         self.review_id = str(preview["transaction_id"])
         return preview
 

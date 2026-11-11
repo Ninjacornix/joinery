@@ -402,3 +402,29 @@ def test_a_changed_stage_is_checked_again_at_the_end(session: Session) -> None:
 
     result = session.run(go)
     assert result.status == "in_review" and session.turn.attempts == 2
+
+
+def test_the_review_carries_the_agents_facts_and_the_checks_that_ran(
+    session: Session,
+) -> None:
+    session.turn.begin("Make the door wider")
+    session.stage({"scenes/ashtray.tscn": SCENE, "art/models/ashtray.glb": "glTF"})
+    session.run(
+        lambda: session.turn.submit(
+            "A wider door", "agent", ["door 20% wider", " ", "wood darker"]
+        )
+    )
+    preview = next(e for e in session.events if e["kind"] == "file_preview")
+    assert preview["facts"] == ["door 20% wider", "wood darker"]
+    assert preview["checks"]["ran"][:2] == ["references", "provenance"]
+    assert "Godot import" in preview["checks"]["ran"]
+    assert preview["checks"]["skipped"] == ["tests"]
+
+
+def test_the_proxy_offers_optional_facts_for_the_review() -> None:
+    from servers.joinery_registry.proxy import make_server
+
+    tools = asyncio.run(make_server(Path("gateway.sock")).list_tools())
+    (tool,) = [t for t in tools if t.name == "submit_for_review"]
+    assert "facts" in tool.input_schema["properties"]
+    assert tool.input_schema["required"] == ["summary"]
