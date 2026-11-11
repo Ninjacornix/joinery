@@ -98,6 +98,10 @@ OP_APPS: dict[str, tuple[str, ...]] = {
     "kit_make": ("blender",),
     "kit_batch": ("blender",),
     "kit_edit": ("blender",),
+    # Animations.
+    "make_cycle": ("blender",),
+    "edit_action": ("blender",),
+    "animation_pass": ("blender",),
 }
 NATIVE_OPS = frozenset(OP_APPS)
 #: Key prefix of a read-only agent's connection on the stage, beside the staged ones.

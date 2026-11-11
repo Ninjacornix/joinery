@@ -36,7 +36,11 @@ PART_GUIDE = (
     "operations in its ops, not with code: maps with adjust_map, or make_map_editable "
     "once and then paint_map (typed Krita layers) or replace_map (a tool-made image); "
     "split_material when only some objects should change; edit_bone and "
-    "edit_shape_key for one bone or shape key. "
+    "edit_shape_key for one bone or shape key; edit_action for an animation (bounce, "
+    "retime, amplitude, foot_lock, ...), make_cycle for a new motion (walk, run, idle, "
+    "jump, attack, wave) and animation_pass for the clips the game plays but the "
+    "character lacks. Pass up to three facts to submit_for_review, such as "
+    '"Run: 0.7 s loop, bounce +30%". '
 )
 
 #: Parametric kits: typed procedural models, made in Blender, replayable.

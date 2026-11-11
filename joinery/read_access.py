@@ -27,6 +27,7 @@ FIRST_PARTY_READS = {
     "validate_project",
     "transaction_status",
     "kit_list",
+    "audit_animations",
 }
 
 
