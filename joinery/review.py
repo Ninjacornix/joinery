@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from joinery import parts as part_lists
 from joinery.authoring import run_offline
 from joinery.transactions import FileTransaction
 
@@ -280,7 +281,9 @@ def plan(
     Every item already names the file each side shows: an image or audio file
     as it is, or the render's output, which appears once :func:`render` has
     run. ``parts`` are the prompt's part targets: a material or map target adds
-    a texture view of that part on its model before the full model.
+    a texture view of that part on its model before the full model. A model and
+    its clips also name the GLB/glTF each side exports (``before_model``,
+    ``after_model``), so the review can show them as live 3D.
     """
     media: list[dict[str, Any]] = []
     renders: list[Render] = []
@@ -299,6 +302,8 @@ def plan(
         }
         digest = hashlib.sha256(relative.encode()).hexdigest()[:12]
         if suffix == ".blend":
+            exports = _exports(tx, relative)
+            item.update(exports)
             for part in _parts_in(relative, parts or []):
                 view: dict[str, Any] = {
                     "path": relative,
@@ -326,6 +331,9 @@ def plan(
                     "media": "clip",
                     "part": anim["id"],
                     "label": anim["action"] or anim["was"],
+                    "before_action": anim["was"],
+                    "after_action": anim["action"],
+                    **exports,
                 }
                 key = hashlib.sha256(anim["id"].encode()).hexdigest()[:8]
                 for side, root, action in (
@@ -405,6 +413,26 @@ async def evidence(
     media, renders = plan(tx, changes, parts)
     await render(renders, strict=True)
     return media
+
+
+def _exports(tx: FileTransaction, source: str) -> dict[str, str]:
+    """The GLB/glTF ``source`` exports, on each side that has it.
+
+    Read where the change is staged: the review loads these files as they are
+    (nothing is imported into the project). Empty when no recipe names one.
+    """
+    try:
+        _tool, _source, resource = part_lists.owner_of(tx.stage, source)
+    except (ValueError, OSError):
+        return {}
+    exported = resource.removeprefix("res://")
+    if Path(exported).suffix.lower() not in {".glb", ".gltf"}:
+        return {}
+    return {
+        f"{side}_model": str(root / exported)
+        for side, root in (("before", tx.original), ("after", tx.stage))
+        if (root / exported).is_file()
+    }
 
 
 def _animations_in(

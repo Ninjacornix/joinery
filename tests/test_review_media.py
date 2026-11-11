@@ -121,3 +121,33 @@ def test_deciding_stops_a_render_still_running(
     decision = asyncio.run(go())
     assert decision["accepted"] and cancelled.is_set() and events == []
     assert (tmp_path / "art/crate.blend").read_bytes() == b"after"
+
+
+def test_a_model_names_the_glb_each_side_exports_for_live_3d(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _gateway, tx = staged(tmp_path, monkeypatch)
+    recipe = (
+        'version=1\ntool="blender"\nscript="recipes/crate.py"\n'
+        'outputs=["art/crate.blend","art/models/crate.glb"]\n'
+    )
+    for root, body in ((tx.original, b"old glb"), (tx.stage, b"new glb")):
+        (root / "recipes").mkdir(exist_ok=True)
+        (root / "recipes/crate.toml").write_text(recipe)
+        (root / "art/models").mkdir(parents=True, exist_ok=True)
+        (root / "art/models/crate.glb").write_bytes(body)
+    media, _renders = review.plan(tx, [{"path": "art/crate.blend", "change": "modified"}])
+    (item,) = media
+    assert item["before_model"] == str(tx.original / "art/models/crate.glb")
+    assert item["after_model"] == str(tx.stage / "art/models/crate.glb")
+    (tx.original / "art/models/crate.glb").unlink()
+    media, _renders = review.plan(tx, [{"path": "art/crate.blend", "change": "modified"}])
+    assert "before_model" not in media[0], "A side without the file has no live model"
+
+
+def test_a_model_without_an_exported_glb_keeps_its_renders_only(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _gateway, tx = staged(tmp_path, monkeypatch)
+    media, _renders = review.plan(tx, [{"path": "art/crate.blend", "change": "modified"}])
+    assert not {"before_model", "after_model"} & media[0].keys()
