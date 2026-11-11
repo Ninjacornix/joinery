@@ -113,6 +113,13 @@ def _credits(project: Path) -> list[str]:
     for entry in entries:
         if entry.origin == "human-import":
             lines.append(f"- `{entry.path}`: {entry.licence}.")
+    from joinery.kit_library import installed
+
+    for manifest, _record in installed(project):
+        lines.append(
+            f"- The {manifest.name} kit {manifest.version} by {manifest.author}: "
+            f"{manifest.licence}."
+        )
     return lines
 
 

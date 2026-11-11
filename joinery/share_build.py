@@ -55,7 +55,17 @@ PLAYTEST_SECONDS = 30.0
 BOOT_FRAMES = 300
 #: Files Joinery keeps out of every export: the editor add-on, store material,
 #: recipes, design documents and tests are not part of the game.
-EXCLUDES = ("addons/joinery/*", "share/*", "recipes/*", "design/*", "tests/*")
+EXCLUDES = (
+    "addons/joinery/*",
+    "share/*",
+    "recipes/*",
+    "design/*",
+    "tests/*",
+    # A shared kit's recipes, generators and thumbnails stay out of the game.
+    "kits/*/recipes/*",
+    "kits/*/generators/*",
+    "kits/*/thumbnails/*",
+)
 #: itch.io's limits for a game played in the browser, and for one download.
 WEB_MAX_TOTAL = 500 * 1024 * 1024
 WEB_MAX_FILES = 1000
@@ -361,7 +371,40 @@ def notices(project: Path, target: str) -> dict[str, bytes]:
     ]
     if imported:
         found["LICENSES/Imported-assets.txt"] = ("\n".join(imported) + "\n").encode()
+    kits = kit_notices(project)
+    if kits:
+        found["LICENSES/Kits.txt"] = kits.encode()
     return found
+
+
+def kit_notices(project: Path) -> str:
+    """Each imported kit's name, author and licence, and the licences its files carry."""
+    from joinery.kit_library import installed
+    from joinery.lockfile import KitAsset
+
+    blocks = []
+    entries = [e for e in read_assets(project) if isinstance(e, KitAsset)]
+    for manifest, record in installed(project):
+        lines = [
+            f"{manifest.name} {manifest.version} by {manifest.author}",
+            f"Licence: {manifest.licence}",
+        ]
+        if manifest.description:
+            lines.append(manifest.description)
+        lines += [
+            f"- {e.path}: {e.asset_licence}"
+            + (f" (from {e.upstream})" if e.upstream else "")
+            for e in entries
+            if e.path.startswith(record.folder + "/") and e.asset_licence
+        ]
+        blocks.append("\n".join(lines))
+    if not blocks:
+        return ""
+    return (
+        "Shared kits this game uses, and their licences:\n\n"
+        + "\n\n".join(blocks)
+        + "\n"
+    )
 
 
 _HOW_TO = {
