@@ -94,6 +94,17 @@ def judged(
         ("debugger", "report_review", {"notes": []}, False),
         ("debugger", "report_diagnosis", {"cause": "x"}, True),
         ("debugger", "reproduce_error", {}, True),
+        # The design check reads and reports findings; it changes nothing.
+        ("designer", "report_design", {"findings": []}, True),
+        ("designer", "view_editor", {}, True),
+        ("designer", "submit_for_review", {"summary": "x"}, False),
+        ("designer", "edit_scene", {}, False),
+        ("designer", "start_task", {"title": "t", "request": "r"}, False),
+        ("designer", "report_review", {"notes": []}, False),
+        ("designer", "blockout", {"layout": {}}, False),
+        ("reviewer", "report_design", {"findings": []}, False),
+        ("lead", "report_design", {"findings": []}, False),
+        ("worker", "report_design", {"findings": []}, False),
         # Tasks are one level deep; only the reviewer and debugger report.
         ("worker", "start_task", {"title": "t", "request": "r"}, False),
         ("worker", "submit_for_review", {"summary": "x"}, True),
@@ -117,7 +128,7 @@ def test_each_role_may_call_only_its_own_tools_whichever_provider_runs_it(
     assert severity == (None if allowed else Severity.DENY)
 
 
-@pytest.mark.parametrize("role", ["reviewer", "debugger"])
+@pytest.mark.parametrize("role", ["reviewer", "debugger", "designer"])
 @pytest.mark.parametrize(
     "server,tool,allowed",
     [
@@ -171,7 +182,7 @@ def test_read_only_roles_run_only_reading_commands(
     project: Path, monkeypatch: pytest.MonkeyPatch, command: str, allowed: bool
 ) -> None:
     assert read_only_command(command) is allowed
-    for role in ("reviewer", "debugger"):
+    for role in ("reviewer", "debugger", "designer"):
         raw = {
             "tool_name": "Bash",
             "tool_input": {"command": command},
@@ -188,13 +199,25 @@ def test_rule_zero_still_stops_every_role_first(
         "tool_input": {"command": "curl https://meshy.ai/api"},
         "cwd": str(project),
     }
-    for role in ("lead", "worker", "reviewer", "debugger"):
+    for role in ("lead", "worker", "reviewer", "debugger", "designer"):
         assert judged(monkeypatch, role, raw) == Severity.STOP
     fetch = {"tool_name": "WebFetch", "tool_input": {"url": "https://example.com"}}
     assert (
         judged(monkeypatch, "debugger", {**fetch, "cwd": str(project)}) == Severity.DENY
     )
     assert judged(monkeypatch, "lead", {**fetch, "cwd": str(project)}) is None
+    assert (
+        judged(monkeypatch, "designer", {**fetch, "cwd": str(project)}) == Severity.DENY
+    )
+    for native in ("Write", "Edit", "apply_patch", "Task"):
+        assert (
+            judged(
+                monkeypatch,
+                "designer",
+                {"tool_name": native, "tool_input": {}, "cwd": str(project)},
+            )
+            == Severity.DENY
+        )
 
 
 def test_an_unknown_role_is_refused_not_read_as_the_lead(
@@ -215,7 +238,9 @@ def test_roles_have_their_own_turns_and_time_boxes() -> None:
         "playtester",
         "accessibility",
         "performance",
+        "designer",
     }
+    assert spec("designer").turn == "design" and spec("designer").read_only
     assert spec("lead").turn == "chat" and not spec("lead").read_only
     assert spec("worker").turn == "task"
     assert spec("reviewer").turn == "review" and spec("reviewer").read_only
@@ -252,6 +277,12 @@ def test_roles_have_their_own_turns_and_time_boxes() -> None:
         ("worker", "report_review", {"notes": []}, "Only the reviewer"),
         ("lead", "report_review", {"notes": []}, "Only the reviewer"),
         ("lead", "reproduce", {}, "Only the debugger"),
+        ("designer", "submit", {"summary": "x"}, "cannot submit"),
+        ("designer", "editor_edit", {}, "cannot change"),
+        ("designer", "report_review", {"notes": []}, "Only the reviewer"),
+        ("designer", "blockout", {"layout": {}}, "Specialists cannot build"),
+        ("reviewer", "report_design", {"findings": []}, "Only the design check"),
+        ("lead", "report_design", {"findings": []}, "Only the design check"),
     ],
 )
 def test_the_endpoint_refuses_what_the_role_may_not_do(
@@ -348,6 +379,9 @@ def test_every_provider_runs_each_role_with_its_hook_and_transport(agent: str) -
     assert session.role == "reviewer" and session.inspection_only
     debugger = Bridge(agent, role="debugger")
     assert debugger._adapter.session.role == "debugger"  # type: ignore[attr-defined]
+    designer = Bridge(agent, role="designer")
+    session = designer._adapter.session  # type: ignore[attr-defined]
+    assert session.role == "designer" and session.inspection_only
     worker = Bridge(agent, role="worker")
     session = worker._adapter.session  # type: ignore[attr-defined]
     assert session.role == "worker" and not session.inspection_only

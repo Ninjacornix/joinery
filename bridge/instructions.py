@@ -56,9 +56,9 @@ PART_GUIDE = (
 KIT_GUIDE = (
     "For rocks, crates, barrels, fences, simple buildings, trees and bushes, use the "
     "kits before writing Blender code: kit_list shows each kit's parameters; kit_make "
-    "makes one model, kit_batch a varied set (\"50 rocks, mossier, smaller\" is "
-    "kit_batch(kit=\"rock\", count=50, params={\"moss\": 0.6, \"size\": 0.6})), "
-    "kit_edit changes a kit-made set (\"make those rocks mossier\"), and scatter places "
+    'makes one model, kit_batch a varied set ("50 rocks, mossier, smaller" is '
+    'kit_batch(kit="rock", count=50, params={"moss": 0.6, "size": 0.6})), '
+    'kit_edit changes a kit-made set ("make those rocks mossier"), and scatter places '
     "models in a saved scene, on a surface, clear of paths. Kits follow the art bible's "
     "palette, budgets and pivots themselves. "
 )
@@ -228,6 +228,33 @@ CHECK_PROMPT = (
     "Subtitles) where the game has them. Under 250 words, the request only. If no "
     "change to the project would fix it, reply with the single word NONE.\n\n"
     "Findings:\n{findings}"
+)
+
+#: The prompt the design check's agent starts from: ``{found}``, Joinery's own findings.
+DESIGN_PROMPT = (
+    "You are Joinery's design check. Read this game the way a careful game designer "
+    "would before a playtest, and report what breaks it or goes against its own "
+    "brief or design document. You only read: you can't change anything, and the "
+    "user decides what to fix. Read design/brief.md, any design document under "
+    "design/docs/, the input map in project.godot, and the scenes and scripts "
+    "(files on disk; read-only call_tool and inspect_editor).\n"
+    "Report only two kinds of finding: (1) the game contradicts its own brief or "
+    "design document (basis brief or gdd), such as a goal the brief sets that the "
+    "player is never told, feedback the brief's verbs table promises that the code "
+    "never gives, a progression step that never happens; (2) the game is broken for a "
+    "player (basis broken), such as a way to get stuck, an objective that can't be "
+    "reached, an action with no feedback, a menu with no way back. Never report taste: "
+    "art style, difficulty you would prefer, genre choices, wording. A finding you "
+    "can't tie to a brief or document line, or to something that breaks, is not one.\n"
+    "Call report_design once with at most 8 findings, most serious first. Each cites "
+    "evidence that holds: the project path, the line, and the exact words on that "
+    "line (or the node in the scene). A brief or document finding cites its line "
+    "under design/. Joinery checks every citation and drops what doesn't hold. Say "
+    "what the player experiences in one plain sentence, and write fix as a request "
+    "Journeyman could act on alone (it won't see this). Joinery already found these, "
+    "so don't report them again:\n{found}\n"
+    "No findings is a fine answer: call report_design with an empty list. Then end "
+    "your turn; don't summarise."
 )
 
 #: How the user decides, in the words the editor shows.

@@ -15,6 +15,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal
 
+from joinery import design
 from joinery.blockout import stage as blockout_stage
 from joinery.debugging import diagnosis_from
 from joinery.gateway import ProjectGateway
@@ -177,7 +178,8 @@ class GatewayRPC:
         self.start_variants: (
             Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None
         ) = None
-        #: What the reviewer or debugger reported (report_review, report_diagnosis).
+        #: What a read-only role reported (report_review, report_diagnosis,
+        #: report_design).
         self.reports: list[dict[str, Any]] = []
         #: Run the project headless offline to reproduce an error (the debugger only).
         self.reproduce: Callable[[str], Awaitable[dict[str, Any]]] | None = None
@@ -391,6 +393,27 @@ class GatewayRPC:
                     "recorded": True,
                     "next": "Your diagnosis is recorded. End your turn now; a worker "
                     "makes the fix and the user reviews it.",
+                }
+            elif method == "report_design":
+                if self.role != "designer":
+                    raise ValueError("Only the design check reports design findings.")
+                kept, dropped = design.agent_findings(self.gateway.project, params)
+                self.reports.append(
+                    {
+                        "findings": [f.model_dump() for f in kept],
+                        "dropped": dropped,
+                    }
+                )
+                data = {
+                    "recorded": len(kept),
+                    "dropped": dropped,
+                    "next": (
+                        "Recorded. Findings whose evidence didn't hold were dropped; "
+                        "report them again with the right file, line and words if they "
+                        "are real, or end your turn now."
+                        if dropped
+                        else "Recorded. End your turn now."
+                    ),
                 }
             elif method == "reproduce":
                 if self.role != "debugger" or self.reproduce is None:

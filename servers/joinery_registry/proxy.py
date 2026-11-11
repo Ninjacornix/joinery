@@ -26,6 +26,27 @@ class ReviewNoteArgument(BaseModel):
     file: str | None = None
 
 
+class DesignEvidenceArgument(BaseModel):
+    """One place in the project a design finding rests on."""
+
+    path: Annotated[str, Field(min_length=1, max_length=300)]
+    line: Annotated[int, Field(ge=0)] = 0
+    node: Annotated[str, Field(max_length=200)] = ""
+    quote: Annotated[str, Field(max_length=300)] = ""
+
+
+class DesignFindingArgument(BaseModel):
+    """One design finding: what breaks the game or goes against its own brief."""
+
+    severity: Literal["high", "medium", "low"]
+    title: Annotated[str, Field(min_length=1, max_length=140)]
+    player: Annotated[str, Field(min_length=1, max_length=400)]
+    why: Annotated[str, Field(min_length=1, max_length=600)]
+    basis: Literal["brief", "gdd", "broken"]
+    evidence: Annotated[list[DesignEvidenceArgument], Field(min_length=1, max_length=6)]
+    fix: Annotated[str, Field(max_length=600)] = ""
+
+
 def make_server(socket: Path) -> MCPServer[Any]:
     server: MCPServer[Any] = MCPServer(
         "joinery-registry",
@@ -187,14 +208,18 @@ def make_server(socket: Path) -> MCPServer[Any]:
                 "sketch": sketch,
             },
         )
-        result = CallToolResult(content=[TextContent(type="text", text=json.dumps(data))])
+        result = CallToolResult(
+            content=[TextContent(type="text", text=json.dumps(data))]
+        )
         picture = str(data.get("picture", "") or "")
         if picture:
             try:
                 media, encoded = chat_attachments.encoded(Path(picture))
             except (OSError, ValueError):
                 return result
-            result.content.append(ImageContent(type="image", data=encoded, mime_type=media))
+            result.content.append(
+                ImageContent(type="image", data=encoded, mime_type=media)
+            )
         return result
 
     @server.tool()
@@ -205,6 +230,16 @@ def make_server(socket: Path) -> MCPServer[Any]:
             socket,
             "report_review",
             {"notes": [note.model_dump(exclude_none=True) for note in notes]},
+        )
+
+    @server.tool()
+    @tool_errors
+    async def report_design(findings: list[DesignFindingArgument]) -> dict[str, Any]:
+        """Design check agents only: report what breaks the game or goes against its own brief or design document, then end your turn. findings: up to 8, most serious first, each {severity high|medium|low, title (one short line), player (what the player experiences), why, basis 'brief'|'gdd'|'broken', evidence [{path, line?, node?, quote?}], fix (a request Journeyman could act on)}. Evidence must hold: the file exists, the line is in it, the quoted words are on it, the node is in the scene; a finding resting on the brief or a design document cites its line under design/. Findings that don't hold are dropped and listed back. Never report taste."""
+        return await rpc(
+            socket,
+            "report_design",
+            {"findings": [f.model_dump() for f in findings]},
         )
 
     @server.tool()

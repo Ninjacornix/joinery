@@ -13,6 +13,9 @@ Every agent Joinery runs has one role:
 * ``accessibility`` and ``performance``: read their check (``access_check``,
   ``perf_check``) and the code it points at, and word the fix a worker makes for a
   finding that needs code (ADR 0049, ADR 0050). Read-only.
+* ``designer``: reads the brief, design documents, scenes and scripts for what breaks
+  the game or goes against its own brief, and reports each finding with evidence
+  through ``report_design`` (the design check). Read-only.
 
 The role reaches the provider's policy hook as ``JOINERY_AGENT_ROLE`` and the
 gateway endpoint as its ``role``; both judge each call against the same tables
@@ -42,12 +45,13 @@ Role = Literal[
     "playtester",
     "accessibility",
     "performance",
+    "designer",
 ]
 ROLES: tuple[Role, ...] = get_args(Role)
 #: The policy hook reads the role from here; absent means ``lead``.
 ROLE_ENV = "JOINERY_AGENT_ROLE"
 READ_ONLY_ROLES: frozenset[str] = frozenset(
-    {"reviewer", "debugger", "playtester", "accessibility", "performance"}
+    {"reviewer", "debugger", "playtester", "accessibility", "performance", "designer"}
 )
 
 #: joinery-registry tools every read-only role may call.
@@ -58,12 +62,13 @@ REGISTRY_READS = frozenset(
 REVIEW_REPORT = "report_review"
 DIAGNOSIS_REPORT = "report_diagnosis"
 REPRODUCE = "reproduce_error"
+DESIGN_REPORT = "report_design"
 #: Play the game headless: read-only, so the lead, workers and the playtester may.
 PLAYTEST = "playtest"
 #: The accessibility and performance checks: read-only, so the lead and workers may too.
 ACCESS_CHECK = "access_check"
 PERF_CHECK = "perf_check"
-ROLE_ONLY = frozenset({REVIEW_REPORT, DIAGNOSIS_REPORT, REPRODUCE})
+ROLE_ONLY = frozenset({REVIEW_REPORT, DIAGNOSIS_REPORT, REPRODUCE, DESIGN_REPORT})
 #: Only the lead starts more agents: parallel tasks and variants.
 LEAD_ONLY = frozenset({"start_task", "start_variants"})
 
@@ -74,7 +79,7 @@ class RoleSpec:
 
     role: Role
     #: How Joinery runs its turn: the chat's own, a task, a timed review or a diagnosis.
-    turn: Literal["chat", "task", "review", "diagnosis", "playtest", "check"]
+    turn: Literal["chat", "task", "review", "diagnosis", "playtest", "check", "design"]
     read_only: bool
     #: joinery-registry tools beyond the shared ones ("*" for every tool).
     registry: frozenset[str]
@@ -137,6 +142,14 @@ SPECS: dict[str, RoleSpec] = {
         # A check may play the game twice (headless, then in a window) and read code.
         600,
         "Reading the performance profile…",
+    ),
+    "designer": RoleSpec(
+        "designer",
+        "design",
+        True,
+        REGISTRY_READS | {DESIGN_REPORT},
+        300,
+        "Reading the design…",
     ),
 }
 
@@ -285,6 +298,11 @@ def refusal(role: str) -> str:
             "The playtester only plays and reads. Call playtest, then write your "
             "report; Journeyman makes the fixes the user asks for."
         )
+    if role == "designer":
+        return (
+            "The design check only reads. Report each finding with its evidence "
+            "through report_design; Journeyman makes the fixes the user asks for."
+        )
     if role in {"accessibility", "performance"}:
         return (
             f"The {role} agent only reads. Write the fix as your reply; a worker "
@@ -339,9 +357,7 @@ def role_violation(
             else Verdict(Severity.DENY, refusal(role))
         )
     if kind == "fetch":
-        return Verdict(
-            Severity.DENY, "Reviewers and debuggers work offline; no web access."
-        )
+        return Verdict(Severity.DENY, "Read-only agents work offline; no web access.")
     if native_writer(native):
         return Verdict(Severity.DENY, refusal(role))
     return None

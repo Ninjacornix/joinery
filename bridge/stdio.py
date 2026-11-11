@@ -20,6 +20,7 @@ from bridge import compaction
 from bridge.chat_record import ChatRecorder
 from bridge.check_runner import Checks
 from bridge.crew import Crew
+from bridge.designer import Designer
 from bridge.host import Bridge
 from bridge.instructions import expand_command
 from bridge.match_runner import MatchRun
@@ -198,6 +199,7 @@ async def _serve(
     crew: Crew | None = None
     variants: Variants | None = None
     playtester: Playtester | None = None
+    designer: Designer | None = None
     matcher: MatchRun | None = None
     checks: Checks | None = None
     #: The last request's model choice, which the tasks it starts use too.
@@ -289,6 +291,8 @@ async def _serve(
             await crew.stop_all()
         if playtester is not None:
             await playtester.stop()
+        if designer is not None:
+            await designer.stop()
         if bridge is not None:
             with contextlib.suppress(Exception):
                 await bridge.cancel()
@@ -519,6 +523,15 @@ async def _serve(
             endpoint=lambda: role_endpoint(gateway, "playtester"),
         )
         rpc_server.playtest = playtester.tool
+        # The design check's agent pass reads in its own read-only role too.
+        designer = Designer(
+            project,
+            emit,
+            agent=agent_id,
+            profile=profile_id,
+            bridge=lambda agent: role_bridge(agent, "designer"),
+            endpoint=lambda: role_endpoint(gateway, "designer"),
+        )
 
         def task_endpoint(lane: ProjectGateway, stop: Any) -> GatewayRPC:
             endpoint = GatewayRPC(lane, stop, role="worker")
@@ -530,9 +543,12 @@ async def _serve(
 
         def after_decision(decision: dict[str, Any]) -> None:
             """``[agents] playtest_after_change``: play after an accepted gameplay change,
-            and the checks' ``[agents] access_check_every`` / ``perf_check_every``."""
+            the checks' ``[agents] access_check_every`` / ``perf_check_every``, and the
+            design check's ``design_check_every``."""
             if checks is not None:
                 checks.after_decision(decision)
+            if designer is not None:
+                designer.after_decision(decision)
             if (
                 playtester is None
                 or not decision.get("accepted")
@@ -843,6 +859,12 @@ async def _serve(
                     playtester.start(str(data.get("focus", "")))
                 elif data.get("kind") == "playtest_cancel":
                     await playtester.stop(str(data.get("playtest_id", "")))
+                elif data.get("kind") == "design_start":
+                    assert designer is not None
+                    designer.start(deep=bool(data.get("deep", True)))
+                elif data.get("kind") == "design_cancel":
+                    assert designer is not None
+                    await designer.stop(str(data.get("design_id", "")))
                 elif data.get("kind") == "task_start":
                     text = str(data.get("text", "")).strip()
                     if not text:
@@ -916,6 +938,8 @@ async def _serve(
             await crew.close()
         if playtester is not None:
             await playtester.close()
+        if designer is not None:
+            await designer.close()
         if active is not None and not active.done():
             active.cancel()
             await asyncio.gather(active, return_exceptions=True)

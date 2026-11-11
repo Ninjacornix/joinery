@@ -171,8 +171,13 @@ class CodexSession:
                 "-c",
                 'mcp_servers.joinery-registry.tools.perf_check.approval_mode="approve"',
             ]
-            # The reviewer's and debugger's reports; the policy hook lets only them call these.
-            for tool in ("report_review", "report_diagnosis", "reproduce_error"):
+            # The read-only roles' reports; the policy hook lets only each role call its own.
+            for tool in (
+                "report_review",
+                "report_diagnosis",
+                "reproduce_error",
+                "report_design",
+            ):
                 args += [
                     "-c",
                     f'mcp_servers.joinery-registry.tools.{tool}.approval_mode="approve"',

@@ -110,8 +110,15 @@ def test_submit_for_review_runs_without_an_approval_prompt(game: Path) -> None:
         in argv
     )
     # The reviewer's and debugger's reports are approved too; the hook limits who calls them.
-    for tool in ("report_review", "report_diagnosis", "reproduce_error"):
-        assert f'mcp_servers.joinery-registry.tools.{tool}.approval_mode="approve"' in argv
+    for tool in (
+        "report_review",
+        "report_diagnosis",
+        "reproduce_error",
+        "report_design",
+    ):
+        assert (
+            f'mcp_servers.joinery-registry.tools.{tool}.approval_mode="approve"' in argv
+        )
 
 
 def test_missing_gate_refuses_launch(tmp_path: Path) -> None:
