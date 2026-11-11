@@ -1,0 +1,20 @@
+# Accessibility settings for every blueprint: one "Accessibility" settings page
+# (it replaces the core's) with text size, high contrast, a colour-blind filter
+# (a post-process shader), screen shake, reduced motion, flash reduction,
+# subtitles and their size, hold-or-toggle for held actions, game speed, and the
+# Controls page to remap keys and buttons when controller support is there.
+# Menu controls get the names screen readers say, from the label beside them.
+# `joinery access` offers it when a game misses these; the user adds it.
+id = "accessibility"
+name = "Accessibility"
+summary = "Text size, high contrast, colour-blind filter, subtitles, reduced motion and flashes, hold or toggle, game speed."
+version = 1
+requires = []
+conflicts = []
+enhances = ["controller"]
+blueprints = ["*"]
+extra_roots = []
+
+[autoload]
+Accessibility = "res://features/accessibility/accessibility.gd"
+Subtitles = "res://features/accessibility/subtitles.gd"
