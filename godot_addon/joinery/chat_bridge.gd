@@ -280,6 +280,22 @@ func send_design(deep: bool, stop := false, design_id := "") -> bool:
 	return true
 
 
+## True while an agent is connected and takes requests.
+func is_ready() -> bool:
+	return _job != null and _connected
+
+
+## The Mixer tab Save mix ({kind: "mixer_save", bus_layout?, tracks?}): the host writes it as
+## a reviewed change (bridge/mixer_save.py). False when not connected.
+func send_mixer(line: Dictionary) -> bool:
+	if not is_ready():
+		return false
+	var message := line.duplicate(true)
+	message["kind"] = "mixer_save"
+	_job.send_line(JSON.stringify(message))
+	return true
+
+
 ## Show a task's change in the Review tab.
 func show_task_review(transaction_id: String) -> void:
 	task_review.emit(transaction_id)

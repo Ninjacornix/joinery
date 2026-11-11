@@ -11,6 +11,7 @@ import sys
 import tempfile
 from pathlib import Path
 
+from music_fixture import plant as plant_music
 from run_startup_test import (
     crash,
     isolated_editor,
@@ -54,6 +55,7 @@ CASES = {
     "design_card_test.gd": "design card: ok",
     "variants_test.gd": "variants: ok",
     "complex_models_setting_test.gd": "complex models setting: ok",
+    "mixer_test.gd": "mixer: ok",
     # Last: it puts the shared disposable project under git.
     "timeline_test.gd": "timeline: ok",
 }
@@ -78,11 +80,28 @@ def _game(path: Path, env: dict[str, str]) -> Path:
     _project(path)
     subprocess.run(
         [
-            "uv", "run", "--frozen", "--quiet", "--project", str(ROOT), "joinery",
-            "game", "apply", "--project", str(path), "--blueprint", GAME_BLUEPRINT,
-            "--features", "", "--no-addon",
+            "uv",
+            "run",
+            "--frozen",
+            "--quiet",
+            "--project",
+            str(ROOT),
+            "joinery",
+            "game",
+            "apply",
+            "--project",
+            str(path),
+            "--blueprint",
+            GAME_BLUEPRINT,
+            "--features",
+            "",
+            "--no-addon",
         ],
-        env=env, check=True, capture_output=True, text=True, timeout=120,
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=120,
     )
     return path
 
@@ -103,11 +122,20 @@ def _run(selected: list[str], temporary: Path) -> int:
     audio = project / "audio/sfx/door_creak.wav"
     audio.parent.mkdir(parents=True)
     shutil.copyfile(ROOT / "testbed/audio/sfx/door_creak.wav", audio)
+    if "mixer_test.gd" in cases:
+        plant_music(project)
     game = _game(temporary / "game", env) if GAME_CASES & set(cases) else None
     binary = isolated_editor(engine_binary(), temporary)
 
     def base(path: Path) -> list[str]:
-        return [str(binary), "--headless", "--audio-driver", "Dummy", "--path", str(path)]
+        return [
+            str(binary),
+            "--headless",
+            "--audio-driver",
+            "Dummy",
+            "--path",
+            str(path),
+        ]
 
     commands = [(base(project) + ["--editor", "--import"], "")]
     if game is not None:
@@ -123,8 +151,14 @@ def _run(selected: list[str], temporary: Path) -> int:
     failed: list[str] = []
     for argv, marker in commands:
         result = subprocess.run(
-            argv, env=env, capture_output=True, text=True, encoding="utf-8",
-            errors="replace", timeout=120, check=False,
+            argv,
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+            check=False,
         )
         output = result.stdout + result.stderr
         print(output, flush=True)

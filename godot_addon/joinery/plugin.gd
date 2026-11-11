@@ -102,6 +102,7 @@ func _enter_tree() -> void:
 	_review_button = add_control_to_bottom_panel(_review_tab, "Review")
 	load("res://addons/joinery/timeline_tab.gd").install(self)
 	load("res://addons/joinery/share_tab.gd").install(self)
+	load("res://addons/joinery/mixer_tab.gd").install(self)
 	# Revert runs the sidebar's own, so the chat's change card follows.
 	_review_tab.attach(_dock.get("_slash"), _review_button)
 	# Accessibility and performance (ADR 0049, 0050): last scores, and their cards.
