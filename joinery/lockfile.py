@@ -279,6 +279,35 @@ def forget_extension(project: Path, name: str) -> bool:
     return True
 
 
+def record_imports(project: Path, imports: list[HumanImport]) -> int:
+    """Add `human-import` entries for paths the lock has no entry for yet.
+
+    Only for files the user explicitly added. Everything already in the lock
+    (assets and `[[extensions]]`) stays as it is. Returns how many were added.
+    """
+    lock = project / LOCK_NAME
+    text = lock.read_text(encoding="utf-8") if lock.is_file() else LOCK_HEADER
+    known = {entry.path for entry in _parse(text)[0]}
+    blocks: list[str] = []
+    for entry in imports:
+        if entry.path in known:
+            continue
+        known.add(entry.path)
+        blocks.append(
+            "[[asset]]\n"
+            + "".join(
+                f"{key} = {json.dumps(value)}\n"
+                for key, value in entry.model_dump().items()
+            )
+        )
+    if not blocks:
+        return 0
+    updated = text.rstrip("\n") + "\n\n" + "\n".join(blocks)
+    _parse(updated)  # never write a lock that does not read back
+    lock.write_text(updated, encoding="utf-8")
+    return len(blocks)
+
+
 def check_assets(project: Path, catalog: Catalog) -> list[str]:
     lock = project / LOCK_NAME
     if not lock.is_file():

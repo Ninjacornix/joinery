@@ -25,6 +25,7 @@ from joinery import (
     hook,
     playtest,
     references,
+    setup_imports,
     timeline,
 )
 from joinery.agents import all_agents
@@ -231,6 +232,14 @@ def _new(
         if blueprint is not None:
             chosen = _defaults(blueprint, chosen)
             game_setup.check_choices(blueprint, chosen, steam_app_id, connect)
+        picked = [
+            setup_imports.parse_reference(text)
+            for text in getattr(policy_args, "reference", None) or []
+        ]
+        documents = [
+            Path(text).expanduser()
+            for text in getattr(policy_args, "design_doc", None) or []
+        ]
         selection = _choose(tools, path / "joinery.toml")
         create_project(
             path,
@@ -243,6 +252,8 @@ def _new(
             connect=connect,
             report=_print_step,
             wizard=True,
+            references=picked,
+            documents=documents,
         )
         if policy is not None:
             history.write_policy(path.resolve(), policy)
@@ -270,6 +281,13 @@ def _game_apply(args: argparse.Namespace) -> int:
     try:
         policy = history.policy_from_args(args)
         chosen = _defaults(args.blueprint, _feature_list(args.features))
+        # The flags, and the wizard's files beside the project; all checked first.
+        imports = setup_imports.plan_from_args(
+            args.project.resolve(),
+            args.reference or [],
+            args.design_doc or [],
+            answers=(setup_imports.REFERENCES_FILE, setup_imports.DOCUMENTS_FILE),
+        )
         game_setup.apply_choices(
             args.project.resolve(),
             args.blueprint,
@@ -278,6 +296,7 @@ def _game_apply(args: argparse.Namespace) -> int:
             args.connect,
             addon=not args.no_addon,
             report=emit,
+            imports=imports,
         )
         if policy is not None:
             history.write_policy(args.project.resolve(), policy)
@@ -296,6 +315,60 @@ def _game_apply(args: argparse.Namespace) -> int:
         emit({"step": "timeline", "state": "done", "message": started})
     emit({"step": "finished", "state": "done", "message": "Your game is ready."})
     return 0
+
+
+def _import_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--reference",
+        action="append",
+        metavar="PATH[=NOTE]",
+        help="a PNG, JPEG or WebP reference image, and what to take from it (repeatable)",
+    )
+    parser.add_argument(
+        "--design-doc",
+        action="append",
+        metavar="PATH",
+        help="a Markdown, text or PDF design document (repeatable)",
+    )
+
+
+def _references(args: argparse.Namespace) -> int:
+    """`joinery references add`: the user's files, as one reviewed change."""
+    project = args.project.resolve()
+    try:
+        if not (project / "project.godot").is_file():
+            raise ValueError(f"No project.godot in {project}")
+        chosen = setup_imports.plan_from_args(
+            project, args.reference or [], args.design_doc or []
+        )
+        if not chosen:
+            raise ValueError("Pick at least one reference image or design document.")
+        if args.plan:
+            print(
+                json.dumps(
+                    {
+                        "changes": chosen.changes(),
+                        "references": [p.destination for p in chosen.references],
+                        "documents": [p.destination for p in chosen.documents],
+                        "notes": setup_imports.plan_notes(project, chosen),
+                    },
+                    indent=2,
+                )
+            )
+            return 0
+        steps: list[dict[str, Any]] = []
+        tx = game_setup.stage_change(
+            project,
+            setup_imports.summary(chosen),
+            lambda stage: steps.extend(setup_imports.apply(stage, chosen)),
+        )
+    except (OSError, ValueError) as exc:
+        if args.json:
+            print(json.dumps({"error": str(exc)}))
+        else:
+            print(f"references: {exc}", file=sys.stderr)
+        return 1
+    return _decide(tx, tx.changes, yes=args.yes, as_json=args.json, after=lambda: steps)
 
 
 def _blueprints(args: argparse.Namespace) -> int:
@@ -579,6 +652,12 @@ def _brief(project: Path, questions: bool, as_json: bool = False) -> int:
         if written is None and record is not None:
             # No setup answers: draft it from the starting point alone.
             written = brief.write_brief(project, {}, described, features)
+        # The wizard's design documents, when it had no starting point to apply.
+        imports = setup_imports.plan_from_args(
+            project, answers=(setup_imports.DOCUMENTS_FILE,)
+        )
+        for step in setup_imports.apply(project, imports):
+            _print_step(step)
     except (ValueError, FileExistsError) as exc:
         print(f"brief: {exc}", file=sys.stderr)
         return 1
@@ -598,6 +677,12 @@ def _bible(project: Path) -> int:
             else None
         )
         written = write_from_answers_file(project, preset or None)
+        # The wizard's reference images go on the board before the approval.
+        imports = setup_imports.plan_from_args(
+            project, answers=(setup_imports.REFERENCES_FILE,)
+        )
+        for step in setup_imports.apply(project, imports):
+            _print_step(step)
     except (ValueError, FileExistsError) as exc:
         print(f"bible: {exc}", file=sys.stderr)
         return 1
@@ -814,6 +899,7 @@ def _parser() -> argparse.ArgumentParser:
         choices=list(game_setup.CONNECT_CHOICES),
         help="with Online play and Steam: connect players through Steam or direct IP",
     )
+    _import_arguments(new)
     history.add_policy_arguments(new)
     game_cmd = commands.add_parser(
         "game", help="apply the new-project wizard's game choices to a project"
@@ -827,7 +913,22 @@ def _parser() -> argparse.ArgumentParser:
     game_cmd.add_argument(
         "--no-addon", action="store_true", help="the addon is already in place"
     )
+    _import_arguments(game_cmd)
     history.add_policy_arguments(game_cmd)
+    references_cmd = commands.add_parser(
+        "references",
+        help="add reference images and design documents as a reviewed change",
+    )
+    references_cmd.add_argument("action", choices=["add"])
+    references_cmd.add_argument("--project", type=Path, required=True)
+    _import_arguments(references_cmd)
+    references_cmd.add_argument(
+        "--plan", action="store_true", help="show what would change; write nothing"
+    )
+    references_cmd.add_argument("--json", action="store_true")
+    references_cmd.add_argument(
+        "--yes", action="store_true", help="accept the reviewed change without asking"
+    )
     blueprints_cmd = commands.add_parser(
         "blueprints", help="list the playable blueprints a project can start from"
     )
@@ -1216,6 +1317,8 @@ def main(argv: list[str] | None = None) -> int:
         )
     if args.command == "game":
         return _game_apply(args)
+    if args.command == "references":
+        return _references(args)
     if args.command == "blueprints":
         return _blueprints(args)
     if args.command == "features":

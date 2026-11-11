@@ -22,10 +22,11 @@ from types import ModuleType
 from typing import Any, cast
 
 from mcp.server import MCPServer
-from mcp.types import ToolAnnotations
+from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
 
-from joinery import brief, parts
+from joinery import brief, chat_attachments, parts, setup_imports
 from joinery.art_approval import approved, fingerprint
+from joinery.bible_schema import REFERENCE_DIR
 from joinery.workspace import index
 from servers.errors import tool_errors
 
@@ -206,6 +207,42 @@ def _requires(features: list[Mapping[str, Any]], feature_id: str) -> list[str]:
     return found
 
 
+#: Pictures art_direction sends along, and how big each may be.
+MAX_REFERENCE_IMAGES = 8
+MAX_REFERENCE_BYTES = 4_000_000
+
+
+def reference_images(project: Path) -> tuple[list[dict[str, Any]], list[ImageContent]]:
+    """The images in art/reference, and the first few as picture content.
+
+    Every image is listed (`path`, `shown`); up to MAX_REFERENCE_IMAGES under
+    MAX_REFERENCE_BYTES each are sent as pictures, in name order. Files whose
+    bytes are not PNG, JPEG or WebP are skipped.
+    """
+    folder = project / REFERENCE_DIR
+    if not folder.is_dir() or not folder.resolve().is_relative_to(project):
+        return [], []
+    listed: list[dict[str, Any]] = []
+    shown: list[ImageContent] = []
+    for path in sorted(folder.iterdir(), key=lambda p: p.name.casefold()):
+        if path.is_symlink() or not path.is_file():
+            continue
+        if path.suffix.lower() not in setup_imports.IMAGE_SUFFIXES:
+            continue
+        size = path.stat().st_size
+        send = len(shown) < MAX_REFERENCE_IMAGES and size <= MAX_REFERENCE_BYTES
+        if send:
+            try:
+                media, encoded = chat_attachments.encoded(path)
+            except (OSError, ValueError):
+                continue
+            shown.append(ImageContent(type="image", data=encoded, mime_type=media))
+        listed.append(
+            {"path": f"{REFERENCE_DIR}/{path.name}", "shown": send}
+        )
+    return listed, shown
+
+
 def make_server(project: Path) -> MCPServer[Any]:
     project = project.resolve()
     if not (project / "project.godot").is_file():
@@ -214,8 +251,8 @@ def make_server(project: Path) -> MCPServer[Any]:
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
-    async def art_direction() -> dict[str, Any]:
-        """Read the project's actual art bible, its user approval status, and a lint of the bible (problems, open sections, reference board, suggestions). The model has no approval operation."""
+    async def art_direction() -> CallToolResult:
+        """Read the project's actual art bible, its user approval status, and a lint of the bible (problems, open sections, reference board, suggestions). The JSON comes first; the user's reference images from art/reference follow as pictures (listed in reference_images), so you can look at them. They are references, never assets: don't copy or trace them. The model has no approval operation."""
         path = project / "art/bible.md"
         lint: dict[str, Any] | None = None
         bible_lint = _optional("joinery.bible_lint")
@@ -224,7 +261,8 @@ def make_server(project: Path) -> MCPServer[Any]:
                 lint = _json_safe(bible_lint.summary(project))
             except (ValueError, OSError) as exc:
                 lint = {"error": str(exc)}
-        return {
+        images, shown = reference_images(project)
+        data = {
             "approved": approved(project),
             "sha256": fingerprint(project) if path.is_file() else "",
             "text": path.read_text()
@@ -232,14 +270,20 @@ def make_server(project: Path) -> MCPServer[Any]:
             else "No art direction has been written for this project.",
             "approval_action": "In chat, type /art and click Approve this version. Saving or accepting a draft does not approve it.",
             "lint": lint,
+            "reference_images": images,
         }
+        return CallToolResult(
+            content=[TextContent(type="text", text=json.dumps(data)), *shown],
+            structured_content=data,
+        )
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
     async def game_brief() -> dict[str, Any]:
-        """Read the project's game brief (design/brief.md): pitch, loops, verbs, controls, platforms, online, saving, scope; its machine-readable facts; open sections; and one-line suggestions where the brief and the game's setup disagree. Offer a suggestion only when it is relevant to the user's request; never act on one unasked."""
+        """Read the project's game brief (design/brief.md): pitch, loops, verbs, controls, platforms, online, saving, scope; its machine-readable facts; open sections; one-line suggestions where the brief and the game's setup disagree; and the user's design documents from design/docs (design_documents, with the text of Markdown and text ones; open a PDF yourself). The brief wins where a document disagrees. Offer a suggestion only when it is relevant to the user's request; never act on one unasked."""
         data = brief.summary(project, project_game(project))
         data["edit_hint"] = brief.EDIT_HINT
+        data["design_documents"] = setup_imports.design_documents(project)
         return cast(dict[str, Any], _json_safe(data))
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))

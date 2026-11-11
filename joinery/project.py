@@ -6,7 +6,7 @@ import shutil
 from collections.abc import Sequence
 from pathlib import Path
 
-from joinery import game_setup
+from joinery import game_setup, setup_imports
 from joinery.catalog import ROOT, Catalog
 from joinery.installer import Selection, write_mcp_config, write_selection
 from joinery.wiring import write_agent_wiring
@@ -27,6 +27,8 @@ def create_project(
     connect: str | None = None,
     report: game_setup.Report | None = None,
     wizard: bool = False,
+    references: Sequence[tuple[Path, str]] = (),
+    documents: Sequence[Path] = (),
 ) -> None:
     """Scaffold a project. Refuses a non-empty folder so nothing is overwritten.
 
@@ -41,6 +43,10 @@ def create_project(
     goes in with its MIT licence and the plugin on, and with Steam its
     settings are written and the pinned GodotSteam extension is downloaded.
     Harnesses that only boot the game leave these out.
+
+    `references` ((path, note) pairs) and `documents` are the user's own
+    reference images and design documents (`setup_imports`): checked before
+    anything is written, then copied in with the starting point.
     """
     if path.exists() and any(path.iterdir()):
         raise ValueError(f"{path} is not empty. Pick a new or empty folder.")
@@ -57,9 +63,16 @@ def create_project(
         raise ValueError(
             "Steam settings need a blueprint. Add --blueprint and --features steam."
         )
+    if (references or documents) and blueprint is None:
+        raise ValueError(
+            "References and design documents go on the art bible and the game brief, "
+            "which come with a starting point. Add --blueprint (blank is an empty game)."
+        )
     existed = path.exists()
     path.mkdir(parents=True, exist_ok=True)
     try:
+        # Every picked file is checked before the project gets anything.
+        imports = setup_imports.plan(path, references, documents)
         _scaffold(path, name, selection)
         if wizard:
             game_setup.install_addon(path, report)
@@ -73,6 +86,7 @@ def create_project(
                 addon=False,
                 steam_setup=wizard,
                 report=report,
+                imports=imports,
             )
     except BaseException:
         # The folder was empty or absent, so everything in it is ours: leave

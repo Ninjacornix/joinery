@@ -24,7 +24,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, Literal
 
-from joinery import art_approval, bible, blueprints, brief, godotsteam
+from joinery import art_approval, bible, blueprints, brief, godotsteam, setup_imports
 from joinery.catalog import ROOT
 from joinery.transactions import FileTransaction, clone_tree, inventory
 
@@ -234,27 +234,47 @@ def write_brief(
 
 
 def write_bible(
-    project: Path, blueprint_id: str, report: Report | None = None
+    project: Path,
+    blueprint_id: str,
+    report: Report | None = None,
+    imports: setup_imports.Plan | None = None,
 ) -> dict[str, Any]:
-    """art/bible.md with the blueprint's preset, from the wizard's answers if any."""
+    """art/bible.md with the blueprint's preset, from the wizard's answers if any.
+
+    The user's reference images go on its board before it is approved at
+    creation, so the approval covers them.
+    """
     preset = blueprints.describe(blueprint_id).get("bible_preset") or None
     if (project / bible.BIBLE_PATH).exists():
         (project / bible.ANSWERS_FILE).unlink(missing_ok=True)
+        rows = setup_imports.add_board_rows(project, imports) if imports else None
         return _step(
-            report, "bible", "skipped", "Kept the art bible that is already there."
+            report,
+            "bible",
+            "skipped",
+            "Kept the art bible that is already there.",
+            board_rows=rows,
         )
     written = bible.write_from_answers_file(project, preset)
     if written is None:
         bible.write_bible(project, {}, preset)
+    rows = setup_imports.add_board_rows(project, imports) if imports else None
     # Drafted at creation from the user's answers (or the starting point's preset when they
     # skipped them all): approved as drafted; open sections can be filled in later.
     if art_approval.approve_at_creation(project):
-        return _step(report, "bible", "done", art_approval.APPROVED_AT_CREATION)
+        return _step(
+            report,
+            "bible",
+            "done",
+            art_approval.APPROVED_AT_CREATION,
+            board_rows=rows,
+        )
     return _step(
         report,
         "bible",
         "done",
         "Wrote the art bible draft. Finish and approve it before asset work.",
+        board_rows=rows,
     )
 
 
@@ -312,13 +332,15 @@ def apply_choices(
     addon: bool = True,
     steam_setup: bool = True,
     report: Report | None = None,
+    imports: setup_imports.Plan | None = None,
 ) -> list[dict[str, Any]]:
     """Apply the wizard's choices to an existing project, step by step.
 
-    Order: addon, blueprint and features, game brief, art bible, Steam
-    settings, GodotSteam download (both left out without `steam_setup`). A bad
-    choice raises ValueError before any write; a failed download does not
-    raise. Returns every step's outcome;
+    Order: addon, blueprint and features, the user's references and design
+    documents (`imports`, already checked by `setup_imports.plan`), game
+    brief, art bible, Steam settings, GodotSteam download (both left out
+    without `steam_setup`). A bad choice raises ValueError before any write;
+    a failed download does not raise. Returns every step's outcome;
     `report` also hears each one as it finishes.
     """
     chosen, app_id, how = check_choices(blueprint, features, steam_app_id, connect)
@@ -344,8 +366,32 @@ def apply_choices(
             features=applied.features, backup=applied.backup,
         )
     )
+    if imports:
+        setup_imports.copy_files(project, imports)
+        setup_imports.record_lock(project, imports)
     steps.append(write_brief(project, blueprint, applied.features, report))
-    steps.append(write_bible(project, blueprint, report))
+    if imports and imports.documents:
+        drafted = setup_imports.update_brief(project, imports)
+        steps.append(
+            _step(
+                report,
+                "design-docs",
+                "done",
+                setup_imports.document_message(len(imports.documents), drafted),
+            )
+        )
+    steps.append(write_bible(project, blueprint, report, imports))
+    if imports and imports.references:
+        steps.append(
+            _step(
+                report,
+                "references",
+                "done",
+                setup_imports.reference_message(
+                    len(imports.references), steps[-1].get("board_rows")
+                ),
+            )
+        )
     if STEAM in applied.features and steam_setup:
         # Without online play, how players connect does not matter yet.
         through: godotsteam.Connect = "direct" if how == "direct" else "steam"

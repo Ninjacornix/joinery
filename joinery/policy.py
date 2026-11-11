@@ -100,6 +100,14 @@ def generative_names(denylist: Denylist) -> frozenset[str]:
 _USER_ONLY = re.compile(r"\bjoinery\b(?:\s+\S+)*?\s+timeline\s+(?:restore|start)\b")
 
 
+#: Adding reference images and design documents records them as the user's own
+#: import (`human-import`), so only the user does it: in the new-project wizard
+#: or Project apps (/setup), never an agent's shell command.
+_USER_IMPORT = re.compile(
+    r"\bjoinery\b(?:\s+\S+)*?\s+(?:references\s+add\b|.*\s--(?:reference|design-doc)\b)"
+)
+
+
 def user_only_violation(command: str) -> Verdict | None:
     """Refuse commands only the user runs, from the editor."""
     for segment in _SEGMENTS.split(command):
@@ -109,6 +117,13 @@ def user_only_violation(command: str) -> Verdict | None:
                 "Restoring a file from the Timeline, or starting one, is the user's "
                 "choice in the Timeline tab. Ask the user, or make the change as a "
                 "reviewed edit.",
+            )
+        if _USER_IMPORT.search(segment):
+            return Verdict(
+                Severity.DENY,
+                "Only the user adds reference images and design documents, from "
+                "Project apps (/setup): they are recorded as the user's own import. "
+                "Ask the user to add the file there.",
             )
     return None
 
