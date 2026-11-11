@@ -113,6 +113,18 @@ func _check_targets(model: Node3D) -> void:
 	_check(target["label"] == "Roughness · Head.001", target["label"])
 	_check(target["kind"] == "Image", "A map chip uses the image icon")
 	_check(
+		str(target["ops"]).split(",").has("make_map_editable"),
+		"A picked map routes to its operations: %s" % target["ops"]
+	)
+	_check(
+		(
+			CHIP.for_part({"part_kind": "bone", "bone": "Mid", "ops": "edit_bone"})["ops"]
+			== "edit_bone"
+		),
+		"A listed part keeps the operations `joinery parts` gave it"
+	)
+	_check(CHIP.for_part(material)["ops"] == "set_material_value,split_material", "Material ops")
+	_check(
 		str(target["tooltip"]).begins_with("Hammer › Head.001 › Steel › Roughness"),
 		target["tooltip"]
 	)

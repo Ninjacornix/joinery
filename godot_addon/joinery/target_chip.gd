@@ -19,6 +19,16 @@ const PART_KINDS := {
 	"bone": "Object",
 	"shape_key": "Object",
 }
+## Part kind -> the typed operations that change it (`joinery parts` lists the same, and
+## knows more: a map with a Krita source is painted with paint_map). The agent reads them
+## from the target, so a chip routes the request to the operation for its part.
+const PART_OPS := {
+	"object": "transform_parts",
+	"material": "set_material_value,split_material",
+	"texture": "adjust_map,make_map_editable,replace_map,split_material",
+	"bone": "edit_bone",
+	"shape_key": "edit_shape_key",
+}
 ## How each map role reads (the same words as `joinery parts`).
 const ROLE_NAMES := {
 	"base_color": "Base colour",
@@ -180,6 +190,8 @@ static func for_part(part: Dictionary) -> Dictionary:
 		target[str(key)] = str(part[key])
 	var kind := str(target.get("part_kind", "object"))
 	target["kind"] = PART_KINDS.get(kind, "Object")
+	if str(target.get("ops", "")).is_empty():
+		target["ops"] = str(PART_OPS.get(kind, ""))
 	target["label"] = part_label(target)
 	target["tooltip"] = part_tooltip(target)
 	if str(target.get("id", "")).is_empty():

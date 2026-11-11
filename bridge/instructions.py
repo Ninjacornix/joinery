@@ -29,6 +29,16 @@ OBJECT_GUIDE = (
     "scene accepted without its model opens with a missing file. "
 )
 
+#: A picked part (a selection target with part_kind) names the typed operations
+#: of joinery-blender-ops that change it, in its `ops`.
+PART_GUIDE = (
+    "A selection target with part_kind is one part of a model; change it with the "
+    "operations in its ops, not with code: maps with adjust_map, or make_map_editable "
+    "once and then paint_map (typed Krita layers) or replace_map (a tool-made image); "
+    "split_material when only some objects should change; edit_bone and "
+    "edit_shape_key for one bone or shape key. "
+)
+
 #: The game: read the brief and setup with the art direction, extend the game
 #: through its extension points, and only ever suggest a feature.
 GAME_GUIDE = (
@@ -49,6 +59,7 @@ GAME_GUIDE = (
     + ATTACHMENT_NOTE
     + " "
     + OBJECT_GUIDE
+    + PART_GUIDE
     + AGENT_GUIDE
 )
 
