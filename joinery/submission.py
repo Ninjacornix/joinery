@@ -221,7 +221,6 @@ async def validate(
         )
         if shapes is not None:
             found.problems.append(shapes)
-        found.ran.append("complex models")
     asset_changes = [
         change["path"]
         for change in changes

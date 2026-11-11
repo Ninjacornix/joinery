@@ -452,6 +452,8 @@ class TurnController:
         so the next submit judges only shapes added after this one."""
         from joinery.complex_models import check_live
 
+        if not self.live_shapes:
+            return []
         found = check_live(self.gateway.project, self.live_shapes)
         if found is None:
             return []

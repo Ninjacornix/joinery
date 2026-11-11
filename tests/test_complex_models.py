@@ -372,7 +372,6 @@ def test_validate_judges_staged_scenes_for_every_provider(
     (tx.stage / "scenes/main.tscn").write_text(HEAD + chair())
     found = asyncio.run(submission.validate(gateway, tx, set()))  # type: ignore[arg-type]
     assert [p.check for p in found.problems] == ["complex_models"]
-    assert "complex models" in found.ran
 
 
 def test_every_agent_is_told_to_make_complex_models_in_blender() -> None:
