@@ -43,6 +43,7 @@ CASES = {
     "parallel_tasks_test.gd": "parallel tasks: ok",
     "agent_roles_test.gd": "agent roles: ok",
     "playtest_card_test.gd": "playtest card: ok",
+    "share_tab_test.gd": "share tab: ok",
     # Last: it puts the shared disposable project under git.
     "timeline_test.gd": "timeline: ok",
 }
