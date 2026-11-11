@@ -5,9 +5,10 @@ extends VBoxContainer
 ## Waiting for you: each change that needs a decision, one line each (what it does, which app
 ## made it, when) with Discard and Accept on the row. Clicking the change that Journeyman just
 ## made opens the full before/after review (review_panel.gd, held here as the detail view);
-## any other change shows its files under the row. Then the art bible's approval as one row,
-## and Decided: accepted, discarded and reverted changes, newest first, with Revert while the
-## change can still be put back.
+## any other change shows its files under the row. The review's rail comes back here (All
+## approvals) and steps through the changes waiting (review_queue.gd). Then the art bible's
+## approval as one row, and Decided: accepted, discarded and reverted changes, newest first,
+## with Revert while the change can still be put back.
 ##
 ## The list comes from `joinery transactions list` (command_job.gd), read when the tab is
 ## shown, on focus, when a turn ends and when a change is staged or decided; it never polls.
@@ -34,6 +35,7 @@ const INDICATOR := preload("activity_indicator.gd")
 const COMMAND_SCRIPT := preload("command_job.gd")
 const SLASH := preload("slash_commands.gd")
 const WORDS := preload("review_words.gd")
+const QUEUE := preload("review_queue.gd")
 const EMPTY_WAITING := "Nothing waits for your review."
 const EMPTY_DECIDED := "No decisions yet."
 const TOO_OLD := "Too old to revert"
@@ -55,7 +57,7 @@ var showing_detail := false
 var _detail: Control
 var _list_view: VBoxContainer
 var _detail_view: VBoxContainer
-var _back: Button
+var _queue: QUEUE
 var _content: VBoxContainer
 var _loading: HBoxContainer
 var _load_error: Label
@@ -106,14 +108,9 @@ func _init() -> void:
 	_detail_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_detail_view.hide()
 	add_child(_detail_view)
-	_back = UI.quiet("All approvals")
-	_back.alignment = HORIZONTAL_ALIGNMENT_LEFT
-	_back.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	_back.tooltip_text = "Back to every change waiting for you and the ones you decided"
-	UI.bind_icon(_back, "back")
-	_back.pressed.connect(show_list)
-	_detail_view.add_child(_back)
+	_queue = QUEUE.new(self)
 	_tasks = load("res://addons/joinery/review_tasks.gd").new(self, _detail_view)
+	_queue.follow(_tasks.panel)
 	_render()
 
 
@@ -156,6 +153,8 @@ func set_detail(panel: Control) -> void:
 		panel.get_parent().remove_child(panel)
 	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_detail_view.add_child(panel)
+	if panel.has_signal("step_requested"):
+		_queue.follow(panel)
 
 
 func detail() -> Control:
@@ -208,6 +207,7 @@ func show_detail(panel: Control = null) -> void:
 	if not showing_detail:
 		_opened_itself = not is_visible_in_tree()
 	showing_detail = true
+	var swapped: bool = _detail_view.visible and not shown.visible
 	if _detail != null:
 		_detail.visible = shown == _detail
 	_tasks.panel.visible = shown == _tasks.panel
@@ -217,6 +217,10 @@ func show_detail(panel: Control = null) -> void:
 	_detail_view.show()
 	if arriving:
 		UI_MOTION.fade_in(_detail_view)
+	elif swapped:
+		# Another change's review crossfades in over the last one (see review_queue.gd).
+		UI_MOTION.fade_in(shown)
+	_queue.sync()
 
 
 ## Back to the list of approvals.
@@ -617,6 +621,8 @@ func _render() -> void:
 	_decided_more.visible = decided.size() > DECIDED_ROWS
 	_tint()
 	_restore_focus(focus_key)
+	if showing_detail:
+		_queue.sync()
 	var count := waiting_count()
 	if count != _count:
 		_count = count
@@ -815,19 +821,7 @@ func _add_error(box: VBoxContainer, id: String) -> void:
 
 ## The files a change touches, one per line ("+ art/models/hammer.glb"), under its row.
 func _files(entry: Dictionary) -> Label:
-	var lines: Array[String] = []
-	var marks := {"created": "+", "deleted": "−", "modified": "~"}
-	for file: Variant in entry.get("files", []):
-		if file is Dictionary:
-			lines.append(
-				"%s %s" % [marks.get(str(file.get("change", "")), "~"), str(file.get("path", ""))]
-			)
-	var more := int(entry.get("file_count", lines.size())) - lines.size()
-	if more > 0:
-		lines.append("and %d more" % more)
-	if lines.is_empty():
-		lines.append("No file list for this change.")
-	var label := UI.label("\n".join(lines), "JoineryCaption", true)
+	var label := UI.label(WORDS.files_text(entry), "JoineryCaption", true)
 	label.name = "Files"
 	return label
 

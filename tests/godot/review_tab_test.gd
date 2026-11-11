@@ -324,7 +324,10 @@ func _check_live(tab: TAB, panel: PANEL) -> void:
 	await _frames()
 	_check(tab.showing_detail and panel.is_visible_in_tree(), "It opens the full review")
 	_check(not tab._list_view.visible, "The full review replaces the list")
-	tab._back.pressed.emit()
+	var rail: Control = panel.get("_rail")
+	_check((rail.get("nav") as Control).visible, "The review's rail leads back to the list")
+	_check(not (rail.get("next") as Control).visible, "One change waiting has no arrows")
+	(rail.get("back") as Button).pressed.emit()
 	await _frames()
 	_check(not tab.showing_detail and tab._list_view.visible, "All approvals goes back")
 	var accepted := [false]
@@ -416,6 +419,20 @@ func _check_task_review(tab: TAB, panel: PANEL) -> void:
 	_check(not panel.visible, "One review panel at a time")
 	_check(str(task_panel.get("_title").text) == "Model a lamp", "It shows the task's change")
 	_check(bool(task_panel.get("pending")), "With Accept and Discard")
+	var task_rail: Control = task_panel.get("_rail")
+	_check(
+		(task_rail.get("place") as Label).text == "2 of 2",
+		"Its rail says where it sits: " + (task_rail.get("place") as Label).text
+	)
+	_check((task_rail.get("next") as Button).disabled, "The last change has no next")
+	(task_rail.get("previous") as Button).pressed.emit()
+	await _frames()
+	_check(panel.visible and not task_panel.visible, "Previous shows the change before it")
+	var main_rail: Control = panel.get("_rail")
+	_check((main_rail.get("place") as Label).text == "1 of 2", "…the first of two")
+	panel.step_requested.emit(1)
+	await _frames()
+	_check(task_panel.visible and not panel.visible, "Next (or Right) goes back to the task's")
 	tab.show_list()
 	(_find(_row(tab, "m1"), "Open") as Button).pressed.emit()
 	await _frames()

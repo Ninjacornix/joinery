@@ -1,6 +1,7 @@
 @tool
 extends RefCounted
-## The words the Review tab and the task cards share: app names and how long ago something was.
+## The words the Review tab and the task cards share: app names, how long ago something was,
+## and the files a change touches.
 
 ## App ids as the gateway records them -> the names people know.
 const APP_NAMES := {
@@ -46,3 +47,21 @@ static func relative_time(stamp: float, now: float) -> String:
 		"Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
 	]
 	return "%d %s" % [int(date["day"]), months[int(date["month"]) - 1]]
+
+
+## The files [param entry] (a `joinery transactions list` row) touches, one per line
+## ("+ art/models/hammer.glb"), "and 3 more" past the listed ones.
+static func files_text(entry: Dictionary) -> String:
+	var lines: Array[String] = []
+	var marks := {"created": "+", "deleted": "−", "modified": "~"}
+	for file: Variant in entry.get("files", []):
+		if file is Dictionary:
+			lines.append(
+				"%s %s" % [marks.get(str(file.get("change", "")), "~"), str(file.get("path", ""))]
+			)
+	var more := int(entry.get("file_count", lines.size())) - lines.size()
+	if more > 0:
+		lines.append("and %d more" % more)
+	if lines.is_empty():
+		lines.append("No file list for this change.")
+	return "\n".join(lines)
