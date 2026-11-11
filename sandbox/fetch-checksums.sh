@@ -26,13 +26,15 @@ mm_under=$(printf '%s' "${MATERIALMAKER_VERSION}" | tr '.' '_')
 godot_name="Godot_v${GODOT_VERSION}-${GODOT_CHANNEL}_linux.x86_64"
 
 # One "name url" pair per line. Keep names in step with the Dockerfile.
-# MPFB2 publishes no release assets, so its tagged source archive is used.
+# MPFB2 publishes no release assets, so its tagged source archive is used;
+# the Godot MCP is pinned to a commit, so its commit archive is used.
 artifacts="\
 godot https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}-${GODOT_CHANNEL}/${godot_name}.zip
 blender https://download.blender.org/release/Blender${BLENDER_SERIES}/blender-${BLENDER_VERSION}-linux-x64.tar.xz
 mpfb2 https://github.com/makehumancommunity/mpfb2/archive/refs/tags/v${MPFB2_VERSION}.tar.gz
 materialmaker https://github.com/RodZill4/material-maker/releases/download/${MATERIALMAKER_VERSION}/material_maker_${mm_under}_linux.tar.gz
-surge https://github.com/surge-synthesizer/releases-xt/releases/download/${SURGE_VERSION}/surge-xt-linux-x64-${SURGE_VERSION}.deb"
+surge https://github.com/surge-synthesizer/releases-xt/releases/download/${SURGE_VERSION}/surge-xt-linux-x64-${SURGE_VERSION}.deb
+godotmcp https://github.com/tugcantopaloglu/godot-mcp/archive/${GODOT_MCP_REF}.tar.gz"
 
 # Start from the existing hashes so fetching one artifact keeps the rest.
 kept=${tmp}/kept

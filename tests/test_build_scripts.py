@@ -48,10 +48,11 @@ def test_checksum_fetch_keeps_every_downloaded_hash_and_existing_entry(
             "mpfb2",
             "materialmaker",
             "surge",
+            "godotmcp",
             "retained",
         }
     assert all(
         entries[name] == expected
-        for name in ("godot", "blender", "mpfb2", "materialmaker")
+        for name in ("godot", "blender", "mpfb2", "materialmaker", "godotmcp")
     )
     assert entries["retained"] == "a" * 64
