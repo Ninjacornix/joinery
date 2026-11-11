@@ -126,6 +126,7 @@ EDITOR_SCREENS = (
     "review-scene",
     "review-filmstrip",
     "review-blockout",
+    "review-clip",
     "timeline-list",
     "timeline-entry",
     "timeline-restored",
@@ -135,6 +136,7 @@ EDITOR_SCREENS = (
     "share-publish",
     "tools",
     "tools-blender",
+    "tools-animation",
     "tools-supercollider",
     "tools-readiness",
     "bottom-panel",
@@ -386,6 +388,7 @@ def editor(theme: str, capture: Path, logs: Path) -> Harness:
         check.mkdir()
         shutil.copyfile(TESTS / "visual_editor_test.gd", check / "test.gd")
         shutil.copyfile(TESTS / "ui_checks.gd", check / "ui_checks.gd")
+        shutil.copyfile(TESTS / "visual_animation.gd", check / "visual_animation.gd")
         (check / "plugin.cfg").write_text(
             '[plugin]\nname="Visual check"\ndescription="Test"\nauthor="Joinery"\n'
             'version="1"\nscript="test.gd"\n'

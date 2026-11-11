@@ -6,6 +6,7 @@ extends EditorPlugin
 ## of ui_checks.gd. JOINERY_VISUAL_THEME names the seeded theme (light or dark).
 
 var _checks: GDScript
+var _animation: GDScript
 var _theme := "dark"
 var _failed := false
 var _plugin: EditorPlugin
@@ -13,6 +14,7 @@ var _plugin: EditorPlugin
 
 func _enter_tree() -> void:
 	_checks = load(get_script().resource_path.get_base_dir().path_join("ui_checks.gd"))
+	_animation = load(get_script().resource_path.get_base_dir().path_join("visual_animation.gd"))
 	# Windowed runs animate; captures must show end states.
 	load("res://addons/joinery/ui_motion.gd").set_enabled(false)
 	var theme := OS.get_environment("JOINERY_VISUAL_THEME")
@@ -364,6 +366,7 @@ func _glance_reviews(
 	dock.hide_edit_review()
 	await _frames()
 	await _blockout_review(dock, panel)
+	await _clip_review(dock, panel, cache)
 
 
 ## A level built from the user's sketch: the sketch and the plan side by side (ADR 0043). The
@@ -720,6 +723,31 @@ func _render_model(ground := Color("3a3d42")) -> Image:
 	return image
 
 
+## An animation change: the run before and after as two looping clips, with its facts.
+func _clip_review(dock: Control, panel: Control, cache: String) -> void:
+	var media: Array = await _animation.clip_media(self, cache)
+	var files := [{"path": "art/sources/hero.blend", "change": "modified"}]
+	dock.show_file_review("Give the hero a bouncier run", "", media, files)
+	await get_tree().create_timer(0.3).timeout
+	await _shot("review-clip", [panel, dock])
+	dock.hide_edit_review()
+	await _frames()
+
+
+## The Blender tab with an animated model: its actions listed under the preview, run playing.
+func _animations(workspace: Control, rail: Control) -> void:
+	workspace.call("_clear_preview")
+	workspace.call("_show_scene", _animation.hero())
+	var parts: Control = workspace.get("_parts_panel")
+	var browser: Control = parts.get("animations")
+	browser.call("set_report", {"resource": "", "parts": _animation.report_rows()})
+	browser.call("show_animation", 2)
+	browser.call("seek", 0.2)
+	await _frames(6)
+	await _shot("tools-animation", [workspace, rail])
+	workspace.call("_clear_preview")
+
+
 ## The Share tab: the templates offer before a first build, a finished build with its media
 ## and page text, and the publish confirmation naming the itch.io page and channels.
 func _share() -> void:
@@ -884,6 +912,8 @@ func _tools() -> void:
 		(buttons[id] as Button).pressed.emit()
 		await _wait_workspace()
 		await _shot("tools-" + id, [workspace, rail])
+		if id == "blender":
+			await _animations(workspace, rail)
 	await _readiness(workspace, rail)
 	EditorInterface.set_main_screen_editor("3D")
 	await _frames()
