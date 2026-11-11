@@ -4,7 +4,9 @@ extends VBoxContainer
 ## remaining height. Images and model renders show in one TextureRect; Before and After swap
 ## by crossfading. Audio uses one compact audio_preview, so Before and After play A/B on the
 ## same player at the same position. A side whose file is not written yet shows a pulsing
-## "Rendering preview…" frame until it appears.
+## "Rendering preview…" frame until it appears, then fades in; the renders start when the
+## change passes its checks, so the review is on screen before they are done
+## ([method update_media] brings their outcome).
 
 ## The shown file changed (several media items), so Before/After availability may differ.
 signal item_changed
@@ -109,6 +111,7 @@ func _process(delta: float) -> void:
 	if FileAccess.file_exists(_waiting):
 		_stop_waiting()
 		_show_current(false)
+		UI_MOTION.fade_in(_frame if _frame.visible else _audio_box)
 	elif _waited >= LOAD_TIMEOUT:
 		_stop_waiting()
 		_fail()
@@ -119,7 +122,7 @@ func _process(delta: float) -> void:
 func show_media(media: Array) -> void:
 	clear_media()
 	for item: Variant in media:
-		if item is Dictionary and (item.has("before") or item.has("after")):
+		if item is Dictionary and (item.has("before") or item.has("after") or item.has("error")):
 			_items.append(item)
 	visible = not _items.is_empty()
 	if _items.is_empty():
@@ -132,6 +135,27 @@ func show_media(media: Array) -> void:
 	_picker.select(0)
 	_fit_picker()
 	_show_current(false)
+
+
+## The renders of the shown items are done: take each item's final sides, or its error. An
+## item already on screen stays where it is.
+func update_media(media: Array) -> void:
+	if _items.is_empty():
+		show_media(media)
+		return
+	for item: Variant in media:
+		if not item is Dictionary:
+			continue
+		for index: int in _items.size():
+			var shown: Dictionary = _items[index]
+			if shown.get("path") == item.get("path") and shown.get("part") == item.get("part"):
+				_items[index] = (item as Dictionary).duplicate()
+	var current: Dictionary = _items[_index]
+	if current.has("error") and not (current.has("before") or current.has("after")):
+		_stop_waiting()
+		_fail(str(current["error"]))
+	elif not _waiting.is_empty():
+		_show_current(false)
 
 
 ## Stop audio, drop loaded previews and forget the items.
@@ -264,6 +288,10 @@ func _show_current(swap: bool) -> void:
 	_name.text = path.get_file()
 	_name.tooltip_text = "res://" + path
 	_picker.tooltip_text = "res://" + path
+	if not (item.has("before") or item.has("after")):
+		_stop_waiting()
+		_fail(str(item.get("error", "")))
+		return
 	var chosen := side if item.has(side) else ("after" if item.has("after") else "before")
 	var source := str(item[chosen])
 	_failure.hide()
@@ -382,7 +410,9 @@ func _stop_waiting() -> void:
 	_loading.hide()
 
 
-func _fail() -> void:
+## No preview: [param reason] (a render's error) says why, or the generic line.
+func _fail(reason := "") -> void:
 	_frame.hide()
 	_audio_box.hide()
+	_failure.text = NO_PREVIEW if reason.is_empty() else "No preview. " + reason
 	_failure.show()

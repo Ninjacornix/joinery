@@ -188,6 +188,44 @@ func _reviews(dock: Control) -> void:
 		)
 	)
 	await _shot("review-image", [panel, dock])
+	dock.hide_edit_review()
+	await _frames()
+	# The review opens as soon as the checks pass; the render fills in when it is done.
+	var rendering := cache.path_join("wood-rendering.png")
+	DirAccess.remove_absolute(rendering)
+	(
+		dock
+		. show_file_review(
+			"Darken the door wood",
+			"~ art/textures/door_wood.kra\n~ art/textures/door_wood.png",
+			[
+				{
+					"path": "art/textures/door_wood.png",
+					"media": "image",
+					"before": before,
+					"after": rendering,
+				}
+			],
+		)
+	)
+	await _shot("review-rendering", [panel, dock])
+	_planks(Color("6b4423")).save_png(rendering)
+	(
+		(panel as Object)
+		. call(
+			"update_media",
+			[
+				{
+					"path": "art/textures/door_wood.png",
+					"media": "image",
+					"before": before,
+					"after": rendering,
+				}
+			]
+		)
+	)
+	await get_tree().create_timer(0.6).timeout
+	await _shot("review-rendered", [panel, dock])
 	await _before_after(panel, "review-image-before")
 	dock.hide_edit_review()
 	await _frames()
@@ -263,9 +301,9 @@ func _approvals() -> void:
 			}
 		)
 	)
-	# The change Journeyman just finished, still being checked.
-	var preparing := {"transaction_id": "ashtray", "summary": "Texture the ashtray"}
-	tab.call("set_preparing", preparing)
+	# The change Journeyman just submitted, open for review while its renders still run.
+	var submitted := {"transaction_id": "ashtray", "summary": "Texture the ashtray"}
+	tab.call("show_live", submitted)
 	var dock := tab.get_parent() as Control
 	var bottom: Control = dock.get_parent() as Control if dock != null else tab
 	await get_tree().create_timer(0.3).timeout

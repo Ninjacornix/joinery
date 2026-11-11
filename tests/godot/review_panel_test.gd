@@ -50,6 +50,7 @@ func _run() -> void:
 	await _check_new_asset(panel)
 	await _check_audio(panel)
 	await _check_loading(panel)
+	await _check_renders_arrive(panel)
 	await _check_details(panel)
 	await _check_scene(panel)
 	await _check_applying(panel)
@@ -215,6 +216,38 @@ func _check_audio(panel: PANEL) -> void:
 	panel.clear()
 	await _frames()
 	_check(panel._media.audio() == null, "Clearing drops the audio preview")
+
+
+## The review opens before its renders are done: Accept works at once, a render that fails says
+## so, and one that arrives fills its place.
+func _check_renders_arrive(panel: PANEL) -> void:
+	var later := _cache.path_join("crate_render.png")
+	DirAccess.remove_absolute(later)
+	var media := [
+		{"path": "art/crate.blend", "media": "image", "after": later},
+		{"path": "art/lamp.blend", "media": "image", "after": _cache.path_join("lamp.png")},
+	]
+	panel.show_file_review("Weather the crate", "", media, [])
+	await _frames()
+	_check(panel._media.is_loading(), "Placeholders while the renders run")
+	_check(not panel._accept.disabled, "Accept works while the renders run")
+	var failed := [
+		{"path": "art/crate.blend", "media": "image", "error": "Blender stopped"},
+		{"path": "art/lamp.blend", "media": "image", "after": _cache.path_join("lamp.png")},
+	]
+	panel.update_media(failed)
+	await _frames()
+	_check(not panel._media.is_loading(), "A failed render stops the placeholder")
+	_check(panel._media.is_failed(), "A failed render says there is no preview")
+	_check(panel._media._failure.text.contains("Blender stopped"), "It says why")
+	panel.show_file_review("Weather the crate", "", media, [])
+	await _frames()
+	_image("crate_render.png", Color(0.5, 0.4, 0.3))
+	panel.update_media(media)
+	var deadline := Time.get_ticks_msec() + 3000
+	while panel._media.is_loading() and Time.get_ticks_msec() < deadline:
+		await process_frame
+	_check(panel._media.texture() != null, "An arrived render shows in place")
 
 
 func _check_loading(panel: PANEL) -> void:

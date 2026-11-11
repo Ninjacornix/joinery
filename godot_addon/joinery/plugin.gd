@@ -19,6 +19,7 @@ const CONNECT_SCRIPT := preload("res://addons/joinery/agent_connect.gd")
 const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
 const UI_COMPONENTS := preload("res://addons/joinery/ui_components.gd")
 const REVIEW_TAB_SCRIPT := preload("res://addons/joinery/review_tab.gd")
+const FLOW_SCRIPT := preload("res://addons/joinery/review_flow.gd")
 
 ## Focus mode is remembered, so a user who wants the stripped-back layout gets
 ## it on every launch instead of re-toggling it each session.
@@ -47,6 +48,8 @@ var _rail: Control
 var _sidebar_tabs: TabContainer
 var _sidebar_tabs_were_visible := true
 var _chat: Node
+## Opens Journeyman's change for review when it passes Joinery's checks (review_flow.gd).
+var _flow: Node
 var _edits: RefCounted
 var _scene_revision := 0
 var _adopting_preview := false
@@ -191,7 +194,9 @@ func _connect_chat(settings: EditorSettings) -> void:
 	_chat.context_provider = _editor_context
 	_review_tab.follow(_chat)
 	_chat.editor_action.connect(_on_editor_action)
-	_chat.file_preview.connect(_on_file_preview)
+	_flow = FLOW_SCRIPT.new()
+	add_child(_flow)
+	_flow.setup(self, _chat)
 	_chat.file_decision.connect(_on_file_decision)
 	_chat.art_review.connect(_on_art_review)
 	_dock.add_child(_chat)
@@ -748,7 +753,7 @@ func _preview_scene_edit(event: Dictionary) -> Dictionary:
 			scene.free()
 		return result
 	_edits.owns_preview_root = empty
-	_open_review(_edits.summary)
+	_flow.live_ready(_edits.summary)
 	EditorInterface.set_main_screen_editor("3D")
 	if not empty:
 		var selection := EditorInterface.get_selection()
@@ -856,20 +861,6 @@ func _apply_changes() -> void:
 		_reject_scene_edit(
 			"Preview discarded before saving or running. Accept it first to keep it.", "info"
 		)
-
-
-func _on_file_preview(event: Dictionary) -> void:
-	_file_review = event.duplicate(true)
-	_call_dock(
-		"show_file_review",
-		[
-			str(event.get("summary", "File changes")),
-			str(event.get("diff", "")),
-			event.get("media", []),
-			event.get("changes", []),
-		]
-	)
-	_show_edit_review_panel()
 
 
 func _on_art_review(event: Dictionary) -> void:

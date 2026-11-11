@@ -72,8 +72,28 @@ func _run() -> void:
 		"A useful connection error must survive host exit"
 	)
 	_check(not chat._busy and chat._header._banner.visible, "A failed host must allow recovery")
+	_check_turn_events(backend.get_script())
 	backend.queue_free()
 	chat.queue_free()
 	await process_frame
 	print("chat transport: ", "FAILED" if _failed else "ok")
 	quit(1 if _failed else 0)
+
+
+## Joinery's own turn events reach their signals; the old "preparing" event is gone.
+func _check_turn_events(script: Script) -> void:
+	var bridge: Node = script.new()
+	var seen: Array = []
+	bridge.turn_state.connect(func(event: Dictionary) -> void: seen.append(event["state"]))
+	bridge.review_media.connect(func(event: Dictionary) -> void: seen.append(event["media"].size()))
+	bridge.notice.connect(func(text: String, kind: String) -> void: seen.append([text, kind]))
+	bridge._handle({"kind": "turn_state", "turn_id": "t", "state": "submitting"})
+	bridge._handle({"kind": "review_media", "transaction_id": "x", "media": [{}, {}]})
+	bridge._handle({"kind": "notice", "level": "warn", "text": "Nothing was changed."})
+	bridge._handle({"kind": "notice", "level": "info", "text": "Fresh session."})
+	_check(
+		seen == ["submitting", 2, ["Nothing was changed.", "error"], ["Fresh session.", "info"]],
+		"Turn state, renders and Joinery's notices reach the sidebar: %s" % [seen]
+	)
+	_check(not bridge.has_signal("review_preparing"), "No preparing event any more")
+	bridge.free()

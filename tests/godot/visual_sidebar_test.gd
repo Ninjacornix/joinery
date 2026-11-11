@@ -207,6 +207,9 @@ func _states(light: bool, width: int) -> void:
 	var timer: Label = card.get("_timer")
 	_check(timer.visible and timer.text == "0:14", "A working card shows its timer")
 	await _shot("working", light, width, chat)
+	# Journeyman handed its change over: Joinery checks it, one quiet status line.
+	chat.set_chat_state("working", "Checking the change…")
+	await _shot("submitting", light, width, chat)
 
 	# Messages sent while Journeyman works wait at the end of the transcript.
 	chat.call("_on_submit", "Then add a brass handle on the left side.")
@@ -247,6 +250,33 @@ func _states(light: bool, width: int) -> void:
 		)
 	)
 	await _shot("conversation", light, width, chat)
+
+	# Joinery's own lines: a fresh session from a summary, and a change that didn't pass.
+	(
+		chat
+		. call(
+			"_on_notice",
+			(
+				"The conversation was getting long, so Journeyman continues in a fresh "
+				+ "session from a short summary."
+			),
+			"info",
+		)
+	)
+	await _shot("compacted", light, width, chat)
+	(
+		chat
+		. call(
+			"_on_notice",
+			(
+				"Journeyman's change didn't pass Joinery's checks: scenes/room.tscn uses "
+				+ "art/models/lamp.glb, which isn't in the project or in this change. "
+				+ "Nothing was changed."
+			),
+			"error",
+		)
+	)
+	await _shot("check-failed", light, width, chat)
 
 	# A request that never reached Journeyman says so in place, with Retry.
 	chat.call("_on_submit", "Now add a brass handle on the left side.")

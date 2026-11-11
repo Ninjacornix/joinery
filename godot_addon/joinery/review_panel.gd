@@ -156,6 +156,12 @@ func show_file_review(
 	_present(arriving)
 
 
+## The before/after renders of the change on screen arrived ({path, before?, after?, error?}).
+func update_media(media: Array) -> void:
+	_media.update_media(media)
+	_sync_sides()
+
+
 ## Disable both buttons while the decision is applied; Accept shows dots and "Applying…".
 ## Turning it off while an optimistic outcome is showing, with no result or error, restores
 ## the review (the decision did not go through).

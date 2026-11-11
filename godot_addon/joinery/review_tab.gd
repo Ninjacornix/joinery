@@ -11,8 +11,8 @@ extends VBoxContainer
 ##
 ## The list comes from `joinery transactions list` (command_job.gd), read when the tab is
 ## shown, when the editor gets focus back, whenever a turn ends and whenever a change is
-## staged or decided; it never polls. The change Journeyman just made shows the moment the
-## agent finishes, as "Preparing your review…" until its checks and renders are done.
+## staged or decided; it never polls. The change Journeyman just made shows the moment it
+## passes Joinery's checks; its before and after renders arrive afterwards.
 ## [signal count_changed] carries the number of things waiting, for the tab's badge.
 
 ## The number of things waiting for the user changed (the tab reads "Review 2").
@@ -34,7 +34,6 @@ const INDICATOR := preload("activity_indicator.gd")
 const COMMAND_SCRIPT := preload("command_job.gd")
 const SLASH := preload("slash_commands.gd")
 const EMPTY_WAITING := "Nothing waits for your review."
-const PREPARING := "Preparing your review…"
 const EMPTY_DECIDED := "No decisions yet."
 const TOO_OLD := "Too old to revert"
 ## Decided rows shown at most; older ones stay in the project history.
@@ -252,39 +251,17 @@ func review_closed() -> bool:
 
 
 ## Follow Journeyman's chat ([param chat], chat_bridge.gd): its change shows here as soon as
-## the agent finishes, opens when the review is ready, and the list is read again whenever a
-## turn ends or a change is decided.
+## it passes Joinery's checks, and the list is read again whenever a turn ends or a change is
+## decided.
 func follow(chat: Object) -> void:
 	var links := {
-		"review_preparing": set_preparing,
 		"file_preview": show_live,
-		"completed": _on_turn_ended,
+		"completed": func(_ok: bool) -> void: refresh(),
 		"file_decision": func(_event: Dictionary) -> void: refresh(),
 	}
 	for signal_name: String in links:
 		if chat.has_signal(signal_name):
 			chat.connect(signal_name, links[signal_name])
-
-
-## The agent finished and its change is being checked ({transaction_id, summary}, a
-## review_preparing event): its row says so, without Accept or Discard, until the review is
-## ready.
-func set_preparing(event: Dictionary) -> void:
-	set_live(
-		{
-			"id": str(event.get("transaction_id", "")),
-			"summary": str(event.get("summary", "File changes")),
-			"preparing": true,
-		}
-	)
-
-
-## A turn ended. A change still "preparing" never reached review (nothing changed, or its
-## checks failed): it leaves. The list is read again either way.
-func _on_turn_ended(_ok: bool) -> void:
-	if bool(_live.get("preparing", false)):
-		clear_live()
-	refresh()
 
 
 ## The change Journeyman staged for review ({transaction_id, summary}, a file_preview event).
@@ -365,10 +342,7 @@ func apply_listing(data: Dictionary) -> void:
 
 ## The number of things waiting: pending changes, and the art bible when it needs approval.
 func waiting_count() -> int:
-	var count := 0
-	for entry: Dictionary in _pending():
-		if not bool(entry.get("preparing", false)):
-			count += 1
+	var count := _pending().size()
 	if str(_bible().get("state", "")) == "needs_approval":
 		count += 1
 	return count
@@ -665,7 +639,6 @@ func _render_bible() -> void:
 func _pending_row(entry: Dictionary, now: float) -> VBoxContainer:
 	var id := str(entry.get("id", ""))
 	var live := bool(entry.get("live", false))
-	var preparing := bool(entry.get("preparing", false))
 	var summary := str(entry.get("summary", "")).strip_edges()
 	if summary.is_empty():
 		summary = "Project changes"
@@ -680,9 +653,7 @@ func _pending_row(entry: Dictionary, now: float) -> VBoxContainer:
 	open.name = "Open"
 	open.set_meta("focus_key", id + ":open")
 	open.tooltip_text = (
-		"The before and after opens when its checks are done"
-		if preparing
-		else "Show the before and after" if live else "Show the files this change touches"
+		"Show the before and after" if live else "Show the files this change touches"
 	)
 	open.accessibility_name = summary + (", show the review" if live else ", show its files")
 	if not live and _open_files.has(id):
@@ -696,7 +667,7 @@ func _pending_row(entry: Dictionary, now: float) -> VBoxContainer:
 	meta.name = "Meta"
 	meta.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	line.add_child(meta)
-	var busy := "preparing" if preparing else str(_busy.get(id, ""))
+	var busy := str(_busy.get(id, ""))
 	if not busy.is_empty():
 		var working := HBoxContainer.new()
 		working.theme_type_variation = "JoineryRowTight"
@@ -704,8 +675,9 @@ func _pending_row(entry: Dictionary, now: float) -> VBoxContainer:
 		var dots := INDICATOR.new()
 		dots.running = true
 		working.add_child(dots)
-		var text := {"accepting": "Accepting…", "preparing": PREPARING}.get(busy, "Discarding…")
-		working.add_child(UI.label(text, "JoineryCaption"))
+		working.add_child(
+			UI.label("Accepting…" if busy == "accepting" else "Discarding…", "JoineryCaption")
+		)
 		working.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		line.add_child(working)
 	else:
@@ -860,8 +832,6 @@ func _restore_focus(key: String) -> void:
 
 
 func _on_open(id: String, live: bool) -> void:
-	if live and bool(_live.get("preparing", false)):
-		return
 	if live:
 		show_detail()
 		return

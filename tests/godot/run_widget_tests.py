@@ -31,6 +31,7 @@ CASES = {
     "ui_theme_test.gd": "ui theme: ok",
     "review_panel_test.gd": "review panel: ok",
     "review_tab_test.gd": "review tab: ok",
+    "review_flow_test.gd": "review flow: ok",
     "asset_workspace_test.gd": "asset workspace: ok",
     "sidebar_feature_test.gd": "sidebar features: ok",
     "art_review_test.gd": "art review: ok",

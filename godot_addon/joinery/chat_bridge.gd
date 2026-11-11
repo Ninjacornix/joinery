@@ -8,10 +8,15 @@ signal message_received(text: String)
 signal message_delta(text: String, new_message: bool)
 signal completed(ok: bool)
 signal editor_action(event: Dictionary)
+## Journeyman's change passed Joinery's checks and is open for review: {transaction_id,
+## summary, diff, changes, media, media_pending}. Renders still coming arrive as review_media.
 signal file_preview(event: Dictionary)
-## The agent finished and its staged change is being checked: {transaction_id, summary}. A
-## file_preview follows when the review is ready; otherwise the turn just completes.
-signal review_preparing(event: Dictionary)
+## Where the turn is: {turn_id, state: working|submitting|in_review|decided|compacting|idle,
+## transaction_id?, reason?}. A live edit's review waits for in_review (review_flow.gd).
+signal turn_state(event: Dictionary)
+## The before/after renders of the change in review: {transaction_id, media}. An item whose
+## render failed carries error instead of its picture.
+signal review_media(event: Dictionary)
 signal file_decision(event: Dictionary)
 signal art_review(event: Dictionary)
 signal models_received(models: Array)
@@ -205,8 +210,12 @@ func _handle(event: Dictionary) -> void:
 			models_received.emit(event.get("models", []))
 		"timing":
 			timing_received.emit(event)
-		"review_preparing":
-			review_preparing.emit(event)
+		"turn_state":
+			turn_state.emit(event)
+		"review_media":
+			review_media.emit(event)
+		"notice":
+			_notice(str(event.get("text", "")), "error" if event.get("level") == "warn" else "info")
 		"file_preview":
 			file_preview.emit(event)
 		"art_review":
