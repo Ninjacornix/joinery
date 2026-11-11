@@ -155,6 +155,28 @@ def _joinery_bake_for_export():
 """
 
 
+# A Rigify rig draws its controls with hundreds of face-less WGT- meshes, used
+# as bone custom shapes. glTF writes each as an empty node, so the game got
+# hundreds of stray nodes under the scene root. The export removes them (the
+# .blend, already saved, keeps them to draw the rig). A custom shape with faces
+# is a real mesh someone reused, and is exported like any other.
+DROP_RIG_WIDGETS = """
+def _joinery_drop_rig_widgets():
+    shapes = set()
+    for rig in [o for o in bpy.data.objects if o.type == 'ARMATURE' and o.pose]:
+        for bone in rig.pose.bones:
+            if bone.custom_shape is not None:
+                shapes.add(bone.custom_shape)
+                bone.custom_shape = None
+    dropped = 0
+    for obj in shapes:
+        if obj.type == 'MESH' and not obj.data.polygons:
+            bpy.data.objects.remove(obj)
+            dropped += 1
+    print('JOINERY_EXPORT_WIDGETS', dropped)
+"""
+
+
 def shape_rows(output: str) -> list[dict[str, Any]]:
     """What the export did to each mesh's shape keys, from the worker's output."""
     rows: list[dict[str, Any]] = []

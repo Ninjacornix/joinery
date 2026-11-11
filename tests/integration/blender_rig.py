@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 from joinery.authoring import IMAGE, edit_document, inspect_document, run_offline
+from joinery.bible_blend import measure_argv, parse_measures
 from joinery.recipe import rebuild_one, recipe_paths
 from joinery.runner import SandboxRunner
 
@@ -38,6 +39,7 @@ from bl_ext.system.mpfb.services.humanservice import HumanService
 from bl_ext.system.mpfb.services.rigservice import RigService
 human = HumanService.create_human()
 human.name = 'Hero'
+human.data.name = 'Hero'  # MPFB2 calls it 'base'; art bibles name meshes
 meta = HumanService.add_builtin_rig(human, 'rigify.human_toes', import_weights=True)
 rig = RigService.generate_rigify_rig(meta, name='HeroRig', meta_rig_action='delete')
 assert rig is not None, 'Rigify rejected the MPFB2 meta-rig'
@@ -113,6 +115,18 @@ async def main(stage: Path) -> dict[str, Any]:
     assert len(joints) == len(set(joints)), "a joint is listed twice"
     skinned = [n for n in gltf["nodes"] if "skin" in n and "mesh" in n]
     assert skinned, "the human mesh is not skinned to the rig"
+    # Rigify's control shapes stay in the .blend to draw the rig, flagged as
+    # widgets for the art bible's checks, and never reach the GLB.
+    measured = await run_offline(measure_argv([SOURCE]), stage, 300, readonly=True)
+    widgets = [
+        o.name for o in parse_measures(measured.output)[SOURCE].objects if o.widget
+    ]
+    assert len(widgets) > 100 and all(w.startswith("WGT-") for w in widgets), widgets[
+        :5
+    ]
+    stray = [n["name"] for n in gltf["nodes"] if n["name"].startswith("WGT-")]
+    assert not stray, stray[:5]
+    assert len(gltf["nodes"]) == len(joints) + 2, len(gltf["nodes"])  # + body, rig
     # MPFB2 hides its helper geometry with a Mask modifier. The game gets the
     # body only (no helpers, so no unweighted vertices and no "neutral_bone").
     # Its shape keys are all body-shape macros ($md-…): by default the export
@@ -130,6 +144,8 @@ async def main(stage: Path) -> dict[str, Any]:
         bones=rig["bone_count"],
         deform_bones=len(joints),
         source_vertices=hero["vertices"],
+        rig_widgets_left_out=len(widgets),
+        glb_nodes=len(gltf["nodes"]),
         exported_vertices=exported,
         source_shape_keys=len(hero["shape_keys"]) - 1,
         morph_targets_baked=len(primitive.get("targets", [])),

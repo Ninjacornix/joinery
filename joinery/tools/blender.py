@@ -22,6 +22,7 @@ from joinery.tools.base import (
 from joinery.tools.blender_export import (
     BAKE_FOR_EXPORT,
     BAKE_MACRO_KEYS,
+    DROP_RIG_WIDGETS,
     macro_call,
 )
 
@@ -952,6 +953,8 @@ class Blender(ToolModule):
                 macro_call(keep_macro_shape_keys),
                 BAKE_FOR_EXPORT,
                 "_joinery_bake_for_export()",
+                DROP_RIG_WIDGETS,
+                "_joinery_drop_rig_widgets()",
                 EXPORT_NAMES,
                 "_joinery_name_parts()",
             ]
