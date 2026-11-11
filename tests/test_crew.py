@@ -630,6 +630,7 @@ def test_every_native_operation_names_the_apps_it_runs() -> None:
     )
     assert op_apps("operate_document", {"tool": "krita"}) == ("krita",)
     assert op_apps("operate_graph", {}) == ("material-maker",)
+    assert op_apps("make_sound", {"kind": "pickup"}) == ("surge-xt",)
 
 
 class SlowOps(FakeConnection):

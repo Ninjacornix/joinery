@@ -201,13 +201,15 @@ def spec_for(arguments: dict[str, Any]) -> SoundSpec:
 
 
 def app_for(arguments: dict[str, Any]) -> str:
-    """The app a make_sound call runs, for worker slots; "" when it can't be told."""
+    """The app a make_sound call runs, for worker slots.
+
+    A kind the kit doesn't know is refused by make_sound itself; until then it
+    holds SuperCollider's slot, the app most kinds run.
+    """
     kind = str(arguments.get("kind", ""))
-    if kind in AMBIENCES:
-        return "supercollider"
     if kind in EFFECTS:
         return EFFECTS[kind][1]
-    return ""
+    return "supercollider"
 
 
 # --- SuperCollider ------------------------------------------------------------------

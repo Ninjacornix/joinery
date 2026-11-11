@@ -84,7 +84,7 @@ def test_make_sound_runs_the_app_of_its_kind() -> None:
     assert gateway.op_apps("make_sound", {"kind": "footstep"}) == ("supercollider",)
     assert gateway.op_apps("make_sound", {"kind": "ui_click"}) == ("surge-xt",)
     assert gateway.op_apps("make_sound", {"kind": "cave"}) == ("supercollider",)
-    assert gateway.op_apps("make_sound", {"kind": "nope"}) == ()
+    assert gateway.op_apps("make_sound", {"kind": "nope"}) == ("supercollider",)
 
 
 def test_make_sound_needs_a_transaction_and_its_tool(tmp_path: Path) -> None:
