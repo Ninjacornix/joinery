@@ -54,7 +54,7 @@ def record_lock(project: Path) -> tuple[str, list[str]]:
     retained = {}
     if existing.is_file():
         for entry in tomllib.loads(existing.read_text()).get("asset", []):
-            if entry.get("origin") in {"human-import", "custom-tool"}:
+            if entry.get("origin") in {"human-import", "custom-tool", "kit"}:
                 retained[entry["path"]] = entry
 
     lines = [
@@ -65,6 +65,18 @@ def record_lock(project: Path) -> tuple[str, list[str]]:
     ]
     for rel in files:
         claim = claims.get(rel)
+        kit = retained.get(rel, {})
+        if kit.get("origin") == "kit" and claim is not None:
+            # A shared kit's asset stays the kit's (its licence still applies)
+            # when its recipe makes it again.
+            kit = {**kit, "sha256": _sha256(project / rel), "tool": claim[0]}
+            kit["recipe"] = claim[1]
+            lines += [
+                "",
+                "[[asset]]",
+                *[f"{k} = {json.dumps(v)}" for k, v in kit.items()],
+            ]
+            continue
         if claim is None:
             if rel in retained:
                 entry = retained[rel]

@@ -29,6 +29,8 @@ from joinery.catalog import ROOT, Catalog, load_project_tools
 LOCK_NAME = "joinery.lock"
 LOCK_HEADER = "version = 1\n"
 ASSET_DIRS = ("art", "audio")
+#: Imported shared kits: kits/<folder>/ with their own art/ and audio/.
+KITS_DIR = "kits"
 NOT_ASSETS = {".gitkeep", ".DS_Store", ".gdignore"}
 NOT_ASSET_PATHS = {"art/bible.md"}
 #: Files Godot or the OS add beside an extension's own; not part of its hash.
@@ -67,7 +69,27 @@ class CustomOutput(_Entry):
     recipe: str | None = None
 
 
-Entry = ToolCreated | HumanImport | CustomOutput
+class KitAsset(_Entry):
+    """Came in a shared kit the user imported: the kit's name, author and licence.
+
+    ``made_as`` keeps how it was made where the kit came from; ``recipe`` is the
+    recipe that rebuilds it here (none for an import the kit carried).
+    """
+
+    origin: Literal["kit"]
+    kit: str = Field(min_length=1)
+    kit_version: str = Field(min_length=1)
+    kit_author: str = Field(min_length=1)
+    licence: str = Field(min_length=1)
+    made_as: Literal["tool-created", "human-import", "custom-tool", "kit"]
+    tool: str = ""
+    recipe: str | None = None
+    #: A human import's own licence, or the kit it first came in.
+    asset_licence: str = ""
+    upstream: str = ""
+
+
+Entry = ToolCreated | HumanImport | CustomOutput | KitAsset
 AssetEntry = Annotated[Entry, Field(discriminator="origin")]
 _ENTRIES: TypeAdapter[list[Entry]] = TypeAdapter(list[AssetEntry])
 
@@ -104,11 +126,19 @@ class Extension(BaseModel):
 _EXTENSIONS: TypeAdapter[list[Extension]] = TypeAdapter(list[Extension])
 
 
+def asset_roots(project: Path) -> list[Path]:
+    """art/ and audio/, and the same folders of every kit imported under kits/."""
+    roots = [project / d for d in ASSET_DIRS]
+    for record in sorted((project / KITS_DIR).glob("*/installed.toml")):
+        roots += [record.parent / d for d in ASSET_DIRS]
+    return roots
+
+
 def asset_files(project: Path) -> set[str]:
-    """Every file under art/ and audio/ that the gate considers an asset."""
+    """Every file under art/ and audio/ (a kit's too) that the gate considers an asset."""
     found: set[str] = set()
-    for directory in ASSET_DIRS:
-        for path in (project / directory).rglob("*"):
+    for directory in asset_roots(project):
+        for path in directory.rglob("*"):
             rel = path.relative_to(project).as_posix()
             skipped = (
                 path.suffix == ".import"
@@ -156,6 +186,9 @@ def _entry_errors(
         return [f"{entry.path}: in {LOCK_NAME} but missing on disk"]
     if hashlib.sha256(file.read_bytes()).hexdigest() != entry.sha256:
         errors.append(f"{entry.path}: sha256 differs from {LOCK_NAME}")
+    recipe = entry.recipe if isinstance(entry, KitAsset) else None
+    if recipe and not (project / recipe).is_file():
+        errors.append(f"{entry.path}: recipe {recipe} not found")
     if isinstance(entry, ToolCreated):
         if entry.tool not in {t.id for t in catalog.tool}:
             errors.append(f"{entry.path}: {entry.tool!r} is not a preferred tool")
@@ -314,6 +347,28 @@ def record_imports(project: Path, imports: list[HumanImport]) -> int:
     _parse(updated)  # never write a lock that does not read back
     lock.write_text(updated, encoding="utf-8")
     return len(blocks)
+
+
+def write_assets(project: Path, drop: set[str], add: list[Entry]) -> None:
+    """Rewrite the lock's assets: without ``drop`` and with ``add`` (replacing by path)."""
+    lock = project / LOCK_NAME
+    text = lock.read_text(encoding="utf-8") if lock.is_file() else LOCK_HEADER
+    entries, extensions = _parse(text)
+    replaced = drop | {e.path for e in add}
+    kept = [e for e in entries if e.path not in replaced] + list(add)
+    blocks = [
+        "[[asset]]\n"
+        + "".join(
+            f"{key} = {json.dumps(value)}\n"
+            for key, value in entry.model_dump(exclude_defaults=True).items()
+            if value is not None
+        )
+        for entry in sorted(kept, key=lambda e: e.path)
+    ]
+    blocks += [_extension_block(e) for e in extensions]
+    updated = LOCK_HEADER + "".join("\n" + block for block in blocks)
+    _parse(updated)  # never write a lock that does not read back
+    lock.write_text(updated, encoding="utf-8")
 
 
 def check_assets(project: Path, catalog: Catalog) -> list[str]:
