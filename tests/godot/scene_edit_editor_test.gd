@@ -99,7 +99,9 @@ func _review_layout(plugin: EditorPlugin) -> void:
 		lines.append("+ Long reviewed scene change %d with properties and source context" % index)
 	(
 		plugin
-		. _on_file_preview(
+		. _chat
+		. file_preview
+		. emit(
 			{
 				"transaction_id": "layout",
 				"summary": "Large technical fixture import",
@@ -128,7 +130,9 @@ func _review_layout(plugin: EditorPlugin) -> void:
 	still.save_png(still_path)
 	(
 		plugin
-		. _on_file_preview(
+		. _chat
+		. file_preview
+		. emit(
 			{
 				"transaction_id": "layout",
 				"summary": "Create a low-poly hammer",
@@ -339,7 +343,9 @@ func _existing_scene(plugin: EditorPlugin, box: Dictionary) -> void:
 	_check(result["success"], "Create box in the live editor")
 	var node := scene.get_node_or_null("ReviewBox") as MeshInstance3D
 	_check(node != null and node.mesh.size == Vector3.ONE, "One metre native BoxMesh")
-	_check(plugin._review_open, "Show Accept/Reject with the live preview")
+	_check(not plugin._review_open, "Accept/Reject wait until the change is submitted")
+	plugin._chat.turn_state.emit({"turn_id": "t", "state": "in_review"})
+	_check(plugin._review_open, "Show Accept/Reject once the change is in review")
 	_check(
 		FileAccess.get_file_as_bytes(scene.scene_file_path) == bytes,
 		"A preview must not write the scene file"
