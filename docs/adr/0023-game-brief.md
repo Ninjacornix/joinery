@@ -53,3 +53,22 @@ why others cannot, and the game core's extension points so the agent builds on
 and lint modules are optional imports, so the registry serves every tool even
 when one of them is absent; a failing lint is reported beside the bible, never
 instead of it.
+
+## Addendum: design documents (2026-11)
+The user's own design documents (Markdown, text or PDF, at most 10 at a time)
+are copied into `design/docs/` from the wizard, `--design-doc PATH` or
+`joinery references add`, and listed in a **Design documents** section at the
+top of the brief. `joinery/gdd.py` drafts open brief sections from Markdown and
+text only by deterministic extraction: ATX and setext headings outside code
+fences are matched to brief sections through a fixed phrase table, and the
+section's own text (subheadings turned into bold lines, cut at 1,500
+characters with a pointer to the file) replaces the open marker, ending with
+the file and heading it came from. A section the user wrote is never changed;
+a heading the table doesn't know stays only in the document. PDFs are not read:
+text pulled from a PDF loses its order in columns and tables, a PDF library
+would be a new dependency, and every supported agent reads PDFs itself, so the
+brief says the document is there and `game_brief` returns it with `text:
+null`. `game_brief` returns every document in `design/docs/`, with the text of
+Markdown and text ones (20,000 characters each, 60,000 in all). The brief and
+the bible win where a document disagrees.
+

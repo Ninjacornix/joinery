@@ -72,3 +72,21 @@ untextured models are not judged. Material factors driven by a texture are
 checked through the texture only when it is an albedo image in the project.
 UI contrast covers StyleBoxFlat backgrounds and opaque colours; textured or
 translucent backgrounds are not judged.
+
+## Addendum: references the user adds (2026-11)
+Pictures picked in the new-project wizard, with `--reference PATH[=note]` on
+`joinery new` / `game apply`, or with `joinery references add` (Project apps)
+are copied into `art/reference/` by `joinery/setup_imports.py`: PNG, JPEG or
+WebP by suffix and by their own first bytes, at most 20 at a time and 40 MB
+each, under a cleaned-up copy of their own name, de-duplicated by content. Each
+gets a `human-import` lock entry (`imported_by = "user (added as a
+reference)"`, `licence = "reference only, not shipped"`) and a board row
+(`R<n>`, the file's name, empty Kind, the note as *Take this*, *Not that*
+open). At creation the rows are written before the creation approval, so it
+covers them; on an existing project the change is a recorded transaction and
+the bible needs approving again. Adding them is the user's act: the shared
+policy refuses `joinery references add` and the `--reference` and
+`--design-doc` flags in an agent's shell command, for every agent.
+`art_direction` lists every reference image and sends up to 8 (4 MB each) as
+image content after its JSON, so agents that take images can look at them.
+

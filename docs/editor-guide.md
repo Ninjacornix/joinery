@@ -546,6 +546,52 @@ and says so once; Godot's own log notes that OpenXR could not start. Tests
 pass `-- --vr-simulate` to run the rig without a headset; see ADR 0039 for
 what was and was not tested on real hardware.
 
+### References and design documents
+
+Your own pictures and design documents can come with a new game, or be added
+later. In the wizard's last step (**Brief and art direction**) drop files on the
+window or use **Add images…** under **Reference images** and **Add documents…**
+under **Design documents**. Each picture shows a thumbnail and a field for what
+to take from it; each document its name and kind; × takes a file off the list.
+For an existing game, **Project apps** (`/setup`) has **References and design
+documents** with **Add references…** and **Add design documents…**: Joinery
+first says what the change would do, and **Add to project** adds them as one
+change the Timeline can revert.
+
+```sh
+uv run joinery new /path/to/game --tools godot --blueprint blank \
+  --reference "~/refs/dusk.png=the warm low light" --reference ~/refs/quarry.jpg \
+  --design-doc ~/docs/gdd.md --design-doc ~/docs/pitch.pdf
+uv run joinery references add --project /path/to/game \
+  --reference ~/refs/pier.webp --plan   # what would change; --yes adds it
+```
+
+- Pictures (PNG, JPEG or WebP, up to 20 at a time) are copied into
+  `art/reference/` under their own names (`dusk-2.png` when the name is taken,
+  nothing when the same picture is already there), recorded in `joinery.lock`
+  as your import (`human-import`, "reference only, not shipped"), and added to
+  the art bible's reference board as R1, R2, … with your note as *Take this*.
+  Kind and *Not that* are left for you. At creation this happens before the
+  bible is approved; later it changes the bible, so you approve it again in
+  `/art`.
+- Design documents (Markdown, text or PDF, up to 10) are copied into
+  `design/docs/` and listed at the top of `design/brief.md` under **Design
+  documents**. For Markdown and text, a heading that names a brief section
+  (Pitch, Core loop, Controls, Target audience, Scope and so on) has its text
+  copied, word for word, into that section if it is still open, ending with
+  the file and heading it came from. Nothing is summarised or invented, and a
+  section you already wrote is never touched. PDFs are kept as files: Joinery
+  doesn't read them, and Journeyman opens them itself.
+- Only the files you pick are copied: nothing else from their folder, nothing
+  they link to, and never anything from the internet. A file of the wrong
+  kind is refused with the reason, before anything is written. Only you add
+  references and design documents; an agent asking to run `joinery references
+  add` is refused.
+
+Journeyman reads `design/docs/` with the brief (`game_brief` returns each
+document, with the text of Markdown and text ones) and sees the pictures on the
+board (`art_direction` sends them along to agents that take images).
+
 ### Changing features
 
 Adding or removing a feature is a reviewed change, like any other:
