@@ -46,8 +46,13 @@ func _called(words: Array) -> bool:
 			FileAccess.get_file_as_string(_calls_path.path_join(file_name))
 		)
 		var hit := call is Array
+		# Windows paths can come with either slash; compare them the same way.
+		var seen: Array = []
+		if hit:
+			for item: Variant in call:
+				seen.append(str(item).replace("\\", "/"))
 		for word: Variant in words:
-			hit = hit and (call as Array).has(word)
+			hit = hit and seen.has(str(word).replace("\\", "/"))
 		if hit:
 			return true
 	return false
