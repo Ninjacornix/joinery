@@ -23,6 +23,7 @@ from joinery import (
     game_setup,
     history,
     hook,
+    match_cli,
     playtest,
     references,
     setup_imports,
@@ -492,7 +493,11 @@ def _reviewer(args: argparse.Namespace) -> int:
         else:
             print(str(exc), file=sys.stderr)
         return 1
-    data = {"enabled": settings.enabled, "model": settings.model, "rounds": settings.rounds}
+    data = {
+        "enabled": settings.enabled,
+        "model": settings.model,
+        "rounds": settings.rounds,
+    }
     if args.json:
         print(json.dumps(data))
     else:
@@ -955,6 +960,10 @@ def _parser() -> argparse.ArgumentParser:
     feature_cmd.add_argument(
         "--yes", action="store_true", help="accept the reviewed change without asking"
     )
+    match_cmd = commands.add_parser(
+        "match", help="audit the project against the art bible; list what drifts"
+    )
+    match_cli.add_arguments(match_cmd)
     playtest_cmd = commands.add_parser(
         "playtest", help="play the game headless with a bot and report what goes wrong"
     )
@@ -1332,6 +1341,8 @@ def main(argv: list[str] | None = None) -> int:
         return playtest.main(args)
     if args.command == "share":
         return share.main(args)
+    if args.command == "match":
+        return match_cli.main(args)
     if args.command == "feature":
         return _feature(args)
     if args.command == "status":
