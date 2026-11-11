@@ -160,6 +160,15 @@ def describe(o):
         row['action'] = o.animation_data.action.name
     return row
 _files = _joinery_texture_files()
+_fps = bpy.context.scene.render.fps / bpy.context.scene.render.fps_base
+def action_owner(a):
+    for o in bpy.data.objects:
+        d = o.animation_data
+        if d is None:
+            continue
+        if d.action == a or any(s.action == a for t in d.nla_tracks for s in t.strips):
+            return o.name
+    return ''
 def describe_material(m):
     images = []
     for row in _joinery_image_nodes(m):
@@ -190,7 +199,11 @@ print('JOINERY_DOCUMENT:' + json.dumps({
         for i in bpy.data.images if i.type in {'IMAGE', 'UV_TEST'}
     ],
     'actions': [
-        {'name': a.name, 'frames': [a.frame_range[0], a.frame_range[1]]}
+        {
+            'name': a.name, 'frames': [a.frame_range[0], a.frame_range[1]], 'fps': _fps,
+            'loop': bool(a.get('joinery_loop', a.use_cyclic)),
+            'kind': str(a.get('joinery_kind', '')), 'armature': action_owner(a),
+        }
         for a in bpy.data.actions
     ],
 }))

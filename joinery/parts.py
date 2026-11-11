@@ -33,12 +33,12 @@ from pydantic import BaseModel, ConfigDict
 from joinery import tools
 from joinery.recipe import load_recipe, recipe_paths
 
-PartKind = Literal["object", "material", "texture", "bone", "shape_key"]
+PartKind = Literal["object", "material", "texture", "bone", "shape_key", "animation"]
 #: Where the editor and gateway put a prompt's part targets for the tool servers.
 TARGETS_FILE = ".joinery/part_targets.json"
 CACHE_DIR = ".joinery/parts"
 #: Part id fields, in the order they appear in an id.
-ID_FIELDS = ("object", "material", "image", "bone", "shape_key")
+ID_FIELDS = ("object", "material", "image", "bone", "shape_key", "action")
 #: How each map role reads in the editor.
 ROLE_NAMES = {
     "base_color": "Base colour",
@@ -57,6 +57,8 @@ IDENTITY: dict[str, tuple[str, ...]] = {
     "texture": ("material", "image"),
     "bone": ("object", "bone"),
     "shape_key": ("object", "shape_key"),
+    # Action names are unique in a model; a chip from Godot may not know the rig.
+    "animation": ("action",),
 }
 #: Typed operations per part kind (maps depend on the map; see Part.ops).
 PART_OPS: dict[str, tuple[str, ...]] = {
@@ -64,6 +66,7 @@ PART_OPS: dict[str, tuple[str, ...]] = {
     "material": ("set_material_value", "split_material"),
     "bone": ("edit_bone",),
     "shape_key": ("edit_shape_key",),
+    "animation": ("edit_action", "make_cycle"),
 }
 KIND_NAMES = {
     "object": "Object",
@@ -71,6 +74,7 @@ KIND_NAMES = {
     "texture": "Texture",
     "bone": "Bone",
     "shape_key": "Shape key",
+    "animation": "Animation",
 }
 
 
@@ -107,6 +111,14 @@ class Part(BaseModel):
     source_only: bool = False
     #: The Krita document or Material Maker graph this map is painted in.
     editable: str = ""
+    #: An animation: its action, frame range ("0,24"), frames per second,
+    #: length in seconds, whether it loops, and the motion Joinery made it as.
+    action: str = ""
+    frames: str = ""
+    fps: str = ""
+    seconds: str = ""
+    loop: bool = False
+    animation_kind: str = ""
 
     @property
     def ops(self) -> tuple[str, ...]:
@@ -149,8 +161,14 @@ class Part(BaseModel):
             "bone",
             "shape_key",
             "texture",
+            "action",
+            "frames",
+            "fps",
+            "seconds",
+            "animation_kind",
         ):
             flat[key] = str(getattr(self, key))
+        flat["loop"] = "true" if self.loop else ""
         flat["roles"] = ",".join(self.roles)
         flat["used_by"] = ",".join(self.used_by)
         flat["materials"] = ",".join(self.materials)
@@ -199,6 +217,8 @@ class PartsReport(BaseModel):
 
 
 def _kind_from_fields(fields: Mapping[str, str]) -> str:
+    if fields.get("action"):
+        return "animation"
     if fields.get("image"):
         return "texture"
     if fields.get("bone"):
@@ -257,6 +277,8 @@ def chip_label(target: Mapping[str, str]) -> str:
         return f"{target.get('bone', '')} · {obj or model}"
     if kind == "shape_key":
         return f"{target.get('shape_key', '')} · {obj or model}"
+    if kind == "animation":
+        return f"{target.get('action', '')} · {model}"
     return f"{obj} · {model}"
 
 
@@ -269,7 +291,7 @@ def chip_tooltip(target: Mapping[str, str]) -> str:
             crumbs.append(str(target[key]))
     if target.get("part_kind") == "texture":
         crumbs.append(chip_label(target).split(" · ")[0])
-    for key in ("bone", "shape_key"):
+    for key in ("bone", "shape_key", "action"):
         if target.get(key):
             crumbs.append(str(target[key]))
     lines = [" › ".join(crumbs)]
@@ -348,6 +370,7 @@ def blender_parts(inspection: dict[str, Any], resource: str, source: str) -> lis
                     owner="blender",
                 )
             )
+    found += _animation_parts(inspection, objects, resource, source)
     slot_of = {
         (str(o["name"]), str(s["material"])): str(s["index"])
         for o in objects
@@ -400,6 +423,41 @@ def blender_parts(inspection: dict[str, Any], resource: str, source: str) -> lis
                     owner="blender",
                 )
             )
+    return found
+
+
+def _animation_parts(
+    inspection: dict[str, Any],
+    objects: list[dict[str, Any]],
+    resource: str,
+    source: str,
+) -> list[Part]:
+    """Each action, on the armature that plays it (or the model's only armature)."""
+    rigs = [str(o["name"]) for o in objects if o.get("type") == "ARMATURE"]
+    found: list[Part] = []
+    for row in inspection.get("actions", []):
+        if not isinstance(row, dict) or not row.get("name"):
+            continue
+        name = str(row["name"])
+        rig = str(row.get("armature") or (rigs[0] if len(rigs) == 1 else ""))
+        frames = [float(f) for f in row.get("frames", [0, 0])][:2] or [0.0, 0.0]
+        fps = float(row.get("fps") or 24.0)
+        found.append(
+            Part(
+                id=part_id(resource, object=rig, action=name),
+                part_kind="animation",
+                object=rig,
+                action=name,
+                frames=f"{round(frames[0])},{round(frames[-1])}",
+                fps=f"{fps:g}",
+                seconds=f"{(frames[-1] - frames[0]) / fps:.3f}",
+                loop=bool(row.get("loop", False)),
+                animation_kind=str(row.get("kind", "")),
+                resource=resource,
+                source=source,
+                owner="blender",
+            )
+        )
     return found
 
 
