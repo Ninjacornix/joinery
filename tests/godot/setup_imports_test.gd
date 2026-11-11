@@ -28,6 +28,16 @@ func _until(ready: Callable, seconds := 20.0) -> bool:
 	return ready.call()
 
 
+func _all_calls() -> Array:
+	var calls: Array = []
+	for file_name: String in DirAccess.get_files_at(_calls_path):
+		if file_name.ends_with(".json"):
+			calls.append(
+				JSON.parse_string(FileAccess.get_file_as_string(_calls_path.path_join(file_name)))
+			)
+	return calls
+
+
 func _called(words: Array) -> bool:
 	for file_name: String in DirAccess.get_files_at(_calls_path):
 		if not file_name.ends_with(".json"):
@@ -123,10 +133,15 @@ func _check_section(dialog: AcceptDialog, section: Control, files: PackedStringA
 	if note != null:
 		note.text = "the warm low light"
 	await _captures(dialog, section)
+	# Captures switch themes, which can plan again: press only once the plan is ready.
+	_check(await _until(planned), "The plan is ready again before adding")
 	add.pressed.emit()
 	var path := files[0] + "=the warm low light"
 	var done := func() -> bool: return _called(["references", "--yes", path])
-	_check(await _until(done), "Add to project passes each picture with its note")
+	var added := await _until(done)
+	if not added:
+		print("setup imports: calls seen: ", _all_calls())
+	_check(added, "Add to project passes each picture with its note")
 	_check(_called(["--design-doc", files[1]]), "And each document")
 	var status := dialog.get("_status") as Label
 	var said := func() -> bool: return status.visible and status.text.begins_with("Added 1")

@@ -318,7 +318,8 @@ def test_the_reviewer_agent_reads_the_change_and_reports_through_its_tool(
     (prompt,) = prompts
     assert "Make a lamp" in prompt.text and "Lamps are 1.5 m tall." in prompt.text
     assert "+lamp" in prompt.text and "notes/lamp.md (created)" in prompt.text
-    assert prompt.attachments and prompt.attachments[0].endswith("art/lamp.png")
+    assert prompt.attachments
+    assert Path(prompt.attachments[0]).as_posix().endswith("art/lamp.png")
     assert prompt.selection.model == "m1"
 
 

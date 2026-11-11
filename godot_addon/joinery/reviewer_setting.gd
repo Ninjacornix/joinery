@@ -37,7 +37,8 @@ func _init() -> void:
 	model.editable = false
 	model.text_submitted.connect(func(_text: String) -> void: _save_model())
 	model.focus_exited.connect(_save_model)
-	model_row = UI.setting_row("Reviewer model", model)
+	# Under "Reviewer agent", so "Model" says enough and fits narrow sidebars.
+	model_row = UI.setting_row("Model", model)
 	add_child(model_row)
 	set_process(false)
 
