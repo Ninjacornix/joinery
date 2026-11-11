@@ -4,9 +4,9 @@ extends PanelContainer
 ## 0037): an outlined card with the task's title and its own Stop, and under it one caption
 ## line: the apps at work, the current step and a quiet timer while it works; "Ready for review"
 ## with a Review link once its change passed Joinery's checks; then the outcome. The change
-## itself is decided in the Review tab, like every other change. A debugging task's card is titled "Debugging: <error>" (the error
-## in full on hover); its debugger reads, then a worker makes the fix, and the cause it found is
-## on the caption's hover.
+## itself is decided in the Review tab, like every other change. A debugging task's card is
+## titled "Debugging: <error>" (the error in full on hover); its debugger reads, then a
+## worker makes the fix, and the cause it found is on the caption's hover.
 
 signal stop_pressed
 signal review_pressed
