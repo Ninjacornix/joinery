@@ -157,14 +157,25 @@ class Crew:
         return [t for t in self.tasks.values() if t.state == WORKING]
 
     def owner(self, transaction_id: str) -> Task | None:
-        """The task whose change ``transaction_id`` is in review."""
+        """The task whose change ``transaction_id`` is in review.
+
+        Its change may be decided while its agent still writes its last words,
+        as the chat's own can.
+        """
         if not transaction_id:
             return None
         return next(
             (
                 t
                 for t in self.tasks.values()
-                if t.state == IN_REVIEW and t.transaction_id == transaction_id
+                if t.state not in FINAL
+                and (
+                    (t.state == IN_REVIEW and t.transaction_id == transaction_id)
+                    or (
+                        t.controller.review_open
+                        and t.controller.review_id == transaction_id
+                    )
+                )
             ),
             None,
         )
@@ -290,7 +301,10 @@ class Crew:
         task.ended = time.time()
         task.step = ""
         controller = task.controller
-        if controller.review_open and (controller.review_id or controller.live_edits):
+        if task.state in FINAL:
+            # Decided while its agent still wrote its last words.
+            await self._finish(task)
+        elif controller.review_open and (controller.review_id or controller.live_edits):
             task.transaction_id = task.controller.review_id
             task.state = IN_REVIEW
         else:
@@ -346,7 +360,10 @@ class Crew:
         decision = await task.controller.decide(transaction_id, accept)
         task.state = "accepted" if accept else "discarded"
         task.message = str(decision.get("message", ""))
-        await self._finish(task)
+        job = task.job
+        if job is None or job.done():
+            await self._finish(task)
+        # Otherwise the lane closes when its agent is done (_run).
         self.emit(task.event())
         return {**decision, "task_id": task.id}
 

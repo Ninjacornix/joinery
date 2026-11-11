@@ -906,6 +906,43 @@ def test_a_task_stages_while_the_main_request_works(
     run(go)
 
 
+def test_a_task_change_is_decided_while_its_agent_still_writes(
+    project: Path,
+) -> None:
+    test = CrewTest(project)
+
+    async def go() -> None:
+        crew = test.crew()
+        reviewed = asyncio.Event()
+        finish = asyncio.Event()
+
+        async def step(lane: ProjectGateway) -> AsyncIterator[Any]:
+            await write(lane, "notes/a.txt", "a")
+            assert lane.turn is not None
+            await lane.turn.submit("Notes")
+            reviewed.set()
+            await finish.wait()
+            yield Message(text="Done.")
+            yield Done(ok=True)
+
+        test.steps = [step]
+        task = await crew.start("A", "Make a", origin="user", prompt=test.prompt())
+        await asyncio.wait_for(reviewed.wait(), 5)
+        identifier = task.controller.review_id
+        assert crew.owner(identifier) is task
+        decided = await crew.decide(identifier, True)
+        assert decided["accepted"] and (project / "notes/a.txt").exists()
+        finish.set()
+        assert task.job is not None
+        await task.job
+        assert task.state == "accepted"
+        assert "A" not in test.gateway.claims.titles.values()
+        await crew.close()
+        await test.gateway.close()
+
+    run(go)
+
+
 def test_the_limit_counts_the_chat_itself(project: Path) -> None:
     test = CrewTest(project, limit=2)
 
