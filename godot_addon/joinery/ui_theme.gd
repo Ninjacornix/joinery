@@ -81,6 +81,8 @@ const ICONS := {
 	"menu": "GuiTabMenuHl",
 	"back": "Back",
 	"forward": "Forward",
+	"previous": "PagePrevious",
+	"next": "PageNext",
 	"disclosure_closed": "GuiTreeArrowRight",
 	"disclosure_open": "GuiTreeArrowDown",
 	"close": "Close",
@@ -500,7 +502,7 @@ static func watch(root: Control) -> void:
 ## JoineryPopup, JoineryHoverCard, JoineryComposer, JoineryComposerFocused, JoineryBubble,
 ## JoineryChangeCard, JoineryMediaFrame, JoineryLoadingFrame, JoineryIconTile, JoineryDock
 ## (the sidebar: GUTTER on the sides and bottom, SPACE.1 on top so its header row lines up
-## with the editor's tab row).
+## with the editor's tab row), JoineryStatusChip, JoineryDrawer.
 ## Containers: JoineryFlush (0), JoineryTight (4), JoineryRowTight (4), JoineryRow (8),
 ## JoineryStack (12), JoinerySections (24) for Box containers; HSplitContainer keeps a 12
 ## gutter between its columns; JoineryInset (side margins 8), JoineryPage

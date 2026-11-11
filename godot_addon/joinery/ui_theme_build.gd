@@ -539,6 +539,12 @@ static func _panels(t: Theme, c: Dictionary, m: Dictionary) -> void:
 		"JoineryChangeCard":
 		[c["surface_raised"], Color.TRANSPARENT, 0.0, "lg", _sp(m, 3), _sp(m, 3)],
 		"JoineryMediaFrame": [c["surface_sunken"], Color.TRANSPARENT, 0.0, "md", 0.0, 0.0],
+		# A quiet status pill (the review's checks): raised, fully round, caption-sized.
+		"JoineryStatusChip":
+		[c["surface_raised"], Color.TRANSPARENT, 0.0, "full", _sp(m, 2), _sp(m, 1) / 2.0],
+		# A sheet that slides over the review's stage (Details).
+		"JoineryDrawer":
+		[c["surface_raised"], c["border_subtle"], hairline, "lg", _sp(m, 1), _sp(m, 1)],
 		"JoineryLoadingFrame":
 		[c["surface_raised"], Color.TRANSPARENT, 0.0, "md", _sp(m, 3), _sp(m, 3)],
 		"JoineryIconTile": [c["surface_raised"], Color.TRANSPARENT, 0.0, "xs", tile_pad, tile_pad],
