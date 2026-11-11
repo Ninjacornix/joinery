@@ -27,7 +27,7 @@ sys.path.insert(0, str(ROOT))
 
 from run_startup_test import crash, scratch_folder
 
-from joinery import kits, parts
+from joinery import kit_preview, kits, parts
 from joinery.locking import GLB_IMPORT, write_lock
 from joinery.workspace import index
 
@@ -152,10 +152,10 @@ def main() -> int:
             env["JOINERY_TEST_PYTHON"] = sys.executable
             drawn = {
                 "make": asyncio.run(
-                    kits.preview(project, "hut", {"windows": 4, "roof": "hip"}, seed=3)
+                    kit_preview.preview(project, "hut", {"windows": 4, "roof": "hip"}, seed=3)
                 ),
                 "edit": asyncio.run(
-                    kits.preview(project, "rock", {"moss": 0.4}, seed=11)
+                    kit_preview.preview(project, "rock", {"moss": 0.4}, seed=11)
                 ),
             }
             env["JOINERY_KITS_PREVIEW"] = json.dumps(drawn)

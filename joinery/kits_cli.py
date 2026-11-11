@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from joinery import kits
+from joinery import kit_preview, kits
 from joinery.art_approval import approved
 from joinery.transactions import FileTransaction
 
@@ -85,12 +85,12 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
     seed = 1 if args.seed is None else args.seed
     if args.action == "preview":
         return asyncio.run(
-            kits.preview(project, args.kit, params, seed=seed, colours=colours)
+            kit_preview.preview(project, args.kit, params, seed=seed, colours=colours)
         )
     if not approved(project):
         raise ValueError(ART_GATE)
     if args.action == "make":
-        kit = kits.get(args.kit)
+        kit = kits.get(args.kit, project)
         label = kit.label.lower()
         summary = (
             f"Make {args.count} {label}s from the kit"
