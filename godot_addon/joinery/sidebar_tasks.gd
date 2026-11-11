@@ -13,6 +13,7 @@ extends VBoxContainer
 ## It hears the host through the chat bridge's task_event ([method on_event]).
 
 const CARD := preload("sidebar_task_card.gd")
+const DEBUG := preload("sidebar_debug.gd")
 const UI_MOTION := preload("ui_motion.gd")
 ## Seconds a finished task's card stays before it steps out.
 const LINGER := 4.0
@@ -42,6 +43,8 @@ static func attach(sidebar: Control, content: Control, before: Control) -> VBoxC
 	var composer: Object = sidebar.get("_composer")
 	if composer != null and composer.has_signal("alongside"):
 		composer.connect("alongside", tasks.run_alongside)
+	# "/debug" and the offer after a new error in Output start a debugging task.
+	DEBUG.attach(sidebar, tasks)
 	return tasks
 
 
@@ -183,7 +186,7 @@ func _finished(each: Control, event: Dictionary) -> void:
 		var kind := "error" if state == "failed" else "info"
 		var line := "%s: %s" % [str(each.get("title")), ENDINGS[state]]
 		var message := str(event.get("message", ""))
-		if state == "failed" and not message.is_empty():
+		if (state == "failed" or str(each.get("role")) == "debugger") and not message.is_empty():
 			line = "%s: %s" % [str(each.get("title")), message]
 		transcript.call("add_notice", line, kind)
 	if not is_inside_tree():

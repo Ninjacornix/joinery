@@ -1,10 +1,12 @@
 @tool
 extends PanelContainer
-## One agent working beside Journeyman (a parallel task, ADR 0036): an outlined card with the
-## task's title and its own Stop, and under it one caption line: the apps at work, the current
-## step and a quiet timer while it works; "Ready for review" with a Review link once its change
-## passed Joinery's checks; then the outcome. The change itself is decided in the Review tab,
-## like every other change.
+## One agent working beside Journeyman (a parallel task, ADR 0036, or a debugging task, ADR
+## 0037): an outlined card with the task's title and its own Stop, and under it one caption
+## line: the apps at work, the current step and a quiet timer while it works; "Ready for review"
+## with a Review link once its change passed Joinery's checks; then the outcome. The change
+## itself is decided in the Review tab, like every other change. A debugging task's card is titled "Debugging: <error>" (the error
+## in full on hover); its debugger reads, then a worker makes the fix, and the cause it found is
+## on the caption's hover.
 
 signal stop_pressed
 signal review_pressed
@@ -29,6 +31,8 @@ var title := ""
 ## working, in_review, accepted, discarded, done, failed or stopped.
 var state := "working"
 var transaction_id := ""
+## The agent role at work (joinery.roles): worker, or debugger while a debug task reads.
+var role := "worker"
 var title_label: Label
 var stop: Button
 var _dots: Control
@@ -142,6 +146,7 @@ func set_elapsed(seconds: int) -> void:
 func apply(event: Dictionary) -> void:
 	var next := str(event.get("state", state))
 	transaction_id = str(event.get("transaction_id", transaction_id))
+	_set_role(event)
 	if event.has("elapsed_s") and next == "working" and _last_second < 0:
 		_started_msec = Time.get_ticks_msec() - int(event["elapsed_s"]) * 1000
 	_set_apps(event.get("apps", []))
@@ -167,6 +172,18 @@ func apply(event: Dictionary) -> void:
 				words = message
 			_settle(str(spec[0]), words)
 			_review.hide()
+
+
+## A debugging task: the error on the title's hover, then the cause its debugger found.
+func _set_role(event: Dictionary) -> void:
+	role = str(event.get("role", role))
+	var error := str(event.get("error", ""))
+	if not error.is_empty():
+		title_label.tooltip_text = error
+		accessibility_name = "Debugging task: " + error
+	var cause := str(event.get("cause", ""))
+	if not cause.is_empty():
+		_step.tooltip_text = "Cause: " + cause
 
 
 ## The step the task's agent is on ("Working in Blender…").

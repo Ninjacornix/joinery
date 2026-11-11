@@ -444,7 +444,7 @@ def test_debug_requests_are_read_from_the_output() -> None:
         }
     )
     assert found.error == ERROR
-    assert found.title.startswith("Debugging: SCRIPT ERROR")
+    assert found.title.startswith("Debugging: Invalid call.")
     assert found.locations() == ["res://player.gd:12"]
     with pytest.raises(ValueError, match="no error"):
         debug_request({"output": "all good"})

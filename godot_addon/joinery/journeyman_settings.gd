@@ -14,6 +14,7 @@ const INDICATOR_SCRIPT := preload("activity_indicator.gd")
 const STYLE := preload("sidebar_style.gd")
 const POLICY := preload("history_policy.gd")
 const TIMELINE_SETTING := preload("timeline_setting.gd")
+const REVIEWER_SETTING := preload("reviewer_setting.gd")
 const PATH := "Joinery/journeyman.cfg"
 const TEXT_SIZES := UI_THEME.TEXT_SIZES
 const MODES := ["Auto", "Fast", "Thorough"]
@@ -437,6 +438,8 @@ func _build_project() -> void:
 	section.body.add_child(_policy_panel)
 	# Each accepted change as a Timeline entry (`[timeline] auto_commit`), read when shown.
 	section.body.add_child(TIMELINE_SETTING.new())
+	# A second agent reads each change first (`[agents] reviewer`, `reviewer_model`).
+	section.body.add_child(REVIEWER_SETTING.new())
 
 
 ## Compact asks first, in place: no dialog, and Cancel leaves everything as it was.

@@ -175,6 +175,11 @@ static func notes_line(notes: Array[Dictionary]) -> String:
 static func reviewer_text(status: String) -> String:
 	if status in ["running", "working", "reviewing", "pending"]:
 		return "Reviewer checking…"
+	# The reviewer agent was skipped (ADR 0037): the change opened without it.
+	if status == "timeout":
+		return "Reviewer ran out of time"
+	if status == "error":
+		return "Reviewer couldn't run"
 	return ""
 
 

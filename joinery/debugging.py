@@ -48,7 +48,9 @@ class DebugRequest:
 
     @property
     def title(self) -> str:
-        return "Debugging: " + self.error[:80]
+        # The card says what went wrong, not the log's prefix.
+        words = re.sub(r"^(?:SCRIPT ERROR|USER ERROR|ERROR|Parse Error):\s*", "", self.error)
+        return "Debugging: " + words[:80]
 
     def locations(self) -> list[str]:
         found = LOCATION.findall(f"{self.error}\n{self.output}\n{self.log}")

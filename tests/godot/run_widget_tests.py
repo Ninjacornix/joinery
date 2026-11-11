@@ -41,6 +41,7 @@ CASES = {
     "usage_meter_test.gd": "usage meter: ok",
     "chat_sessions_test.gd": "chat sessions: ok",
     "parallel_tasks_test.gd": "parallel tasks: ok",
+    "agent_roles_test.gd": "agent roles: ok",
     # Last: it puts the shared disposable project under git.
     "timeline_test.gd": "timeline: ok",
 }

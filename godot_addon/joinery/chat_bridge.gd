@@ -170,6 +170,24 @@ func start_task(text: String, targets: Array) -> bool:
 	return true
 
 
+## Debug [param error] (one Output line) with the Output [param output] and game [param log]
+## around it: a debugger agent finds the cause and a worker stages the fix (sidebar_debug.gd).
+func start_debug(error: String, output: String, log: String, scene := "") -> bool:
+	if _job == null or not _connected:
+		return false
+	var line := {
+		"kind": "debug_start",
+		"error": error,
+		"output": output,
+		"log": log,
+		"scene": scene,
+		"selection": _selection.duplicate(),
+		"editor_context": context_provider.call([]) if context_provider.is_valid() else {},
+	}
+	_job.send_line(JSON.stringify(line))
+	return true
+
+
 ## Stop one parallel task.
 func cancel_task(task_id: String) -> void:
 	if _job != null and _connected:

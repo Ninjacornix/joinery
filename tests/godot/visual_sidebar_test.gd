@@ -210,6 +210,9 @@ func _states(light: bool, width: int) -> void:
 	# Journeyman handed its change over: Joinery checks it, one quiet status line.
 	chat.set_chat_state("working", "Checking the change…")
 	await _shot("submitting", light, width, chat)
+	# It passed: the reviewer agent reads it before the user sees it.
+	chat.set_chat_state("working", "Reviewing the change…")
+	await _shot("reviewing", light, width, chat)
 
 	# Messages sent while Journeyman works wait at the end of the transcript.
 	chat.call("_on_submit", "Then add a brass handle on the left side.")
@@ -400,12 +403,32 @@ func _parallel(light: bool, width: int, chat: Control) -> void:
 	await _shot("parallel-stop", light, width, chat)
 	prompt.text = ""
 	tasks.call("_drop_offer")
+	await _debugging(light, width, chat, tasks, backend)
 	for id: String in ["t1", "t2"]:
 		tasks.call("_remove", id)
 	tasks.set("bridge", null)
 	backend.free()
 	var composer: Node = chat.get("_composer")
 	composer.get("stop").disabled = false
+
+
+## Debugging: the offer after a new error in Output, and the "Debugging: <error>" card.
+func _debugging(light: bool, width: int, chat: Control, tasks: Node, backend: Node) -> void:
+	for id: String in ["t1", "t2"]:
+		tasks.call("_remove", id)
+	backend.set("_connected", true)
+	var watcher: Node = tasks.find_child("Debugging", false, false)
+	var error := "SCRIPT" + " ERROR: Invalid call. Nonexistent function 'jump' in base 'Player'."
+	watcher.call("take_output", error + "\n   at: _physics_process (res://player.gd:42)\n")
+	var debug := {"kind": "task", "task_id": "d1", "title": "Debugging: " + error.substr(14)}
+	debug.merge({"role": "debugger", "error": error, "state": "working", "origin": "debug"})
+	debug["step"] = "Reproducing the error offline…"
+	tasks.call("on_event", debug)
+	tasks.call("card", "d1").call("set_elapsed", 21)
+	await _shot("debugging", light, width, chat)
+	watcher.call("_drop_offer")
+	tasks.call("_remove", "d1")
+	backend.set("_connected", false)
 
 
 func _images(light: bool, width: int) -> void:

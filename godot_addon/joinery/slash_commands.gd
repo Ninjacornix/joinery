@@ -18,6 +18,8 @@ signal started(command: String)
 signal finished(command: String, text: String, kind: String)
 ## A revert finished.
 signal reverted(transaction_id: String, ok: bool, message: String)
+## "/debug [what goes wrong]": debug the last error Godot reported (sidebar_debug.gd).
+signal debug_requested(details: String)
 ## "/feature add|remove <id>" planned the change: `joinery feature … --plan --json`.
 signal feature_planned(plan: Dictionary)
 ## Apply on a feature plan finished; [param transaction_id] is the accepted change.
@@ -45,6 +47,7 @@ const COMMANDS := {
 	"/rebuild": ["Verify assets can be rebuilt", "cli"],
 	"/agents": ["Accounts Journeyman can use", "cli"],
 	"/models": ["Refresh the model list", "ui"],
+	"/debug": ["Debug the last error", "debug"],
 }
 
 ## Shown only when typed, or under the Troubleshooting divider.
@@ -115,8 +118,11 @@ func run(entry: String) -> bool:
 	var command := resolve(entry)
 	if command.is_empty():
 		return false
-	if COMMANDS[command][1] == "ui":
-		requested.emit(command)
+	if COMMANDS[command][1] in ["ui", "debug"]:
+		if command == "/debug":
+			debug_requested.emit(" ".join(arguments(entry)))
+		else:
+			requested.emit(command)
 		return true
 	if _jobs.has("check") or not _running.is_empty():
 		finished.emit(command, "Another check is still running.", "error")
