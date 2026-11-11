@@ -23,6 +23,7 @@ from joinery import (
     game_setup,
     history,
     hook,
+    kit_share_cli,
     kits_cli,
     match_cli,
     playtest,
@@ -982,6 +983,10 @@ def _parser() -> argparse.ArgumentParser:
         "kits", help="list kits, preview one, or make models from a kit for review"
     )
     kits_cli.add_arguments(kits_cmd)
+    kit_cmd = commands.add_parser(
+        "kit", help="export a shared kit, import one for review, remove one, list them"
+    )
+    kit_share_cli.add_arguments(kit_cmd)
     setup = commands.add_parser("setup", help="change a project's tools")
     setup.add_argument("--tools", help="comma-separated ids; skips the menu")
     setup.add_argument("--project", type=Path, default=ROOT)
@@ -1357,6 +1362,8 @@ def main(argv: list[str] | None = None) -> int:
         return blockout_command.main(args)
     if args.command == "kits":
         return kits_cli.main(args)
+    if args.command == "kit":
+        return kit_share_cli.main(args)
     if args.command == "feature":
         return _feature(args)
     if args.command == "status":
