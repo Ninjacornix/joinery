@@ -253,6 +253,14 @@ func _starting_points(dialog: Window) -> bool:
 	_check(target != null, "First-person 3D is offered")
 	if target == null:
 		return false
+	var room: Button = null
+	for card: Button in cards:
+		if card.get_meta("blueprint", "") == "vr-room":
+			room = card
+	_check(room != null, "The VR room is offered with its card")
+	if room != null:
+		await _scroll_to(dialog, room)
+		await _shot("setup-1-vr-room", dialog)
 	target.grab_focus()
 	await _frames(1)
 	_check(target.has_focus(), "A card takes keyboard focus")
