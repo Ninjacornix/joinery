@@ -18,13 +18,15 @@ from typing import Any, BinaryIO, Protocol
 
 from bridge import compaction
 from bridge.chat_record import ChatRecorder
+from bridge.crew import Crew
 from bridge.host import Bridge
 from bridge.models import Selection
 from bridge.protocol import Done, EditorAction, Message, Prompt
 from bridge.specialists import Specialists
 from bridge.turn_runner import run_turn, settle_compaction
-from joinery import bible_lint, blueprints, brief, chat_attachments
+from joinery import bible_lint, blueprints, brief, chat_attachments, chats
 from joinery.art_approval import approve, review
+from joinery.claims import parallel_limit
 from joinery.editor_ops import validate_edit
 from joinery.gateway import ProjectGateway
 from joinery.gateway_rpc import GatewayRPC
@@ -177,6 +179,9 @@ async def _serve(
     bridge: Bridge | None = None
     active: asyncio.Task[None] | None = None
     specialists: Specialists | None = None
+    crew: Crew | None = None
+    #: The last request's model choice, which the tasks it starts use too.
+    selection: dict[str, Any] = {}
     try:
         gateway = ProjectGateway(project)
     except (OSError, ValueError) as exc:
@@ -226,7 +231,7 @@ async def _serve(
 
     async def view_editor() -> dict[str, Any]:
         """Ask the sidebar for a screenshot of the editor's viewport (read-only)."""
-        if active is None or active.done():
+        if (active is None or active.done()) and not (crew and crew.working()):
             raise ValueError("Looking at the editor requires an active user request.")
         request_id = uuid.uuid4().hex
         future: asyncio.Future[dict[str, Any]] = (
@@ -242,6 +247,9 @@ async def _serve(
     gateway.view_editor = view_editor
 
     async def policy_stop(reason: str) -> None:
+        # A Rule Zero stop in any agent stops every agent: no task routes around it.
+        if crew is not None:
+            await crew.stop_all()
         if bridge is not None:
             with contextlib.suppress(Exception):
                 await bridge.cancel()
@@ -255,6 +263,38 @@ async def _serve(
             ).model_dump()
         )
         emit(Done(ok=False).model_dump())
+
+    def emit_task(event: dict[str, Any]) -> None:
+        emit(event)
+
+    def task_prompt(data: dict[str, Any] | None = None) -> Prompt:
+        """A task's prompt context: the user's own (Run alongside) or the lead's."""
+        if data is None:
+            return Prompt(
+                text="",
+                project_dir=str(project),
+                target_context=gateway.target_context,
+                editor_context=dict(gateway.editor_context),
+                selection=Selection.model_validate(selection or {}),
+            )
+        context = data.get("targets", [])
+        targets = tuple(
+            {str(k): str(v) for k, v in entry.items()}
+            for entry in (context if isinstance(context, list) else [])
+            if isinstance(entry, dict)
+        )
+        editor = data.get("editor_context", {})
+        return Prompt(
+            text="",
+            project_dir=str(project),
+            targets=tuple(entry.get("id", "") for entry in targets),
+            target_context=targets,
+            editor_context={str(k): str(v) for k, v in editor.items()}
+            if isinstance(editor, dict)
+            else {},
+            selection=Selection.model_validate(data.get("selection", {})),
+            attachments=chat_attachments.validate(project, data.get("attachments", [])),
+        )
 
     rpc_server: GatewayRPC | None = None
     try:
@@ -320,6 +360,8 @@ async def _serve(
             gateway.editor_context = prompt.editor_context
             gateway.target_context = prompt.target_context
             gateway.request_summary = str(data["text"])
+            selection.clear()
+            selection.update(prompt.selection.model_dump())
             outcome = await run_turn(
                 controller,
                 bridge,
@@ -389,6 +431,37 @@ async def _serve(
             return await specialists.inspect(jobs)
 
         rpc_server.delegate = delegate
+        crew = Crew(
+            gateway,
+            emit_task,
+            agent=agent_id,
+            profile=profile_id,
+            limit=parallel_limit(project),
+            bridge=lambda agent: Bridge(agent),
+            endpoint=lambda lane, stop: GatewayRPC(lane, stop, worker=True),
+            on_stop=policy_stop,
+        )
+
+        async def lead_start(request: dict[str, Any]) -> dict[str, Any]:
+            assert crew is not None
+            if active is None or active.done():
+                raise ValueError("Tasks start from an active user request.")
+            task = await crew.start(
+                request["title"],
+                request["request"],
+                origin="lead",
+                prompt=task_prompt(),
+                targets=request["targets"],
+            )
+            return {
+                "task_id": task.id,
+                "state": task.state,
+                "next": "The task works on its own and its change is reviewed "
+                "separately. Carry on with your part; check it with task_status.",
+            }
+
+        rpc_server.start_task = lead_start
+        rpc_server.task_status = crew.status
         emit(
             {
                 "kind": "connection",
@@ -396,16 +469,25 @@ async def _serve(
                 "agent": agent_id,
                 "mode": "reviewed-scene-edits",
                 "models": [model.model_dump() for model in bridge.model_choices],
+                "parallel": crew.limit,
                 "elapsed_ms": connection_timing.report("connected")["total_ms"],
             }
         )
         emit(game_suggestions(project))
+        assert crew is not None
         while line := await reader.readline():
             try:
                 data = json.loads(line)
                 if not isinstance(data, dict):
                     raise TypeError("Invalid chat message.")
-                if data.get("kind") == "decision":
+                owned = crew.owner(str(data.get("transaction_id", "")))
+                if data.get("kind") == "decision" and owned is not None:
+                    emit(
+                        await crew.decide(
+                            owned.transaction_id, bool(data.get("accept", False))
+                        )
+                    )
+                elif data.get("kind") == "decision":
                     # Allowed while the agent still writes its last words: once a
                     # change is in review the agent can't change anything more.
                     if not controller.review_open:
@@ -466,7 +548,11 @@ async def _serve(
                     waiting = view_calls.get(str(data.get("request_id", "")))
                     if waiting is not None and not waiting.done():
                         waiting.set_result(result)
+                elif data.get("kind") == "cancel" and data.get("task_id"):
+                    await crew.stop(str(data["task_id"]))
                 elif data.get("kind") == "cancel":
+                    if data.get("all"):
+                        await crew.stop_all()
                     if specialists is not None:
                         await specialists.close()
                     if active is not None and not active.done():
@@ -476,6 +562,16 @@ async def _serve(
                         await asyncio.gather(active, return_exceptions=True)
                         emit(Done(ok=False).model_dump())
                     await controller.cancel()
+                elif data.get("kind") == "task_start":
+                    text = str(data.get("text", "")).strip()
+                    if not text:
+                        raise ValueError("Write what the task should do.")
+                    await crew.start(
+                        chats.title_from(text),
+                        text,
+                        origin="user",
+                        prompt=task_prompt(data),
+                    )
                 elif data.get("kind") == "prompt":
                     if active is not None and not active.done():
                         emit(
@@ -509,6 +605,8 @@ async def _serve(
         )
         return 1
     finally:
+        if crew is not None:
+            await crew.close()
         if active is not None and not active.done():
             active.cancel()
             await asyncio.gather(active, return_exceptions=True)

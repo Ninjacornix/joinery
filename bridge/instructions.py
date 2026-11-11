@@ -46,8 +46,33 @@ GAME_GUIDE = (
     + AGENT_GUIDE
 )
 
+#: When to hand part of a request to a parallel task, and when not.
+TASK_GUIDE = (
+    "When a request has independent parts that change different files, such as two "
+    "separate models or two separate scenes, hand each extra part to a parallel task "
+    "with start_task(title, request, targets) and do one part yourself; each task "
+    "makes its own change, reviewed on its own. Keep dependent steps together and do "
+    "them yourself in order: a model and the scene that places it, a script and the "
+    "scene that uses it, anything in the same files, and small requests. The request "
+    "must stand alone, since the task doesn't see this conversation. Tasks stage files "
+    "only; you keep the scene on screen. Use task_status(id) now and then to see how a "
+    "task is doing; never wait for one in a loop. If a tool says a file is being "
+    "changed by another task, work on something else or wait. "
+)
+
+#: The prompt a parallel task starts from; ``{request}`` is its part of the work.
+TASK_PROMPT = (
+    "You are one of several Journeyman agents working on this project at the same "
+    "time. Do only this task, in one change: make it, then call submit_for_review. "
+    "Don't call start_task. Change only staged files: the scene on screen belongs to "
+    "the main request. If a tool says a file is being changed by another task, leave "
+    "that file alone and say so in one line.\n\nYour task:\n{request}"
+)
+
 #: How the user decides, in the words the editor shows.
 REVIEW_GUIDE = (
+    TASK_GUIDE
+    +
     "The user accepts or discards every change in the Review panel. "
     "When your change is complete, call submit_for_review with one short line naming "
     "what changed. Joinery checks it (art bible rules, Godot import, missing files, "

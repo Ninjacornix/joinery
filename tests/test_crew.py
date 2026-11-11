@@ -1,0 +1,974 @@
+"""Several agents at once: lanes, claims, rebasing and the task scheduler."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from collections.abc import AsyncIterator, Awaitable, Callable
+from pathlib import Path
+from typing import Any
+
+import pytest
+from mcp.types import CallToolResult, TextContent
+
+from bridge.crew import Crew
+from bridge.protocol import Done, Message, Prompt
+from joinery.claims import PathClaims, WorkerSlots, parallel_limit, project_paths
+from joinery.gateway import ProjectGateway
+from joinery.gateway_rpc import NO_NESTED_TASKS, GatewayRPC, rpc
+from joinery.mcp_runtime import ServerSpec
+from joinery.rebase import merge_lock
+from joinery.runner import Result
+
+LOCK_A = 'version = 1\n\n[[asset]]\npath = "art/a.png"\nsha256 = "aa"\norigin = "tool-created"\ntool = "krita"\nrecipe = "art/a.recipe.json"\n'
+LOCK_B = 'version = 1\n\n[[asset]]\npath = "art/b.png"\nsha256 = "bb"\norigin = "tool-created"\ntool = "krita"\nrecipe = "art/b.recipe.json"\n'
+
+
+class FakeConnection:
+    """A tool's MCP server: ``write`` writes the file named in its call; ``touch``
+    writes ``a.txt`` into the folder it is given, a path the call never names."""
+
+    def __init__(self, spec: ServerSpec, _project: Path) -> None:
+        self.spec = spec
+        self.tools = {"write": object(), "touch": object()}
+
+    async def connect(self, timeout: float = 0) -> None:
+        return None
+
+    async def call(
+        self, tool: str, arguments: dict[str, Any], timeout: float = 0
+    ) -> CallToolResult:
+        if tool == "touch":
+            target = Path(arguments["folder"]) / "a.txt"
+            text = "touched\n"
+        else:
+            target = Path(arguments["path"])
+            text = arguments["text"]
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(text)
+        return CallToolResult(content=[TextContent(type="text", text="ok")])
+
+    async def close(self) -> None:
+        return None
+
+
+@pytest.fixture
+def project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    (tmp_path / "project.godot").write_text("config_version=5\n")
+    (tmp_path / "joinery.toml").write_text('[tools]\nenabled=["godot"]\n')
+    (tmp_path / "notes").mkdir()
+    (tmp_path / "notes/shared.txt").write_text("before\n")
+    monkeypatch.setattr("joinery.gateway.configured", lambda _: ([], []))
+    monkeypatch.setattr("joinery.gateway.approved", lambda _project: True)
+    monkeypatch.setattr("joinery.gateway.MCPConnection", FakeConnection)
+    monkeypatch.setattr("joinery.submission.approved_in", lambda *_: True)
+    monkeypatch.setattr("joinery.submission.check_assets", lambda *_: [])
+
+    async def offline(_argv: list[str], _root: Path, *_a: Any, **_k: Any) -> Result:
+        return Result(True, "", "", 0.0)
+
+    monkeypatch.setattr("joinery.submission.run_offline", offline)
+    return tmp_path
+
+
+def wire(gateway: ProjectGateway) -> ProjectGateway:
+    """Give ``gateway`` the fake tool server."""
+
+    async def connection(server: str) -> FakeConnection:
+        spec = ServerSpec(name=server, command="unused", source="first-party")
+        return FakeConnection(spec, gateway.project)
+
+    gateway.connection = connection  # type: ignore[method-assign]
+    return gateway
+
+
+async def write(gateway: ProjectGateway, path: str, text: str) -> CallToolResult:
+    return await gateway.call(
+        "joinery-sound", "write", {"path": str(gateway.project / path), "text": text}
+    )
+
+
+def run(step: Callable[[], Awaitable[Any]]) -> Any:
+    return asyncio.run(step())
+
+
+# --- Lanes and claims ---------------------------------------------------------------
+
+
+def test_one_agent_alone_claims_nothing(project: Path) -> None:
+    async def go() -> None:
+        gateway = wire(ProjectGateway(project))
+        try:
+            await write(gateway, "notes/a.txt", "a\n")
+            assert gateway.claims.owners == {}
+            assert not gateway.claims.contended()
+        finally:
+            await gateway.close()
+
+    run(go)
+
+
+def test_each_task_stages_its_own_change_and_one_is_accepted_alone(
+    project: Path,
+) -> None:
+    async def go() -> None:
+        main = wire(ProjectGateway(project))
+        try:
+            await write(main, "notes/main.txt", "main\n")
+            lane = wire(main.lane("t1", "Make a lamp"))
+            await write(lane, "notes/lamp.txt", "lamp\n")
+            assert main.transaction is not None and lane.transaction is not None
+            assert main.transaction.id != lane.transaction.id
+            # Joining recorded what the main request had already staged.
+            assert main.claims.held("main") == ["notes/main.txt"]
+            assert main.claims.held("t1") == ["notes/lamp.txt"]
+            lane.transaction.review()
+            decided = await lane.decide(lane.transaction.id, True)
+            assert decided["accepted"] is True
+            assert (project / "notes/lamp.txt").read_text() == "lamp\n"
+            # The main request's stage is untouched and still staging.
+            assert main.transaction.state == "staging"
+            assert not (project / "notes/main.txt").exists()
+            assert main.claims.held("t1") == []
+            main.transaction.review()
+            await main.decide(main.transaction.id, True)
+            assert (project / "notes/main.txt").read_text() == "main\n"
+        finally:
+            await main.close()
+
+    run(go)
+
+
+def test_a_file_another_task_claimed_is_refused_before_the_call(project: Path) -> None:
+    async def go() -> None:
+        main = wire(ProjectGateway(project))
+        try:
+            lane = wire(main.lane("t1", "Make a lamp"))
+            await write(lane, "notes/shared.txt", "lamp\n")
+            with pytest.raises(ValueError) as refused:
+                await write(main, "notes/shared.txt", "main\n")
+            assert str(refused.value) == (
+                "notes/shared.txt is being changed by another task: Make a lamp. "
+                "Work on something else or wait."
+            )
+            # Refused before anything ran: not even a stage was made.
+            assert main.transaction is None
+            # res:// names are recognised too.
+            with pytest.raises(ValueError, match="another task: Make a lamp"):
+                await main.call(
+                    "joinery-sound",
+                    "write",
+                    {"path": "res://notes/shared.txt", "text": "x"},
+                )
+        finally:
+            await main.close()
+
+    run(go)
+
+
+def test_a_write_the_call_did_not_name_is_put_back_and_refused(project: Path) -> None:
+    async def go() -> None:
+        main = wire(ProjectGateway(project))
+        try:
+            lane = wire(main.lane("t1", "Notes"))
+            await write(lane, "notes/a.txt", "lane\n")
+            with pytest.raises(ValueError, match="notes/a.txt is being changed"):
+                await main.call(
+                    "joinery-sound", "touch", {"folder": str(project / "notes")}
+                )
+            assert main.transaction is not None
+            assert not (main.transaction.stage / "notes/a.txt").exists()
+            assert main.claims.held("main") == []
+        finally:
+            await main.close()
+
+    run(go)
+
+
+def test_claims_end_with_the_decision(project: Path) -> None:
+    async def go() -> None:
+        main = wire(ProjectGateway(project))
+        try:
+            lane = wire(main.lane("t1", "Lamp"))
+            await write(lane, "notes/shared.txt", "lamp\n")
+            assert lane.transaction is not None
+            lane.transaction.review()
+            await lane.decide(lane.transaction.id, False)
+            await write(main, "notes/shared.txt", "main\n")
+            assert main.claims.held("main") == ["notes/shared.txt"]
+        finally:
+            await main.close()
+
+    run(go)
+
+
+def test_a_task_never_stages_the_scene_on_screen(project: Path) -> None:
+    async def go() -> None:
+        main = wire(ProjectGateway(project))
+        try:
+            main.editor_context = {"scene_path": "res://scenes/level.tscn"}
+            lane = wire(main.lane("t1", "Lamp"))
+            with pytest.raises(ValueError, match="only the main request"):
+                await lane.call(
+                    "godot", "add_node", {"scenePath": "res://scenes/level.tscn"}
+                )
+        finally:
+            await main.close()
+
+    run(go)
+
+
+def test_closing_the_main_gateway_drops_every_lane(project: Path) -> None:
+    async def go() -> None:
+        main = wire(ProjectGateway(project))
+        lane = wire(main.lane("t1", "Lamp"))
+        await write(lane, "notes/lamp.txt", "lamp\n")
+        tx = lane.transaction
+        await main.close()
+        assert tx is not None and tx.state == "rejected"
+        assert main.lanes == {} and "t1" not in main.claims.titles
+
+    run(go)
+
+
+# --- Following the project ------------------------------------------------------------
+
+
+def test_an_untouched_file_follows_an_accepted_change(project: Path) -> None:
+    async def go() -> None:
+        main = wire(ProjectGateway(project))
+        try:
+            await write(main, "notes/main.txt", "main\n")
+            lane = wire(main.lane("t1", "Shared"))
+            await write(lane, "notes/shared.txt", "after\n")
+            assert lane.transaction is not None
+            lane.transaction.review()
+            await lane.decide(lane.transaction.id, True)
+            # The next write brings the accepted file into the main stage.
+            await write(main, "notes/more.txt", "more\n")
+            assert main.transaction is not None
+            assert (main.transaction.stage / "notes/shared.txt").read_text() == (
+                "after\n"
+            )
+            assert {c["path"] for c in main.transaction.diff()} == {
+                "notes/main.txt",
+                "notes/more.txt",
+            }
+        finally:
+            await main.close()
+
+    run(go)
+
+
+def test_a_file_changed_underneath_is_redone_not_merged(project: Path) -> None:
+    async def go() -> None:
+        from joinery.turn import TurnController
+
+        main = wire(ProjectGateway(project))
+        events: list[dict[str, Any]] = []
+        turn = TurnController(main, events.append)
+        try:
+            turn.begin("Change the notes")
+            await write(main, "notes/shared.txt", "mine\n")
+            # Another change to the same file was accepted meanwhile.
+            (project / "notes/shared.txt").write_text("theirs\n")
+            main.claims.generation += 1
+            result = await turn.submit("Notes")
+            assert result.status == "failed" and not result.final
+            (problem,) = result.problems
+            assert problem.check == "conflict"
+            assert problem.paths == ["notes/shared.txt"]
+            assert "redo your part" in problem.message
+            assert main.transaction is not None
+            assert (main.transaction.stage / "notes/shared.txt").read_text() == (
+                "theirs\n"
+            )
+            # Redone on top of theirs, it goes to review.
+            await write(main, "notes/shared.txt", "theirs and mine\n")
+            again = await turn.submit("Notes")
+            assert again.status == "in_review"
+            await turn.decide(again.transaction_id, True)
+            assert (project / "notes/shared.txt").read_text() == "theirs and mine\n"
+        finally:
+            await main.close()
+
+    run(go)
+
+
+def test_the_asset_lock_is_merged_between_tasks(project: Path) -> None:
+    async def go() -> None:
+        main = wire(ProjectGateway(project))
+        try:
+            lane_a = wire(main.lane("a", "Art A"))
+            lane_b = wire(main.lane("b", "Art B"))
+            for lane, name, lock in ((lane_a, "a", LOCK_A), (lane_b, "b", LOCK_B)):
+                await write(lane, f"art/{name}.png", name)
+                await write(lane, "joinery.lock", lock)
+            assert lane_a.transaction is not None and lane_b.transaction is not None
+            lane_a.transaction.review()
+            lane_b.transaction.review()
+            await lane_a.decide(lane_a.transaction.id, True)
+            await lane_b.decide(lane_b.transaction.id, True)
+            lock = (project / "joinery.lock").read_text()
+            assert 'path = "art/a.png"' in lock and 'path = "art/b.png"' in lock
+            assert (project / "art/a.png").read_text() == "a"
+            assert (project / "art/b.png").read_text() == "b"
+        finally:
+            await main.close()
+
+    run(go)
+
+
+def test_merge_lock_keeps_entries_the_change_did_not_touch() -> None:
+    merged = merge_lock(LOCK_A, LOCK_B, {"art/b.png"})
+    assert 'path = "art/a.png"' in merged and 'path = "art/b.png"' in merged
+    # An asset this change deleted loses its entry.
+    assert 'path = "art/a.png"' not in merge_lock(
+        LOCK_A, "version = 1\n", {"art/a.png"}
+    )
+
+
+# --- Shared pieces --------------------------------------------------------------------
+
+
+def test_project_paths_finds_names_in_any_form(tmp_path: Path) -> None:
+    found = project_paths(
+        {
+            "a": "res://scenes/a.tscn",
+            "b": [str(tmp_path / "art/b.png"), "not a path", "/elsewhere/c.png"],
+            "c": {"d": "./audio/d.ogg", "e": "../up.txt", "f": "word"},
+        },
+        tmp_path,
+    )
+    assert found == {"scenes/a.tscn", "art/b.png", "audio/d.ogg"}
+
+
+def test_claims_skip_the_lock_and_report_the_holder() -> None:
+    claims = PathClaims()
+    claims.register("main", "the main request")
+    claims.register("t1", "Lamp")
+    assert claims.claim("t1", {"art/lamp.png", "joinery.lock"}) == {}
+    assert claims.claim("main", {"art/lamp.png", "joinery.lock"}) == {
+        "art/lamp.png": "Lamp"
+    }
+    assert claims.held("main") == []
+    claims.unregister("t1")
+    assert claims.claim("main", {"art/lamp.png"}) == {}
+
+
+def test_parallel_limit_reads_joinery_toml(tmp_path: Path) -> None:
+    assert parallel_limit(tmp_path) == 3
+    (tmp_path / "joinery.toml").write_text("[agents]\nparallel = 1\n")
+    assert parallel_limit(tmp_path) == 1
+    (tmp_path / "joinery.toml").write_text("[agents]\nparallel = 40\n")
+    assert parallel_limit(tmp_path) == 6
+
+
+def test_document_operators_of_one_worker_image_take_turns() -> None:
+    async def go() -> list[str]:
+        slots = WorkerSlots()
+        order: list[str] = []
+        waited: list[str] = []
+
+        async def op(name: str, tool: str) -> None:
+            async with slots.hold(tool, lambda: waited.append(name)):
+                order.append(name + " in")
+                await asyncio.sleep(0.01)
+                order.append(name + " out")
+
+        await asyncio.gather(
+            op("one", "blender"), op("two", "krita"), op("three", "godot")
+        )
+        assert waited == ["two"]
+        return order
+
+    order = run(go)
+    assert order.index("one out") < order.index("two in")
+    assert order.index("three in") < order.index("one out")
+
+
+# --- The scheduler ------------------------------------------------------------------
+
+
+class Script:
+    """A fake provider for one task: each send runs the next step on its gateway."""
+
+    def __init__(self, crew_test: CrewTest, _agent: str) -> None:
+        self.test = crew_test
+        self.lane: ProjectGateway | None = None
+
+    def bind_gateway(self, path: Any) -> None:
+        self.lane = path
+
+    async def connect(self, _project: Path, _profile: str = "") -> None:
+        return None
+
+    async def send(self, prompt: Prompt) -> AsyncIterator[Any]:
+        assert self.lane is not None
+        self.test.prompts.append(prompt)
+        step = self.test.steps.pop(0)
+        async for event in step(wire(self.lane)):
+            yield event
+
+    def editor_result(self, _id: str, _result: dict[str, Any]) -> None:
+        return None
+
+    async def cancel(self) -> None:
+        return None
+
+    async def close(self) -> None:
+        return None
+
+
+class Endpoint:
+    """The task's gateway endpoint; its path is the lane itself for the fake provider."""
+
+    def __init__(self, lane: ProjectGateway, on_stop: Any) -> None:
+        self.path = lane
+        self.on_stop = on_stop
+
+    async def start(self) -> None:
+        return None
+
+    async def close(self) -> None:
+        return None
+
+
+Step = Callable[[ProjectGateway], AsyncIterator[Any]]
+
+
+class CrewTest:
+    def __init__(self, project: Path, limit: int = 3) -> None:
+        self.project = project
+        self.events: list[dict[str, Any]] = []
+        self.prompts: list[Prompt] = []
+        self.steps: list[Step] = []
+        self.stops: list[str] = []
+        self.endpoints: list[Endpoint] = []
+        self.gateway = wire(ProjectGateway(project))
+        self.limit = limit
+
+    def crew(self) -> Crew:
+        async def on_stop(reason: str) -> None:
+            self.stops.append(reason)
+
+        def endpoint(lane: ProjectGateway, stop: Any) -> Endpoint:
+            made = Endpoint(lane, stop)
+            self.endpoints.append(made)
+            return made
+
+        return Crew(
+            self.gateway,
+            self.events.append,
+            agent="codex",
+            profile="",
+            limit=self.limit,
+            bridge=lambda agent: Script(self, agent),
+            endpoint=endpoint,
+            on_stop=on_stop,
+        )
+
+    def prompt(self) -> Prompt:
+        return Prompt(text="", project_dir=str(self.project))
+
+    def tasks(self, state: str) -> list[dict[str, Any]]:
+        return [e for e in self.events if e["kind"] == "task" and e["state"] == state]
+
+
+def makes(path: str, text: str, gate: asyncio.Event | None = None) -> Step:
+    async def step(lane: ProjectGateway) -> AsyncIterator[Any]:
+        if gate is not None:
+            await gate.wait()
+        await write(lane, path, text)
+        assert lane.turn is not None
+        result = await lane.turn.submit(path)
+        yield Message(text=f"{path} is open for review ({result.status}).")
+        yield Done(ok=True)
+
+    return step
+
+
+def test_tasks_run_at_the_same_time_and_each_change_is_reviewed_alone(
+    project: Path,
+) -> None:
+    test = CrewTest(project)
+
+    async def go() -> None:
+        crew = test.crew()
+        both = asyncio.Event()
+        started: list[str] = []
+
+        def waits(path: str) -> Step:
+            async def step(lane: ProjectGateway) -> AsyncIterator[Any]:
+                started.append(path)
+                if len(started) == 2:
+                    both.set()
+                await asyncio.wait_for(both.wait(), 2)
+                async for event in makes(path, path)(lane):
+                    yield event
+
+            return step
+
+        test.steps = [waits("notes/chair.txt"), waits("notes/lamp.txt")]
+        one = await crew.start(
+            "Chair", "Make a chair", origin="user", prompt=test.prompt()
+        )
+        two = await crew.start(
+            "Lamp", "Make a lamp", origin="lead", prompt=test.prompt()
+        )
+        await asyncio.gather(*(t.job for t in (one, two) if t.job))
+        assert one.state == two.state == "in_review"
+        assert one.transaction_id != two.transaction_id
+        assert "Make a chair" in test.prompts[0].text
+        assert "Don't call start_task" in test.prompts[0].text
+        # Accept one; the other's change stays in review untouched.
+        decided = await crew.decide(one.transaction_id, True)
+        assert decided["accepted"] and decided["task_id"] == one.id
+        assert (project / "notes/chair.txt").exists()
+        assert not (project / "notes/lamp.txt").exists()
+        assert two.gateway.transaction is not None
+        assert two.gateway.transaction.state == "review"
+        assert crew.owner(two.transaction_id) is two
+        await crew.decide(two.transaction_id, True)
+        assert (project / "notes/lamp.txt").exists()
+        assert crew.status(one.id)["state"] == "accepted"
+        assert sorted(e["title"] for e in test.tasks("in_review")) == ["Chair", "Lamp"]
+        # Every task event the sidebar gets is tagged with its task.
+        tagged = [e for e in test.events if e["kind"] == "file_preview"]
+        assert {e["task_id"] for e in tagged} == {one.id, two.id}
+        await crew.close()
+        await test.gateway.close()
+
+    run(go)
+
+
+def test_the_limit_counts_the_chat_itself(project: Path) -> None:
+    test = CrewTest(project, limit=2)
+
+    async def go() -> None:
+        crew = test.crew()
+        hold = asyncio.Event()
+        test.steps = [makes("notes/a.txt", "a", hold)]
+        first = await crew.start("A", "Make a", origin="user", prompt=test.prompt())
+        with pytest.raises(ValueError, match="1 tasks are already running"):
+            await crew.start("B", "Make b", origin="lead", prompt=test.prompt())
+        hold.set()
+        assert first.job is not None
+        await first.job
+        await crew.close()
+        await test.gateway.close()
+
+    run(go)
+
+
+def test_parallel_one_turns_tasks_off(project: Path) -> None:
+    test = CrewTest(project, limit=1)
+
+    async def go() -> None:
+        crew = test.crew()
+        with pytest.raises(ValueError, match=r"parallel = 1"):
+            await crew.start("A", "Make a", origin="user", prompt=test.prompt())
+        await test.gateway.close()
+
+    run(go)
+
+
+def test_a_target_another_task_holds_refuses_the_start(project: Path) -> None:
+    test = CrewTest(project)
+
+    async def go() -> None:
+        crew = test.crew()
+        hold = asyncio.Event()
+        test.steps = [makes("notes/a.txt", "a", hold)]
+        first = await crew.start(
+            "A",
+            "Make a",
+            origin="lead",
+            prompt=test.prompt(),
+            targets=["res://notes/a.txt"],
+        )
+        with pytest.raises(
+            ValueError, match="notes/a.txt is being changed by another task: A"
+        ):
+            await crew.start(
+                "B",
+                "Make b",
+                origin="lead",
+                prompt=test.prompt(),
+                targets=["notes/a.txt"],
+            )
+        hold.set()
+        assert first.job is not None
+        await first.job
+        await crew.close()
+        await test.gateway.close()
+
+    run(go)
+
+
+def test_stop_all_stops_every_task_and_drops_its_stage(project: Path) -> None:
+    test = CrewTest(project)
+
+    async def go() -> None:
+        crew = test.crew()
+        never = asyncio.Event()
+
+        def stuck(path: str) -> Step:
+            async def step(lane: ProjectGateway) -> AsyncIterator[Any]:
+                await write(lane, path, "x")
+                await never.wait()
+                yield Done(ok=True)
+
+            return step
+
+        test.steps = [stuck("notes/a.txt"), stuck("notes/b.txt")]
+        tasks = [
+            await crew.start(name, name, origin="user", prompt=test.prompt())
+            for name in ("A", "B")
+        ]
+        for _ in range(50):
+            if all(t.gateway.transaction is not None for t in tasks):
+                break
+            await asyncio.sleep(0.01)
+        stages = [t.gateway.transaction for t in tasks]
+        assert await crew.stop_all() == 2
+        assert [t.state for t in tasks] == ["stopped", "stopped"]
+        assert all(tx is not None and tx.state == "rejected" for tx in stages)
+        assert crew.working() == []
+        assert set(test.gateway.claims.titles) == {"main"}
+        await crew.close()
+        await test.gateway.close()
+
+    run(go)
+
+
+def test_a_failed_task_says_so_and_releases_everything(project: Path) -> None:
+    test = CrewTest(project)
+
+    async def go() -> None:
+        crew = test.crew()
+
+        async def breaks(_lane: ProjectGateway) -> AsyncIterator[Any]:
+            raise RuntimeError("The provider went away.")
+            yield Done(ok=False)  # pragma: no cover
+
+        test.steps = [breaks]
+        task = await crew.start("A", "Make a", origin="user", prompt=test.prompt())
+        assert task.job is not None
+        await task.job
+        assert task.state == "failed" and task.message == "The provider went away."
+        assert "A" not in test.gateway.claims.titles.values()
+        await crew.close()
+        await test.gateway.close()
+
+    run(go)
+
+
+def test_workers_get_the_policy_stop_and_cannot_start_tasks(project: Path) -> None:
+    """A task's endpoint reports a Rule Zero stop like the chat's own, and refuses
+    start_task (tasks are one level deep)."""
+    stops: list[str] = []
+
+    async def go() -> None:
+        main = ProjectGateway(project)
+        lane = main.lane("t1", "Lamp")
+
+        async def on_stop(reason: str) -> None:
+            stops.append(reason)
+
+        endpoint = GatewayRPC(lane, on_stop, worker=True)
+
+        async def lead(_request: dict[str, Any]) -> dict[str, Any]:
+            raise AssertionError("never reached")
+
+        endpoint.start_task = lead
+        try:
+            await endpoint.start()
+            with pytest.raises(RuntimeError, match=NO_NESTED_TASKS):
+                await rpc(
+                    endpoint.path,
+                    "start_task",
+                    {"title": "More", "request": "More work", "targets": []},
+                )
+            with pytest.raises(RuntimeError, match="Only the main request"):
+                await rpc(endpoint.path, "editor_edit", {})
+            with pytest.raises(RuntimeError, match="Rule Zero"):
+                await rpc(endpoint.path, "policy_stop", {"reason": "Rule Zero: x"})
+            await asyncio.sleep(0)
+        finally:
+            await endpoint.close()
+            # The worker's endpoint never closes the lane; the scheduler does.
+            assert "t1" in main.lanes
+            await main.close()
+
+    run(go)
+    assert stops == ["Rule Zero: x"]
+
+
+def test_the_crew_hands_its_stop_to_every_task_endpoint(project: Path) -> None:
+    test = CrewTest(project)
+
+    async def go() -> None:
+        crew = test.crew()
+        test.steps = [makes("notes/a.txt", "a")]
+        task = await crew.start("A", "Make a", origin="user", prompt=test.prompt())
+        assert task.job is not None
+        await task.job
+        (endpoint,) = test.endpoints
+        await endpoint.on_stop("Rule Zero")
+        assert test.stops == ["Rule Zero"]
+        await crew.close()
+        await test.gateway.close()
+
+    run(go)
+
+
+def test_start_task_arguments_are_checked() -> None:
+    from joinery.gateway_rpc import task_request
+
+    assert task_request({"title": " Lamp ", "request": "Make a lamp"}) == {
+        "title": "Lamp",
+        "request": "Make a lamp",
+        "targets": [],
+    }
+    with pytest.raises(ValueError, match="short title"):
+        task_request({"title": "", "request": "x"})
+    with pytest.raises(ValueError, match="does not see this conversation"):
+        task_request({"title": "x", "request": ""})
+    with pytest.raises(ValueError, match="project paths"):
+        task_request({"title": "x", "request": "y", "targets": [1]})
+
+
+def test_saved_chats_record_tasks_and_their_outcomes(project: Path) -> None:
+    from bridge.chat_record import ChatRecorder
+    from joinery import chats
+
+    recorder = ChatRecorder(project, "codex")
+    recorder.begin({"text": "Make a chair and a lamp"}, ())
+    base = {"kind": "task", "task_id": "t1", "title": "Lamp", "origin": "lead"}
+    recorder.observe({**base, "state": "working", "request": "Make a lamp"})
+    recorder.observe({**base, "state": "working", "apps": ["blender"]})
+    recorder.observe({"kind": "message_delta", "text": "lamp words", "task_id": "t1"})
+    recorder.observe({**base, "state": "in_review", "transaction_id": "a" * 32})
+    recorder.observe({**base, "state": "accepted", "transaction_id": "a" * 32})
+    _, entries = chats.read(project, recorder.chat_id)
+    tasks = [e for e in entries if e["type"] == "task"]
+    assert [t["state"] for t in tasks] == ["started", "in_review", "accepted"]
+    assert tasks[0]["request"] == "Make a lamp"
+    assert not any(e["type"] == "agent" for e in entries)
+    (turn,) = chats.turns(entries)
+    assert turn["tasks"] == [{"task_id": "t1", "title": "Lamp", "state": "accepted"}]
+    meta, _ = chats.read(project, recorder.chat_id)
+    assert 'Parallel task "Lamp": its change was accepted.' in chats.summary(
+        project, meta, entries
+    )
+    json.dumps(entries)
+
+
+# --- The chat host ------------------------------------------------------------------
+
+
+class HostTest:
+    """The chat host with fake providers: the sidebar's lines go out as events allow."""
+
+    def __init__(self, root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from bridge import stdio
+
+        self.events: list[dict[str, Any]] = []
+        self.gateway: ProjectGateway | None = None
+        #: (when the events so far allow it, the line the sidebar sends).
+        self.lines: list[
+            tuple[Callable[[list[dict[str, Any]]], bool], dict[str, Any]]
+        ] = []
+        self.scripts: dict[str, Step] = {}
+        self.cancelled: list[str] = []
+        test = self
+
+        class FakeBridge:
+            handle = ""
+
+            def __init__(self, _agent: str) -> None:
+                self.model_choices: list[Any] = []
+                self.lane: ProjectGateway | None = None
+
+            async def resume(self, _handle: str) -> bool:
+                return False
+
+            async def new_session(self) -> None:
+                return None
+
+            def bind_gateway(self, path: Any) -> None:
+                self.lane = path if isinstance(path, ProjectGateway) else None
+
+            async def connect(self, _project: Path, _profile: str = "") -> None:
+                return None
+
+            async def send(self, prompt: Prompt) -> AsyncIterator[Any]:
+                key = next(k for k in test.scripts if k in prompt.text)
+                lane = self.lane or test.gateway
+                assert lane is not None
+                async for event in test.scripts[key](wire(lane)):
+                    yield event
+
+            def editor_result(self, _id: str, _result: dict[str, Any]) -> None:
+                return None
+
+            async def cancel(self) -> None:
+                test.cancelled.append("lane" if self.lane else "main")
+
+            async def close(self) -> None:
+                return None
+
+        def gateway(project: Path) -> ProjectGateway:
+            self.gateway = ProjectGateway(project)
+            return self.gateway
+
+        class FakeRPC:
+            def __init__(self, gateway: Any, stop: Any, worker: bool = False) -> None:
+                self.gateway = gateway
+                self.worker = worker
+                self.path = gateway if worker else Path("gateway.sock")
+                self.stop_reason = ""
+
+            async def start(self) -> None:
+                return None
+
+            async def close(self) -> None:
+                if not self.worker:
+                    await self.gateway.close()
+
+        async def reader(_stream: Any) -> tuple[asyncio.StreamReader, Any]:
+            stream = asyncio.StreamReader()
+
+            async def drive() -> None:
+                for _ in range(500):
+                    for when, line in list(self.lines):
+                        if when(self.events):
+                            self.lines.remove((when, line))
+                            stream.feed_data(json.dumps(line).encode() + b"\n")
+                    if not self.lines:
+                        break
+                    await asyncio.sleep(0.01)
+                await asyncio.sleep(0.1)
+                stream.feed_eof()
+
+            asyncio.get_running_loop().create_task(drive())
+            return stream, type("T", (), {"close": lambda self: None})()
+
+        monkeypatch.setattr(stdio, "emit", self.events.append)
+        monkeypatch.setattr(stdio, "Bridge", FakeBridge)
+        monkeypatch.setattr(stdio, "ProjectGateway", gateway)
+        monkeypatch.setattr(stdio, "GatewayRPC", FakeRPC)
+        monkeypatch.setattr(stdio, "Specialists", lambda *_a: _Closable())
+        monkeypatch.setattr(
+            stdio, "game_suggestions", lambda _p: {"kind": "suggestions"}
+        )
+        monkeypatch.setattr(stdio, "input_reader", reader)
+        self.root = root
+
+    def run(self) -> None:
+        from bridge import stdio
+
+        assert asyncio.run(stdio.serve(self.root, "codex")) == 0
+
+    def task(self, state: str) -> dict[str, Any] | None:
+        return next(
+            (e for e in self.events if e.get("kind") == "task" and e["state"] == state),
+            None,
+        )
+
+
+class _Closable:
+    async def close(self) -> None:
+        return None
+
+
+def test_run_alongside_starts_a_task_whose_change_is_decided_on_its_own(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    host = HostTest(project, monkeypatch)
+    release = asyncio.Event()
+
+    async def main(lane: ProjectGateway) -> AsyncIterator[Any]:
+        await write(lane, "notes/level.txt", "level\n")
+        await release.wait()
+        yield Done(ok=True)
+
+    host.scripts = {
+        "Make a lamp": makes("notes/lamp.txt", "lamp\n"),
+        "Make a level": main,
+    }
+    host.lines = [
+        (lambda _e: True, {"kind": "prompt", "text": "Make a level", "chat_id": ""}),
+        (
+            lambda e: any(x.get("kind") == "progress" for x in e),
+            {"kind": "task_start", "text": "Make a lamp", "targets": []},
+        ),
+    ]
+
+    def decide(events: list[dict[str, Any]]) -> bool:
+        review = host.task("in_review")
+        if review is None:
+            return False
+        host.lines.append(
+            (
+                lambda _e: True,
+                {
+                    "kind": "decision",
+                    "transaction_id": review["transaction_id"],
+                    "accept": True,
+                },
+            )
+        )
+        return False
+
+    def finish(events: list[dict[str, Any]]) -> bool:
+        if host.task("accepted") is not None:
+            release.set()
+        return False
+
+    host.lines += [(decide, {}), (finish, {})]
+    host.run()
+    connected = next(e for e in host.events if e.get("kind") == "connection")
+    assert connected["parallel"] == 3
+    accepted = host.task("accepted")
+    assert accepted is not None and accepted["title"] == "Make a lamp"
+    assert accepted["origin"] == "user"
+    decision = next(e for e in host.events if e.get("kind") == "file_decision")
+    assert decision["task_id"] == accepted["task_id"] and decision["accepted"]
+    assert (project / "notes/lamp.txt").read_text() == "lamp\n"
+    # The chat's own change is a separate one and never reached the project.
+    assert not (project / "notes/level.txt").exists()
+    untagged = [
+        e for e in host.events if e.get("kind") == "done" and not e.get("task_id")
+    ]
+    assert len(untagged) == 1
+
+
+def test_stop_with_all_stops_the_tasks_too(
+    project: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    host = HostTest(project, monkeypatch)
+    never = asyncio.Event()
+
+    async def stuck(lane: ProjectGateway) -> AsyncIterator[Any]:
+        await write(lane, f"notes/{lane.task_id}.txt", "x")
+        await never.wait()
+        yield Done(ok=True)
+
+    host.scripts = {"Make a lamp": stuck, "Make a level": stuck}
+    host.lines = [
+        (lambda _e: True, {"kind": "prompt", "text": "Make a level", "chat_id": ""}),
+        (
+            lambda e: any(x.get("kind") == "progress" for x in e),
+            {"kind": "task_start", "text": "Make a lamp"},
+        ),
+        (
+            lambda e: any(x.get("kind") == "progress" and x.get("task_id") for x in e),
+            {"kind": "cancel", "all": True},
+        ),
+    ]
+    host.run()
+    stopped = host.task("stopped")
+    assert stopped is not None and stopped["title"] == "Make a lamp"
+    assert host.cancelled.count("main") >= 1

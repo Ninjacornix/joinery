@@ -80,6 +80,26 @@ def make_server(socket: Path) -> MCPServer[Any]:
 
     @server.tool()
     @tool_errors
+    async def start_task(
+        title: Annotated[str, Field(min_length=1, max_length=80)],
+        request: Annotated[str, Field(min_length=1, max_length=4000)],
+        targets: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Hand an independent part of the user's request to a parallel agent. It works in its own staged change on different files (another asset, another scene) and the user reviews its change separately. request must be complete on its own: the task does not see this conversation. targets: project paths the task will create or change (res://… or relative); they are reserved for it. Returns the task id. Don't split dependent steps or work on the same files; tasks can't start tasks."""
+        return await rpc(
+            socket,
+            "start_task",
+            {"title": title, "request": request, "targets": targets or []},
+        )
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True))
+    @tool_errors
+    async def task_status(id: str) -> dict[str, Any]:
+        """How a parallel task started with start_task is doing: state (working, in_review, accepted, discarded, done, failed, stopped), its current step, and its change. Check now and then; never wait in a loop."""
+        return await rpc(socket, "task_status", {"id": id})
+
+    @server.tool()
+    @tool_errors
     async def call_tool(
         server: str, tool: str, arguments: dict[str, Any]
     ) -> CallToolResult:

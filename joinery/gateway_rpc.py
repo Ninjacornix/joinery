@@ -73,6 +73,34 @@ def search_tools(data: dict[str, Any], query: str) -> dict[str, Any]:
     }
 
 
+#: A task asked to change the scene on screen.
+TASK_LIVE = (
+    "Only the main request changes the scene on screen. Change scenes that aren't "
+    "open as staged files, or leave this to the main request."
+)
+NO_NESTED_TASKS = "A task can't start further tasks; do this part yourself."
+
+
+def task_request(params: dict[str, Any]) -> dict[str, Any]:
+    """start_task's arguments, checked: {title, request, targets}."""
+    title, request = params.get("title"), params.get("request")
+    targets = params.get("targets", [])
+    if not isinstance(title, str) or not 1 <= len(title.strip()) <= 80:
+        raise ValueError("Give the task a short title (1 to 80 characters).")
+    if not isinstance(request, str) or not 1 <= len(request.strip()) <= 4000:
+        raise ValueError(
+            "Describe the task completely in request (1 to 4000 characters); "
+            "it does not see this conversation."
+        )
+    if (
+        not isinstance(targets, list)
+        or len(targets) > 20
+        or any(not isinstance(t, str) or not 1 <= len(t) <= 400 for t in targets)
+    ):
+        raise ValueError("targets is a list of up to 20 project paths.")
+    return {"title": title.strip(), "request": request.strip(), "targets": targets}
+
+
 class GatewayRPC:
     def __init__(
         self,
@@ -81,6 +109,7 @@ class GatewayRPC:
         *,
         transport: Literal["unix", "tcp"] | None = None,
         inspection_only: bool = False,
+        worker: bool = False,
     ) -> None:
         self.gateway = gateway
         self.transport = transport or ("tcp" if os.name == "nt" else "unix")
@@ -105,9 +134,16 @@ class GatewayRPC:
         self.on_stop = on_stop
         self.stop_reason = ""
         self.inspection_only = inspection_only
+        #: Serves a parallel task: it can't start tasks, and its lane outlives it.
+        self.worker = worker
         self.delegate: (
             Callable[[list[dict[str, str]]], Awaitable[list[dict[str, str]]]] | None
         ) = None
+        #: Hand an independent part of the request to a parallel task (the lead only).
+        self.start_task: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None = (
+            None
+        )
+        self.task_status: Callable[[str], dict[str, Any]] | None = None
 
     async def start(self) -> None:
         if self.transport == "tcp":
@@ -223,6 +259,8 @@ class GatewayRPC:
             elif method == "editor_edit":
                 if self.inspection_only:
                     raise ValueError("Specialists cannot change the live editor.")
+                if self.worker:
+                    raise ValueError(TASK_LIVE)
                 if self.gateway.edit_scene is None:
                     raise ValueError("No live editor is connected to this gateway.")
                 data = await self.gateway.edit_scene(params)
@@ -261,6 +299,16 @@ class GatewayRPC:
                         "Supply one or two named read-only inspection questions (up to 4000 characters)."
                     )
                 data = {"results": await self.delegate(jobs)}
+            elif method == "start_task":
+                if self.worker or self.inspection_only:
+                    raise ValueError(NO_NESTED_TASKS)
+                if self.start_task is None:
+                    raise ValueError("Parallel tasks are not available here.")
+                data = await self.start_task(task_request(params))
+            elif method == "task_status":
+                if self.task_status is None:
+                    raise ValueError("Parallel tasks are not available here.")
+                data = self.task_status(str(params.get("id", "")))
             else:
                 raise ValueError(
                     "The model interface supports inventory, schema, call and submit; no approval methods."
@@ -304,7 +352,7 @@ class GatewayRPC:
         for task in self.tasks:
             task.cancel()
         await asyncio.gather(*self.tasks, return_exceptions=True)
-        if not self.inspection_only:
+        if not self.inspection_only and not self.worker:
             await self.gateway.close()
         shutil.rmtree(self.directory, ignore_errors=True)
 
