@@ -19,11 +19,11 @@ it. Games made with Joinery are plain Godot projects and open in stock Godot.
 
 ## Status
 
-Version 0.3. Early software, unsigned builds.
+Version 0.4. Early software, unsigned builds.
 
-- Tested: the 0.2.0 builds for macOS (Apple Silicon), Linux and Windows passed
+- Tested: the 0.3.0 builds for macOS (Apple Silicon), Linux and Windows passed
   their editor, review, undo and exported-game checks on native machines, and
-  0.3 runs the same checks when its tag is pushed. On 2026-11-10 every built-in
+  0.4 runs the same checks when its tag is pushed. On 2026-11-10 every built-in
   tool passed a real create, edit and export run with networking off, and the
   recipes from those runs rebuilt their assets
   ([results](evals/results/tools-working.md)).
@@ -35,7 +35,7 @@ Version 0.3. Early software, unsigned builds.
   Codex is supported.
 
 What changed in this version, and what is still missing:
-[0.3.0 release notes](docs/releases/0.3.0.md).
+[0.4.0 release notes](docs/releases/0.4.0.md).
 
 ## How a change works
 
