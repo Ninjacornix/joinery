@@ -118,11 +118,7 @@ func _run() -> void:
 				"node_type": "Camera3D",
 				"name": "DoorCamera",
 				"properties":
-				{
-					"position": [0.3, 1.6, 4.1],
-					"rotation": [-0.2217, 0.5812, 0.0017],
-					"fov": 61.3
-				}
+				{"position": [0.3, 1.6, 4.1], "rotation": [-0.2217, 0.5812, 0.0017], "fov": 61.3}
 			}
 		]
 	}
