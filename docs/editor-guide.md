@@ -219,6 +219,40 @@ its own.
   Each task is a separate session with your provider and uses its own
   context and tokens. Saved chats keep each task and what became of it.
 
+### Trying a few ways
+
+When you aren't sure how something should look, sound or play, let Journeyman
+make it a few different ways at once and keep the one you like (ADR 0042).
+
+- `/variants 3 a wooden door for the cabin` makes three versions side by side
+  (2 to 4; 3 when you leave the number out). Add your own directions after the
+  request: `/variants a wooden door | chunky and worn | slim and clean`.
+  Otherwise Joinery gives each way its own short direction, chosen by what you
+  asked for (a look, a sound, music, code or a level).
+- **Try 3 ways** in the message box's options menu (the mode picker) does the
+  same for the message you typed.
+- **Try other ways** on a change waiting for your decision keeps that change as
+  the first way, **As made**, and makes two more beside it.
+- Journeyman may offer it in one line when you're unsure; it only starts
+  variants when you ask for options or say yes.
+- The ways show as one card in the chat: each way's picture (a render or a
+  texture), a play button for a sound, or the first changed lines of a script,
+  with its number and direction ("2 · slim and clean") and one line of facts.
+  A way still working shows its step; one waiting for a free agent says so.
+  Click a picture for that way's full before and after in the Review tab, where
+  the same strip sits above it.
+- **Use this** keeps that way: it is accepted as one Timeline entry, and every
+  other way is discarded (or stopped, if it still works) at once. Accepting a
+  way from its own row in the Review tab does the same. If keeping it fails,
+  nothing else changes and you can choose again.
+- **Mix…** asks for one more way from what you liked: "door shape from 2,
+  colour from 3". **Discard all** throws every way away.
+- Each way is its own agent, checked by Joinery and read by the reviewer like
+  any change, and they all count towards `[agents] parallel`; ways over the
+  limit wait their turn. The ways change files, never the scene on screen
+  live: a scene that is open is changed as a file and reloads once you keep a
+  way. Saved chats keep the ways and which one you kept.
+
 ### Reviewer and debugger agents
 
 Two more kinds of agent help, and both only read (ADR 0037).
@@ -459,6 +493,8 @@ again.
   new ones.
 - `/debug` debugs the last error Godot reported; words after it say what
   goes wrong (see Reviewer and debugger agents).
+- `/variants [2-4] <request>` makes the request a few ways side by side so you
+  can keep one (see Trying a few ways above).
 - `/playtest [what to aim for]` plays the game with a bot and reports bugs,
   softlocks and balance notes (see Playtests above).
 - `/match` checks the project against the art bible and offers to fix what
