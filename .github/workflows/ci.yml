@@ -111,6 +111,22 @@ jobs:
           sandbox/build.sh --with blender --with supercollider --with krita --with inkscape --with materialmaker --with gimp --tag joinery-sandbox-runtime
           docker build --platform linux/amd64 -t joinery-mcp-worker -f sandbox/mcp.Dockerfile sandbox
           docker build --platform linux/amd64 -t joinery-creative-worker -f sandbox/creative.Dockerfile sandbox
+      - name: Install and probe the pinned Godot MCP in the offline worker
+        run: |
+          uv run joinery new out/mcp-check --name "Worker MCP check" --tools godot
+          uv run joinery mcp install --project out/mcp-check --tool godot
+          uv run joinery mcp status --project out/mcp-check --probe > out/mcp-status.json
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+
+          servers = json.loads(Path('out/mcp-status.json').read_text())['servers']
+          (godot,) = [item for item in servers if item['name'] == 'godot']
+          assert godot['state'] == 'discovered' and godot['inspected'], godot
+          print(godot['summary'])
+          PY
+      - name: Stage, review, reject and accept Godot scene edits through the worker MCP
+        run: uv run python tests/integration/mcp_round_trip.py
       - name: Create, edit and replay a Surge XT sound in the offline worker
         run: uv run python tests/integration/surge_native.py
       - name: Create, edit one layer of and replay a GIMP image in the offline worker

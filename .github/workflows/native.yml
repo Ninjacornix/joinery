@@ -266,42 +266,32 @@ jobs:
           if os.name == 'nt':
               assert 'llvmpipe' in (evidence / 'editor.log').read_text(encoding='utf-8').lower(), 'Windows must exercise the private Mesa renderer'
           PY
-      - name: Install and inspect the pinned Godot MCP on the native host
+      - name: Report the Godot MCP's offline worker honestly on the native host
+        # The pinned Godot MCP runs in joinery-mcp-worker, never on the host.
+        # These runners do not build the worker images (ci.yml's assets job
+        # builds them and probes the server there), so install and status must
+        # say so plainly instead of falling back to a host server.
         run: |
           uv run joinery new out/mcp-check --name "Native MCP check" --tools godot
-          uv run joinery mcp install --project out/mcp-check --tool godot
-          # Runners have no Docker worker images, so status reports the Godot
-          # server as runtime-missing (its writes need joinery-mcp-worker).
-          # Keep that report as evidence; the check below connects to the
-          # host server and runs its read-only probe directly.
+          if uv run joinery mcp install --project out/mcp-check --tool godot > out/native-evidence/mcp-install.json; then
+            echo "The Godot MCP installed without its worker image" >&2
+            exit 1
+          fi
+          cat out/native-evidence/mcp-install.json
           uv run joinery mcp status --project out/mcp-check --probe > out/native-evidence/mcp.json || true
           cat out/native-evidence/mcp.json
           uv run python - <<'PY'
-          import asyncio
+          import json
           from pathlib import Path
 
-          from joinery import readiness
-          from joinery.mcp_runtime import MCPConnection
-          from joinery.server_install import _run_probes, configured
-
-          project = Path('out/mcp-check')
-
-          async def main() -> None:
-              specs, missing = configured(project)
-              assert not missing, missing
-              (spec,) = [s for s in specs if s.name == 'godot']
-              connection = MCPConnection(spec, project)
-              try:
-                  await connection.connect()
-                  failed, reason = await _run_probes(
-                      connection, readiness.mcp_probes('godot', ['godot']), project
-                  )
-                  assert not failed, f'{failed}: {reason}'
-                  print('godot MCP answered its read-only probe on the host')
-              finally:
-                  await connection.close()
-
-          asyncio.run(main())
+          evidence = Path('out/native-evidence')
+          error = json.loads((evidence / 'mcp-install.json').read_text(encoding='utf-8'))['error']
+          assert error.startswith('Needs Docker') or 'is not built' in error, error
+          servers = json.loads((evidence / 'mcp.json').read_text(encoding='utf-8'))['servers']
+          (godot,) = [item for item in servers if item['name'] == 'godot']
+          assert godot['state'] == 'not-installed', godot
+          assert godot['summary'].startswith('Godot tools: not installed. Rebuild the worker.'), godot
+          print('Godot MCP without its worker:', error, '/', godot['summary'])
           PY
       - name: Read the release version
         id: release_version
