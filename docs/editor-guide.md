@@ -469,6 +469,57 @@ the paperclip, paste or drop, and send `/blockout`, or just "build this level"
   design/blockouts/<name>.toml --project .` to rebuild the same way
   (`check` only checks it, `walk` walks it in Godot).
 
+### Sound and music
+
+Ask Journeyman for music and it composes an **adaptive track** (ADR 0048): a
+few layers — pads, bass, percussion, melody, tension — that play together and
+come in and out with the game. "Compose a tense track in E minor at 120 BPM
+with pads, bass, drums and tension, and a combat section." The notes are
+written by rules from the mood, key and a seed (no model), saved as MIDI in
+`audio/music/<name>/` that you can open in any sequencer, and rendered through
+FluidSynth and Surge XT to one Ogg per layer. Every layer of a section is the
+same length and loops without a seam, and the section's mix meets the art
+bible's music loudness. The game core's `Music` plays it: calm, explore,
+danger, combat and victory raise and lower the layers on the next bar, combat
+switches to the second section, and the victory, checkpoint and fail stingers
+play on the beat. Enemies near the player, low health, checkpoints and the
+end of a level drive it by themselves; set `audio/music/track` to the track's
+`res://music/<name>.tres` to play it in every level. "Make it slower", "add a
+melody", "swap the pads for strings" or "a new variation" edit the same track
+and keep your mix.
+
+**The Mixer** tab, beside Share, shows one strip per bus — Master, Music, SFX,
+Ambience, UI, Voice — with a fader, **M**ute, **S**olo, a meter, **Reverb** and
+**Compress**, and **Duck music under** Off, Voice or SFX. An older project
+without these buses gets **Add them**. Under it, pick a track: each layer has
+its fader, Mute and Solo, **Play** auditions the stems in the editor and
+**Intensity** moves from calm to victory so you hear each state. You hear
+every change at once; nothing is written until **Save mix**, which sends the
+bus layout and the track's mix as a normal reviewed change. **Revert** puts
+back what is saved. Saving needs Journeyman connected.
+
+**`/sound-pass`** goes through the level and gives it its sounds. Words after
+it narrow it: `/sound-pass footsteps only`, `/sound-pass ambience and coins`.
+
+- A **Sound pass** card shows what is missing ("11 sounds missing in
+  level.tscn") and one row per change as it is made: footsteps for each floor
+  surface, jump and land on the player; pickup, lever and plate sounds on the
+  props; a wind, cave, forest or room-tone bed in an ambience zone over the
+  level, with its reverb; click and hover on every button.
+- Every sound is made in SuperCollider or Surge XT from a typed kit, at the
+  bible's loudness, with a recipe, and placed in the scenes: `Footsteps` under
+  the player, `SoundCue` nodes on the props, an `AmbienceZone` in the level and
+  a `surface` tag on each floor. Changes that touch different files run side
+  by side; each is checked, read by the reviewer and decided by you.
+- The sound designer, your provider in a read-only role, writes a short report
+  of what the level was missing and what is being made.
+- `joinery sound-pass --project <path>` prints the same list without a model
+  (`--json`, `--plan`, `--scene res://…`).
+
+A change that writes a track shows its layers under the waveform in review:
+one row per layer with its own small waveform and level, and the mix's
+loudness.
+
 ### The Timeline tab
 
 **Timeline**, beside Review in the bottom bar, shows how the project changed
@@ -576,6 +627,8 @@ again.
   (see Checking the design above).
 - `/blockout [notes]` builds a greybox level from the sketch you attach (see
   Building a level from a sketch above).
+- `/sound-pass [what to aim for]` gives the level its missing sounds and places
+  them, as reviewed changes (see Sound and music above).
 - `/brief` opens `design/brief.md` read-only, with **Ask Journeyman to change
   it**. With no brief, **Write the brief** drafts one from the starting point.
 - `/tools` gives each app's state and its one action (for example Start Docker
