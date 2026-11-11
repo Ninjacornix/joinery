@@ -1373,6 +1373,9 @@ class HostTest:
             def bind_gateway(self, path: Any) -> None:
                 self.lane = path if isinstance(path, ProjectGateway) else None
 
+            def allow_stage(self, stage: str) -> None:
+                self.stage = stage
+
             async def connect(self, _project: Path, _profile: str = "") -> None:
                 return None
 

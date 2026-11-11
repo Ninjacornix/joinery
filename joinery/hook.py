@@ -51,7 +51,14 @@ from joinery.policy import (
     user_only_violation,
 )
 from joinery.read_access import read_only
-from joinery.roles import ROLE_ENV, role_violation
+from joinery.roles import (
+    ROLE_ENV,
+    native_writer,
+    read_only_command,
+    role_violation,
+    spec,
+)
+from joinery.stage_access import STAGE_ENV, stage_violation
 
 # Env vars an agent may set to tell the hook its project directory, in order.
 _PROJECT_DIR_ENVS = ("CLAUDE_PROJECT_DIR", "CODEX_PROJECT_DIR")
@@ -202,9 +209,42 @@ def rule_zero(event: Event) -> Verdict | None:
     return None
 
 
+def staged_folders(event: Event, raw: dict[str, Any], role: str) -> Verdict | None:
+    """The provider's own shell and file tools against ``.joinery/transactions/``.
+
+    Judged only in a session Joinery started (``JOINERY_STAGE`` set): the session may
+    reach its one allowed staged change and no other; a read-only role may not write
+    there at all (``joinery.stage_access``). MCP calls go through the gateway, which
+    applies the same rule to their paths.
+    """
+    allowed = os.environ.get(STAGE_ENV)
+    if allowed is None or event.kind not in {"bash", "other"}:
+        return None
+    values = raw.get("tool_input") or raw.get("args") or {}
+    native = str(raw.get("tool_name") or raw.get("tool") or "")
+    try:
+        read_only = spec(role).read_only or (
+            os.environ.get("JOINERY_INSPECTION_ONLY") == "1"
+        )
+    except ValueError:
+        read_only = True
+    writes = (
+        not read_only_command(event.command)
+        if event.kind == "bash"
+        else native_writer(native)
+    )
+    return stage_violation(allowed, values, read_only=read_only, writes=writes)
+
+
 def violation(raw: dict[str, Any]) -> Verdict | None:
     event = normalise_event(raw)
     role = os.environ.get(ROLE_ENV, "")
+    stop = rule_zero(event)
+    if stop is not None and stop.severity == Severity.STOP:
+        return stop
+    folders = staged_folders(event, raw, role)
+    if folders is not None:
+        return folders
     if role:
         # Rule Zero first: a forbidden asset service stops every agent's turn,
         # whichever role tried it. Then what the role itself may do.

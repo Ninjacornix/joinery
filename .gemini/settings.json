@@ -5,7 +5,7 @@
   "hooks": {
     "BeforeTool": [
       {
-        "matcher": "mcp_.*|run_shell_command|web_fetch",
+        "matcher": "mcp_.*|run_shell_command|web_fetch|read_file|read_many_files|glob|grep|search_file_content|list_directory|write_file|replace",
         "hooks": [
           {
             "type": "command",

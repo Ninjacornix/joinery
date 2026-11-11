@@ -33,6 +33,7 @@ from joinery.chat_attachments import encoded
 from joinery.mcp_runtime import PolicyStop, validate_arguments
 from joinery.platform_support import launch_argv
 from joinery.roles import ROLE_ENV
+from joinery.stage_access import NO_STAGE, STAGE_ENV
 
 
 def _count(source: dict[str, Any], key: str) -> int:
@@ -95,6 +96,8 @@ class ACPSession:
         self.inspection_only = False
         #: The agent role the policy hook judges this provider's calls by ("" = lead).
         self.role = ""
+        #: The one staged change its own shell and file tools may reach ("" = none).
+        self.stage = ""
         self.model_choices: list[ModelChoice] = []
         self.current_model = ""
         self.profile_model = ""
@@ -119,6 +122,7 @@ class ACPSession:
             env["JOINERY_INSPECTION_ONLY"] = "1"
         if self.role:
             env[ROLE_ENV] = self.role
+        env[STAGE_ENV] = self.stage or NO_STAGE
         extra: list[str] = []
         if profile_id:
             driver, extra, values = runtime(profile_id)

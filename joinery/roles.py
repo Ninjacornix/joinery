@@ -231,6 +231,11 @@ _WRITERS = frozenset(
 )
 
 
+def native_writer(native: str) -> bool:
+    """A provider's own tool that writes or delegates (Write, apply_patch, Task…)."""
+    return native.lower() in _WRITERS
+
+
 def refusal(role: str) -> str:
     if role == "reviewer":
         return (
@@ -299,7 +304,7 @@ def role_violation(
         return Verdict(
             Severity.DENY, "Reviewers and debuggers work offline; no web access."
         )
-    if native.lower() in _WRITERS:
+    if native_writer(native):
         return Verdict(Severity.DENY, refusal(role))
     return None
 

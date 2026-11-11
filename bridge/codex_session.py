@@ -31,6 +31,7 @@ from joinery.catalog import ROOT
 from joinery.editor_ops import SCENE_TOOL, validate_edit
 from joinery.platform_support import launch_argv
 from joinery.roles import ROLE_ENV
+from joinery.stage_access import NO_STAGE, STAGE_ENV
 from joinery.wiring import _command_str
 
 
@@ -98,6 +99,8 @@ class CodexSession:
         self.inspection_only = False
         #: The agent role the policy hook judges this provider's calls by ("" = lead).
         self.role = ""
+        #: The one staged change its own shell and file tools may reach ("" = none).
+        self.stage = ""
         self.profile_model = ""
 
     async def connect(self, project: Path, profile_id: str = "") -> None:
@@ -114,6 +117,7 @@ class CodexSession:
             env["JOINERY_INSPECTION_ONLY"] = "1"
         if self.role:
             env[ROLE_ENV] = self.role
+        env[STAGE_ENV] = self.stage or NO_STAGE
         if profile_id:
             driver, args, extra = runtime(profile_id)
             if driver != "codex":

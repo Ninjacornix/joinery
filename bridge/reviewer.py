@@ -40,6 +40,8 @@ class RoleBridge(Protocol):
 
     def bind_gateway(self, path: Any) -> None: ...
 
+    def allow_stage(self, stage: str) -> None: ...
+
     async def connect(self, project: Path, profile_id: str = "") -> None: ...
 
     def send(self, message: Any) -> Any: ...
@@ -85,6 +87,9 @@ async def _run_role(
         await serving.start()
         child = bridge(agent, role)
         child.bind_gateway(serving.path)
+        # Its own shell and file tools may read the change it was given, no other.
+        staged = gateway.transaction
+        child.allow_stage(staged.id if staged is not None else "")
         await child.connect(gateway.project, profile)
         async for event in child.send(prompt):
             if isinstance(event, Execution):

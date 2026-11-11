@@ -33,6 +33,14 @@ from joinery.catalog import ROOT
 from joinery.chat_attachments import encoded
 from joinery.platform_support import launch_argv
 from joinery.roles import ROLE_ENV
+from joinery.stage_access import NO_STAGE, STAGE_ENV
+
+#: The tools a Joinery-run Claude session's policy hook judges: the project's own
+#: gate, plus Claude's file tools, so the staged-change folders hold for them too.
+SESSION_MATCHER = (
+    "mcp__.*|Bash|WebFetch|Read|Grep|Glob|LS|NotebookRead|Write|Edit|MultiEdit|"
+    "NotebookEdit"
+)
 from joinery.wiring import _command_str
 
 
@@ -150,6 +158,8 @@ class ClaudeSession:
         self.inspection_only = False
         #: The agent role the policy hook judges this provider's calls by ("" = lead).
         self.role = ""
+        #: The one staged change its own shell and file tools may reach ("" = none).
+        self.stage = ""
         self.effort_supported = False
 
     async def connect(self, project: Path, profile_id: str = "") -> None:
@@ -217,7 +227,7 @@ class ClaudeSession:
             "hooks": {
                 "PreToolUse": [
                     {
-                        "matcher": "mcp__.*|Bash|WebFetch",
+                        "matcher": SESSION_MATCHER,
                         "hooks": [{"type": "command", "command": hook, "timeout": 30}],
                     }
                 ]
@@ -260,6 +270,7 @@ class ClaudeSession:
             args += ["--disallowedTools", "Task", "Agent"]
         if self.role:
             env[ROLE_ENV] = self.role
+        env[STAGE_ENV] = self.stage or NO_STAGE
         self.process = await asyncio.create_subprocess_exec(
             *readonly_command(launch_argv(args[0], args[1:]), self.project),
             cwd=self.project,

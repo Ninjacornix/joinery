@@ -211,15 +211,19 @@ class FakeRole:
         self.act = act
         self.record = record
         self.path: Path | None = None
+        self.stage: str | None = None
 
     def bind_gateway(self, path: Path) -> None:
         self.path = path
+
+    def allow_stage(self, stage: str) -> None:
+        self.stage = stage
 
     async def connect(self, _project: Path, _profile: str = "") -> None:
         return None
 
     async def send(self, prompt: Prompt) -> AsyncIterator[Any]:
-        assert self.path is not None
+        assert self.path is not None and self.stage is not None
         self.record.append(prompt)
         yield Execution(model="m1", name="Model One", effort="", mode="auto")
         reply = await self.act(self.path, prompt)
@@ -235,10 +239,12 @@ def agent_for(
     gateway: ProjectGateway, act: Callable[[Path, Prompt], Any], record: list[Any]
 ) -> ReviewAgent:
     roles: list[str] = []
+    children: list[FakeRole] = []
 
     def bridge(_agent: str, role: str) -> FakeRole:
         roles.append(role)
-        return FakeRole(act, record)
+        children.append(FakeRole(act, record))
+        return children[-1]
 
     def endpoint(lane: ProjectGateway, role: str) -> GatewayRPC:
         return GatewayRPC(lane, role=role)
@@ -247,6 +253,7 @@ def agent_for(
         gateway, agent="codex", profile="", bridge=bridge, endpoint=endpoint
     )
     made.roles = roles  # type: ignore[attr-defined]
+    made.children = children  # type: ignore[attr-defined]
     return made
 
 
@@ -310,6 +317,9 @@ def test_the_reviewer_agent_reads_the_change_and_reports_through_its_tool(
             assert preview["reviewer"]["status"] == "reviewed"
             assert preview["reviewer"]["model"] == "Model One"
             assert reviewer.roles == ["reviewer"]  # type: ignore[attr-defined]
+            # Its own shell and file tools may read the change under review only.
+            (child,) = reviewer.children  # type: ignore[attr-defined]
+            assert child.stage == preview["transaction_id"]
         finally:
             await gateway.close()
 

@@ -39,7 +39,12 @@ _HOOK_HEAD = ["run", "--frozen", "--quiet"]
 _HOOK_FOOT = ["joinery", "hook"]
 _MATCHER_CLAUDE = "mcp__.*|Bash|WebFetch"
 _MATCHER_CODEX = "mcp__.*|Bash"
-_MATCHER_GEMINI = "mcp_.*|run_shell_command|web_fetch"
+#: Gemini's own file tools too: in a Joinery session the hook keeps them out of
+#: other staged changes' folders (joinery.stage_access).
+_MATCHER_GEMINI = (
+    "mcp_.*|run_shell_command|web_fetch|read_file|read_many_files|glob|grep|"
+    "search_file_content|list_directory|write_file|replace"
+)
 _TELEMETRY_OFF = {"DISABLE_TELEMETRY": "1", "DISABLE_ERROR_REPORTING": "1"}
 
 

@@ -58,6 +58,11 @@ class Bridge:
     def bind_gateway(self, path: Path) -> None:
         self._adapter.bind_gateway(path)
 
+    def allow_stage(self, stage: str) -> None:
+        """Let its own shell and file tools reach the staged change ``stage`` (an
+        id; "" for none), and no other (``joinery.stage_access``)."""
+        self._adapter.allow_stage(stage)
+
     async def connect(self, project: Path, profile_id: str = "") -> None:
         await self._adapter.connect(project, profile_id)
         await self.refresh_models()
