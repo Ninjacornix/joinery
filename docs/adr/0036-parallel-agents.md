@@ -34,7 +34,11 @@ ADR 0035 already kept the turn controller free of globals so that a scheduler co
    stage changes (`joinery/claims.py`). A call whose arguments name a file another task holds
    is refused before it runs; a call that wrote one anyway has that file put back. Both read
    "`<path>` is being changed by another task: `<title>`. Work on something else or wait."
-   Claims last until the change is decided or dropped. `joinery.lock` is never claimed: it is
+   Claims last until the change is decided or dropped. After each call the files it names
+   and those in folders whose listing changed are hashed against a stat snapshot of the stage
+   (`joinery/stage_watch.py`); the whole stage is hashed only when an agent joins and at
+   submit, where a file rewritten in place behind every call is put back and reported as a
+   fixable `conflict`. `joinery.lock` is never claimed: it is
    shared bookkeeping, merged entry by entry. Folders are never claimed. Game features are one
    claim for the whole project: a stage that rewrites `.joinery/game-manifest.json` holds it,
    and so does `joinery feature add|remove` (the sidebar's `/feature`) while it applies, through
@@ -49,8 +53,13 @@ ADR 0035 already kept the turn controller free of globals so that a scheduler co
    version and the agent redoes its part on top. A change in review that is accepted after
    another one only has its lock and folders refreshed, so the files the user saw are exactly
    what is applied. Each accepted change is still one timeline commit.
-6. **One live scene owner.** Only the lead changes the scene on screen live (`scene_route`).
-   A task's `edit_scene` is refused, and so is a staged write to a scene that routes live.
+6. **One live scene owner.** One agent at a time changes the scene on screen live
+   (`scene_route`): the first live edit makes it the owner (`PathClaims.live`) until the user
+   decides the preview (`live_decision`, which says whether it was accepted). The lead may
+   while it works; a task may only while the lead is idle (nothing running, nothing in
+   review). Anyone else's live edit, or staged write to a scene that routes live, is refused
+   and names the owner. A task's live preview is reviewed when its turn reaches review,
+   never over the lead's file review, and decided on its own.
 7. **Shared workers.** Blender and Krita document operators take turns per worker image
    (`WorkerSlots`); the waiting task says so in its step. Other apps run side by side, each
    task in its own staged worker.
@@ -58,9 +67,12 @@ ADR 0035 already kept the turn controller free of globals so that a scheduler co
    hook judges every call and reports a Rule Zero stop to the task's own endpoint. Any Rule
    Zero stop stops every agent of the chat, so no task routes around it.
 9. **What the user sees.** Each task has a card above the footer: its title, the apps at
-   work, its step, a timer and its own Stop. The header says "3 agents working" while two or
-   more work. Each task's change is its own row in the Review tab, decided through the chat (the
-   host runs the task, so the CLI never decides it behind its back). Stop on the lead's request
+   work, its step ("Starting `<provider>`…" first, then its own steps, including its own
+   "Connecting project tools…"), a timer and its own Stop. The header says "3 agents working" while two or
+   more work. Each task's change is its own row in the Review tab with the same full
+   before/after review as the lead's (`review_tasks.gd`), decided through the chat (the host
+   runs the task, so the CLI never decides it behind its back). One review panel shows at a
+   time; a task's never opens by itself, so the lead's review keeps priority. Stop on the lead's request
    offers, in one line, to stop the tasks too. A finished task leaves one line in the
    transcript, and saved chats record each task's start and outcome (`type: task`).
 
@@ -70,7 +82,6 @@ ADR 0035 already kept the turn controller free of globals so that a scheduler co
   one never touches another's stage.
 - Every task costs a provider session and its own context; a task's context use is in its
   status. Tasks are single turns, so they never need a session summary.
-- A task's change is reviewed from its Review tab row (summary, apps, files); the full
-  before/after panel remains the lead's.
 - Claims are checked by path. A tool that writes a file its arguments don't name is caught
-  after the call, so it may have done other work first.
+  after the call, so it may have done other work first; one rewritten in place in a folder
+  whose listing didn't change is caught at submit.

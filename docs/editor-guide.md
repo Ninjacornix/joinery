@@ -143,20 +143,29 @@ its own.
   `start_task`. It keeps dependent steps (a model and the scene that places
   it), small requests and anything in the same files for itself.
 - Each task shows as a card above the message box: its title, the apps at
-  work, what it is doing, a timer and its own **Stop**. While two or more
+  work, what it is doing (first "Starting Codex CLI…", or your provider, then
+  its own steps), a timer and its own **Stop**. While two or more
   agents work, the top of the sidebar says **3 agents working**.
 - When a task's change passes Joinery's checks its card says **Ready for
-  review**, and **Review** opens the Review tab, where the change is its own
-  row with **Accept** and **Discard**. Accepting one change never touches
-  another's. When the task is done its card leaves one line in the chat, such
+  review**, and **Review** opens it in the Review tab with the same full
+  review as Journeyman's own change: before and after, Details, **Accept** and
+  **Discard**. Its row in the list opens it too. One review shows at a time;
+  opening another row swaps it, and a task's change never pops up over
+  Journeyman's own review. Accepting one change never touches another's. When the task is done its card leaves one line in the chat, such
   as "Make a desk lamp: change accepted."
 - Two agents never change the same file. A task that tries gets a plain
   answer ("`art/props/lamp.glb` is being changed by another task: Make a
   desk lamp. Work on something else or wait.") and leaves it alone. If a
   change you accepted meanwhile touched a file a task also changed, the task
-  redoes its part on top of yours before its change reaches you. Only
-  Journeyman's own request changes the scene on screen; tasks change other
-  scenes as files.
+  redoes its part on top of yours before its change reaches you.
+- One agent at a time changes the scene on screen live. While Journeyman's
+  own request works, it keeps the scene and tasks change other scenes as
+  files; once it is idle, a task may change the open scene live, and its
+  preview is reviewed when that task finishes. Deciding the preview hands
+  the scene on to the next agent.
+- Game features change one at a time: while a task's change adds or removes
+  one, `/feature` says which task has them ("Game features are being changed
+  by another task: …"), and the other way round.
 - **Stop** on Journeyman's request asks once whether to stop the tasks too:
   **Stop all** or **Keep them**.
 - Blender and Krita work on one document at a time, so tasks using them take
