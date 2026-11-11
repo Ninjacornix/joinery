@@ -32,6 +32,8 @@ var hud: Array[Dictionary] = []
 var pages: Array[Dictionary] = []
 var _boot_usec: int = 0
 var _hud_at: int = -1
+## Rendered frames so far: each is 1/60 s of game time under --fixed-fps 60.
+var _drawn: int = 0
 
 
 func _init(on: SceneTree, probe_kind: String, with_luma: bool, total_frames: int) -> void:
@@ -56,9 +58,10 @@ func tick(frame: int, paused: bool, menu_open: bool) -> void:
 
 
 ## Once per rendered frame: the picture's luminance (only with --luma, in a window).
-func drawn(frame: int) -> void:
+func drawn(_frame: int) -> void:
 	if not luma or DisplayServer.get_name() == "headless":
 		return
+	_drawn += 1
 	var image := tree.root.get_texture().get_image()
 	if image == null or image.is_empty():
 		return
@@ -70,7 +73,7 @@ func drawn(frame: int) -> void:
 			var lum := 0.2126 * _linear(c.r) + 0.7152 * _linear(c.g) + 0.0722 * _linear(c.b)
 			quarters[int(y >= 4) * 2 + int(x >= 8)] += lum / 32.0
 	var whole: float = (quarters[0] + quarters[1] + quarters[2] + quarters[3]) / 4.0
-	luma_trace.append([frame, snappedf(whole, 0.001)] + _snapped(quarters))
+	luma_trace.append([_drawn, snappedf(whole, 0.001)] + _snapped(quarters))
 
 
 ## After play: the census and hot scripts (perf), or the menus (access).
