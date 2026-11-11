@@ -115,6 +115,8 @@ async def inspect_document(project: Path, tool: str, source: str) -> dict[str, A
         load_catalog(), load_project_tools(project / "joinery.toml")
     ):
         raise PermissionError("Select this owning application in project setup first.")
+    # The app reads a project path, never Godot's res:// form.
+    source = source.removeprefix("res://")
     path = confined(project, source)
     if not path.is_file():
         raise ValueError("The source document is missing.")
