@@ -16,22 +16,31 @@ checks and is accepted. Then:
 
 Sections are async functions in ``SECTIONS``; each prints its timings and returns a
 summary. Technical fixtures only; nothing here approves art in a user's game.
-Run: ``uv run python tests/integration/sound_pass.py [sweep|all]``.
+``music``: a 3-layer adaptive track (2 sections, a stinger) composed by rule and
+rendered as stems: equal frame counts after decoding, seamless loops, the section
+mix at the bible's loudness; stock Godot's core Music autoload plays it and switches
+to the combat section on the bar with every layer in sync; edited (tempo, a layer
+in, one out, the Mixer's fader kept); every recipe replays byte for byte.
+
+Run: ``uv run python tests/integration/sound_pass.py [sweep|music|all]``.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import re
 import secrets
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
 import time
+import wave
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
@@ -41,14 +50,16 @@ from bridge.protocol import Prompt
 from bridge.sound_pass import SoundPassRun
 from joinery import scene_text, sound_pass
 from joinery.authoring import IMAGE, run_offline
-from joinery.bible_rules import _MEASURE, load_rules, parse_loudness
+from joinery.bible_rules import _MEASURE, check_rules, load_rules, parse_loudness
 from joinery.catalog import ROOT
 from joinery.cli import main as cli_main
 from joinery.gateway import ProjectGateway
+from joinery.music_track import from_tres, to_tres
 from joinery.playtest import STOCK_GODOT
 from joinery.recipe import load_recipe, rebuild_one, recipe_paths
 from joinery.runner import SandboxRunner
 from joinery.tools.audio_chain import folder_value
+from servers.sound import tracks
 
 TOOLS = '[tools]\nenabled = ["godot", "supercollider", "surge-xt"]\n'
 #: The game core's sound nodes, when this checkout's blueprint core has none yet.
@@ -407,7 +418,244 @@ async def sweep() -> dict[str, Any]:
         return summary
 
 
-SECTIONS: dict[str, Callable[[], Awaitable[dict[str, Any]]]] = {"sweep": sweep}
+# --- Adaptive music ----------------------------------------------------------------
+
+MUSIC_BIBLE = """# Art bible (test fixture)
+
+## Checked rules
+
+```toml
+schema = 2
+
+[audio]
+true_peak_max_dbtp = -1.0
+lufs_tolerance = 1.0
+
+[audio.lufs]
+"audio/music" = -16.0
+
+[audio.format."audio/music"]
+container = "ogg"
+sample_rates = [48000]
+channels = [2]
+```
+"""
+#: Plays the composed track through the game core's Music autoload, asks for combat
+#: (a section switch on the next bar) and reads every layer's position at once.
+MUSIC_CHECK = """extends Node
+var _start := 0
+var _asked := -1.0
+
+
+func _ready() -> void:
+	print("MUSIC_PLAY ", Music.play("res://music/theme.tres", &"explore"))
+	_start = Time.get_ticks_msec()
+
+
+func _process(_delta: float) -> void:
+	var elapsed := Time.get_ticks_msec() - _start
+	if elapsed > 1000 and _asked < 0.0:
+		# Mid-bar: the switch waits for the bar line at 2 s.
+		_asked = Music.position_seconds()
+		Music.set_intensity(&"combat", true)
+	if elapsed < 3200:
+		return
+	AudioServer.lock()
+	var positions := []
+	for player: AudioStreamPlayer in Music.layer_players():
+		positions.append(player.get_playback_position())
+	AudioServer.unlock()
+	var state := {
+		"intensity": str(Music.intensity), "section": str(Music.current_section()),
+		"positions": positions, "position": Music.position_seconds(), "asked_at": _asked,
+	}
+	print("MUSIC_STATE " + JSON.stringify(state))
+	set_process(false)
+	# Let go of the stems before quitting, as a game leaving its level does.
+	Music.stop(0.0)
+	# The audio thread lets go of stopped playbacks on its next mixes.
+	await get_tree().create_timer(0.5).timeout
+	get_tree().quit()
+"""
+
+
+async def decode(project: Path, path: str) -> list[float]:
+    """A stem's left channel, decoded by ffmpeg in the worker."""
+    out = ".decode.wav"
+    got = await run_offline(
+        [
+            "ffmpeg",
+            "-nostdin",
+            "-loglevel",
+            "error",
+            "-y",
+            "-i",
+            path,
+            "-c:a",
+            "pcm_s16le",
+            out,
+        ],
+        project,
+    )
+    assert got.ok, got.output
+    with wave.open(str(project / out)) as audio:
+        data = audio.readframes(audio.getnframes())
+    (project / out).unlink()
+    values = struct.unpack(f"<{len(data) // 2}h", data)
+    return [values[i] / 32768 for i in range(0, len(values), 2)]
+
+
+def seam(frames: list[float]) -> float:
+    """The jump across the loop point against the 99th percentile jump inside it."""
+    jumps = sorted(abs(frames[i] - frames[i - 1]) for i in range(1, len(frames)))
+    return abs(frames[0] - frames[-1]) / (jumps[int(len(jumps) * 0.99)] or 1e-9)
+
+
+async def measure_offline(argv: list[str], root: Path) -> Any:
+    return await run_offline(argv, root, readonly=True)
+
+
+def play_in_godot(project: Path, start: float) -> dict[str, Any]:
+    binary = godot()
+    (project / "music_check.gd").write_text(MUSIC_CHECK)
+    (project / "music_check.tscn").write_text(
+        '[gd_scene format=3]\n\n[ext_resource type="Script" path="res://music_check.gd"'
+        ' id="1"]\n\n[node name="Check" type="Node"]\nscript = ExtResource("1")\n'
+    )
+    env = {"HOME": str(project.parent), "PATH": "/usr/bin:/bin"}
+    base = [str(binary), "--headless", "--audio-driver", "Dummy", "--path", str(project)]
+    imported = subprocess.run(
+        [*base, "--editor", "--import"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=300,
+        env=env,
+    )
+    assert imported.returncode == 0, imported.stderr[-2000:]
+    got = subprocess.run(
+        [*base, "res://music_check.tscn"],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=120,
+        env=env,
+    )
+    for name in ("music_check.gd", "music_check.tscn"):
+        (project / name).unlink()
+    output = got.stdout + got.stderr
+    errors = [
+        line for line in output.splitlines() if line.startswith(("ERROR", "SCRIPT ERROR"))
+    ]
+    assert not errors, "\n".join(errors[:20])
+    assert "MUSIC_PLAY true" in output, output[-2000:]
+    line = next(x for x in output.splitlines() if x.startswith("MUSIC_STATE "))
+    state: dict[str, Any] = json.loads(line.removeprefix("MUSIC_STATE "))
+    positions = state["positions"]
+    state["drift_ms"] = round((max(positions) - min(positions)) * 1000, 2)
+    stamp(start, "stock Godot plays the track: " + json.dumps(state))
+    assert state["section"] == "combat" and state["intensity"] == "combat", state
+    assert len(positions) == 3 and state["drift_ms"] <= 5.0, state
+    # Asked for mid-bar, the combat section started on the next bar line (2 s), not
+    # at once: about 1.2 s of it has played when the check reads it.
+    assert 1.0 < state["asked_at"] < 2.0 and 0.6 < state["position"] < 1.8, state
+    return state
+
+
+async def music() -> dict[str, Any]:
+    """Compose a 3-layer track, check its stems, play it in Godot, edit it, rebuild it."""
+    start = time.monotonic()
+    with tempfile.TemporaryDirectory(prefix="joinery-music-") as directory:
+        # Native authoring runs in a staged copy, as a change does.
+        project = make_game(Path(directory)).rename(Path(directory) / "stage")
+        (Path(directory) / "journal.json").write_text(json.dumps({"state": "staging"}))
+        (project / "art").mkdir(exist_ok=True)
+        (project / "art/bible.md").write_text(MUSIC_BIBLE)
+        summary: dict[str, Any] = {}
+        made = await tracks.compose_track(
+            project,
+            "theme",
+            ["pads", "bass", "percussion"],
+            mood="adventurous",
+            key="D minor",
+            tempo_bpm=120,
+            bars=4,
+            sections=["main", "combat"],
+            stingers=["victory"],
+            seed=7,
+        )
+        summary["compose_seconds"] = round(time.monotonic() - start, 1)
+        stamp(start, "composed and rendered 3 layers x 2 sections + a stinger")
+        frames = round(4 * 4 * 0.5 * 48000)
+        summary["sections"] = {
+            s["name"]: {"mix_lufs": s["mix_lufs"], "true_peak": s["mix_true_peak"]}
+            for s in made["measured"]["sections"]
+        }
+        for section in made["measured"]["sections"]:
+            assert section["frames"] == frames, section
+            assert abs(section["mix_lufs"] + 16.0) <= 1.0, section
+        track = from_tres((project / "music/theme.tres").read_text())
+        seams: dict[str, float] = {}
+        for part in track.sections:
+            for layer, stem in part.stems.items():
+                decoded = await decode(project, stem.removeprefix("res://"))
+                assert len(decoded) == frames, (stem, len(decoded), frames)
+                seams[f"{part.name}_{layer}"] = round(seam(decoded), 2)
+        assert max(seams.values()) < 1.5, seams
+        summary["seam_ratio_max"] = max(seams.values())
+        stamp(start, f"every stem {frames} frames after decoding; seams {seams}")
+        oggs = [o for o in made["outputs"] if o.endswith(".ogg")]
+        problems = await check_rules(project, oggs, measure_offline)
+        assert not problems, problems
+        summary["godot"] = play_in_godot(project, start)
+
+        mixed = from_tres((project / "music/theme.tres").read_text())
+        mixed.layers[1].volume_db = -4.5
+        (project / "music/theme.tres").write_text(to_tres(mixed))
+        edit_start = time.monotonic()
+        edited = await tracks.edit_track(
+            project,
+            "theme",
+            {
+                "tempo_bpm": 128,
+                "add_layers": ["melody"],
+                "remove_layers": ["percussion"],
+                "variation": 2,
+            },
+        )
+        summary["edit_seconds"] = round(time.monotonic() - edit_start, 1)
+        track = from_tres((project / "music/theme.tres").read_text())
+        assert [layer.name for layer in track.layers] == ["pads", "bass", "melody"]
+        assert track.layers[1].volume_db == -4.5, "the Mixer's fader is kept"
+        assert "audio/music/theme/main_percussion.ogg" in edited["removed"]
+        stamp(start, "edited: 128 BPM, melody in, percussion out, fader kept")
+
+        before = {
+            o: hashlib.sha256((project / o).read_bytes()).hexdigest()
+            for p in recipe_paths(project)
+            for o in load_recipe(p).outputs
+            if o.startswith("audio/music/")
+        }
+        rebuild_start = time.monotonic()
+        for path in recipe_paths(project):
+            replay = rebuild_one(path, project, SandboxRunner(image=IMAGE))
+            assert replay.ok, replay
+        summary["rebuild_seconds"] = round(time.monotonic() - rebuild_start, 1)
+        after = {
+            o: hashlib.sha256((project / o).read_bytes()).hexdigest() for o in before
+        }
+        assert before == after, [o for o in before if before[o] != after[o]]
+        summary["replayed_files"] = len(before)
+        stamp(start, f"{len(before)} music files replayed byte for byte")
+        print(json.dumps(summary, indent=1))
+        print("Adaptive music: compose, stems, Godot playback, edit, replay: PASS")
+        return summary
+
+
+SECTIONS: dict[str, Callable[[], Awaitable[dict[str, Any]]]] = {
+    "sweep": sweep,
+    "music": music,
+}
 
 
 async def main(which: str) -> int:
