@@ -11,6 +11,8 @@ extends VBoxContainer
 ## - Sounds: one compact audio_preview with its waveform, so Before and After play A/B at the
 ##   same position.
 ## - Text: only the changed lines (review_diff.gd).
+## - A blockout (ADR 0043): the user's sketch (the item's `reference`) beside the plan of the
+##   level built from it; Before and After crossfade the plan.
 ##
 ## A side whose file is not written yet shows a pulsing "Rendering preview…" frame until it
 ## appears; the renders start when the change passes its checks, so the review is on screen
@@ -368,7 +370,7 @@ func thumbnail() -> Texture2D:
 func measured_facts() -> Array[String]:
 	var found: Array[String] = []
 	for item: Dictionary in _items:
-		if not _paired(item) or item.has("error"):
+		if not _paired(item) or item.has("error") or item.has("reference"):
 			continue
 		var before := str(item["before"])
 		var after := str(item["after"])
@@ -437,7 +439,12 @@ static func kind_of(item: Dictionary) -> String:
 ## True when [param item] shows as a split picture: an image (texture, part view or scene
 ## snapshot) with both sides. Models have their own framing per side, so they crossfade.
 static func swipes(item: Dictionary) -> bool:
-	return kind_of(item) == "image" and _paired(item) and not item.has("error")
+	return (
+		kind_of(item) == "image"
+		and _paired(item)
+		and not item.has("error")
+		and not item.has("reference")
+	)
 
 
 static func _paired(item: Dictionary) -> bool:
@@ -537,6 +544,9 @@ func _show_current(swap: bool) -> void:
 	_stop_waiting()
 	if kind_of(item) == "audio":
 		_show_audio(source, swap)
+	elif item.has("reference") and FileAccess.file_exists(str(item["reference"])):
+		# The sketch stays on the left; the plan beside it is what changes.
+		_show_image(str(item["reference"]), source, swap)
 	else:
 		_show_image(source, str(item.get(chosen + "_back", "")), swap)
 
@@ -578,7 +588,8 @@ func _show_image(source: String, far: String, swap: bool) -> void:
 	if not far.is_empty() and FileAccess.file_exists(far):
 		back = _texture(far)
 	_frame.show()
-	if swap and _front.visible and _front.main.texture != null and _front.main.texture != picture:
+	var changed := _front.main.texture != picture or _front.far.texture != back
+	if swap and _front.visible and _front.main.texture != null and changed:
 		_back.set_pictures(picture, back)
 		UI_MOTION.crossfade(_front, _back)
 		var shown := _back

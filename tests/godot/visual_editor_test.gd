@@ -363,6 +363,49 @@ func _glance_reviews(
 	await _shot("review-filmstrip", [panel, dock])
 	dock.hide_edit_review()
 	await _frames()
+	await _blockout_review(dock, panel)
+
+
+## A level built from the user's sketch: the sketch and the plan side by side (ADR 0043). The
+## suite copies a fixture sketch and the plan Joinery draws for it into the project.
+func _blockout_review(dock: Control, panel: Control) -> void:
+	var sketch := ProjectSettings.globalize_path("res://blockout_fixture/keep.png")
+	var plan := ProjectSettings.globalize_path("res://blockout_fixture/keep-plan.png")
+	_check(FileAccess.file_exists(sketch) and FileAccess.file_exists(plan), "Blockout fixture")
+	(
+		dock
+		. show_file_review(
+			"Build the keep from my sketch",
+			"+ design/blockouts/keep.toml\n+ game/keep_blockout.tscn",
+			[
+				{
+					"path": "design/blockouts/keep.toml",
+					"media": "image",
+					"label": "Blockout",
+					"after": plan,
+					"reference": sketch,
+				}
+			],
+			[
+				{"path": "design/blockouts/keep.toml", "change": "created"},
+				{"path": "game/keep_blockout.tscn", "change": "created"},
+				{"path": "game/blockout/blockout_level.gd", "change": "created"},
+			],
+		)
+	)
+	(
+		panel
+		. call(
+			"show_glance",
+			{
+				"facts": ["Walkable: spawn reaches 3 of 3 goals"],
+				"checks": {"ran": ["references", "Godot import"], "skipped": ["tests"]},
+			}
+		)
+	)
+	await _shot("review-blockout", [panel, dock])
+	dock.hide_edit_review()
+	await _frames()
 
 
 ## The Review tab's list of approvals, with fixture changes, then with none.

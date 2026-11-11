@@ -40,6 +40,7 @@ const COMMAND_SCRIPT := preload("command_job.gd")
 const COMMANDS := {
 	"/art": ["Review the art direction", "ui"],
 	"/brief": ["Read the game brief", "ui"],
+	"/blockout": ["Build a level from a sketch", "prompt"],
 	"/feature": ["Add or remove a game feature", "cli"],
 	"/playtest": ["Play the game and report bugs", "ui"],
 	"/match": ["Make everything match the bible", "ui"],
@@ -582,6 +583,13 @@ static func _first_error(output: String) -> String:
 
 ## True for commands that only open or change something in the editor ("ui"), which work
 ## while Journeyman is busy with a request.
+## True for a command sent to Journeyman as a message with its words and attachments:
+## "/blockout [words]" builds a level from the attached sketch (ADR 0043).
+static func is_prompt(entry: String) -> bool:
+	var found: Array = COMMANDS.get(entry.strip_edges().split(" ")[0].to_lower(), [])
+	return found.size() > 1 and found[1] == "prompt"
+
+
 static func is_local(command: String) -> bool:
 	var entry: Array = COMMANDS.get(command.split(" ")[0].to_lower(), [])
 	return entry.size() > 1 and entry[1] == "ui"

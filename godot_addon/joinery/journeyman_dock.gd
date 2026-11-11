@@ -409,7 +409,7 @@ func _on_submit(text: String) -> void:
 		return
 	_command_popup.close()
 	_prompt.clear()
-	if entry.begins_with("/"):
+	if entry.begins_with("/") and not SLASH_SCRIPT.is_prompt(entry):
 		run_command(entry)
 		return
 	_start_request(entry, target_snapshot())
@@ -461,7 +461,7 @@ func _drain() -> void:
 		return
 	var next := queue.take()
 	var entry := str(next["text"])
-	if not entry.begins_with("/"):
+	if not entry.begins_with("/") or SLASH_SCRIPT.is_prompt(entry):
 		_start_request(entry, next["targets"])
 		return
 	run_command(entry)

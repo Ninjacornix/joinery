@@ -3,8 +3,8 @@ extends SceneTree
 ## measures, the counts), the checks as one status, the reviewer's notes as one line with the
 ## rest in Details, the keyboard (Enter, Backspace / Delete, A / B) only with focus in the
 ## review, a filmstrip for several items with the most important first, a model from two
-## angles, Accept on screen at a narrow width, and the chat card's row that decides a small
-## change and offers Review for a big one.
+## angles, a blockout's plan beside the sketch it was built from, Accept on screen at a narrow
+## width, and the chat card's row that decides a small change and offers Review for a big one.
 
 const PANEL := preload("res://addons/joinery/review_panel.gd")
 const GLANCE := preload("res://addons/joinery/review_glance.gd")
@@ -50,6 +50,7 @@ func _run() -> void:
 	await _check_keyboard(panel)
 	await _check_filmstrip(panel)
 	await _check_model(panel)
+	await _check_blockout(panel)
 	await _check_narrow(panel)
 	await _check_card(panel)
 	panel.clear()
@@ -322,6 +323,38 @@ func _check_model(panel: PANEL) -> void:
 	_check(panel._media.side == "before", "Flip shows the original model")
 	_check(panel._media.texture() != front, "Both angles swap to the original")
 	_check(panel._media.far_texture() != null, "The original's far side shows too")
+
+
+## A blockout (ADR 0043): the user's sketch on the left, the plan built from it on the right;
+## an earlier plan flips in place, and pixels of a plan are no facts.
+func _check_blockout(panel: PANEL) -> void:
+	var sketch := _image("sketch.png", Color(0.95, 0.94, 0.9), Vector2i(90, 60))
+	var plan_before := _image("plan-a.png", Color(0.2, 0.21, 0.24), Vector2i(80, 60))
+	var plan_after := _image("plan-b.png", Color(0.3, 0.32, 0.36), Vector2i(80, 60))
+	var media := [
+		{
+			"path": "design/blockouts/keep.toml",
+			"media": "image",
+			"label": "Blockout",
+			"before": plan_before,
+			"after": plan_after,
+			"reference": sketch,
+		}
+	]
+	panel.show_file_review("Build the keep from my sketch", "", media, [])
+	await _frames()
+	var shown: Texture2D = panel._media.texture()
+	_check(not panel._media.swipe().visible, "A blockout does not split")
+	_check(shown != null and shown.get_width() == 90, "The sketch shows on the left")
+	var plan: Texture2D = panel._media.far_texture()
+	_check(plan != null and plan.get_width() == 80, "The plan shows beside the sketch")
+	_check(panel._media.measured_facts().is_empty(), "A plan's pixels make no facts")
+	panel.flip()
+	await _frames()
+	_check(panel._media.side == "before", "Flip shows the earlier plan")
+	_check(panel._media.texture().get_width() == 90, "The sketch stays")
+	_check(panel._media.far_texture() != plan, "The plan beside it is the earlier one")
+	_check(panel.glance().get("thumbnail") != null, "The card gets the plan's picture")
 
 
 func _check_narrow(panel: PANEL) -> void:

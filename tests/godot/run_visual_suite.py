@@ -121,6 +121,7 @@ EDITOR_SCREENS = (
     "review-text",
     "review-scene",
     "review-filmstrip",
+    "review-blockout",
     "timeline-list",
     "timeline-entry",
     "timeline-restored",
@@ -386,6 +387,7 @@ def editor(theme: str, capture: Path, logs: Path) -> Harness:
             'version="1"\nscript="test.gd"\n'
         )
         (project / "visual.tscn").write_text(FIXTURE_SCENE)
+        blockout_fixture(project / "blockout_fixture")
         settings = (
             "config_version=5\n[application]\n"
             'config/name="Harbour Keeper"\nconfig/features=PackedStringArray("4.7")\n'
@@ -440,6 +442,17 @@ def legacy(name: str, capture: Path, logs: Path) -> Harness:
     run_godot(harness, [sys.executable, str(TESTS / script)], env, logs, timeout=600)
     harness.captures = [name for name in expected if (capture / name).is_file()]
     return harness
+
+
+def blockout_fixture(folder: Path) -> None:
+    """A sample sketch and the plan Joinery draws of the level built from it."""
+    from joinery import blockout
+
+    sketches = ROOT / "tests/fixtures/blockout"
+    folder.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(sketches / "keep.png", folder / "keep.png")
+    built = blockout.make(folder, (sketches / "keep.toml").read_text(encoding="utf-8"))
+    (folder / "keep-plan.png").write_bytes(built.plan_png)
 
 
 def seed_theme(binary: Path, theme: str) -> None:
