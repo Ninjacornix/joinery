@@ -37,6 +37,7 @@ CASES = {
     "kits_panel_test.gd": "kits panel: ok",
     "animation_browser_test.gd": "animation browser: ok",
     "review_clip_test.gd": "review clip: ok",
+    "kit_share_test.gd": "kit share: ok",
     "sidebar_feature_test.gd": "sidebar features: ok",
     "art_review_test.gd": "art review: ok",
     "share_view_test.gd": "share view: ok",
