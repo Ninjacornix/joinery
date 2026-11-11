@@ -1,6 +1,7 @@
 [gd_scene format=3 uid="uid://s3rw8wxogon7"]
 
 [ext_resource type="Script" uid="uid://puaoy5vmpxom" path="res://game/player/player.gd" id="1_player"]
+[ext_resource type="Script" uid="uid://7qd6x5dbmd30" path="res://game/player/character_animator.gd" id="3_animator"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
 radius = 0.35
@@ -47,3 +48,6 @@ fov = 75.0
 
 [node name="InteractRay" type="RayCast3D" parent="Head/Camera3D"]
 target_position = Vector3(0, 0, -2.5)
+
+[node name="Animator" type="Node" parent="."]
+script = ExtResource("3_animator")

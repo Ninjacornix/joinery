@@ -2,6 +2,7 @@
 
 [ext_resource type="Script" uid="uid://b5yor343m71q3" path="res://game/player/player.gd" id="1_player"]
 [ext_resource type="Script" uid="uid://odxnxsmwuv62" path="res://game/player/orbit_camera.gd" id="2_orbit_ca"]
+[ext_resource type="Script" uid="uid://dsoj7cwtgnhai" path="res://game/player/character_animator.gd" id="3_animator"]
 
 [sub_resource type="CapsuleShape3D" id="CapsuleShape3D_body"]
 radius = 0.4
@@ -80,3 +81,6 @@ margin = 0.1
 fov = 70.0
 near = 0.1
 far = 300.0
+
+[node name="Animator" type="Node" parent="."]
+script = ExtResource("3_animator")

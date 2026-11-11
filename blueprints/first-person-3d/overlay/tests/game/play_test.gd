@@ -49,6 +49,7 @@ func _run() -> void:
 	await _check_look(player)
 	await _check_walk(player)
 	await _check_jump(player)
+	await _check_animations(player)
 	await _check_interact(level, player)
 	await _check_save_round_trip(level, player)
 	await _check_pause_and_settings(player)
@@ -208,6 +209,15 @@ func _check_jump(player: CharacterBody3D) -> void:
 	h.expect(highest > ground + 0.9, "jump rises (peak %.2f m)" % (highest - ground))
 	h.expect(player.is_on_floor(), "the player lands after a jump")
 	h.expect_near(player.global_position.y, ground, 0.05, "the player lands back on the floor")
+
+
+
+func _check_animations(player: CharacterBody3D) -> void:
+	# Loaded at run time, like everything this --script test reaches.
+	var script: GDScript = load("res://tests/game/animation_checks.gd") as GDScript
+	var checks: RefCounted = script.new(h, self)
+	var place: Callable = func() -> void: _place(player, Vector3(0.0, 0.0, 4.0), 0.0)
+	await checks.call(&"run", player, place)
 
 
 func _check_interact(level: Node, player: CharacterBody3D) -> void:

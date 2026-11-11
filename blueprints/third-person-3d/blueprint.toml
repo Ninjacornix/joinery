@@ -13,6 +13,8 @@ main_scene = "res://core/main.tscn"
 level_scene = "res://game/level.tscn"
 player_scene = "res://game/player/player.tscn"
 spawnable_scenes = []
+# Clips the player plays when the character model has them (game/player/character_animator.gd).
+animations = ["idle", "walk", "run", "jump_start", "jump_air", "jump_land"]
 
 [brief]
 genre = ["3d platformer", "adventure"]

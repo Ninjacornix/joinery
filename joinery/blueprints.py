@@ -248,6 +248,8 @@ class Hooks(_Strict):
     level_scene: str = ""
     player_scene: str = ""
     spawnable_scenes: list[str] = []
+    #: Clip names the player plays when its character model has them.
+    animations: list[str] = []
 
 
 class BriefDefaults(_Strict):

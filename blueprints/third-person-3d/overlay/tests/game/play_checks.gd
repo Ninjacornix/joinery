@@ -14,6 +14,7 @@ const Mover := preload("res://game/props/mover.gd")
 const Plate := preload("res://game/props/pressure_plate.gd")
 const Checkpoint := preload("res://game/props/checkpoint.gd")
 const CameraSettingsPage := preload("res://game/ui/camera_settings_page.gd")
+const AnimationChecks := preload("res://tests/game/animation_checks.gd")
 
 var tree: SceneTree
 var root: Window
@@ -59,6 +60,10 @@ func run() -> void:
 	_check_text_sizes()
 	await _check_win()
 	await _check_pause_restart()
+	# Last: walking about collects coins and reaches checkpoints.
+	_refresh()
+	if player != null:
+		await _check_animations()
 	h.finish()
 
 
@@ -172,12 +177,19 @@ func _check_jump() -> void:
 	h.expect(jumps[0] == 2, "each jump press jumps once")
 	h.expect(stretch[0] > 1.1, "the body stretches on take-off")
 	await h.physics_frames(30)
-	h.expect(visual.scale.is_equal_approx(Vector3.ONE) or visual.scale.distance_to(Vector3.ONE) < 0.02,
-		"the squash and stretch settles back")
+	h.expect(
+		visual.scale.is_equal_approx(Vector3.ONE) or visual.scale.distance_to(Vector3.ONE) < 0.02,
+		"the squash and stretch settles back"
+	)
 	h.expect(short_peak > ground + 0.4, "a tapped jump raises the player")
 	h.expect(tall_peak > short_peak + 0.8, "holding jump jumps higher than a tap")
 	h.expect(tall_peak > ground + 2.5, "a held jump reaches platform height")
 	h.expect_near(player.global_position.y, ground, 0.05, "the player lands back on the floor")
+
+
+func _check_animations() -> void:
+	var checks: AnimationChecks = AnimationChecks.new(h, tree)
+	await checks.run(player, func() -> void: _place(Vector3(0.0, 0.05, 3.0)))
 
 
 func _jump_peak(hold_frames: int) -> float:

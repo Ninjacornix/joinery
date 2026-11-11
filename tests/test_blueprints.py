@@ -436,3 +436,17 @@ def test_capture_elsewhere_is_still_an_asset(fixture_catalogue: FixtureCatalogue
     (fixture_catalogue.features / "net/capture.png").write_bytes(b"\x89PNG\r\n\x1a\n")
     problems = blueprints.validate_catalogue()
     assert any("capture.png is an asset file" in p for p in problems), problems
+
+
+@pytest.mark.parametrize("blueprint_id", ["third-person-3d", "first-person-3d"])
+def test_player_animations_match_the_animator(blueprint_id: str) -> None:
+    """hooks.animations names exactly the clips the player's Animator plays."""
+    found = {bp.id: bp for bp in blueprints.list_blueprints()}[blueprint_id]
+    script = (found.dir / "overlay/game/player/character_animator.gd").read_text()
+    block = re.search(r"const ANIMATION_NAMES: Array\[StringName\] = \[(.*?)\]", script, re.DOTALL)
+    assert block is not None
+    names = re.findall(r'&"([a-z_]+)"', block.group(1))
+    assert found.hooks.animations == names
+    assert {"idle", "walk", "run"} <= set(names)
+    scene = (found.dir / "overlay/game/player/player.tscn").read_text()
+    assert '[node name="Animator" type="Node" parent="."]' in scene
