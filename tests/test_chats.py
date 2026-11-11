@@ -220,9 +220,7 @@ class FakeGateway:
     def __init__(self, project: Path) -> None:
         self.project = project
         self.transaction: Any = None
-
-    async def finish(self) -> None:
-        return None
+        self.art_gate: Any = None
 
     async def cancel(self) -> None:
         pass

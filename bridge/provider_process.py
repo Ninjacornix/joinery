@@ -39,12 +39,22 @@ INSTRUCTIONS = (
 )
 
 
+PRIMER = "Earlier in this chat (summary):\n"
+
+
+def primed(prompt: Prompt) -> str:
+    """The summary a fresh session starts from, as a block before the turn ("" without)."""
+    return PRIMER + prompt.primer.strip() + "\n\n" if prompt.primer.strip() else ""
+
+
 def prompt_text(prompt: Prompt, images_inline: bool = False) -> str:
     """The turn as text. Attached images are listed by path unless the provider takes
     them inline (`images_inline`)."""
     return (
         INSTRUCTIONS
-        + "\n\nEditor context:\n"
+        + "\n\n"
+        + primed(prompt)
+        + "Editor context:\n"
         + json.dumps(prompt.editor_context)
         + "\nSelection:\n"
         + json.dumps(prompt.target_context)

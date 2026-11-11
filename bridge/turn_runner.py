@@ -8,7 +8,8 @@ says plainly when a change didn't make it.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+import asyncio
+from collections.abc import Callable, Coroutine
 from typing import Any, Protocol
 
 from bridge.instructions import CONTINUE_AFTER_FAILED_SUBMIT
@@ -107,6 +108,7 @@ async def run_turn(
     prompt: Prompt,
     emit: Emit,
     timing: TurnTiming,
+    compact: Callable[[], Coroutine[Any, Any, Any]] | None = None,
     *,
     request: str = "",
 ) -> str:
@@ -117,6 +119,15 @@ async def run_turn(
     more in the same turn; a change that still fails is dropped, and Joinery says
     so in its own line.
     """
+    if controller.compaction is not None:
+        # The session is being summarised while the user reviewed; wait for it.
+        if not controller.compaction.done():
+            controller.gateway.progress("Summarising the session…")
+        await asyncio.gather(controller.compaction, return_exceptions=True)
+        controller.compaction = None
+    if controller.primer:
+        prompt = prompt.model_copy(update={"primer": controller.primer})
+        controller.primer = ""
     controller.begin(request or prompt.text)
     controller.gateway.progress("Thinking through your request…")
     ok = await stream(controller, bridge, prompt, emit, timing)
@@ -135,4 +146,7 @@ async def run_turn(
     if last is not None and last.status == "failed" and last.final:
         emit(failure_notice(last))
     emit(Done(ok=ok).model_dump())
+    if compact is not None and controller.needs_compaction():
+        # Runs while the user reviews; the next request waits for it.
+        controller.compaction = asyncio.create_task(compact())
     return "done" if ok else "failed"

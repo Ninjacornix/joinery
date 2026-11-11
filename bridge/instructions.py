@@ -66,3 +66,11 @@ CONTINUE_AFTER_FAILED_SUBMIT = (
     "Fix every problem, then call submit_for_review with one short line naming the "
     "change. Don't ask the user to accept anything before it returns in_review."
 )
+
+#: Joinery's request for a session summary before a fresh provider session.
+SUMMARY_REQUEST = (
+    "Joinery is about to continue this conversation in a fresh session. Summarise it "
+    "for that session in plain bullets: the decisions made, the changes the user "
+    "accepted, the changes they discarded, the open tasks, and the user's stated "
+    "preferences. Use no tools and change nothing; reply with the bullets only."
+)

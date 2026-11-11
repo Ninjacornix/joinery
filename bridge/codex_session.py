@@ -25,7 +25,7 @@ from bridge.protocol import (
     Prompt,
     Usage,
 )
-from bridge.provider_process import stop_process
+from bridge.provider_process import primed, stop_process
 from joinery.api_profiles import list_public, runtime
 from joinery.catalog import ROOT
 from joinery.editor_ops import SCENE_TOOL, validate_edit
@@ -465,7 +465,10 @@ class CodexSession:
                     "input": [
                         {
                             "type": "text",
-                            "text": prompt.text + "\n\nEditor context:\n" + context,
+                            "text": primed(prompt)
+                            + prompt.text
+                            + "\n\nEditor context:\n"
+                            + context,
                         },
                         # Attached images go in as the app server's local image input.
                         *(

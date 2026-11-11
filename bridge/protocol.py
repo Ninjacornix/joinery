@@ -44,6 +44,8 @@ class Prompt(_Msg):
     effort: str = ""
     # Images the user attached (absolute paths under .joinery/attachments): context only.
     attachments: tuple[str, ...] = ()
+    # A summary of the conversation so far, on the first prompt of a fresh session.
+    primer: str = ""
 
 
 class Decision(_Msg):

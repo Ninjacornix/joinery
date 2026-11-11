@@ -10,11 +10,13 @@ import os
 import re
 import sys
 import threading
+import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, BinaryIO, Protocol
 
+from bridge import compaction
 from bridge.chat_record import ChatRecorder
 from bridge.host import Bridge
 from bridge.models import Selection
@@ -190,6 +192,7 @@ async def _serve(
     editor_calls: dict[str, asyncio.Future[dict[str, Any]]] = {}
     gateway.progress = lambda text: emit({"kind": "progress", "text": text})
     controller = TurnController(gateway, emit, agent_id)
+    session_start = time.time()
 
     async def edit_scene(payload: dict[str, Any]) -> dict[str, Any]:
         context = gateway.editor_context
@@ -275,6 +278,7 @@ async def _serve(
 
     async def turn(data: dict[str, Any]) -> None:
         assert bridge is not None
+        agent = bridge
         timing = TurnTiming()
         gateway.timing = timing
         outcome = "failed"
@@ -314,7 +318,15 @@ async def _serve(
             gateway.target_context = prompt.target_context
             gateway.request_summary = str(data["text"])
             outcome = await run_turn(
-                controller, bridge, prompt, emit, timing, request=str(data["text"])
+                controller,
+                bridge,
+                prompt,
+                emit,
+                timing,
+                lambda: compaction.compact(
+                    controller, agent, recorder, project, emit, session_start
+                ),
+                request=str(data["text"]),
             )
         except asyncio.CancelledError:
             outcome = "cancelled"
@@ -490,6 +502,9 @@ async def _serve(
         if active is not None and not active.done():
             active.cancel()
             await asyncio.gather(active, return_exceptions=True)
+        if controller.compaction is not None:
+            controller.compaction.cancel()
+            await asyncio.gather(controller.compaction, return_exceptions=True)
         if bridge is not None:
             await bridge.close()
         if specialists is not None:

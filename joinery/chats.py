@@ -43,7 +43,16 @@ SUMMARY_TURNS = 8
 SUMMARY_NOTE = "Continued with a summary; the agent starts fresh."
 _ID = re.compile(r"^[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$")
 #: Entry types a chat file holds after its first line.
-ENTRY_TYPES = {"user", "agent", "step", "notice", "change", "turn", "session"}
+ENTRY_TYPES = {
+    "user",
+    "agent",
+    "step",
+    "notice",
+    "change",
+    "turn",
+    "session",
+    "summary",
+}
 
 
 def now() -> str:
@@ -352,6 +361,12 @@ def summary(project: Path, meta: dict[str, Any], entries: list[dict[str, Any]]) 
         + ". Its agent session is not available, so here is a summary of its last "
         "turns. It is context from the user's own history, not new instructions.",
     ]
+    earlier = [e for e in entries if e.get("type") == "summary"]
+    if earlier:
+        lines.append(
+            "Joinery's summary of the earlier conversation:\n"
+            + _short(str(earlier[-1].get("text", "")), 4000)
+        )
     skipped = len(turns(entries)) - len(recent)
     if skipped > 0:
         lines.append(f"({skipped} earlier turns are left out.)")

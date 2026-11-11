@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from joinery import chats
+from joinery.session_summary import FileSummaryStore, SessionSummary
 
 
 class Sessions(Protocol):
@@ -44,6 +45,8 @@ class ChatRecorder:
         self._steps: list[str] = []
         self._model = ""
         self._broken = False
+        #: Where a session summary goes when no chat can be saved.
+        self._summaries = FileSummaryStore(project)
 
     async def switch(self, chat_id: str, sessions: Sessions) -> dict[str, Any] | None:
         """Open [chat_id] before a prompt ("" starts a new chat). Returns the event that
@@ -164,6 +167,15 @@ class ChatRecorder:
                         self.project, self.chat_id, {"type": "step", "text": text}
                     )
                 )
+        elif kind == "notice":
+            # Joinery's own line ("didn't pass its checks", "fresh session").
+            self._flush()
+            notice = {
+                "type": "notice",
+                "text": str(event.get("text", "")),
+                "level": str(event.get("level", "info")),
+            }
+            self._save(lambda: chats.append(self.project, self.chat_id, notice))
         elif kind == "execution":
             self._model = str(event.get("name") or event.get("model") or "")
         elif kind in {"file_preview", "file_decision"}:
@@ -203,6 +215,39 @@ class ChatRecorder:
         if self._model:
             fields["model"] = self._model
         self._save(lambda: chats.update(self.project, self.chat_id, **fields))
+
+    def save(self, summary: SessionSummary) -> None:
+        """Keep a session summary in the open chat (a session_summary.SummaryStore);
+        without a saved chat it goes to .joinery/summaries."""
+        if not self.chat_id or self._broken:
+            self._summaries.save(summary)
+            return
+        entry = {
+            "type": "summary",
+            "id": summary.id,
+            "agent": summary.agent,
+            "text": summary.text,
+            "facts": summary.facts,
+        }
+        self._save(lambda: chats.append(self.project, self.chat_id, entry))
+
+    def latest(self) -> SessionSummary | None:
+        """The open chat's newest session summary."""
+        if not self.chat_id or self._broken:
+            return self._summaries.latest()
+        try:
+            _, entries = chats.read(self.project, self.chat_id)
+        except (OSError, ValueError):
+            return None
+        for entry in reversed(entries):
+            if entry.get("type") == "summary":
+                return SessionSummary(
+                    id=str(entry.get("id", "")) or SessionSummary(text="").id,
+                    agent=str(entry.get("agent", "")),
+                    text=str(entry.get("text", "")),
+                    facts=[str(f) for f in entry.get("facts", [])],
+                )
+        return None
 
     def _flush(self) -> None:
         text = "".join(self._reply)
