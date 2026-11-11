@@ -106,16 +106,17 @@ func _check_words() -> void:
 		"Checks detail: " + GLANCE.checks_detail(checks)
 	)
 	var skipped := {"checks": {"ran": ["references"], "skipped": ["tests"]}}
-	_check(
-		GLANCE.checks_detail(skipped) == "Checked references. No tests to run.", "Skipped tests"
-	)
-	var notes := GLANCE.sorted_notes(
-		[
-			{"severity": "info", "text": "Nice bevels"},
-			{"severity": "block", "text": "Door clips the wall", "file": "scenes/room.tscn"},
-			{"severity": "warn", "text": "Texel density low"},
-			"not a note",
-		]
+	_check(GLANCE.checks_detail(skipped) == "Checked references. No tests to run.", "Skipped tests")
+	var notes := (
+		GLANCE
+		. sorted_notes(
+			[
+				{"severity": "info", "text": "Nice bevels"},
+				{"severity": "block", "text": "Door clips the wall", "file": "scenes/room.tscn"},
+				{"severity": "warn", "text": "Texel density low"},
+				"not a note",
+			]
+		)
 	)
 	_check(notes.size() == 3 and notes[0]["severity"] == "block", "Notes sort worst first")
 	_check(GLANCE.notes_line(notes) == "Door clips the wall · 2 more", "Notes as one line")
@@ -127,43 +128,59 @@ func _check_words() -> void:
 func _check_facts_and_notes(panel: PANEL) -> void:
 	var before := _image("wood-before.png", Color(0.7, 0.5, 0.3))
 	var after := _image("wood-after.png", Color(0.35, 0.24, 0.12))
-	panel.show_file_review(
-		"Darken the door wood",
-		"",
-		[{"path": "art/textures/door_wood.png", "media": "image", "before": before, "after": after}],
-		[
-			{"path": "art/textures/door_wood.kra", "change": "modified"},
-			{"path": "art/textures/door_wood.png", "change": "modified"},
-		]
+	(
+		panel
+		. show_file_review(
+			"Darken the door wood",
+			"",
+			[
+				{
+					"path": "art/textures/door_wood.png",
+					"media": "image",
+					"before": before,
+					"after": after
+				}
+			],
+			[
+				{"path": "art/textures/door_wood.kra", "change": "modified"},
+				{"path": "art/textures/door_wood.png", "change": "modified"},
+			]
+		)
 	)
 	await _frames()
 	var facts: String = panel._summary.facts_text()
 	_check(facts == "Door wood darker · 1 image · 2 files", "Measured facts: " + facts)
 	_check(panel._summary.status_text() == "Checks passed", "The checks are one quiet status")
 	_check(panel._summary.notes_text().is_empty(), "No notes line without notes")
-	panel.show_glance(
-		{
-			"facts": ["wood darker"],
-			"checks": {"ran": ["references", "provenance"], "skipped": []},
-			"reviewer_status": "running",
-		}
+	(
+		panel
+		. show_glance(
+			{
+				"facts": ["wood darker"],
+				"checks": {"ran": ["references", "provenance"], "skipped": []},
+				"reviewer_status": "running",
+			}
+		)
 	)
 	await _frames()
 	facts = panel._summary.facts_text()
-	_check(facts.begins_with("Wood darker · door wood darker"), "Agent facts lead: " + facts)
+	_check(facts == "Wood darker · 1 image · 2 files", "Agent facts replace measured: " + facts)
 	_check(
 		panel._summary.status_text() == "Checks passed · Reviewer checking…",
 		"A running reviewer joins the status: " + panel._summary.status_text()
 	)
-	panel.show_glance(
-		{
-			"review_notes":
-			[
-				{"severity": "warn", "text": "The grain runs across the planks"},
-				{"severity": "info", "text": "Matches the art bible palette"},
-			],
-			"reviewer_status": "done",
-		}
+	(
+		panel
+		. show_glance(
+			{
+				"review_notes":
+				[
+					{"severity": "warn", "text": "The grain runs across the planks"},
+					{"severity": "info", "text": "Matches the art bible palette"},
+				],
+				"reviewer_status": "done",
+			}
+		)
 	)
 	await _frames()
 	_check(
@@ -206,7 +223,9 @@ func _check_keyboard(panel: PANEL) -> void:
 	panel.reject_pressed.connect(func() -> void: rejected[0] += 1)
 	var before := _image("crate-before.png", Color(0.6, 0.5, 0.4))
 	var after := _image("crate-after.png", Color(0.3, 0.25, 0.2))
-	var media := [{"path": "art/textures/crate.png", "media": "image", "before": before, "after": after}]
+	var media := [
+		{"path": "art/textures/crate.png", "media": "image", "before": before, "after": after}
+	]
 	var field := LineEdit.new()
 	_host.add_child(field)
 	panel.show_file_review("Darken the crate", "", media, [])

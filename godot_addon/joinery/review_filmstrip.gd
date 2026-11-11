@@ -10,6 +10,7 @@ signal chosen(index: int)
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
+const UI := preload("ui_components.gd")
 ## Tile side, in control heights ("lg").
 const TILE := 1.25
 
@@ -50,13 +51,6 @@ class Tile:
 			var region := Rect2(Vector2.ZERO, inner.size / scale)
 			region.position = (picture.get_size() - region.size) / 2.0
 			draw_texture_rect_region(picture, inner, region)
-		elif not glyph.is_empty():
-			var icon := UI_THEME.icon(self, glyph, UI_THEME.color(self, "text_muted"))
-			if icon != null:
-				var side := float(UI_THEME.icon_px(self))
-				draw_texture_rect(
-					icon, Rect2((size - Vector2(side, side)) / 2.0, Vector2(side, side)), false
-				)
 		elif not word.is_empty():
 			var font := UI_THEME.mono_font(self)
 			var font_size := UI_THEME.font_size(self, "caption")
@@ -115,6 +109,17 @@ func show_items(items: Array) -> void:
 		tile.button_group = group
 		tile.picture = item.get("picture") as Texture2D
 		tile.glyph = str(item.get("glyph", ""))
+		if not tile.glyph.is_empty() and tile.picture == null:
+			# The kind's glyph, muted, in the middle of the tile.
+			var mark := TextureRect.new()
+			mark.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
+			mark.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			mark.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+			UI.bind_icon(mark, tile.glyph, "texture")
+			mark.theme_changed.connect(
+				func() -> void: mark.self_modulate = UI_THEME.color(mark, "text_muted")
+			)
+			tile.add_child(mark)
 		tile.word = str(item.get("word", ""))
 		tile.tooltip_text = str(item.get("name", ""))
 		tile.accessibility_name = str(item.get("name", ""))

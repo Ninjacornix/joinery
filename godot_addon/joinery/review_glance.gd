@@ -32,7 +32,8 @@ static func facts_line(review: Dictionary, measured: Array = []) -> String:
 		var text := str(fact).strip_edges()
 		if not text.is_empty() and parts.size() < MAX_FACTS:
 			parts.append(text)
-	for fact: Variant in measured:
+	# The agent's words carry the meaning; measured facts only stand in when it gave none.
+	for fact: Variant in measured if parts.is_empty() else []:
 		if parts.size() >= MAX_FACTS:
 			break
 		parts.append(str(fact))

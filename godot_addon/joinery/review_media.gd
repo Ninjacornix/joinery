@@ -69,15 +69,34 @@ class View:
 	func _init() -> void:
 		theme_type_variation = "JoineryRowTight"
 		size_flags_vertical = Control.SIZE_EXPAND_FILL
+		# The two angles sit together in the middle, not at the far ends of a wide frame.
+		alignment = BoxContainer.ALIGNMENT_CENTER
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
 		main = _picture()
 		far = _picture()
+		resized.connect(func() -> void: set_pictures(main.texture, far.texture))
 		hide()
 
 	func set_pictures(front: Texture2D, back: Texture2D) -> void:
 		main.texture = front
 		far.texture = back
 		far.visible = back != null
+		for picture: TextureRect in [main, far]:
+			_fit(picture)
+
+	## Two angles: each picture is as wide as its height allows, so the pair stays together.
+	func _fit(picture: TextureRect) -> void:
+		var texture := picture.texture
+		var paired := far != null and far.visible
+		if not paired or texture == null or texture.get_height() == 0:
+			picture.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			picture.custom_minimum_size.x = 0.0
+			return
+		picture.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+		var width := size.y * texture.get_width() / texture.get_height()
+		width = minf(width, (size.x - get_theme_constant("separation")) / 2.0)
+		if not is_equal_approx(picture.custom_minimum_size.x, width):
+			picture.custom_minimum_size.x = maxf(0.0, floorf(width))
 
 	func _picture() -> TextureRect:
 		var picture := TextureRect.new()

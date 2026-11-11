@@ -30,6 +30,8 @@ func _init() -> void:
 	_text.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_text.accessibility_name = "Changed lines"
 	inset.add_child(_text)
+	# Changed lines read as one block of code, not as paragraphs.
+	_text.add_theme_constant_override("paragraph_separation", 0)
 	_text.theme_changed.connect(_render)
 
 

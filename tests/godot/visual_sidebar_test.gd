@@ -228,6 +228,23 @@ func _states(light: bool, width: int) -> void:
 	chat.finish_agent_response(true)
 	chat.set_chat_busy(false)
 	var still := _thumbnail()
+	# A bigger change (several assets) offers Review on the card; a small one Accept.
+	(
+		chat
+		. show_file_review(
+			"Widen the door and add a creak",
+			"",
+			[
+				{"path": "art/props/door.glb", "media": "image", "after": still},
+				{"path": "audio/sfx/door_creak.wav", "media": "audio", "after": still},
+			],
+			[
+				{"path": "art/props/door.glb", "change": "modified"},
+				{"path": "audio/sfx/door_creak.wav", "change": "created"},
+			],
+		)
+	)
+	await _shot("review-waiting-big", light, width, chat)
 	(
 		chat
 		. show_file_review(

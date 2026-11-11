@@ -141,7 +141,9 @@ func _check_image_pair(panel: PANEL) -> void:
 	_check(panel.pending, "A shown review is pending")
 	_check(panel._title.text == "Darken the door wood", "The title is just the summary")
 	var facts: String = panel._summary.facts_text()
-	_check(facts == "Door wood darker, 64×48 → 80×40 px · 1 image · 2 files", "Facts line: " + facts)
+	_check(
+		facts == "Door wood darker, 64×48 → 80×40 px · 1 image · 2 files", "Facts line: " + facts
+	)
 	_check(panel._segment.visible, "Before/After shows when a pair exists")
 	_check(not panel._new_chip.visible, "A changed asset is not marked new")
 	_check(

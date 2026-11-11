@@ -136,13 +136,30 @@ func _reviews(dock: Control) -> void:
 	var still := cache.path_join("hammer.png")
 	var rendered := await _render_model()
 	rendered.save_png(still)
+	# The far side: the same render seen from behind.
+	var far := cache.path_join("hammer-back.png")
+	var flipped := rendered.duplicate() as Image
+	flipped.flip_x()
+	flipped.save_png(far)
 	var panel: Control = _plugin.get("_review_panel")
 	(
 		dock
 		. show_file_review(
 			"Create a low-poly hammer",
-			"+ art/sources/hammer.blend\n+ art/models/hammer.glb\n+ recipes/hammer.toml",
-			[{"path": "art/models/hammer.glb", "media": "image", "after": still}],
+			"",
+			[
+				{
+					"path": "art/sources/hammer.blend",
+					"media": "image",
+					"after": still,
+					"after_back": far,
+				}
+			],
+			[
+				{"path": "art/sources/hammer.blend", "change": "created"},
+				{"path": "art/models/hammer.glb", "change": "created"},
+				{"path": "recipes/hammer.toml", "change": "created"},
+			],
 		)
 	)
 	await _shot("review-model", [panel, dock])
@@ -248,6 +265,101 @@ func _reviews(dock: Control) -> void:
 	)
 	await _shot("review-audio", [panel, dock])
 	await _before_after(panel, "review-audio-before")
+	dock.hide_edit_review()
+	await _frames()
+	await _glance_reviews(dock, panel, cache, before, after, still)
+
+
+## The other kinds at a glance: text as changed lines, a scene edit as viewport frames, and a
+## change with several items as a filmstrip with the agent's facts and the reviewer's notes.
+func _glance_reviews(
+	dock: Control, panel: Control, cache: String, before: String, after: String, still: String
+) -> void:
+	var diff := (
+		"\n"
+		. join(
+			[
+				"--- scripts/door.gd",
+				"+++ scripts/door.gd",
+				"@@ -3,7 +3,8 @@",
+				" extends AnimatableBody3D",
+				"-const OPEN_SECONDS := 0.8",
+				"+const OPEN_SECONDS := 0.45",
+				"+const EASE := Tween.EASE_OUT",
+				" ",
+				'-	tween.tween_property(self, "rotation_degrees:y", 90.0, OPEN_SECONDS)',
+				'+	tween.tween_property(self, "rotation_degrees:y", 90.0, OPEN_SECONDS).set_ease(EASE)',
+			]
+		)
+	)
+	dock.show_file_review(
+		"Make the door open faster", diff, [], [{"path": "scripts/door.gd", "change": "modified"}]
+	)
+	panel.call("show_glance", {"checks": {"ran": ["references", "Godot import", "tests"]}})
+	await _shot("review-text", [panel, dock])
+	dock.hide_edit_review()
+	await _frames()
+	var room_before := cache.path_join("room-before.png")
+	var room_after := cache.path_join("room-after.png")
+	(await _render_model(Color("3a3d42"))).save_png(room_before)
+	(await _render_model(Color("5a4a36"))).save_png(room_after)
+	var frames := [
+		{
+			"path": "scenes/workshop.tscn",
+			"media": "image",
+			"label": "Viewport",
+			"before": room_before,
+			"after": room_after,
+		}
+	]
+	panel.call("show_scene_review", "Warm up the workshop light", 2, frames)
+	await _shot("review-scene", [panel, dock])
+	dock.hide_edit_review()
+	await _frames()
+	var creak := ProjectSettings.globalize_path("res://audio/sfx/door_creak.wav")
+	(
+		dock
+		. show_file_review(
+			"Widen the door and darken the wood",
+			"--- scripts/door.gd\n+++ scripts/door.gd\n@@ -1 +1 @@\n-var width := 1.0\n+var width := 1.2",
+			[
+				{
+					"path": "art/textures/door_wood.png",
+					"media": "image",
+					"before": before,
+					"after": after
+				},
+				{"path": "art/sources/door.blend", "media": "image", "after": still},
+				{"path": "audio/sfx/door_creak.wav", "media": "audio", "after": creak},
+			],
+			[
+				{"path": "art/sources/door.blend", "change": "modified"},
+				{"path": "art/textures/door_wood.png", "change": "modified"},
+				{"path": "audio/sfx/door_creak.wav", "change": "modified"},
+				{"path": "scripts/door.gd", "change": "modified"},
+			],
+		)
+	)
+	(
+		panel
+		. call(
+			"show_glance",
+			{
+				"facts": ["door 20% wider", "wood darker"],
+				"checks": {"ran": ["references", "provenance", "art bible"], "skipped": ["tests"]},
+				"review_notes":
+				[
+					{
+						"severity": "warn",
+						"text": "The hinge side lost its bevel",
+						"file": "door.blend"
+					},
+					{"severity": "info", "text": "Wood tone matches the palette"},
+				],
+			}
+		)
+	)
+	await _shot("review-filmstrip", [panel, dock])
 	dock.hide_edit_review()
 	await _frames()
 
@@ -478,14 +590,14 @@ func _before_after(panel: Control, screen: String) -> void:
 	await _frames()
 
 
-func _render_model() -> Image:
+func _render_model(ground := Color("3a3d42")) -> Image:
 	var viewport := SubViewport.new()
 	viewport.size = Vector2i(640, 480)
 	viewport.own_world_3d = true
 	viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	var environment := Environment.new()
 	environment.background_mode = Environment.BG_COLOR
-	environment.background_color = Color("3a3d42")
+	environment.background_color = ground
 	environment.ambient_light_color = Color(0.6, 0.6, 0.6)
 	environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
 	var world := WorldEnvironment.new()
