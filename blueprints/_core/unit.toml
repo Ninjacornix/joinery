@@ -12,6 +12,7 @@ GameEvents = "res://core/game_events.gd"
 Menus = "res://core/menus.gd"
 Game = "res://core/game.gd"
 Music = "res://core/audio/music.gd"
+UiSounds = "res://core/audio/ui_sounds.gd"
 
 [project.settings]
 "audio/buses/default_bus_layout" = "res://default_bus_layout.tres"

@@ -23,6 +23,7 @@ AUTOLOADS = {
     "Menus": "res://core/menus.gd",
     "Game": "res://core/game.gd",
     "Music": "res://core/audio/music.gd",
+    "UiSounds": "res://core/audio/ui_sounds.gd",
 }
 CORE_TEST = "res://tests/support/core_test.gd"
 GODOT_UID = re.compile(r"^uid://[a-y0-8]+$")
