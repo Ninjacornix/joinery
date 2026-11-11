@@ -410,6 +410,35 @@ headless, then the same seed in a window that never takes focus. No model is nee
 - `joinery access --project <path>` and `joinery perf --project <path> --target web`
   print the same (`--json`, `--area`, `--plan`, `--no-window`).
 
+### Checking the design
+
+`/design`, or **Design check** in Settings, checks the game against its own brief and
+design document, and for what breaks it for a player (ADR 0053). It never changes the
+game and needs no model. The card shows how many problems it found, how serious they are
+in one line, and one line per problem with its severity dot and **Ask agent to fix**.
+Hover a line for where it is (file, line, node), what the player would experience and
+why. **Ask agent to fix** puts a request in the message box; edit it or send it, and the
+fix is a normal change you review.
+
+- It flags only what conflicts with `design/brief.md` or a design document in
+  `design/docs/`, and what breaks the game: a verb in the brief's verbs table with no
+  input action, no key or button, or no code that reads it; a mechanic the design
+  document lists that the game never mentions; a "Win:" or "Lose:" in the brief that no
+  code reaches; controls never shown to the player; a pickup that vanishes with no sound,
+  effect or count; the same player tuned differently from scene to scene; a blockout goal
+  the spawn can't reach, or a room you can drop into and never leave; and softlocks,
+  falls out of the world, difficulty spikes and goals that are hard to find from the last
+  playtest. It never flags taste.
+- **Look deeper** asks the read-only design agent to read the game too. It looks for what
+  the checks can't see, such as a goal the brief sets that the game never shows, and
+  every finding it makes must point at a real line, or a node in a scene; anything it
+  can't back up is dropped before you see it. Its findings join the list. It can't
+  change anything; **Stop** stops it.
+- **Check the design** in Settings checks by itself after every change, or every 3, 5 or
+  10 accepted changes (`[agents] design_check_every`; Off by default). The card shows
+  only when that check finds something.
+- `joinery design --project <path>` prints the same list (`--json` for everything).
+
 ### Building a level from a sketch
 
 Draw the level on paper (or take a top-down screenshot), attach the picture with
@@ -543,6 +572,8 @@ again.
   drifts (see Making everything match above).
 - `/access` and `/perf [target]` check the game's accessibility and performance
   (see Accessibility and performance above).
+- `/design` checks the game against its brief and for what breaks it for a player
+  (see Checking the design above).
 - `/blockout [notes]` builds a greybox level from the sketch you attach (see
   Building a level from a sketch above).
 - `/brief` opens `design/brief.md` read-only, with **Ask Journeyman to change
