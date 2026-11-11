@@ -61,7 +61,8 @@ func _init(identifier := "", number := 0, note := "") -> void:
 	variant = number
 	direction = note
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	# Ways in one row are one height, their Use this buttons on one line.
+	size_flags_vertical = Control.SIZE_FILL
 	accessibility_name = _label()
 	var column := VBoxContainer.new()
 	column.theme_type_variation = "JoineryTight"
@@ -116,6 +117,10 @@ func _init(identifier := "", number := 0, note := "") -> void:
 	_facts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_facts.mouse_filter = Control.MOUSE_FILTER_PASS
 	column.add_child(_facts)
+	var push := Control.new()
+	push.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	push.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	column.add_child(push)
 	use_button = UI.secondary("Use this")
 	use_button.accessibility_name = "Keep way %d: %s" % [number, note]
 	use_button.tooltip_text = "Keep this way. The other ways are discarded."
@@ -128,6 +133,10 @@ func _init(identifier := "", number := 0, note := "") -> void:
 	mouse_exited.connect(_restyle)
 	resized.connect(_fit)
 	set_state("queued")
+
+
+func _ready() -> void:
+	_restyle()
 
 
 ## The way's state from its task event ({state, step, message, transaction_id}).
@@ -262,6 +271,9 @@ func _fit() -> void:
 
 
 func _restyle() -> void:
+	if not is_inside_tree():
+		# Outside the tree the theme is Godot's default; the card styles itself on entering.
+		return
 	var source := get_theme_stylebox("panel", "JoineryCard")
 	if source == null:
 		return
