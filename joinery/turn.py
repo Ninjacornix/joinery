@@ -212,6 +212,8 @@ class TurnController:
         #: Scenes changed live this turn ("res://…", "" for an unsaved root).
         self.live_scenes: set[str] = set()
         self.live_edits = 0
+        #: Placeholder shapes the live edits added this turn: (parent, shape).
+        self.live_shapes: list[tuple[str, Any]] = []
         #: A change is on screen for the user; nothing new may be made until decided.
         self.review_open = False
         #: The transaction under review ("" for a live edit alone).
@@ -224,8 +226,8 @@ class TurnController:
         self.compaction: asyncio.Task[Any] | None = None
         #: The last submit's result this turn, the agent's or Joinery's.
         self.last_result: SubmitResult | None = None
-        #: Live edits the editor is applying: {request id: scene}.
-        self._live_requests: dict[str, str] = {}
+        #: Live edits the editor is applying: {request id: (scene, payload)}.
+        self._live_requests: dict[str, tuple[str, Mapping[str, Any]]] = {}
         #: The submit checks running now, so a Stop can end them.
         self._checks: asyncio.Task[Validation] | None = None
         #: The stage and live edits as the last fixable failure found them.
@@ -286,6 +288,7 @@ class TurnController:
         if not self.review_open:
             self.live_scenes.clear()
             self.live_edits = 0
+            self.live_shapes = []
         self._to(TurnState.WORKING)
 
     def needs_compaction(self) -> bool:
@@ -356,29 +359,37 @@ class TurnController:
             )
         return scene
 
-    def record_live_edit(self, scene: str, ok: bool) -> None:
+    def record_live_edit(
+        self, scene: str, ok: bool, payload: Mapping[str, Any] | None = None
+    ) -> None:
         if ok:
+            from joinery.complex_models import live_shapes
+
             self.live_scenes.add(_res(scene))
             self.live_edits += 1
+            self.live_shapes += live_shapes(payload or {})
         elif not self.live_edits:
             # Nothing on screen after all: the scene is free again.
             claims = self.gateway.claims
             if claims.live == self.gateway.task_id:
                 claims.release_live()
 
-    def expect_live(self, request_id: str, scene: str) -> None:
+    def expect_live(
+        self, request_id: str, scene: str, payload: Mapping[str, Any] | None = None
+    ) -> None:
         """A live edit was sent to the editor; :meth:`live_result` records its answer."""
-        self._live_requests[request_id] = scene
+        self._live_requests[request_id] = (scene, payload or {})
 
     def live_result(self, request_id: str, ok: bool) -> None:
-        scene = self._live_requests.pop(request_id, None)
-        if scene is not None:
-            self.record_live_edit(scene, ok)
+        sent = self._live_requests.pop(request_id, None)
+        if sent is not None:
+            self.record_live_edit(sent[0], ok, sent[1])
 
     def live_decided(self) -> None:
         """The user decided the live preview (or it was dropped)."""
         self.live_scenes.clear()
         self.live_edits = 0
+        self.live_shapes = []
         if self.review_open and not self.review_id:
             self.review_open = False
             if self.state is TurnState.IN_REVIEW:
@@ -434,6 +445,19 @@ class TurnController:
         except (OSError, ValueError):
             return None
 
+    def _live_shape_problems(self) -> list[Problem]:
+        """Objects the live edits built from placeholder shapes (shared core).
+
+        Said once: the shapes the author removes live can't be told apart by name,
+        so the next submit judges only shapes added after this one."""
+        from joinery.complex_models import check_live
+
+        found = check_live(self.gateway.project, self.live_shapes)
+        if found is None:
+            return []
+        self.live_shapes = []
+        return [found]
+
     async def _run_checks(self) -> Validation:
         async with self.gateway.call_lock:
             return await self.gateway.submit_checks(self.live_scenes)
@@ -482,6 +506,7 @@ class TurnController:
         if error is None:
             checked = checks.result()
             found, problems, gate = checked.changes, checked.problems, checked.gate
+            problems = problems + self._live_shape_problems()
             self._passed = {"ran": checked.ran, "skipped": checked.skipped}
             skipped = checked.skipped
         elif isinstance(error, (OSError, RuntimeError, ValueError, TimeoutError)):
@@ -789,6 +814,7 @@ class TurnController:
         self.gateway.art_gate = None
         self.live_scenes.clear()
         self.live_edits = 0
+        self.live_shapes = []
         self.review_open = False
         self.review_id = ""
         self._to(TurnState.IDLE, reason)

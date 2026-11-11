@@ -137,7 +137,7 @@ async def stream(
                     event.request_id, {"success": False, "message": str(exc)}
                 )
                 continue
-            controller.expect_live(event.request_id, scene)
+            controller.expect_live(event.request_id, scene, event.payload)
         if isinstance(event, Done):
             ok = event.ok
             continue

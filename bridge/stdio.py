@@ -29,7 +29,15 @@ from bridge.reviewer import Debugger, ReviewAgent
 from bridge.specialists import Specialists
 from bridge.turn_runner import run_turn, settle_compaction
 from bridge.variants import Variants, parse_command
-from joinery import bible_lint, blueprints, brief, chat_attachments, chats, playtest
+from joinery import (
+    bible_lint,
+    blueprints,
+    brief,
+    chat_attachments,
+    chats,
+    complex_models,
+    playtest,
+)
 from joinery.art_approval import approve, review
 from joinery.authoring import run_offline
 from joinery.claims import parallel_limit
@@ -242,7 +250,7 @@ async def _serve(
             ok = bool(result.get("success"))
             return result
         finally:
-            turn.record_live_edit(scene, ok)
+            turn.record_live_edit(scene, ok, edit.model_dump(mode="json"))
             editor_calls.pop(request_id, None)
 
     async def edit_scene(payload: dict[str, Any]) -> dict[str, Any]:
@@ -315,9 +323,12 @@ async def _serve(
             project_dir=str(project),
             targets=tuple(entry.get("id", "") for entry in targets),
             target_context=targets,
-            editor_context={str(k): str(v) for k, v in editor.items()}
-            if isinstance(editor, dict)
-            else {},
+            editor_context=complex_models.with_setting(
+                project,
+                {str(k): str(v) for k, v in editor.items()}
+                if isinstance(editor, dict)
+                else {},
+            ),
             selection=Selection.model_validate(data.get("selection", {})),
             attachments=chat_attachments.validate(project, data.get("attachments", [])),
         )
@@ -383,7 +394,9 @@ async def _serve(
                 project_dir=str(project),
                 targets=tuple(entry.get("id", "") for entry in targets),
                 target_context=targets,
-                editor_context={str(k): str(v) for k, v in editor.items()},
+                editor_context=complex_models.with_setting(
+                    project, {str(k): str(v) for k, v in editor.items()}
+                ),
                 selection=Selection.model_validate(data.get("selection", {})),
                 attachments=attachments,
             )
