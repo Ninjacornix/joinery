@@ -39,6 +39,17 @@ PART_GUIDE = (
     "edit_shape_key for one bone or shape key. "
 )
 
+#: Parametric kits: typed procedural models, made in Blender, replayable.
+KIT_GUIDE = (
+    "For rocks, crates, barrels, fences, simple buildings, trees and bushes, use the "
+    "kits before writing Blender code: kit_list shows each kit's parameters; kit_make "
+    "makes one model, kit_batch a varied set (\"50 rocks, mossier, smaller\" is "
+    "kit_batch(kit=\"rock\", count=50, params={\"moss\": 0.6, \"size\": 0.6})), "
+    "kit_edit changes a kit-made set (\"make those rocks mossier\"), and scatter places "
+    "models in a saved scene, on a surface, clear of paths. Kits follow the art bible's "
+    "palette, budgets and pivots themselves. "
+)
+
 #: The game: read the brief and setup with the art direction, extend the game
 #: through its extension points, and only ever suggest a feature.
 GAME_GUIDE = (
@@ -60,6 +71,7 @@ GAME_GUIDE = (
     + " "
     + OBJECT_GUIDE
     + PART_GUIDE
+    + KIT_GUIDE
     + AGENT_GUIDE
 )
 

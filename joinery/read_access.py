@@ -26,6 +26,7 @@ FIRST_PARTY_READS = {
     "inspect_document",
     "validate_project",
     "transaction_status",
+    "kit_list",
 }
 
 
@@ -42,6 +43,7 @@ def read_only(server: str, tool: str) -> bool:
                 "game_setup",
                 "list_assets",
                 "resolve_source",
+                "kit_list",
             }
         )
         or (server == "claude-collider" and tool == "cc_status")

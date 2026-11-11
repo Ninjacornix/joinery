@@ -37,6 +37,12 @@ FAMILIES = {
         "set_pivot",
         "reduce_triangles",
         "set_texel_density",
+        # Parametric kits (servers/blender_ops/kits.py).
+        "kit_list",
+        "kit_make",
+        "kit_batch",
+        "kit_edit",
+        "scatter",
     },
     "joinery-paint": {
         "inspect_document",
@@ -90,7 +96,12 @@ def test_discovery_exposes_only_real_family_capabilities(
         async with Client(authoring.make_server(project, family)) as client:
             tools = {tool.name: tool for tool in (await client.list_tools()).tools}
             assert set(tools) == FAMILIES[family]
-            readers = {"inspect_document", "document_capabilities", "inspect_music"}
+            readers = {
+                "inspect_document",
+                "document_capabilities",
+                "inspect_music",
+                "kit_list",
+            }
             for name in readers & set(tools):
                 assert tools[name].annotations.read_only_hint is True
             for name in set(tools) - readers:

@@ -24,7 +24,7 @@ from typing import Any, cast
 from mcp.server import MCPServer
 from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
 
-from joinery import brief, chat_attachments, parts, setup_imports
+from joinery import brief, chat_attachments, kits, parts, setup_imports
 from joinery.art_approval import approved, fingerprint
 from joinery.bible_schema import REFERENCE_DIR
 from joinery.workspace import index
@@ -315,6 +315,12 @@ def make_server(project: Path) -> MCPServer[Any]:
     async def list_assets() -> dict[str, Any]:
         """List actual project assets, their source documents, owners and recipes."""
         return index(project)
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True))
+    @tool_errors
+    async def kit_list() -> dict[str, Any]:
+        """List the parametric kits Joinery makes models with in Blender (rocks, crates, barrels, fences, huts, trees, bushes): each kit's typed parameters with ranges, its materials under this project's art bible (palette colour, roughness, metallic), and the triangle budget and pivot of its folder. Make models with kit_make, kit_batch and kit_edit of joinery-blender-ops; place them with scatter."""
+        return kits.describe(project)
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors

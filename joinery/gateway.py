@@ -91,6 +91,10 @@ OP_APPS: dict[str, tuple[str, ...]] = {
     "reduce_triangles": ("blender",),
     "set_texel_density": ("blender",),
     "edit_image": ("krita",),
+    # Parametric kits run Blender. (scatter only writes a scene file.)
+    "kit_make": ("blender",),
+    "kit_batch": ("blender",),
+    "kit_edit": ("blender",),
 }
 NATIVE_OPS = frozenset(OP_APPS)
 
@@ -433,9 +437,13 @@ class ProjectGateway:
         if not readonly and self.turn is not None:
             self.turn.admit_mutation()
         scene = str(arguments.get("scenePath", "") or "")
+        scene_server = server == "godot"
+        if server == "joinery-blender-ops" and tool == "scatter":
+            # Scatter writes a saved scene, like the staged Godot tools.
+            scene, scene_server = str(arguments.get("scene", "") or ""), True
         if (
             not readonly
-            and server == "godot"
+            and scene_server
             and scene
             and (
                 scene_route(scene, self.editor_context) == "live"
