@@ -24,6 +24,7 @@ from typing import Any, Literal, Protocol
 from bridge.instructions import TASK_PROMPT
 from bridge.protocol import Prompt
 from bridge.turn_runner import run_turn
+from joinery import agents
 from joinery.claims import refusal
 from joinery.gateway import ProjectGateway
 from joinery.timing import TurnTiming
@@ -132,6 +133,14 @@ class Crew:
 
     # --- Asking -------------------------------------------------------------------------
 
+    @property
+    def provider(self) -> str:
+        """The provider's name as people know it ("Codex CLI")."""
+        try:
+            return agents.get(self.agent).name
+        except (KeyError, ValueError):
+            return self.agent.capitalize() or "the agent"
+
     def working(self) -> list[Task]:
         return [t for t in self.tasks.values() if t.state == WORKING]
 
@@ -200,6 +209,7 @@ class Crew:
             lane, lambda event: self._emit(holder[0], event), self.agent
         )
         task = Task(task_id, title, request, origin, lane, controller)
+        task.step = f"Starting {self.provider}…"
         holder.append(task)
         lane.progress = lambda text: self._progress(task, text)
         self.tasks[task_id] = task
@@ -226,7 +236,6 @@ class Crew:
             await endpoint.start()
             agent = self._bridge(self.agent)
             agent.bind_gateway(endpoint.path)
-            self._progress(task, "Starting a parallel agent…")
             await agent.connect(lane.project, self.profile)
             outcome = await run_turn(
                 task.controller,

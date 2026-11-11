@@ -311,6 +311,22 @@ def test_writes_stay_fast_on_a_large_stage(
     run(go)
 
 
+def test_a_task_says_connecting_on_its_own_card(project: Path) -> None:
+    async def go() -> None:
+        main = wire(ProjectGateway(project))
+        said: list[tuple[str, str]] = []
+        main.progress = lambda text: said.append(("main", text))
+        try:
+            lane = main.lane("t1", "Lamp")
+            lane.progress = lambda text: said.append(("t1", text))
+            await lane.discover()
+            assert said == [("t1", "Connecting project tools…")]
+        finally:
+            await main.close()
+
+    run(go)
+
+
 # --- Following the project ------------------------------------------------------------
 
 
@@ -616,6 +632,31 @@ def test_tasks_run_at_the_same_time_and_each_change_is_reviewed_alone(
         # Every task event the sidebar gets is tagged with its task.
         tagged = [e for e in test.events if e["kind"] == "file_preview"]
         assert {e["task_id"] for e in tagged} == {one.id, two.id}
+        await crew.close()
+        await test.gateway.close()
+
+    run(go)
+
+
+def test_a_task_card_starts_with_the_provider_then_its_first_step(
+    project: Path,
+) -> None:
+    test = CrewTest(project)
+
+    async def go() -> None:
+        crew = test.crew()
+        test.steps = [makes("notes/a.txt", "a")]
+        task = await crew.start("A", "Make a", origin="user", prompt=test.prompt())
+        assert task.job is not None
+        await task.job
+        first = next(e for e in test.events if e["kind"] == "task")
+        assert first["step"] == "Starting Codex CLI…"
+        steps = [
+            e["text"]
+            for e in test.events
+            if e["kind"] == "progress" and e.get("task_id") == task.id
+        ]
+        assert steps[0] == "Thinking through your request…"
         await crew.close()
         await test.gateway.close()
 

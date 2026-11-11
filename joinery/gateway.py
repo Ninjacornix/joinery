@@ -317,26 +317,28 @@ class ProjectGateway:
         return connection
 
     async def discover(self) -> dict[str, Any]:
-        if self.is_lane:
-            return await self._root.discover()
-        async with self._discovery_lock:
+        """The project's tools. Lanes share the chat's connections and cache, but
+        say "Connecting project tools…" on their own task's card."""
+        root = self._root
+        async with root._discovery_lock:
+            cache = root._discovery_cache
             if (
-                self._discovery_cache
-                and time.monotonic() - self._discovery_cache[0] < 15
+                cache
+                and time.monotonic() - cache[0] < 15
                 and all(
                     connection.readiness.connected
                     for connection in self.connections.values()
                 )
             ):
-                return self._discovery_cache[1]
-            with self.timing.span("discovery") if self.timing else nullcontext():
-                result = await self._discover()
+                return cache[1]
+            with self.span("discovery"):
+                result = await root._discover(self.progress)
             if all(s.get("connected") for s in result["servers"]):
-                self._discovery_cache = (time.monotonic(), result)
+                root._discovery_cache = (time.monotonic(), result)
             return result
 
-    async def _discover(self) -> dict[str, Any]:
-        self.progress("Connecting project tools…")
+    async def _discover(self, progress: Callable[[str], None]) -> dict[str, Any]:
+        progress("Connecting project tools…")
         tools = []
         states = [state.model_dump() for state in self.unavailable]
         limit = asyncio.Semaphore(3)
