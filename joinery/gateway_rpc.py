@@ -22,7 +22,7 @@ from joinery.mcp_runtime import PolicyStop
 from joinery.peer_review import notes_from
 from joinery.platform_support import private_directory
 from joinery.read_access import read_only
-from joinery.roles import READ_ONLY_ROLES, spec
+from joinery.roles import READ_ONLY_ROLES, refusal, registry_allowed, spec
 
 
 def search_tools(data: dict[str, Any], query: str) -> dict[str, Any]:
@@ -185,6 +185,10 @@ class GatewayRPC:
         self.playtest: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None = (
             None
         )
+        #: The accessibility and performance checks (read-only): kind, params -> report.
+        self.checks: (
+            Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None
+        ) = None
 
     async def start(self) -> None:
         if self.transport == "tcp":
@@ -402,13 +406,19 @@ class GatewayRPC:
                 if self.playtest is None:
                     raise ValueError("Playtests are not available here.")
                 data = await self.playtest(params)
+            elif method in {"access_check", "perf_check"}:
+                if self.checks is None:
+                    raise ValueError("The checks are not available here.")
+                if self.role and not registry_allowed(self.role, method):
+                    raise ValueError(refusal(self.role))
+                data = await self.checks(method.removesuffix("_check"), params)
             elif method == "task_status":
                 if self.task_status is None:
                     raise ValueError("Parallel tasks are not available here.")
                 data = self.task_status(str(params.get("id", "")))
             else:
                 raise ValueError(
-                    "The model interface supports inventory, schema, call, submit, blockout and playtest; no approval methods."
+                    "The model interface supports inventory, schema, call, submit, blockout, playtest and the checks; no approval methods."
                 )
             response = {"ok": True, "result": data}
         except PolicyStop as exc:

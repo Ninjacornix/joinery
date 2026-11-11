@@ -205,12 +205,38 @@ PLAYTEST_PROMPT = (
     "needs fixing."
 )
 
+#: The accessibility and performance checks, for every agent.
+CHECKS_GUIDE = (
+    "To see how accessible the game is, call access_check(); to see how it runs on a "
+    "target machine, call perf_check(target?). Both play the game in stock Godot and "
+    "return scores and findings with where each was seen; neither changes anything. "
+    "The user opens them with /access and /perf. "
+)
+
+#: The prompt of the accessibility and performance roles: ``{role}``, ``{tool}``,
+#: ``{findings}``.
+CHECK_PROMPT = (
+    "You are Joinery's {role} agent. Joinery's {role} check measured the game and "
+    "found what is below; it needs a change in the game's code or scenes, which a "
+    "worker agent will make from your words alone. You only read: open the files "
+    "named (read-only tools, files on disk) and, if the numbers may be stale, call "
+    "{tool} once. You can't change anything. Then reply with the request for the "
+    "worker, complete on its own: each file and what to change in it, why (the "
+    "measured number and the goal), how to keep the game's behaviour, and how to "
+    "check it (replay with the seed where there is one). Prefer the game's existing "
+    "settings and the Accessibility feature's API (Settings, Accessibility, "
+    "Subtitles) where the game has them. Under 250 words, the request only. If no "
+    "change to the project would fix it, reply with the single word NONE.\n\n"
+    "Findings:\n{findings}"
+)
+
 #: How the user decides, in the words the editor shows.
 REVIEW_GUIDE = (
     TASK_GUIDE
     + BLOCKOUT_GUIDE
     + VARIANT_GUIDE
     + PLAYTEST_GUIDE
+    + CHECKS_GUIDE
     + "The user accepts or discards every change in the Review panel. "
     "When your change is complete, call submit_for_review with one short line naming "
     "what changed. Joinery checks it (art bible rules, Godot import, missing files, "

@@ -154,6 +154,20 @@ def make_server(socket: Path) -> MCPServer[Any]:
             )
         return result
 
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True))
+    @tool_errors
+    async def access_check(areas: list[str] | None = None) -> dict[str, Any]:
+        """Check the game's accessibility (not the editor's): stock Godot plays it headless and reads every text and control on the HUD and menus. Returns scores per area (contrast, colour, text size, subtitles, controls, motion, pause, assists, screen readers) and findings, each with what was measured, what it should be, where it was seen (scene, node, seed) and how it gets fixed (typed, agent or feature). areas: only these. Changes nothing."""
+        return await rpc(socket, "access_check", {"areas": areas or []})
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True))
+    @tool_errors
+    async def perf_check(
+        target: Literal["", "high", "mid", "low", "steam-deck", "web"] = "",
+    ) -> dict[str, Any]:
+        """Measure how the game runs: stock Godot plays a seeded run headless and in a background window, and returns frame times (p50/p95/p99, scaled to the target machine), draw calls, primitives, texture memory, shader compilations, nodes, physics bodies, load time, memory growth and each script's cost, with findings that say where (scene, node, seed) and how each is fixed. target: the project's own by default. Changes nothing."""
+        return await rpc(socket, "perf_check", {"target": target})
+
     @server.tool()
     @tool_errors
     async def blockout(

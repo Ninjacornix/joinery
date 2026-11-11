@@ -18,6 +18,7 @@ from typing import Any, BinaryIO, Protocol
 
 from bridge import compaction
 from bridge.chat_record import ChatRecorder
+from bridge.check_runner import Checks
 from bridge.crew import Crew
 from bridge.host import Bridge
 from bridge.instructions import expand_command
@@ -198,6 +199,7 @@ async def _serve(
     variants: Variants | None = None
     playtester: Playtester | None = None
     matcher: MatchRun | None = None
+    checks: Checks | None = None
     #: The last request's model choice, which the tasks it starts use too.
     selection: dict[str, Any] = {}
     try:
@@ -280,6 +282,9 @@ async def _serve(
         # A Rule Zero stop in any agent stops every agent: no task routes around it.
         if matcher is not None:
             await matcher.stop()
+        if checks is not None:
+            for run in checks.runs.values():
+                await run.stop()
         if crew is not None:
             await crew.stop_all()
         if playtester is not None:
@@ -519,10 +524,15 @@ async def _serve(
             endpoint = GatewayRPC(lane, stop, role="worker")
             if playtester is not None:
                 endpoint.playtest = playtester.tool
+            if checks is not None:
+                endpoint.checks = checks.tool
             return endpoint
 
         def after_decision(decision: dict[str, Any]) -> None:
-            """``[agents] playtest_after_change``: play after an accepted gameplay change."""
+            """``[agents] playtest_after_change``: play after an accepted gameplay change,
+            and the checks' ``[agents] access_check_every`` / ``perf_check_every``."""
+            if checks is not None:
+                checks.after_decision(decision)
             if (
                 playtester is None
                 or not decision.get("accepted")
@@ -633,6 +643,19 @@ async def _serve(
             lambda argv, root: run_offline(argv, root, 600, readonly=True),
             task_prompt,
         )
+
+        # Accessibility and performance (ADR 0049, 0050): the checks' tools and fixes.
+        checks = Checks(
+            crew,
+            project,
+            emit,
+            task_prompt,
+            agent=agent_id,
+            profile=profile_id,
+            bridge=role_bridge,
+            endpoint=lambda role: role_endpoint(gateway, role),
+        )
+        rpc_server.checks = checks.tool
 
         async def variants_action(data: dict[str, Any]) -> None:
             """Pick, Mix or Discard all on a variant strip. A refusal goes back to
@@ -839,6 +862,11 @@ async def _serve(
                 elif data.get("kind") == "match_cancel":
                     assert matcher is not None
                     await matcher.stop()
+                elif data.get("kind") == "check_cancel":
+                    assert checks is not None
+                    await checks.cancel(data)
+                elif checks is not None and checks.handle(data):
+                    pass
                 elif data.get("kind") == "variants_start":
                     # /variants N <request>, Try 3 ways, or Try other ways on a change.
                     await start_variants(data, "user")
@@ -882,6 +910,8 @@ async def _serve(
     finally:
         if matcher is not None:
             await matcher.stop()
+        if checks is not None:
+            await checks.close()
         if crew is not None:
             await crew.close()
         if playtester is not None:
