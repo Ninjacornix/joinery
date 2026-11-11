@@ -90,6 +90,8 @@ def graph_code(
     )
 
 
+#: Immutable copies recipes start from (joinery.recipe.PREIMAGE_DIR).
+PREIMAGES = "recipes/inputs"
 #: Material Maker's image node and the parameter holding its file.
 IMAGE_NODE = "image"
 IMAGE_PARAMETER = "image"
@@ -131,7 +133,7 @@ def _image_input(project: Path, value: Any, source: str, output_directory: str) 
         or "://" in text
         or ".." in path.parts
         or not path.parts
-        or path.parts[0] != "art"
+        or (path.parts[0] != "art" and path.parent != PurePosixPath(PREIMAGES))
     ):
         raise ValueError(
             f"Image input {value!r} must be a file under art/ in this project."
@@ -175,7 +177,13 @@ def image_inputs(
         assert isinstance(parameters, dict)
         if known is None:
             known = _known_assets(project)
-        if relative not in known:
+        # A preimage is an immutable copy named by its content, so it needs
+        # no lock entry of its own (a map's pixels taken from its model).
+        preimage = relative.startswith(PREIMAGES + "/") and (
+            hashlib.sha256((project / relative).read_bytes()).hexdigest()
+            == PurePosixPath(relative).stem
+        )
+        if relative not in known and not preimage:
             raise ValueError(
                 f"{relative} has no joinery.lock entry, so its origin is unknown. "
                 "Ask the user to declare it as a human import, or make it with a "

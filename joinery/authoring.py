@@ -153,11 +153,13 @@ async def edit_document(
     note: str = "",
     *,
     keep_macro_shape_keys: bool | None = None,
+    inputs: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Apply `code` to a native document, export it and record the recipe.
 
-    For Blender, `keep_macro_shape_keys` keeps MPFB2's body-shape macros as
-    morph targets; None keeps the model's recorded choice.
+    `inputs` are further project files the code reads (a painted map), listed
+    as recipe sources. For Blender, `keep_macro_shape_keys` keeps MPFB2's
+    body-shape macros as morph targets; None keeps the model's recorded choice.
     """
     enabled(project, tool)
     module = tools.get(tool)
@@ -191,6 +193,9 @@ async def edit_document(
     base = store_preimage(project, target) if target.is_file() else ""
     for output in [source, *exports]:
         confined(project, output).parent.mkdir(parents=True, exist_ok=True)
+    for extra in inputs:
+        if not confined(project, extra).is_file():
+            raise ValueError(f"{extra} is not a file in this project.")
     script = recipe_dir / (identifier + module.script_ext)
     if isinstance(module, blender.Blender):
         keep = keep_macro_shape_keys
@@ -207,7 +212,7 @@ async def edit_document(
         tool=tool,
         script=script.relative_to(project).as_posix(),
         outputs=(source, *exports),
-        sources=(base,) if base else (),
+        sources=tuple(dict.fromkeys(((base,) if base else ()) + inputs)),
         note=note,
     )
     # Keep the old maps in memory: a failed or refused edit puts them back, so

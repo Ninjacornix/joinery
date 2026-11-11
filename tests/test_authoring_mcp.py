@@ -25,6 +25,13 @@ FAMILIES = {
         "set_material_value",
         "adjust_map",
         "bake_height_to_normal",
+        # Maps, material copies, bones and shape keys (servers/blender_ops/ops.py).
+        "make_map_editable",
+        "paint_map",
+        "replace_map",
+        "split_material",
+        "edit_bone",
+        "edit_shape_key",
     },
     "joinery-paint": {
         "inspect_document",

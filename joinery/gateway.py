@@ -77,6 +77,12 @@ NATIVE_OPS = frozenset(
         "set_material_value",
         "adjust_map",
         "bake_height_to_normal",
+        "make_map_editable",
+        "paint_map",
+        "replace_map",
+        "split_material",
+        "edit_bone",
+        "edit_shape_key",
     }
 )
 #: Files whose line-by-line diff the review's Details show.
@@ -518,7 +524,8 @@ class ProjectGateway:
             self.progress("Working in " + owner.replace("-", " ").capitalize() + "…")
         app = owner.replace("-", " ").capitalize()
         async with self.slots.hold(
-            owner, lambda: self.progress(f"Waiting for {app}: another task is using it…")
+            owner,
+            lambda: self.progress(f"Waiting for {app}: another task is using it…"),
         ):
             result = await connection.call(
                 tool,

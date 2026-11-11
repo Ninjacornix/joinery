@@ -58,6 +58,13 @@ IDENTITY: dict[str, tuple[str, ...]] = {
     "bone": ("object", "bone"),
     "shape_key": ("object", "shape_key"),
 }
+#: Typed operations per part kind (maps depend on the map; see Part.ops).
+PART_OPS: dict[str, tuple[str, ...]] = {
+    "object": ("transform_parts",),
+    "material": ("set_material_value", "split_material"),
+    "bone": ("edit_bone",),
+    "shape_key": ("edit_shape_key",),
+}
 KIND_NAMES = {
     "object": "Object",
     "material": "Material",
@@ -98,6 +105,20 @@ class Part(BaseModel):
     texture: str = ""
     #: In the source only: the game's copy cannot carry it (a height map).
     source_only: bool = False
+    #: The Krita document or Material Maker graph this map is painted in.
+    editable: str = ""
+
+    @property
+    def ops(self) -> tuple[str, ...]:
+        """The typed operations that change this part (joinery-blender-ops)."""
+        if self.part_kind == "texture":
+            found = ["adjust_map", "make_map_editable", "replace_map"]
+            if self.editable.endswith(".kra"):
+                found[1] = "paint_map"
+            if "height" in self.roles:
+                found.append("bake_height_to_normal")
+            return (*found, "split_material")
+        return PART_OPS.get(self.part_kind, ())
 
     @property
     def label(self) -> str:
@@ -135,6 +156,8 @@ class Part(BaseModel):
         flat["materials"] = ",".join(self.materials)
         flat["maps"] = ",".join(self.maps)
         flat["source_only"] = "true" if self.source_only else ""
+        flat["editable"] = self.editable
+        flat["ops"] = ",".join(self.ops)
         flat["label"] = chip_label(flat)
         return flat
 
@@ -371,6 +394,7 @@ def blender_parts(inspection: dict[str, Any], resource: str, source: str) -> lis
                     texture=f"{texture_dir}/{file}" if file else "",
                     # glTF has no height map: it reaches the game only once baked.
                     source_only=bool(roles) and set(roles) <= {"height"},
+                    editable=str(image.get("editable", "")),
                     resource=resource,
                     source=source,
                     owner="blender",

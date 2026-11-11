@@ -170,6 +170,8 @@ def describe_material(m):
             'packed': image.packed_file is not None,
             'source': image.source,
             'file': _files.get(image.name, ''),
+            # The Krita or Material Maker source a map is painted in, once made.
+            'editable': str(image.get('joinery_source', '')),
         })
         images.append(row)
     users = [
@@ -347,6 +349,12 @@ def _joinery_object_hash(obj):
         if mesh.shape_keys:
             for key in mesh.shape_keys.key_blocks:
                 parts += [key.name, key.value, key.mute, _joinery_floats(key.data, 'co', 3)]
+    if obj.type == 'ARMATURE':
+        for bone in obj.data.bones:
+            parts.append((bone.name, bone.parent.name if bone.parent else None,
+                          bone.use_connect, bone.use_deform,
+                          _joinery_plain([list(row) for row in bone.matrix_local]),
+                          round(bone.length, 6)))
     return _joinery_hash(parts)
 
 def _joinery_material_hash(material):
@@ -667,8 +675,11 @@ def guarded(
             PART_WALK,
             SCOPE_GUARD,
             "_joinery_before = _joinery_scope_hashes()",
+            # An operation adds the parts Blender changes along with its
+            # target (a renamed bone's vertex groups) to this set.
+            "_joinery_also = set()",
             code,
-            f"_joinery_scope_check(_joinery_before, set({allowed!r}))",
+            f"_joinery_scope_check(_joinery_before, set({allowed!r}) | _joinery_also)",
         ]
     )
 
