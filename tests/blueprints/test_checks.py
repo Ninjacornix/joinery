@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -20,11 +21,16 @@ from joinery import access, blueprints, checks_core, perf
 from tests.blueprints.godot_run import import_project, make_project, needs_godot
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
+# Drawing needs the editor binary and a display: a Linux runner without one only plays
+# headless, so its windowed measurements are not asked for.
 WINDOW = (
     bool(os.environ.get("JOINERY_GODOT_BIN"))
     and Path(os.environ.get("JOINERY_GODOT_BIN", "")).is_file()
+    and not (sys.platform.startswith("linux") and not os.environ.get("DISPLAY"))
 )
-needs_window = pytest.mark.skipif(not WINDOW, reason="needs JOINERY_GODOT_BIN to draw")
+needs_window = pytest.mark.skipif(
+    not WINDOW, reason="needs JOINERY_GODOT_BIN and a display to draw"
+)
 
 
 def _copy(tmp_path: Path, name: str) -> Path:
