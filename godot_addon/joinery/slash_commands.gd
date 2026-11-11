@@ -34,6 +34,8 @@ signal bible_upgraded(ok: bool, message: String)
 signal playtest_requested(focus: String)
 ## "/match", or Make it match elsewhere: audit the project against the art bible.
 signal match_requested
+## "/variants [N] <request>": make the request a few ways side by side (sidebar_variants.gd).
+signal variants_requested(words: String)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 ## Everyday commands first; descriptions stay at 32 characters or fewer.
@@ -44,6 +46,7 @@ const COMMANDS := {
 	"/feature": ["Add or remove a game feature", "cli"],
 	"/playtest": ["Play the game and report bugs", "ui"],
 	"/match": ["Make everything match the bible", "ui"],
+	"/variants": ["Try a few ways side by side", "ui"],
 	"/setup": ["Change project apps", "ui"],
 	"/focus": ["Toggle focus mode", "ui"],
 	"/toolbar": ["Show or hide viewport tools", "ui"],
@@ -132,6 +135,8 @@ func run(entry: String) -> bool:
 			playtest_requested.emit(" ".join(arguments(entry)))
 		elif command == "/match":
 			match_requested.emit()
+		elif command == "/variants":
+			variants_requested.emit(" ".join(arguments(entry)))
 		else:
 			requested.emit(command)
 		return true

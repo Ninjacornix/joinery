@@ -228,6 +228,7 @@ func _init(text := "", context: Array = []) -> void:
 	_steps.hide()
 	_progress.add_child(_steps)
 	_ready_row = REVIEW_ROW.new()
+	_ready_row.other_ways_pressed.connect(_try_other_ways)
 	_column.add_child(_ready_row)
 	_error = UI.label("", "JoineryError", true)
 	_error.hide()
@@ -437,6 +438,14 @@ func set_ready(media: Array = [], review: Object = null) -> void:
 	_outcome.hide()
 	_ready_row.show_for(media, review)
 	_sync_activity()
+
+
+## "Try other ways": a few more versions of this request beside this change (sidebar_variants.gd).
+func _try_other_ways() -> void:
+	if is_inside_tree() and not transaction_id.is_empty():
+		get_tree().call_group(
+			&"joinery_variants", &"try_other_ways", request, transaction_id, _ready_row.line_text()
+		)
 
 
 ## The ready change's row in this card (picture, line, Discard / Accept).

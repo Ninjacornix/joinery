@@ -14,6 +14,7 @@ extends Node
 ## provider's own session or starts a fresh one from a summary, which the transcript says.
 
 const TASKS := preload("sidebar_tasks.gd")
+const VARIANTS := preload("sidebar_variants.gd")
 const STORE := preload("chat_store.gd")
 const PAGE := preload("chats_page.gd")
 const UI := preload("ui_components.gd")
@@ -272,8 +273,16 @@ func render(entries: Array) -> void:
 				_transcript.call("show_timing", timing)
 				if card != null:
 					card.call("finish", outcome)
+			"variants":
+				# A request tried several ways: what was kept, as the sidebar said it.
+				var said := VARIANTS.saved_line(entry)
+				if not said.is_empty():
+					_transcript.call("add_notice", said, "info")
 			"task":
-				# A parallel task's outcome, as the sidebar said it when it finished.
+				# A parallel task's outcome, as the sidebar said it when it finished. A way of a
+				# request tried several ways is told by its group's line instead.
+				if entry.has("variant_group"):
+					continue
 				var ending := str(TASKS.ENDINGS.get(str(entry.get("state", "")), ""))
 				if not ending.is_empty():
 					var line := "%s: %s" % [str(entry.get("title", "Task")), ending]

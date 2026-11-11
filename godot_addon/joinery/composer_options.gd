@@ -7,6 +7,8 @@ extends MenuButton
 ## provider no longer lists stays visible as "Unavailable: …".
 
 signal changed(selection: Dictionary)
+## "Try 3 ways": make the typed message three ways side by side (ADR 0042).
+signal try_ways
 
 const UI_THEME := preload("ui_theme.gd")
 const UI := preload("ui_components.gd")
@@ -16,6 +18,7 @@ const MODE_HINTS := ["Adapts to your request", "Favours short replies", "Favours
 ## Closed label width cap, in multiples of the font size.
 const MAX_EM := 16.0
 const MODEL_ID := 100
+const WAYS_ID := 200
 
 var _models: Array = []
 var _selection: Dictionary = {"mode": "auto", "model": "", "effort": ""}
@@ -133,6 +136,12 @@ func _rebuild() -> void:
 	if _model_ids.size() > 1:
 		popup.add_separator()
 		popup.add_submenu_node_item("Model: " + model_name(), _model_menu, MODEL_ID)
+	popup.add_separator()
+	popup.add_item("Try 3 ways", WAYS_ID)
+	popup.set_item_tooltip(
+		popup.get_item_index(WAYS_ID),
+		"Make this message three different ways side by side, then keep one"
+	)
 	text = summary()
 	_sync_tooltip()
 	_fit()
@@ -169,7 +178,9 @@ func _model(id: String) -> Dictionary:
 
 
 func _on_mode(id: int) -> void:
-	if id >= 0 and id < MODES.size():
+	if id == WAYS_ID:
+		try_ways.emit()
+	elif id >= 0 and id < MODES.size():
 		set_mode(MODES[id])
 
 

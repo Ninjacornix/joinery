@@ -4,13 +4,19 @@ extends HBoxContainer
 ## what changed, and Discard / Accept, so a small change is decided without opening the Review
 ## panel. A bigger one (several assets, many lines, a reviewer's warning) offers Review
 ## instead, which brings the panel into view. Both go through the panel (review_panel.gd), so
-## the decision looks and behaves the same wherever it is made.
+## the decision looks and behaves the same wherever it is made. "Try other ways" asks for a few
+## more versions of the same request side by side, this one kept as the first (ADR 0042).
+
+## "Try other ways": compare this change with a few other versions.
+signal other_ways_pressed
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
 
+## "Try other ways", while the change waits for a decision.
+var ways: Button
 var _review: Object
 var _frame: PanelContainer
 var _thumb: TextureRect
@@ -58,10 +64,14 @@ func _init() -> void:
 	_open.accessibility_name = "Open the review"
 	_open.tooltip_text = "A bigger change: look at it in the Review panel"
 	_open.pressed.connect(_show_panel)
+	ways = UI.quiet("Try other ways")
+	ways.accessibility_name = "Try other ways of this change"
+	ways.tooltip_text = "Make a few other versions side by side and keep the one you like"
+	ways.pressed.connect(func() -> void: other_ways_pressed.emit())
 	var ordered := (
 		[_accept, _discard] if DisplayServer.get_swap_cancel_ok() else [_discard, _accept]
 	)
-	for button: Button in ordered + [_open]:
+	for button: Button in ordered + [_open, ways]:
 		UI.bind_height(button, "sm")
 		_actions.add_child(button)
 	STYLE.on_theme(
@@ -104,10 +114,16 @@ func refresh(media: Array = []) -> void:
 	_discard.visible = simple
 	_accept.visible = simple
 	_open.visible = decidable and not simple
+	ways.visible = decidable
 	var was := visible
 	visible = _frame.visible or decidable
 	if visible and not was:
 		UI_MOTION.reveal(self)
+
+
+## The line of facts on show ("" without one).
+func line_text() -> String:
+	return _line.text
 
 
 ## The thumbnail on show (null without one).

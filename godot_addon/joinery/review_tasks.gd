@@ -7,23 +7,35 @@ extends RefCounted
 ## The Review tab shows one panel at a time: the main request's (review_tab.gd's detail) or this
 ## one, holding one task's change. Opening another task's row swaps what it shows. A task never
 ## opens the panel by itself; the main request's review does, and takes the view back.
+##
+## A way of a request tried several ways (ADR 0042) shows the variant strip above its panel
+## (variant_strip.gd): every way side by side, Use this, Mix and Discard all; a way's picture
+## swaps the panel to that way.
 
 const PANEL := preload("review_panel.gd")
+const STRIP := preload("variant_strip.gd")
 const UI_MOTION := preload("ui_motion.gd")
 
 ## The panel a task's change shows in (review_panel.gd), inside the tab's detail view.
 var panel: Control
 ## The transaction of the task change on show ("" for none).
 var showing := ""
+## The variant strip above the panel while a way is on show (null otherwise).
+var strip: Control
 var _tab: Control
 var _chat: Object
 ## Each task change waiting for review: {transaction id: its file_preview}.
 var _previews: Dictionary = {}
+var _view: Control
+## Variant groups as last heard: {group id: its event}, and each way's group.
+var _groups: Dictionary = {}
+var _way_group: Dictionary = {}
 
 
 ## Live inside [param tab] (review_tab.gd), next to its own panel in [param view].
 func _init(tab: Control, view: Control) -> void:
 	_tab = tab
+	_view = view
 	panel = PANEL.new()
 	panel.name = "TaskReview"
 	panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -36,6 +48,8 @@ func _init(tab: Control, view: Control) -> void:
 ## Decide through [param chat] (chat_bridge.gd), which runs the tasks.
 func follow(chat: Object) -> void:
 	_chat = chat
+	if chat != null and chat.has_signal("variants_event"):
+		chat.connect("variants_event", _on_group)
 
 
 ## True when [param id] is a task's change.
@@ -61,6 +75,7 @@ func open(id: String) -> bool:
 			)
 		)
 		panel.call("show_glance", preview)
+	_show_strip(str(_way_group.get(str(preview.get("task_id", "")), "")), id)
 	return true
 
 
@@ -92,6 +107,11 @@ func _decided(accepted: bool) -> void:
 ## when the Review tab should read its list again.
 func on_event(event: Dictionary) -> String:
 	var id := str(event.get("transaction_id", ""))
+	var group := str(event.get("variant_group", ""))
+	if not group.is_empty():
+		_way_group[str(event.get("task_id", ""))] = group
+	if strip != null and strip.call("has_way", str(event.get("task_id", ""))):
+		strip.call("on_event", event)
 	match str(event.get("kind", "")):
 		"file_preview":
 			_previews[id] = event.duplicate(true)
@@ -133,10 +153,86 @@ func _leave_after_result(id: String) -> void:
 	_leave(id)
 
 
+## The variant strip of [param group] above the panel, [param id] being the way on show; none
+## when the change isn't a way of one.
+func _show_strip(group: String, id: String) -> void:
+	if group.is_empty() or not _groups.has(group):
+		_drop_strip()
+		return
+	if strip == null or str(strip.get("group_id")) != group:
+		_drop_strip()
+		strip = STRIP.new(group)
+		strip.set("compact", true)
+		strip.name = "VariantStrip"
+		_view.add_child(strip)
+		_view.move_child(strip, panel.get_index())
+		strip.connect("open_requested", _open_way)
+		strip.connect("picked", _pick.bind(group))
+		strip.connect("mix_requested", _mix.bind(group))
+		strip.connect("discard_all_requested", _discard.bind(group))
+		var shown := strip
+		panel.visibility_changed.connect(
+			func() -> void:
+				if is_instance_valid(shown):
+					shown.visible = panel.visible
+		)
+		strip.call("show_group", _groups[group])
+		for each: String in _previews:
+			if strip.call("has_way", str(_previews[each].get("task_id", ""))):
+				strip.call("on_event", _previews[each])
+	strip.visible = true
+	for way: Control in strip.call("ways"):
+		way.set("chosen", str(way.get("transaction_id")) == id)
+		way.call("_restyle")
+
+
+func _drop_strip() -> void:
+	if strip != null:
+		strip.queue_free()
+		strip = null
+
+
+func _on_group(event: Dictionary) -> void:
+	var group := str(event.get("group_id", ""))
+	if str(event.get("kind", "")) == "variants":
+		_groups[group] = event.duplicate(true)
+		for way: Variant in event.get("ways", []):
+			if way is Dictionary:
+				_way_group[str(way.get("task_id", ""))] = group
+	if strip != null and str(strip.get("group_id")) == group:
+		if str(event.get("kind", "")) == "notice":
+			strip.call("pick_failed")
+		else:
+			strip.call("on_event", event)
+
+
+func _open_way(id: String) -> void:
+	if _previews.has(id):
+		_tab.call("show_task", id)
+
+
+func _pick(task_id: String, group: String) -> void:
+	if _chat != null:
+		_chat.call(
+			"start_task", "", [], {"kind": "variants_pick", "group_id": group, "task_id": task_id}
+		)
+
+
+func _mix(note: String, group: String) -> void:
+	if _chat != null:
+		_chat.call("start_task", "", [], {"kind": "variants_mix", "group_id": group, "note": note})
+
+
+func _discard(group: String) -> void:
+	if _chat != null:
+		_chat.call("start_task", "", [], {"kind": "variants_discard", "group_id": group})
+
+
 func _leave(id: String) -> void:
 	if showing != id:
 		return
 	showing = ""
+	_drop_strip()
 	if not panel.visible:
 		return
 	var main: Control = _tab.call("detail")

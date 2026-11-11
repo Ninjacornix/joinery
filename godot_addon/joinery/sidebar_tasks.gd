@@ -24,6 +24,7 @@ const CARD := preload("sidebar_task_card.gd")
 const DEBUG := preload("sidebar_debug.gd")
 const MATCH := preload("sidebar_match.gd")
 const PLAYTEST_CARD := preload("playtest_card.gd")
+const VARIANTS := preload("sidebar_variants.gd")
 const UI_MOTION := preload("ui_motion.gd")
 ## Seconds a finished task's card stays before it steps out.
 const LINGER := 4.0
@@ -45,10 +46,14 @@ var bridge: Object:
 		if bridge != null and bridge.has_signal("playtest_event"):
 			if not bridge.is_connected("playtest_event", on_playtest):
 				bridge.connect("playtest_event", on_playtest)
+		if variants != null:
+			variants.call("follow", bridge)
 ## The playtest card, while there is one.
 var playtest: Control
 ## The match card (match_card.gd), while there is one.
 var match_card: Control
+## Requests tried several ways (sidebar_variants.gd): their ways' events go there.
+var variants: Node
 var _cards: Dictionary = {}
 var _main_busy := false
 var _offer: Control
@@ -66,6 +71,7 @@ static func attach(sidebar: Control, content: Control, before: Control) -> VBoxC
 	DEBUG.attach(sidebar, tasks)
 	# "/match" and Make it match: the project against the art bible.
 	MATCH.attach(sidebar, tasks)
+	tasks.variants = VARIANTS.attach(sidebar, tasks)
 	var slash: Object = sidebar.get("_slash")
 	if slash != null and slash.has_signal("playtest_requested"):
 		slash.connect("playtest_requested", tasks.start_playtest)
@@ -99,6 +105,8 @@ func working_count() -> int:
 	for each: Control in cards():
 		if each.call("working"):
 			count += 1
+	if variants != null:
+		count += int(variants.call("working_count"))
 	return count
 
 
@@ -113,6 +121,9 @@ func set_main_busy(busy: bool) -> void:
 ## One event from a task (chat_bridge.gd's task_event).
 func on_event(event: Dictionary) -> void:
 	var id := str(event.get("task_id", ""))
+	if variants != null and variants.call("take", event):
+		_sync()
+		return
 	match str(event.get("kind", "")):
 		"task":
 			var each := card(id)
@@ -327,9 +338,18 @@ func _remove(id: String) -> void:
 	_sync()
 
 
-## Shown while any card is: a task's, the playtest's or the match card.
+## Shown while any card is: a task's, the playtest's, the match card or a variant strip.
 func sync_visible() -> void:
-	visible = not _cards.is_empty() or is_instance_valid(playtest) or is_instance_valid(match_card)
+	visible = (
+		not _cards.is_empty()
+		or is_instance_valid(playtest)
+		or is_instance_valid(match_card)
+		or _has_variants()
+	)
+
+
+func _has_variants() -> bool:
+	return variants != null and bool(variants.call("has_cards"))
 
 
 func _sync() -> void:

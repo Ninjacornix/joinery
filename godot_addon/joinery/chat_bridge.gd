@@ -54,6 +54,10 @@ signal playtest_event(event: Dictionary)
 ## "Make it match" (ADR 0045): {state: auditing|fixing|done|failed|stopped, tasks: [{key, title,
 ## area, apps, task_id, state, message}], audit?, message?}. Its changes are tasks.
 signal match_event(event: Dictionary)
+## A request tried several ways (ADR 0042), tagged with its group_id: the group itself
+## ({kind: "variants", state, picked, ways}) or the host refusing a pick ({kind: "notice"}).
+## Each way's own events come as task events, tagged with variant_group.
+signal variants_event(event: Dictionary)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 const ATTACHMENTS := preload("chat_attachments.gd")
@@ -152,8 +156,11 @@ func submit(text: String, targets: Array) -> void:
 		busy_changed.emit(false)
 
 
-## Run [param text] as a parallel task beside the request Journeyman is working on.
-func start_task(text: String, targets: Array) -> bool:
+## Run [param text] as a parallel task beside the request Journeyman is working on. With
+## [param extra], the same line (text, targets, editor context, model choice) goes as another
+## kind: the variant strip's "variants_start", "variants_pick", "variants_mix" and
+## "variants_discard" (sidebar_variants.gd, ADR 0042).
+func start_task(text: String, targets: Array, extra := {}) -> bool:
 	if _job == null or not _connected:
 		return false
 	var scene_targets: Array = []
@@ -173,6 +180,9 @@ func start_task(text: String, targets: Array) -> bool:
 	}
 	if not images.is_empty():
 		line["attachments"] = images
+	if not extra.is_empty():
+		line["chat_id"] = chat_id
+		line.merge(extra, true)
 	_job.send_line(JSON.stringify(line))
 	return true
 
@@ -282,6 +292,9 @@ func _handle(event: Dictionary) -> void:
 		return
 	if not str(event.get("playtest_id", "")).is_empty():
 		playtest_event.emit(event)
+		return
+	if not str(event.get("group_id", "")).is_empty():
+		variants_event.emit(event)
 		return
 	match str(event.get("kind", "")):
 		"connection":

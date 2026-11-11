@@ -32,6 +32,8 @@ signal submitted(text: String)
 signal stop_pressed
 ## "Run alongside": start [param text] as a parallel task now instead of queueing it.
 signal alongside(text: String)
+## "Try 3 ways" in the options menu: make [param text] three ways side by side (ADR 0042).
+signal variants(text: String)
 ## A target chip was pressed: open [param path] where it is made.
 signal target_opened(path: String)
 ## Something to tell the user in the status footer ("Share my view" failed, the limit…).
@@ -120,6 +122,7 @@ func _init() -> void:
 	controls.add_child(view)
 	options = OPTIONS_SCRIPT.new()
 	options.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	options.try_ways.connect(func() -> void: variants.emit(prompt.text.strip_edges()))
 	controls.add_child(options)
 	var push := Control.new()
 	push.size_flags_horizontal = Control.SIZE_EXPAND_FILL
