@@ -230,6 +230,7 @@ func _states(light: bool, width: int) -> void:
 	await _match(light, width, chat)
 	await _check_cards(light, width, chat)
 	await _design(light, width, chat)
+	await _sound_pass(light, width, chat)
 
 	chat.append_agent_text("I widened **Door** by 20% in Blender and darkened the wood.", true)
 	chat.finish_agent_response(true)
@@ -963,3 +964,46 @@ func _check_cards(light: bool, width: int, chat: Control) -> void:
 		card.free()
 		tasks.set("%s_card" % check, null)
 		tasks.call("sync_visible")
+
+
+## The sound pass: what the level is missing, its rows following the sounds being made.
+func _sound_pass(light: bool, width: int, chat: Control) -> void:
+	var tasks: Node = chat.get("_tasks")
+	var sounder: Node = tasks.get_node("SoundPass")
+	sounder.call("_open")
+	var card: Control = tasks.get("sound_card")
+	_check(card != null, "The sound pass card shows")
+	var categories := [
+		{"id": "footsteps", "label": "Footsteps", "missing": 3, "findings": 2},
+		{"id": "jump_land", "label": "Jump and land", "missing": 2, "findings": 1},
+		{"id": "pickups", "label": "Pickups", "missing": 1, "findings": 1},
+		{"id": "switches", "label": "Doors and switches", "missing": 2, "findings": 2},
+		{"id": "ambience", "label": "Ambience", "missing": 1, "findings": 1},
+		{"id": "ui", "label": "UI", "missing": 2, "findings": 1},
+	]
+	var rows := [
+		["s1", "Add footsteps, jump and land to the player", ["footsteps", "jump_land"], "working"],
+		["s2", "Add wind ambience and floor surfaces to level.tscn", ["ambience"], "in_review"],
+		["s3", "Add pickup sound to coin", ["pickups"], "in_review"],
+		["s4", "Add lever and plate sounds to 2 props", ["switches"], "queued"],
+		["s5", "Add UI click and hover sounds", ["ui"], "queued"],
+	]
+	var run: Array = []
+	for row: Array in rows:
+		run.append({"task_id": row[0], "title": row[1], "categories": row[2], "state": row[3]})
+	(
+		card
+		. call(
+			"apply",
+			{
+				"kind": "sound_pass",
+				"state": "making",
+				"audit": {"headline": "11 sounds missing in level.tscn", "categories": categories},
+				"tasks": run,
+			}
+		)
+	)
+	await _shot("sound-pass", light, width, chat)
+	card.free()
+	tasks.set("sound_card", null)
+	tasks.call("sync_visible")

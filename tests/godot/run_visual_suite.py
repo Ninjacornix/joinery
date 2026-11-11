@@ -79,6 +79,7 @@ SIDEBAR_STATES = (
     "variants-working",
     "variants",
     "variants-picked",
+    "sound-pass",
     "review-waiting",
     "review-waiting-big",
     "accepted",
