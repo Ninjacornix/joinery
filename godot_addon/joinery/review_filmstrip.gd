@@ -72,8 +72,12 @@ class Tile:
 		ring.border_color = UI_THEME.color(
 			self, "accent" if button_pressed else ("border_strong" if hovered else "border_subtle")
 		)
-		ring.set_border_width_all(
-			maxi(1, int(UI_THEME.unit(self) / (2.0 if button_pressed else 4.0)))
+		(
+			ring
+			. set_border_width_all(
+				# The shown tile's ring is clearly thicker than the others' hairline.
+				maxi(2, int(UI_THEME.unit(self) / 2.0)) if button_pressed else 1
+			)
 		)
 		draw_style_box(ring, rect)
 		if has_focus() and not button_pressed:
