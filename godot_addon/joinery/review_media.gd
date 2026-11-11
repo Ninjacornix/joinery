@@ -13,6 +13,8 @@ extends VBoxContainer
 ## - Text: only the changed lines (review_diff.gd).
 ## - A blockout (ADR 0043): the user's sketch (the item's `reference`) beside the plan of the
 ##   level built from it; Before and After crossfade the plan.
+## - Animations: the original and the change as two looping clips side by side
+##   (review_clip.gd); Before and After dim the other clip.
 ##
 ## A side whose file is not written yet shows a pulsing "Rendering preview…" frame until it
 ## appears; the renders start when the change passes its checks, so the review is on screen
@@ -32,6 +34,7 @@ const GLANCE := preload("review_glance.gd")
 const SWIPE := preload("review_swipe.gd")
 const DIFF := preload("review_diff.gd")
 const FILMSTRIP := preload("review_filmstrip.gd")
+const CLIP := preload("review_clip.gd")
 ## Seconds to wait for a preview file before giving up.
 const LOAD_TIMEOUT := 120.0
 ## Seconds between checks for a preview file that is still being written.
@@ -57,6 +60,7 @@ var _loading: PanelContainer
 var _loading_dots: INDICATOR
 var _failure: Label
 var _strip: FILMSTRIP
+var _clip: CLIP
 var _waiting := ""
 var _waited := 0.0
 var _since_poll := 0.0
@@ -130,6 +134,8 @@ func _init() -> void:
 	_swipe.hide()
 	_swipe.dragged.connect(_on_dragged)
 	_frame.add_child(_swipe)
+	_clip = CLIP.new()
+	_frame.add_child(_clip)
 	_diff = DIFF.new()
 	_diff.hide()
 	add_child(_diff)
@@ -240,6 +246,7 @@ func clear_media() -> void:
 		view.hide()
 	_swipe.set_pictures(null, null)
 	_swipe.hide()
+	_clip.stop()
 	_diff.hide()
 	_failure.hide()
 	_strip.hide()
@@ -357,11 +364,9 @@ func thumbnail() -> Texture2D:
 		var kind := kind_of(item)
 		if kind in ["audio", "text"]:
 			continue
-		for key: String in ["after", "before"]:
-			if item.has(key) and FileAccess.file_exists(str(item[key])):
-				var picture := _texture(str(item[key]))
-				if picture != null:
-					return picture
+		var picture := _tile_picture(item)
+		if picture != null:
+			return picture
 	return null
 
 
@@ -370,6 +375,16 @@ func thumbnail() -> Texture2D:
 func measured_facts() -> Array[String]:
 	var found: Array[String] = []
 	for item: Dictionary in _items:
+		if kind_of(item) == "clip":
+			var line := CLIP.clip_fact(
+				str(item.get("label", "")), item.get("before_clip", {}), item.get("after_clip", {})
+			)
+			if (
+				not line.is_empty()
+				and item.has("after_clip" if item.has("after") else "before_clip")
+			):
+				found.append(line)
+			continue
 		if not _paired(item) or item.has("error") or item.has("reference"):
 			continue
 		var before := str(item["before"])
@@ -423,10 +438,10 @@ func stop_audio() -> void:
 		(player as AudioStreamPlayer).stop()
 
 
-## "image", "model", "audio" or "text" for a media [param item].
+## "image", "model", "audio", "clip" (an animation) or "text" for a media [param item].
 static func kind_of(item: Dictionary) -> String:
 	var media := str(item.get("media", "image"))
-	if media in ["audio", "text"]:
+	if media in ["audio", "text", "clip"]:
 		return media
 	if item.has("before_back") or item.has("after_back"):
 		return "model"
@@ -436,11 +451,11 @@ static func kind_of(item: Dictionary) -> String:
 	return "image"
 
 
-## True when [param item] shows as a split picture: an image (texture, part view or scene
-## snapshot) with both sides. Models have their own framing per side, so they crossfade.
+## True when [param item] shows both sides at once: a split picture (texture, part view or scene
+## snapshot) or two clips. Models have their own framing per side, so they crossfade.
 static func swipes(item: Dictionary) -> bool:
 	return (
-		kind_of(item) == "image"
+		kind_of(item) in ["image", "clip"]
 		and _paired(item)
 		and not item.has("error")
 		and not item.has("reference")
@@ -477,6 +492,8 @@ func _tile_specs() -> Array:
 func _tile_picture(item: Dictionary) -> Texture2D:
 	for key: String in ["after", "before"]:
 		if item.has(key) and FileAccess.file_exists(str(item[key])):
+			if kind_of(item) == "clip":
+				return CLIP.middle_frame(_texture(str(item[key])), item.get(key + "_clip", {}))
 			return _texture(str(item[key]))
 	return null
 
@@ -522,19 +539,15 @@ func _show_current(swap: bool) -> void:
 		_stop_waiting()
 		_fail(str(item.get("error", "")))
 		return
+	if kind_of(item) == "clip" or swipes(item):
+		_show_both(item, swap)
+		return
+	_clip.stop()
 	var wanted := "after" if side == "compare" else side
 	if item.has("error") and not item.has(wanted):
 		# That side's render failed: say so rather than show the other side as if it were it.
 		_stop_waiting()
 		_fail(str(item["error"]), wanted)
-		return
-	if swipes(item):
-		for key: String in ["before", "after"]:
-			if not FileAccess.file_exists(str(item[key])):
-				_wait_for(str(item[key]))
-				return
-		_stop_waiting()
-		_show_swipe(item, swap)
 		return
 	var chosen := wanted if item.has(wanted) else ("after" if item.has("after") else "before")
 	var source := str(item[chosen])
@@ -551,7 +564,38 @@ func _show_current(swap: bool) -> void:
 		_show_image(source, str(item.get(chosen + "_back", "")), swap)
 
 
+## Both sides at once (a split picture, or an animation's clips), once each side it has is
+## rendered.
+func _show_both(item: Dictionary, swap: bool) -> void:
+	for key: String in ["before", "after"]:
+		if item.has(key) and not FileAccess.file_exists(str(item[key])):
+			_clip.stop()
+			_wait_for(str(item[key]))
+			return
+	_stop_waiting()
+	if kind_of(item) != "clip":
+		_clip.stop()
+		_show_swipe(item, swap)
+		return
+	_audio_box.hide()
+	_swipe.hide()
+	for view: View in [_front, _back]:
+		view.hide()
+	var before := _texture(str(item["before"])) if item.has("before") else null
+	var after := _texture(str(item["after"])) if item.has("after") else null
+	if before == null and after == null:
+		_clip.stop()
+		_fail(str(item.get("error", "")))
+		return
+	_frame.show()
+	if not _clip.visible or _clip.get_meta("item", {}) != item:
+		_clip.show_clip(item, before, after)
+		_clip.set_meta("item", item)
+	_clip.set_side(side)
+
+
 func _hide_stage() -> void:
+	_clip.stop()
 	_frame.hide()
 	_audio_box.hide()
 	_loading.hide()
