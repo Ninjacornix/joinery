@@ -136,7 +136,10 @@ def project_a(root: Path) -> Path:
         "s1",
         "supercollider",
         "recipes/s1.scd",
-        {"audio/sfx/splash.scd": b"// splash", "audio/sfx/splash.wav": b"RIFF-splash"},
+        {
+            "audio/sfx/splash.scd": b'score.recordNRT(outputFilePath:"audio/sfx/splash.wav");',
+            "audio/sfx/splash.wav": b"RIFF-splash",
+        },
         code='score.recordNRT(outputFilePath:"audio/sfx/splash.wav");\n',
     )
     _write(project, "art/textures/brick.png", b"PNG-brick")
@@ -476,6 +479,9 @@ def test_import_is_one_reviewed_change_with_paths_moved(tmp_path: Path) -> None:
     assert kits.MARKER not in script  # Kit settings stay with the project that made it
     sound = load_recipe(target / "recipes/harbour__s1.toml")
     assert "kits/harbour/audio/sfx/splash.wav" in sound.outputs
+    patch = (target / "kits/harbour/audio/sfx/splash.scd").read_bytes()
+    assert b'outputFilePath:"kits/harbour/audio/sfx/splash.wav"' in patch
+    assert sound.expect["kits/harbour/audio/sfx/splash.scd"] == "sha256:" + _sha(patch)
     entries = {e.path: e for e in read_assets(target)}
     glb = entries["kits/harbour/art/environment/rocks_01.glb"]
     assert isinstance(glb, KitAsset)

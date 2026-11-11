@@ -63,6 +63,8 @@ from joinery.recipe import RECIPE_DIR, Recipe, load_recipe, recipe_paths
 
 #: Text a kit's paths are moved in on import.
 TEXT_RESOURCES = frozenset({".tscn", ".tres"})
+#: Text sources whose paths move too, so a rebuild writes them the same.
+TEXT_SOURCES = frozenset({".scd", ".json", ".txt", ".ptex"})
 #: Folders a kit never takes anything from.
 NEVER = (".godot", ".joinery", ".git", "addons", "recipes/history")
 _RES = re.compile(r"res://([^\"'\s)\]]+)")
@@ -635,6 +637,15 @@ def plan_import(project: Path, archive: Archive, into: str = "") -> ImportPlan:
             text = _relocate(data.decode("utf-8"), roots, folder, res_only=False)
             # Kit settings change a set where it was made; here it is the kit's.
             data = text.replace(kits.MARKER, "# joinery-kit-shared: ", 1).encode()
+        elif suffix in TEXT_SOURCES and content.kind in {"asset", "input"}:
+            # A text source (a SuperCollider patch) holds the paths its script
+            # writes into it: moved the same way, a rebuild writes the same text.
+            try:
+                text = data.decode("utf-8")
+            except UnicodeDecodeError:
+                text = ""
+            if text:
+                data = _relocate(text, roots, folder, res_only=False).encode()
         writes[target[content.path]] = data
     for content in manifest.contents:
         if content.kind == "recipe":
