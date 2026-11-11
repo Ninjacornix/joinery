@@ -10,6 +10,7 @@ signal dragged
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
+const GLANCE := preload("review_glance.gd")
 
 ## Share of the width showing the original, from the left (0..1).
 var split := 0.5:
@@ -36,7 +37,20 @@ func _init() -> void:
 func set_pictures(old: Texture2D, new: Texture2D) -> void:
 	before = old
 	after = new
+	_sample()
 	queue_redraw()
+
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_RESIZED:
+		_sample()
+
+
+## Pixel art and small pictures blown up stay crisp; photos are smooth (review_glance.gd).
+func _sample() -> void:
+	var shown := after if after != null else before
+	if shown != null:
+		texture_filter = GLANCE.picture_filter(shown, fit(shown.get_size()).size)
 
 
 ## Move the line to [param value], animated with an ease-in-out unless motion is off.

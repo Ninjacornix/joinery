@@ -16,6 +16,11 @@ extends VBoxContainer
 ## - Animations: the original and the change as two looping clips side by side
 ##   (review_clip.gd); Before and After dim the other clip.
 ##
+## Pictures fill the frame, keeping their shape: a pair shares its width. Pixel art and small
+## or flat pictures (a sketch, a plan, a 32 px texture) are blown up crisp, photos and renders
+## smooth (review_glance.gd's picture_filter). The frame grows with the panel's width, so a
+## wide panel shows a large picture rather than a thin strip.
+##
 ## A side whose file is not written yet shows a pulsing "Rendering preview…" frame until it
 ## appears; the renders start when the change passes its checks, so the review is on screen
 ## before they are done ([method update_media] brings their outcome).
@@ -42,9 +47,21 @@ const POLL := 0.25
 const NO_PREVIEW := "No preview. Open Details to see the file changes."
 ## Files Image.load reads; anything else (a .kra, a .blend) has no preview of its own.
 const IMAGE_FORMATS := ["png", "jpg", "jpeg", "webp", "svg", "bmp", "tga", "exr", "hdr"]
+## The picture frame's height as a share of its width, between [constant FRAME_MIN] and
+## [constant FRAME_MAX] large control heights.
+const FRAME_SHARE := 0.3
+const FRAME_MIN := 2.0
+const FRAME_MAX := 5.0
+## The tallest the frame grows under a row of ways (variant_strip.gd), which takes the rest.
+const FRAME_UNDER_WAYS := 3.0
 
 ## The side on show: "before", "after", or "compare" (a split picture).
 var side := "after"
+## The tallest the picture frame grows, in large control heights.
+var frame_max := FRAME_MAX:
+	set(value):
+		frame_max = value
+		_size_frame()
 var _items: Array = []
 var _index := 0
 var _textures := {}
@@ -89,6 +106,7 @@ class View:
 		far.visible = back != null
 		for picture: TextureRect in [main, far]:
 			_fit(picture)
+			_sample(picture)
 
 	## Two angles: each picture is as wide as its height allows, so the pair stays together.
 	func _fit(picture: TextureRect) -> void:
@@ -111,8 +129,13 @@ class View:
 		picture.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		picture.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		picture.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		picture.resized.connect(func() -> void: _sample(picture))
 		add_child(picture)
 		return picture
+
+	## Crisp or smooth for the size the picture is shown at.
+	func _sample(picture: TextureRect) -> void:
+		picture.texture_filter = GLANCE.picture_filter(picture.texture, picture.size)
 
 
 func _init() -> void:
@@ -169,8 +192,27 @@ func _init() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_THEME_CHANGED:
 		var tall := float(UI_THEME.control_h(self, "lg") * 2)
-		for area: Control in [_frame, _loading, _audio_box, _diff]:
+		for area: Control in [_audio_box, _diff]:
 			area.custom_minimum_size.y = tall
+		_size_frame()
+	elif what == NOTIFICATION_RESIZED:
+		_size_frame()
+
+
+## The picture frame (and the loading frame in its place) grows with the width.
+func _size_frame() -> void:
+	if not is_inside_tree():
+		return
+	var large := float(UI_THEME.control_h(self, "lg"))
+	var tall := floorf(clampf(size.x * FRAME_SHARE, large * FRAME_MIN, large * frame_max))
+	for area: Control in [_frame, _loading]:
+		if not is_equal_approx(area.custom_minimum_size.y, tall):
+			area.custom_minimum_size.y = tall
+
+
+## The picture frame's height now.
+func frame_height() -> float:
+	return _frame.size.y
 
 
 func _process(delta: float) -> void:

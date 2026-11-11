@@ -81,6 +81,8 @@ func _init(identifier := "", number := 0, note := "") -> void:
 	picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	picture.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	picture.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	# Pixel art and small pictures blown up stay crisp; renders are smooth.
+	picture.resized.connect(_sample)
 	_frame.add_child(picture)
 	var middle := VBoxContainer.new()
 	middle.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -177,6 +179,7 @@ func show_change(preview: Dictionary) -> void:
 	var media: Array = preview.get("media", [])
 	var texture := ROW.first_picture(media)
 	picture.texture = texture
+	_sample()
 	_sound = ""
 	for item: Variant in media:
 		if item is Dictionary and str(item.get("media", "")) == "audio" and item.has("after"):
@@ -253,6 +256,14 @@ func facts_text() -> String:
 ## What the picture's place says ("Waiting for a free agent", the step), "" when hidden.
 func words_text() -> String:
 	return _words.text if _words.visible else ""
+
+
+func _sample() -> void:
+	var texture := picture.texture
+	if texture == null or texture.get_width() <= 0 or texture.get_height() <= 0:
+		return
+	var cover := maxf(picture.size.x / texture.get_width(), picture.size.y / texture.get_height())
+	picture.texture_filter = GLANCE.picture_filter(texture, texture.get_size() * cover)
 
 
 func _has_media() -> bool:

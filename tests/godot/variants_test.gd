@@ -170,6 +170,10 @@ func _run() -> void:
 		(ways[0].get("picture") as TextureRect).texture != null, "An image way shows its picture"
 	)
 	_check(str(ways[0].call("facts_text")).contains("Chunky"), "…and its facts")
+	await process_frame
+	var tile := ways[0].get("picture") as TextureRect
+	_check(tile.size.x > 32.0, "The way's picture fills its tile: %s" % tile.size)
+	_check(tile.texture_filter == CanvasItem.TEXTURE_FILTER_NEAREST, "…a small picture crisp")
 	var play := ways[1].get("_play") as Button
 	_check(play.visible, "A sound way has a play button")
 	play.pressed.emit()

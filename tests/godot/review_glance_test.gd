@@ -51,6 +51,7 @@ func _run() -> void:
 	await _check_filmstrip(panel)
 	await _check_model(panel)
 	await _check_blockout(panel)
+	await _check_scaling(panel)
 	await _check_narrow(panel)
 	await _check_card(panel)
 	panel.clear()
@@ -355,6 +356,87 @@ func _check_blockout(panel: PANEL) -> void:
 	_check(panel._media.texture().get_width() == 90, "The sketch stays")
 	_check(panel._media.far_texture() != plan, "The plan beside it is the earlier one")
 	_check(panel.glance().get("thumbnail") != null, "The card gets the plan's picture")
+
+
+## A noisy picture, like a photo or a render: many colours.
+func _photo(name: String, size: Vector2i) -> String:
+	var image := Image.create(size.x, size.y, false, Image.FORMAT_RGB8)
+	var noise := RandomNumberGenerator.new()
+	noise.seed = 7
+	for y: int in size.y:
+		for x: int in size.x:
+			image.set_pixel(x, y, Color(noise.randf(), noise.randf(), noise.randf()))
+	var path := _cache.path_join(name)
+	image.save_png(path)
+	return path
+
+
+## Small pictures fill the frame, crisp; photos smooth; a pair shares the width; the frame
+## grows with the panel's width, and stays shorter under a row of ways.
+func _check_scaling(panel: PANEL) -> void:
+	var media := [
+		{
+			"path": "art/textures/tile.png",
+			"media": "image",
+			"before": _image("px-a.png", Color(0.7, 0.5, 0.3), Vector2i(16, 16)),
+			"after": _image("px-b.png", Color(0.4, 0.3, 0.2), Vector2i(16, 16)),
+		},
+		{
+			"path": "art/photo.png",
+			"media": "image",
+			"after": _photo("photo.png", Vector2i(400, 300))
+		},
+	]
+	panel.show_file_review("Retint the tile", "", media, [])
+	await _frames(3)
+	var swipe: Control = panel._media.swipe()
+	var frame := float(panel._media.frame_height())
+	var least := float(panel._media._frame.custom_minimum_size.y)
+	_check(least > 120.0, "The frame grows with a wide panel: %.0f" % least)
+	var shown: Rect2 = swipe.call("fit", Vector2(16, 16))
+	_check(
+		shown.size.y >= swipe.size.y - 1.0 and shown.size.y > 16.0 * 4.0,
+		"A 16 px texture fills the frame's height: %s in %s" % [shown.size, swipe.size]
+	)
+	_check(swipe.texture_filter == CanvasItem.TEXTURE_FILTER_NEAREST, "…and stays crisp")
+	var tiles: Array = panel._media.filmstrip().tiles()
+	_check(tiles[0].texture_filter == CanvasItem.TEXTURE_FILTER_NEAREST, "Its tile is crisp too")
+	panel._media.select_item(1)
+	await _frames(3)
+	var picture: TextureRect = panel._media._front.main
+	_check(picture.texture != null and picture.size.y >= frame - 1.0, "A photo fills the frame")
+	_check(picture.texture_filter == CanvasItem.TEXTURE_FILTER_LINEAR, "…smoothly")
+	var blockout := [
+		{
+			"path": "design/blockouts/keep.toml",
+			"media": "image",
+			"after": _image("plan-s.png", Color(0.3, 0.32, 0.36), Vector2i(60, 80)),
+			"reference": _image("sketch-s.png", Color(0.95, 0.94, 0.9), Vector2i(60, 80)),
+		}
+	]
+	panel.show_file_review("Build the keep", "", blockout, [])
+	await _frames(3)
+	var view = panel._media._front
+	var sketch: TextureRect = view.main
+	var plan: TextureRect = view.far
+	frame = float(panel._media.frame_height())
+	_check(
+		sketch.size.y >= frame - 1.0 and absf(sketch.size.x - frame * 0.75) <= 2.0,
+		"The sketch fills the frame's height at its shape: %s" % sketch.size
+	)
+	_check(absf(plan.size.x - sketch.size.x) <= 1.0, "The plan shares the space equally")
+	_check(sketch.texture_filter == CanvasItem.TEXTURE_FILTER_NEAREST, "A small sketch is crisp")
+	panel.set_under_ways(true)
+	await _frames(3)
+	var under := float(panel._media._frame.custom_minimum_size.y)
+	_check(under < least, "Under a row of ways the frame is shorter: %.0f" % under)
+	panel.set_under_ways(false)
+	_host.size = Vector2(340, 420)
+	await _frames(4)
+	var narrow := float(panel._media._frame.custom_minimum_size.y)
+	_check(narrow < least, "A narrow panel has a smaller frame: %.0f" % narrow)
+	_host.size = Vector2(900, 560)
+	await _frames()
 
 
 func _check_narrow(panel: PANEL) -> void:

@@ -175,6 +175,11 @@ func show_file_review(
 
 ## The review event's extra fields: the agent's "facts", the "checks" that ran, the reviewer's
 ## "review_notes" and "reviewer_status". Missing keys keep what is shown.
+## Keep the picture shorter while a row of ways (the variant strip) sits above the panel.
+func set_under_ways(under: bool) -> void:
+	_media.frame_max = MEDIA.FRAME_UNDER_WAYS if under else MEDIA.FRAME_MAX
+
+
 func show_glance(extra: Dictionary) -> void:
 	if _state == "empty":
 		return

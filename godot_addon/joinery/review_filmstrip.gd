@@ -11,6 +11,7 @@ signal chosen(index: int)
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
+const GLANCE := preload("review_glance.gd")
 ## Tile side, in control heights ("lg").
 const TILE := 1.25
 
@@ -35,6 +36,15 @@ class Tile:
 		# The ring is the focus mark; the theme's focus box would draw a second one.
 		for state: String in ["focus", "normal", "hover", "pressed", "hover_pressed"]:
 			add_theme_stylebox_override(state, StyleBoxEmpty.new())
+
+	## Set the picture, sampled crisp or smooth for the tile it covers.
+	func set_picture(value: Texture2D) -> void:
+		picture = value
+		if picture != null and picture.get_width() > 0 and picture.get_height() > 0:
+			var side := maxf(custom_minimum_size.x, size.x)
+			var cover := maxf(side / picture.get_width(), side / picture.get_height())
+			texture_filter = GLANCE.picture_filter(picture, picture.get_size() * cover)
+		queue_redraw()
 
 	func _draw() -> void:
 		var rect := Rect2(Vector2.ZERO, size)
@@ -151,8 +161,7 @@ func select(index: int) -> void:
 ## Give the tile at [param index] its picture once it is ready.
 func set_picture(index: int, picture: Texture2D) -> void:
 	if index >= 0 and index < _tiles.size():
-		_tiles[index].picture = picture
-		_tiles[index].queue_redraw()
+		_tiles[index].set_picture(picture)
 
 
 ## The index of the ringed tile.
@@ -194,4 +203,5 @@ func _size_tiles() -> void:
 	var side := ceilf(UI_THEME.control_h(self, "lg") * TILE)
 	for tile: Tile in _tiles:
 		tile.custom_minimum_size = Vector2(side, side)
+		tile.set_picture(tile.picture)
 	custom_minimum_size.y = side

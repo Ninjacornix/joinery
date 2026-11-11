@@ -181,12 +181,17 @@ func _show_strip(group: String, id: String) -> void:
 			if strip.call("has_way", str(_previews[each].get("task_id", ""))):
 				strip.call("on_event", _previews[each])
 	strip.visible = true
+	panel.call("set_under_ways", true)
 	for way: Control in strip.call("ways"):
 		way.set("chosen", str(way.get("transaction_id")) == id)
 		way.call("_restyle")
 
 
 func _drop_strip() -> void:
+	panel.call("set_under_ways", false)
+	var main: Control = _tab.call("detail")
+	if main != null and main.has_method("set_under_ways"):
+		main.call("set_under_ways", false)
 	if strip != null:
 		strip.queue_free()
 		strip = null
@@ -220,6 +225,9 @@ func over_main(id: String) -> void:
 	if not ways.any(func(way: Control) -> bool: return str(way.get("transaction_id")) == id):
 		return
 	strip.visible = true
+	var main: Control = _tab.call("detail")
+	if main != null and main.has_method("set_under_ways"):
+		main.call("set_under_ways", true)
 	for way: Control in ways:
 		way.set("chosen", str(way.get("transaction_id")) == id)
 		way.call("_restyle")

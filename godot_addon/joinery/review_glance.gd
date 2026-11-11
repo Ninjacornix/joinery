@@ -20,6 +20,12 @@ const WARM_HUE := 0.08
 const HUE_SHIFT := 0.03
 ## Below this mean saturation a picture is grey and has no warmth to speak of.
 const MIN_SATURATION := 0.12
+## A picture this small (pixels on its longest side) is drawn crisp when blown up.
+const CRISP_SIDE := 256
+## A larger picture with at most this many colours (pixel art, a flat drawing) is too.
+const CRISP_COLOURS := 64
+## Samples per side when counting a picture's colours.
+const CRISP_SAMPLE := 64
 ## Severity order of reviewer notes, worst last.
 const SEVERITIES := ["info", "warn", "block"]
 
@@ -227,3 +233,45 @@ static func _mean(image: Image) -> Color:
 		for x: int in 8:
 			total += small.get_pixel(x, y)
 	return total / 64.0
+
+
+## How a picture shown at [param shown] pixels is sampled: nearest-neighbour when it is blown
+## up and is pixel art or a small or flat drawing (a sketch, a plan, a 32 px texture), so its
+## pixels stay crisp; smooth for photos and renders, and for anything shown smaller.
+static func picture_filter(texture: Texture2D, shown: Vector2) -> CanvasItem.TextureFilter:
+	if texture == null or texture.get_width() <= 0 or texture.get_height() <= 0:
+		return CanvasItem.TEXTURE_FILTER_LINEAR
+	var scale := minf(shown.x / texture.get_width(), shown.y / texture.get_height())
+	if scale <= 1.0 or not crisp(texture):
+		return CanvasItem.TEXTURE_FILTER_LINEAR
+	return CanvasItem.TEXTURE_FILTER_NEAREST
+
+
+## True for pixel art and small or flat pictures: at most [constant CRISP_SIDE] pixels on a
+## side, or at most [constant CRISP_COLOURS] colours in a sample of its pixels. Remembered on
+## the texture.
+static func crisp(texture: Texture2D) -> bool:
+	if texture.has_meta(&"joinery_crisp"):
+		return bool(texture.get_meta(&"joinery_crisp"))
+	var found := maxi(texture.get_width(), texture.get_height()) <= CRISP_SIDE
+	if not found:
+		var image := texture.get_image()
+		if image != null and not image.is_empty():
+			if image.is_compressed():
+				image = image.duplicate() as Image
+				image.decompress()
+			var colours := {}
+			var step := Vector2i(
+				maxi(1, image.get_width() / CRISP_SAMPLE),
+				maxi(1, image.get_height() / CRISP_SAMPLE)
+			)
+			for y: int in range(0, image.get_height(), step.y):
+				for x: int in range(0, image.get_width(), step.x):
+					colours[image.get_pixel(x, y).to_rgba32()] = true
+					if colours.size() > CRISP_COLOURS:
+						break
+				if colours.size() > CRISP_COLOURS:
+					break
+			found = colours.size() <= CRISP_COLOURS
+	texture.set_meta(&"joinery_crisp", found)
+	return found
