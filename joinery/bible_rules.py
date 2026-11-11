@@ -218,6 +218,39 @@ class AccessibilityRules(_Strict):
     ui_folders: list[str] = ["ui", "core/ui", "game/ui", "features"]
 
 
+#: Godot's Environment.tonemap_mode values, by name.
+TONEMAPS = {"linear": 0, "reinhard": 1, "filmic": 2, "aces": 3, "agx": 4}
+
+
+class EnvironmentRules(_Strict):
+    """The look of every Environment (WorldEnvironment) in the project."""
+
+    #: Where Environment resources (.tres) and scenes holding one (.tscn) are checked.
+    folders: list[str] = [""]
+    tonemap: Literal["linear", "reinhard", "filmic", "aces", "agx"] | None = None
+    exposure: tuple[float, float] | None = None
+    #: Fog on (true) or off (false); absent = not checked.
+    fog: bool | None = None
+    glow: bool | None = None
+    #: Colour grading (adjustment_*) ranges; 1 is unchanged.
+    brightness: tuple[float, float] | None = None
+    contrast: tuple[float, float] | None = None
+    saturation: tuple[float, float] | None = None
+
+    def model_post_init(self, _context: object) -> None:
+        for name in ("exposure", "brightness", "contrast", "saturation"):
+            _range(getattr(self, name), f"environment.{name}")
+
+
+class UiRules(_Strict):
+    """UI themes against the bible: their fonts and their colours."""
+
+    #: Font files UI resources may use, such as "ui/fonts/inter.ttf". Empty: not checked.
+    fonts: list[str] = []
+    #: Theme and StyleBox colours stay within palette.max_delta_e of the palette.
+    palette_colours: bool = False
+
+
 class BibleRules(_Strict):
     model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
 
@@ -232,6 +265,8 @@ class BibleRules(_Strict):
     sprites: SpriteRules = SpriteRules()
     palette: PaletteRules = PaletteRules()
     accessibility: AccessibilityRules = AccessibilityRules()
+    environment: EnvironmentRules = EnvironmentRules()
+    ui: UiRules = UiRules()
 
     def model_post_init(self, _context: object) -> None:
         if self.schema_version > SCHEMA:
