@@ -541,6 +541,16 @@ class TurnController:
             final = self.attempts >= MAX_SUBMITS or any(
                 not problem.fixable for problem in problems
             )
+            # What the checks found, for logs and smoke runs: the editor shows
+            # only the status line, the agent gets the same list as its result.
+            self.emit(
+                {
+                    "kind": "check_problems",
+                    "attempt": self.attempts,
+                    "final": final,
+                    "problems": [problem.as_dict() for problem in problems],
+                }
+            )
             if final:
                 await self._drop("failed")
                 return self._result(

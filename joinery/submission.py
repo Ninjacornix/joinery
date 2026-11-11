@@ -320,14 +320,11 @@ async def checks(
                     argv, root, OFFLINE_SECONDS, readonly=True
                 ),
             )
-        if not found:
-            return []
+        # One problem per finding, each naming its file, so the author sees a
+        # list it can work through rather than one long joined line.
         return [
-            Problem(
-                "art_bible",
-                "Art bible check failed: " + "; ".join(found),
-                _paths(found),
-            )
+            Problem("art_bible", "Art bible check failed: " + line, _paths([line]))
+            for line in found
         ]
 
     async def godot_checks() -> list[Problem]:
