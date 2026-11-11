@@ -54,19 +54,29 @@ func _unhandled_input(event: InputEvent) -> void:
 
 
 ## Adds or replaces an entry. `menu` is `&"main"` or `&"pause"`; lower `order`
-## comes first; `enabled` (optional) returns whether the entry can be used.
+## comes first; `enabled` (optional) returns whether the entry can be used;
+## `reason` (optional) returns why it cannot (an English msgid, "" for none),
+## shown under the disabled entry.
 func add_entry(
 	menu: StringName,
 	id: StringName,
 	label: String,
 	action: Callable,
 	order: int = 100,
-	enabled: Callable = Callable()
+	enabled: Callable = Callable(),
+	reason: Callable = Callable()
 ) -> void:
 	if not _entries.has(menu):
 		_entries[menu] = {}
 	var entries: Dictionary = _entries[menu]
-	entries[id] = {"id": id, "label": label, "action": action, "order": order, "enabled": enabled}
+	entries[id] = {
+		"id": id,
+		"label": label,
+		"action": action,
+		"order": order,
+		"enabled": enabled,
+		"reason": reason,
+	}
 
 
 func remove_entry(menu: StringName, id: StringName) -> void:
@@ -213,11 +223,20 @@ func _menu_page(menu: StringName, heading: String) -> Control:
 		var item: Button = UiStyle.button(str(entry["label"]))
 		item.name = str(entry["id"])
 		var enabled: Callable = entry["enabled"]
+		var why: String = ""
 		if enabled.is_valid() and not bool(enabled.call()):
 			item.disabled = true
 			item.focus_mode = Control.FOCUS_NONE
+			var reason: Callable = entry.get("reason", Callable())
+			if reason.is_valid():
+				why = str(reason.call())
 		item.pressed.connect(entry["action"])
 		column.add_child(item)
+		if not why.is_empty():
+			item.tooltip_text = why
+			var note: Label = UiStyle.hint(why)
+			note.name = "%s_reason" % entry["id"]
+			column.add_child(note)
 	var screen: Control = UiStyle.page(heading, column)
 	var heading_label: Node = screen.find_child("Column", true, false).get_child(0)
 	if heading_label is Label:
