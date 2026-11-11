@@ -286,8 +286,11 @@ def test_cli_stdio_conversation_and_eof_cleanup(
                 ) from None
             if not line:
                 err = await process.stderr.read() if process.stderr else b""
+                # The exit code tells a crash (e.g. 0xC0000005) from a clean exit.
+                code = await asyncio.wait_for(process.wait(), timeout=5)
                 raise AssertionError(
-                    "the chat host exited: " + err.decode(errors="replace")[-2000:]
+                    f"the chat host exited with {code:#x}: "
+                    + err.decode(errors="replace")[-2000:]
                 )
             return json.loads(line)
 
