@@ -756,7 +756,7 @@ func _preview_scene_edit(event: Dictionary) -> Dictionary:
 			scene.free()
 		return result
 	_edits.owns_preview_root = empty
-	_flow.live_ready(_edits.summary)
+	_flow.live_ready(_edits.summary, str(event.get("owner", "")))
 	EditorInterface.set_main_screen_editor("3D")
 	if not empty:
 		var selection := EditorInterface.get_selection()
@@ -775,7 +775,7 @@ func _accept_scene_edit(quiet := false) -> void:
 	if not _file_review.is_empty():
 		_review_applying(true)
 		_file_accept_live_id = ""
-		if _edits.pending():
+		if _edits.pending() and _flow.owns_live():
 			var ready: Dictionary = _edits.prepare_accept()
 			if not ready["success"]:
 				_review_failed(str(ready["message"]))
@@ -818,7 +818,7 @@ func _accept_scene_edit(quiet := false) -> void:
 		return
 	if not quiet:
 		_close_review(str(result["message"]), "success")
-	_chat.finish_live_review()
+	_chat.finish_live_review(true)
 	EditorInterface.mark_scene_as_unsaved()
 	var selection := EditorInterface.get_selection()
 	selection.clear()
@@ -839,9 +839,10 @@ func _reject_scene_edit(message: String = REJECTED, kind: String = "rejected") -
 			_chat.decide_files(str(_file_review["transaction_id"]), false)
 		else:
 			_review_failed("Journeyman isn't connected. Reconnect, then discard again.")
-	if _edits != null and _edits.pending():
+	# A task's live preview beside the main request's files stays for its own decision.
+	if _edits != null and _edits.pending() and (not files or _flow.owns_live()):
 		_edits.reject()
-		_chat.finish_live_review()
+		_chat.finish_live_review(false)
 		if not files:
 			_close_review(message, kind)
 		_dock.on_selection_changed()
@@ -901,9 +902,10 @@ func _on_file_decision(event: Dictionary) -> void:
 			_open_review(_edits.summary)
 		return
 	_accepted_changes[str(event.get("transaction_id", ""))] = event.get("changes", [])
-	if _edits.pending():
+	if _edits.pending() and _flow.owns_live():
 		_accept_scene_edit(true)
 	_close_review(ACCEPTED if message.is_empty() else message, "success")
+	_flow.reopen_live()
 	var files := EditorInterface.get_resource_filesystem()
 	files.scan()
 	await get_tree().process_frame

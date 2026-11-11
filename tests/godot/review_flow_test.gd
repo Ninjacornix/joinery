@@ -1,6 +1,7 @@
 extends SceneTree
 ## review_flow.gd: a live edit's review waits for Joinery's in_review, a dropped turn drops
-## the preview, a file review opens on file_preview, and renders reach the panel and card.
+## the preview, a file review opens on file_preview, and renders reach the panel and card. A
+## parallel task's live edit follows that task's turn and never opens over the main request's.
 
 const FLOW := preload("res://addons/joinery/review_flow.gd")
 const CARD := preload("res://addons/joinery/sidebar_change_card.gd")
@@ -14,6 +15,12 @@ class FakeChat:
 	signal file_preview(event: Dictionary)
 	signal turn_state(event: Dictionary)
 	signal review_media(event: Dictionary)
+	signal task_event(event: Dictionary)
+	signal task_review(transaction_id: String)
+	var live: Array[bool] = []
+
+	func finish_live_review(accepted := true) -> void:
+		live.append(accepted)
 
 
 ## The live preview's pending state (scene_edits.gd).
@@ -23,6 +30,9 @@ class FakeEdits:
 
 	func pending() -> bool:
 		return waiting
+
+	func reject() -> void:
+		waiting = false
 
 
 ## The request's card in the sidebar (sidebar_change_card.gd).
@@ -151,6 +161,35 @@ func _run() -> void:
 	_check(card._thumb.texture == null, "No thumbnail before the render exists")
 	_check(not card._ready_row.visible, "No empty picture row while the render runs")
 	card.queue_free()
+
+	# A task's live edit, once the main request is idle: its own turn moves its review.
+	plugin.calls.clear()
+	plugin._file_review = {}
+	plugin._edits.waiting = true
+	flow.live_ready("Move the lamp", "t1")
+	chat.turn_state.emit({"state": "in_review"})
+	_check(plugin.calls.is_empty(), "The main request's turn doesn't move a task's preview")
+	chat.task_event.emit({"kind": "turn_state", "task_id": "t2", "state": "in_review"})
+	_check(plugin.calls.is_empty(), "Nor does another task's")
+	plugin._file_review = {"transaction_id": "m1"}
+	chat.task_event.emit({"kind": "turn_state", "task_id": "t1", "state": "in_review"})
+	_check(plugin.calls.is_empty(), "It never opens over the main request's file review")
+	_check(not flow.owns_live(), "The main request's files are decided without it")
+	plugin._file_review = {}
+	flow.reopen_live()
+	_check(plugin.calls == [["open", "Move the lamp"]], "It opens once that review is decided")
+	plugin.calls.clear()
+	chat.task_review.emit("")
+	_check(plugin.calls == [["open", "Move the lamp"]], "Or from the task card's Review link")
+	plugin.calls.clear()
+	flow.live_ready("Move the rug", "t1")
+	plugin._file_review = {"transaction_id": "m1"}
+	var stopped := {"kind": "turn_state", "task_id": "t1", "state": "idle", "reason": "stopped"}
+	chat.task_event.emit(stopped)
+	_check(plugin.calls.is_empty(), "A stopped task leaves the main request's review alone")
+	_check(not plugin._edits.waiting, "Its own preview goes")
+	_check(chat.live == [false], "The host hears it was dropped")
+	_check(flow.owns_live(), "The scene is free again")
 
 	flow.queue_free()
 	chat.queue_free()

@@ -375,9 +375,11 @@ func rollback_files(identifier: String) -> void:
 		_job.send_line(JSON.stringify({"kind": "rollback_decision", "transaction_id": identifier}))
 
 
-func finish_live_review() -> void:
+## The live preview on screen was decided ([param accepted]) or dropped: the agent that made it
+## hears, and the scene is free for the next one.
+func finish_live_review(accepted := true) -> void:
 	if _job != null and _connected:
-		_job.send_line(JSON.stringify({"kind": "live_decision"}))
+		_job.send_line(JSON.stringify({"kind": "live_decision", "accepted": accepted}))
 
 
 func review_art() -> void:

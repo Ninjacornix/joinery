@@ -7,34 +7,60 @@ extends Node
 ## after renders arrive. A live scene edit shows in the viewport at once, but its Accept and
 ## Discard wait here until the change is in review; a turn that drops its change drops the
 ## preview too.
+##
+## Once Journeyman's own request is idle, a parallel task may make the live edit (ADR 0036): its
+## preview is followed through that task's turn instead, and its review never opens over a
+## file review of the main request; it opens after it, or from the task card's Review link.
 
 ## Reasons a turn ends without its change ("idle" with one of these): the preview goes.
 const DROPPED := ["failed", "cancelled", "stopped", "needs_user"]
 
 ## The plugin (plugin.gd): its review panel, sidebar and live preview.
 var _plugin: Object
+var _chat: Node
 var _live_summary := ""
 var _live_waiting := false
+## The task whose live edit is on screen ("" for Journeyman's own request).
+var _live_owner := ""
 
 
 ## Follow [param chat] (chat_bridge.gd) for [param plugin].
 func setup(plugin: Object, chat: Node) -> void:
 	_plugin = plugin
+	_chat = chat
 	var links := {
 		"file_preview": _on_file_preview,
 		"turn_state": _on_turn_state,
 		"review_media": _on_review_media,
+		"task_event": _on_task_event,
+		"task_review": _on_task_review,
 	}
 	for signal_name: String in links:
 		if chat.has_signal(signal_name):
 			chat.connect(signal_name, links[signal_name])
 
 
-## A live edit is on screen in the viewport ([param summary] names it). Its review opens once
-## the change is in review.
-func live_ready(summary: String) -> void:
+## A live edit is on screen in the viewport ([param summary] names it; [param owner] is the
+## task that made it, "" for Journeyman's own request). Its review opens once the change is in
+## review.
+func live_ready(summary: String, owner := "") -> void:
 	_live_summary = summary
 	_live_waiting = true
+	_live_owner = owner
+
+
+## True when the live preview on screen, if any, belongs to Journeyman's own request, so it is
+## decided together with that request's files.
+func owns_live() -> bool:
+	return _live_owner.is_empty() or not _pending()
+
+
+## Open a task's live edit for review, unless the main request's file review is on screen.
+func reopen_live() -> void:
+	if _live_owner.is_empty() or _live_waiting or not _pending():
+		return
+	if (_plugin.get("_file_review") as Dictionary).is_empty():
+		_plugin.call("_open_review", _live_summary)
 
 
 ## True while a live edit waits for its change to reach review.
@@ -43,19 +69,46 @@ func live_waiting() -> bool:
 
 
 func _on_turn_state(event: Dictionary) -> void:
+	if _live_owner.is_empty():
+		_follow(event)
+
+
+## A task's events: the turn of the task whose live edit is on screen moves its review.
+func _on_task_event(event: Dictionary) -> void:
+	if str(event.get("kind", "")) != "turn_state" or _live_owner.is_empty():
+		return
+	if str(event.get("task_id", "")) == _live_owner:
+		_follow(event)
+
+
+## A task card's Review link; a live edit has no transaction ("").
+func _on_task_review(transaction_id: String) -> void:
+	if transaction_id.is_empty():
+		reopen_live()
+
+
+func _follow(event: Dictionary) -> void:
 	if not _live_waiting:
 		return
 	var state := str(event.get("state", ""))
 	if state == "in_review":
 		_live_waiting = false
-		var edits: Variant = _plugin.get("_edits")
-		var pending := edits is Object and bool((edits as Object).call("pending"))
 		# A file review shows the live edit with it; otherwise the scene review opens.
-		if pending and (_plugin.get("_file_review") as Dictionary).is_empty():
+		if _pending() and (_plugin.get("_file_review") as Dictionary).is_empty():
 			_plugin.call("_open_review", _live_summary)
 	elif state == "idle" and str(event.get("reason", "")) in DROPPED:
 		_live_waiting = false
-		_plugin.call("_reject_scene_edit", "", "info")
+		if owns_live() or (_plugin.get("_file_review") as Dictionary).is_empty():
+			_plugin.call("_reject_scene_edit", "", "info")
+		else:
+			# Only the task's preview goes; the main request's files stay in review.
+			(_plugin.get("_edits") as Object).call("reject")
+			_chat.call("finish_live_review", false)
+
+
+func _pending() -> bool:
+	var edits: Variant = _plugin.get("_edits")
+	return edits is Object and bool((edits as Object).call("pending"))
 
 
 func _on_file_preview(event: Dictionary) -> void:
