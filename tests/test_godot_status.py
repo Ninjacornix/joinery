@@ -1,10 +1,11 @@
-"""Godot's status tells the truth: worker image, pinned install integrity and "Open in"."""
+"""Godot's status tells the truth: its worker image, Docker and "Open in".
+
+The pinned install itself is covered by tests/test_godot_worker.py.
+"""
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, ClassVar
@@ -12,100 +13,10 @@ from typing import Any, ClassVar
 import pytest
 
 from joinery import desktop, server_install
-from joinery.catalog import load_catalog
 from joinery.mcp_runtime import Readiness, ServerSpec
 from joinery.workspace import index, open_asset
-from tests.test_mcp_install_workflows import fake_commands
 
-
-@pytest.fixture
-def cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    root = tmp_path / "server cache"
-    monkeypatch.setenv("JOINERY_SERVER_CACHE", str(root))
-    monkeypatch.setattr(
-        server_install.shutil,
-        "which",
-        lambda name: "/runtime/node" if name == "node" else None,
-    )
-    return root
-
-
-def legacy_godot_install() -> Path:
-    """An install written before source hashes were recorded."""
-    preferred = load_catalog().get("godot").mcp
-    assert preferred is not None
-    root = server_install.installation("godot")
-    source = root / "source"
-    (source / "build").mkdir(parents=True)
-    (source / "build/index.js").write_text("// built\n")
-    lock = source / "package-lock.json"
-    lock.write_text('{"packages":{}}')
-    spec = ServerSpec(
-        name=preferred.server,
-        command="/runtime/node",
-        args=[str(source / "build/index.js")],
-        source=preferred.repo,
-        revision=preferred.ref,
-    )
-    (root / "server.json").write_text(
-        json.dumps(
-            {
-                "spec": spec.model_dump(),
-                "lock_sha256": hashlib.sha256(lock.read_bytes()).hexdigest(),
-            }
-        )
-    )
-    return root
-
-
-# --- Pinned install integrity ---------------------------------------------------
-
-
-def test_install_without_a_recorded_tree_hash_must_be_reinstalled(cache: Path) -> None:
-    legacy_godot_install()
-    with pytest.raises(
-        server_install.ReinstallRequired, match="no recorded source hash"
-    ):
-        server_install.load_installed("godot")
-
-
-def test_install_replaces_an_untrusted_copy_and_records_its_tree(
-    cache: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root = legacy_godot_install()
-    calls = fake_commands(monkeypatch, "godot")
-    spec = server_install.install("godot")
-    assert calls, "the pin was installed again"
-    metadata = json.loads((root / "server.json").read_text())
-    assert metadata["tree_sha256"] == server_install.tree_hash(root / "source")
-    assert server_install.load_installed("godot") == spec
-    assert not list(root.parent.glob(".stale-*"))
-    assert not list(root.parent.glob(".install-*"))
-
-
-def test_failed_reinstall_keeps_the_old_copy(
-    cache: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    root = legacy_godot_install()
-    before = (root / "server.json").read_text()
-    fake_commands(monkeypatch, "godot", revision="f" * 40)
-    with pytest.raises(ValueError, match="pinned revision"):
-        server_install.install("godot")
-    assert (root / "server.json").read_text() == before
-
-
-def test_configured_says_why_godot_cannot_start(cache: Path, tmp_path: Path) -> None:
-    legacy_godot_install()
-    project = tmp_path / "game"
-    project.mkdir()
-    (project / "joinery.toml").write_text('[tools]\nenabled = ["godot"]\n')
-    _specs, missing = server_install.configured(project)
-    godot = next(item for item in missing if item.name == "godot")
-    assert godot.state == "not-installed"
-    assert "no recorded source hash" in godot.detail
-
-
-# --- inspect_servers checks the worker image Godot writes in ------------------
+# --- inspect_servers checks the worker image Godot runs in --------------------
 
 
 class FakeConnection:
@@ -141,7 +52,12 @@ def servers(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     project = tmp_path / "game"
     project.mkdir()
     specs = [
-        ServerSpec(name="godot", command="/runtime/node", args=["index.js"]),
+        ServerSpec(
+            name="godot",
+            command="docker",
+            args=["run", "joinery-mcp-worker"],
+            worker_image="joinery-mcp-worker",
+        ),
         ServerSpec(name="joinery-registry", command="python", source="first-party"),
     ]
     monkeypatch.setattr(server_install, "configured", lambda _p: (specs, []))
@@ -165,7 +81,11 @@ def test_godot_without_its_worker_image_is_runtime_missing(
         images.append(image)
         return False
 
+    async def running() -> str:
+        return ""
+
     monkeypatch.setattr(server_install, "_image_present", absent)
+    monkeypatch.setattr(server_install, "_docker_problem", running)
     found = inspect(servers)
     assert images == ["joinery-mcp-worker"]
     assert found["godot"]["state"] == "runtime-missing"
@@ -177,40 +97,39 @@ def test_godot_without_its_worker_image_is_runtime_missing(
     assert found["joinery-registry"]["summary"] == "Project registry: ready"
 
 
+def test_godot_without_docker_says_needs_docker(
+    servers: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def absent(image: str) -> bool:
+        return False
+
+    async def stopped() -> str:
+        return "Docker is not running."
+
+    monkeypatch.setattr(server_install, "_image_present", absent)
+    monkeypatch.setattr(server_install, "_docker_problem", stopped)
+    found = inspect(servers, probe=True)
+    assert found["godot"]["state"] == "runtime-missing"
+    assert found["godot"]["detail"].startswith("Needs Docker: Docker is not running.")
+    assert (
+        found["godot"]["summary"]
+        == "Godot tools: Needs Docker. Start Docker, then check again."
+    )
+    assert "godot" not in FakeConnection.started
+
+
 def test_godot_ready_names_its_operations_and_the_worker(
     servers: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def present(image: str) -> bool:
         return True
 
-    async def version(check: Any) -> tuple[int, str]:
-        assert check.image == "joinery-mcp-worker"
-        assert tuple(check.argv) == ("godot", "--version", "--headless")
-        return 0, "4.7.2.stable.official.ed1daf0bf\n"
-
     monkeypatch.setattr(server_install, "_image_present", present)
-    monkeypatch.setattr(server_install, "_worker_run", version)
     found = inspect(servers, probe=True)
     assert found["godot"]["state"] == "discovered" and found["godot"]["inspected"]
     assert (
         found["godot"]["summary"] == "Godot tools ready (3 operations, offline worker)"
     )
-
-
-def test_godot_missing_from_the_worker_is_reported(
-    servers: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    async def present(image: str) -> bool:
-        return True
-
-    async def broken(check: Any) -> tuple[int, str]:
-        return 127, "godot: not found"
-
-    monkeypatch.setattr(server_install, "_image_present", present)
-    monkeypatch.setattr(server_install, "_worker_run", broken)
-    found = inspect(servers, probe=True)
-    assert found["godot"]["state"] == "runtime-missing"
-    assert "missing from the offline worker" in found["godot"]["detail"]
 
 
 def test_a_probe_that_returns_an_error_is_not_inspected(
@@ -226,18 +145,15 @@ def test_a_probe_that_returns_an_error_is_not_inspected(
     assert "project.godot not found" in found["godot"]["summary"]
 
 
-def test_status_without_probe_skips_the_worker_run(
+def test_status_without_probe_only_connects(
     servers: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     async def present(image: str) -> bool:
         return True
 
-    async def never(check: Any) -> tuple[int, str]:
-        raise AssertionError("no worker run without --probe")
-
     monkeypatch.setattr(server_install, "_image_present", present)
-    monkeypatch.setattr(server_install, "_worker_run", never)
-    assert inspect(servers)["godot"]["state"] == "discovered"
+    found = inspect(servers)["godot"]
+    assert found["state"] == "discovered" and not found["inspected"]
 
 
 def test_describe_wording() -> None:

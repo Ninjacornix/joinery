@@ -6,14 +6,16 @@ import ast
 import asyncio
 import contextlib
 import json
+import ntpath
 import os
+import re
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
 from typing import Any
 
 from jsonschema import Draft202012Validator
 from mcp import Client, StdioServerParameters
-from mcp.types import CallToolResult, Tool
+from mcp.types import CallToolResult, TextContent, Tool
 from pydantic import BaseModel, ConfigDict, Field
 
 from joinery.hook import mcp_violation
@@ -32,6 +34,92 @@ class ServerSpec(BaseModel):
     container_name: str = Field(default="", pattern=r"^$|^joinery-mcp-[a-f0-9]{32}$")
     worker_image: str = ""
     worker_scope: str = Field(default="", pattern=r"^$|^[a-f0-9]{32}$")
+
+
+#: Where an offline worker sees the folder it was given.
+WORKDIR = "/work"
+
+
+def map_paths(value: Any, project: PurePath, stage: PurePath) -> Any:
+    """Move every absolute path under `project` to the same place under `stage`."""
+    if isinstance(value, dict):
+        return {k: map_paths(v, project, stage) for k, v in value.items()}
+    if isinstance(value, list):
+        return [map_paths(v, project, stage) for v in value]
+    if isinstance(value, str):
+        candidate: PurePath
+        original: PurePath
+        if isinstance(project, PureWindowsPath):
+            # PureWindowsPath also permits exercising Windows drive/UNC/case
+            # behavior on other hosts without changing the host's os.name.
+            candidate = PureWindowsPath(ntpath.normpath(value))
+            original = PureWindowsPath(ntpath.normpath(str(project)))
+        else:
+            candidate = Path(value)
+            original = Path(project)
+        if not candidate.is_absolute():
+            return value
+        if isinstance(project, Path):
+            candidate = Path(value).resolve()
+            original = project.resolve()
+        try:
+            relative = candidate.relative_to(original)
+        except ValueError:
+            return value
+        return str(stage.joinpath(*relative.parts))
+    return value
+
+
+def worker_root(spec: ServerSpec) -> Path | None:
+    """The host folder a worker server sees as /work, or None for a host server."""
+    if spec.command != "docker":
+        return None
+    for flag, value in zip(spec.args, spec.args[1:], strict=False):
+        if flag not in {"-v", "--volume"}:
+            continue
+        for suffix in (":" + WORKDIR, ":" + WORKDIR + ":ro"):
+            if value.endswith(suffix):
+                return Path(value[: -len(suffix)])
+    return None
+
+
+def rewrite_root(result: CallToolResult, root: str, new_root: PurePath) -> CallToolResult:
+    """Put every path under `root` in a result under `new_root` instead.
+
+    A worker answers with its own paths (/work/...), which mean nothing on the
+    host; the agent should read the project paths it asked about.
+    """
+    pattern = re.compile(
+        r"(?<![\w./\\-])"
+        + re.escape(root.rstrip("/\\"))
+        + r"((?:[/\\][^\s\"'`<>|,;:()\[\]{}]*)?)(?![\w-]|\.\w)"
+    )
+
+    def swap(match: re.Match[str]) -> str:
+        tail = [part for part in re.split(r"[/\\]", match.group(1)) if part]
+        return str(new_root.joinpath(*tail))
+
+    def text(value: Any) -> Any:
+        if isinstance(value, str):
+            return pattern.sub(swap, value)
+        if isinstance(value, dict):
+            return {k: text(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [text(v) for v in value]
+        return value
+
+    content = [
+        block.model_copy(update={"text": text(block.text)})
+        if isinstance(block, TextContent)
+        else block
+        for block in result.content
+    ]
+    return result.model_copy(
+        update={
+            "content": content,
+            "structured_content": text(result.structured_content),
+        }
+    )
 
 
 class Readiness(BaseModel):
@@ -336,16 +424,22 @@ class MCPConnection:
             raise ValueError(
                 f"Invalid {self.spec.name}.{tool} input at {location}: {error.validator} constraint failed."
             )
+        root = worker_root(self.spec)
+        if root is not None:
+            # The worker sees its folder as /work: host paths go in as worker
+            # paths, and worker paths come back as host paths.
+            arguments = map_paths(arguments, root, PurePosixPath(WORKDIR))
         future: asyncio.Future[CallToolResult] = (
             asyncio.get_running_loop().create_future()
         )
         await self._queue.put(_Request(tool, arguments, future, timeout))
         try:
-            return await asyncio.wait_for(asyncio.shield(future), timeout + 2)
+            result = await asyncio.wait_for(asyncio.shield(future), timeout + 2)
         except (TimeoutError, asyncio.CancelledError):
             future.cancel()
             await self.close()
             raise
+        return result if root is None else rewrite_root(result, WORKDIR, root)
 
     async def probe(self, tool: str, arguments: dict[str, Any]) -> CallToolResult:
         """Only the caller's explicit read-only app probe can establish inspected.

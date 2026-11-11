@@ -5,12 +5,11 @@ from __future__ import annotations
 import asyncio
 import difflib
 import json
-import ntpath
 import time
 import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractContextManager, nullcontext
-from pathlib import Path, PurePath, PurePosixPath, PureWindowsPath
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from mcp.types import CallToolResult, TextContent
@@ -33,11 +32,17 @@ from joinery.claims import (
 )
 from joinery.lockfile import asset_files
 from joinery.locking import record_custom_outputs
-from joinery.mcp_runtime import MCPConnection, PolicyStop, validate_arguments
+from joinery.mcp_runtime import (
+    MCPConnection,
+    PolicyStop,
+    rewrite_root,
+    validate_arguments,
+)
+from joinery.mcp_runtime import map_paths as _map_paths
 from joinery.read_access import read_only
 from joinery.rebase import Rebase, rebase, refresh_review
 from joinery.review import Render, plan, render
-from joinery.server_install import configured, installation
+from joinery.server_install import configured
 from joinery.stage_watch import StageWatch
 from joinery.submission import is_reference
 from joinery.timing import TurnTiming
@@ -52,6 +57,7 @@ from joinery.transactions import (
 from joinery.turn import Problem, scene_route
 from joinery.workers import (
     blender_worker,
+    godot_runtime_script,
     godot_worker,
     inkscape_worker,
     supercollider_worker,
@@ -146,35 +152,6 @@ def result_text(result: CallToolResult) -> str:
     return "\n".join(
         part.text for part in result.content if isinstance(part, TextContent)
     )
-
-
-def _map_paths(value: Any, project: PurePath, stage: PurePath) -> Any:
-    if isinstance(value, dict):
-        return {k: _map_paths(v, project, stage) for k, v in value.items()}
-    if isinstance(value, list):
-        return [_map_paths(v, project, stage) for v in value]
-    if isinstance(value, str):
-        candidate: PurePath
-        original: PurePath
-        if isinstance(project, PureWindowsPath):
-            # PureWindowsPath also permits exercising Windows drive/UNC/case
-            # behavior on other hosts without changing the host's os.name.
-            candidate = PureWindowsPath(ntpath.normpath(value))
-            original = PureWindowsPath(ntpath.normpath(str(project)))
-        else:
-            candidate = Path(value)
-            original = Path(project)
-        if not candidate.is_absolute():
-            return value
-        if isinstance(project, Path):
-            candidate = Path(value).resolve()
-            original = project.resolve()
-        try:
-            relative = candidate.relative_to(original)
-        except ValueError:
-            return value
-        return str(stage.joinpath(*relative.parts))
-    return value
 
 
 class ProjectGateway:
@@ -512,10 +489,6 @@ class ProjectGateway:
             arguments = _map_paths(arguments, self.project, self.transaction.stage)
             if not readonly and self.claims.contended():
                 self._watch_stage()
-        if connection.spec.container_name and self.transaction is not None:
-            arguments = _map_paths(
-                arguments, self.transaction.stage, PurePosixPath("/work")
-            )
         if server == "godot" and tool == "run_project":
             self._prepare_runtime()
         definition = connection.tools.get(tool)
@@ -554,6 +527,11 @@ class ProjectGateway:
                 if server == "blender" or server.startswith("joinery-")
                 else 60,
             )
+        if self.transaction is not None and connection is self.staged.get(server):
+            # The agent asked about project paths; answer in them, not the stage's.
+            stage = self.transaction.stage
+            for staged_root in dict.fromkeys((str(stage), str(stage.resolve()))):
+                result = rewrite_root(result, staged_root, self.project)
         if result.is_error and result_text(result).startswith("Rule Zero STOP:"):
             raise PolicyStop(result_text(result))
         if not readonly:
@@ -742,9 +720,7 @@ class ProjectGateway:
         if self.runtime_config is not None or self.transaction is None:
             return
         root = self.transaction.stage
-        script = (
-            installation("godot") / "source/build/scripts/mcp_interaction_server.gd"
-        )
+        script = godot_runtime_script()
         root_script = root / "mcp_interaction_server.gd"
         if root_script.is_file() and root_script.read_bytes() != script.read_bytes():
             raise ValueError(
@@ -775,9 +751,7 @@ class ProjectGateway:
             self.runtime_config if text.strip() == self.runtime_config.strip() else text
         )
         root_script = self.transaction.stage / "mcp_interaction_server.gd"
-        pinned = (
-            installation("godot") / "source/build/scripts/mcp_interaction_server.gd"
-        )
+        pinned = godot_runtime_script()
         if self.runtime_root_script:
             if (
                 root_script.is_file()

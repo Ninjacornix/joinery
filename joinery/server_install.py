@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 import json
 import os
-import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import uuid
 from pathlib import Path
@@ -21,15 +22,11 @@ from joinery.deps import check_deps
 from joinery.mcp_runtime import MCPConnection, Readiness, ServerSpec
 from joinery.platform_support import npm_argv, private_file
 from joinery.policy import command_violation, load_denylist
-from joinery.tools.base import McpProbe, WorkerExec
+from joinery.tools.base import McpProbe
 
 
 class ReinstallRequired(ValueError):
     """An installed pin cannot be trusted as it is; `install` replaces it."""
-
-
-class _CannotStart(ValueError):
-    """A selected server is installed but something it needs on the host is not."""
 
 
 def cache_root() -> Path:
@@ -81,7 +78,9 @@ def install(tool_id: str) -> ServerSpec:
             # Changed, swapped or recorded without a source hash: install the
             # pin again. The old copy is replaced only once the new one is built.
             pass
-    if tool_id not in {"godot", "blender", "supercollider", "inkscape"}:
+    if tool_id == "godot":
+        return _install_from_worker(tool_id, destination)
+    if tool_id not in {"blender", "supercollider", "inkscape"}:
         raise ValueError(
             f"{tool.name}: its app-specific pinned installer is not implemented yet."
         )
@@ -159,15 +158,7 @@ def install(tool_id: str) -> ServerSpec:
         lock = source / "package-lock.json"
         if not lock.is_file():
             raise ValueError("Pinned server has no dependency lockfile.")
-        packages = json.loads(lock.read_text()).get("packages", {})
-        for package in packages:
-            verdict = command_violation(
-                "npm install " + package.split("node_modules/")[-1], load_denylist()
-            )
-            if verdict is not None:
-                raise ValueError(
-                    "The pinned server dependency lock contains a denied package."
-                )
+        _lock_gate(lock)
         _run(["npm", "ci", "--ignore-scripts"], source)
         _run(["npm", "run", "build"], source)
         node = shutil.which("node")
@@ -188,6 +179,128 @@ def install(tool_id: str) -> ServerSpec:
             "tree_sha256": tree_hash(source),
         }
         (temporary / "server.json").write_text(json.dumps(metadata, indent=2) + "\n")
+        _place(temporary, destination)
+        return spec
+    finally:
+        if temporary.exists():
+            shutil.rmtree(temporary)
+
+
+def _lock_gate(lock: Path) -> None:
+    """Refuse a dependency lock that names any denied package."""
+    packages = json.loads(lock.read_text()).get("packages", {})
+    for package in packages:
+        verdict = command_violation(
+            "npm install " + package.split("node_modules/")[-1], load_denylist()
+        )
+        if verdict is not None:
+            raise ValueError(
+                "The pinned server dependency lock contains a denied package."
+            )
+
+
+#: Files the Godot MCP worker image carries next to its built server.
+_WORKER_FILES = (
+    "joinery-pin.json",
+    "package.json",
+    "package-lock.json",
+    "build/index.js",
+    "build/scripts/mcp_interaction_server.gd",
+)
+
+
+def _worker_files(image: str, directory: str, names: tuple[str, ...]) -> bytes:
+    """A tar of `names` under `directory` in an offline worker image."""
+    if shutil.which("docker") is None:
+        raise ValueError("Needs Docker: install and start Docker, then run Joinery setup.")
+    try:
+        done = subprocess.run(
+            [
+                "docker", "run", "--rm", "--pull", "never",
+                "--platform", "linux/amd64", "--network", "none",
+                "--entrypoint", "tar", image,
+                "-C", directory, "-cf", "-", *names,
+            ],
+            capture_output=True,
+            timeout=300,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ValueError(f"Needs Docker: {exc}") from exc
+    if done.returncode:
+        message = done.stderr.decode(errors="replace")
+        if "No such image" in message or "Unable to find image" in message:
+            raise ValueError(
+                f"The offline worker {image} is not built. Run Joinery setup."
+            )
+        if "daemon" in message.lower():
+            raise ValueError("Needs Docker: start Docker, then run Joinery setup.")
+        raise ValueError(
+            f"The offline worker {image} has no pinned Godot MCP. Rebuild the worker."
+        )
+    return done.stdout
+
+
+def _install_from_worker(tool_id: str, destination: Path) -> ServerSpec:
+    """Check the pinned server baked into the MCP worker and record it.
+
+    sandbox/mcp.Dockerfile builds the pinned commit from its hash-checked
+    archive and lockfile. Here the image's copy must name the catalog's pin and
+    pass the same dependency gate as any host install; only the in-game
+    inspector script is copied out, because the gateway compares against it.
+    """
+    from joinery.workers import GODOT_MCP_DIR, WORKER_IMAGE
+
+    tool = load_catalog().get(tool_id)
+    assert tool.mcp is not None
+    archive = _worker_files(WORKER_IMAGE, GODOT_MCP_DIR, _WORKER_FILES)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = Path(tempfile.mkdtemp(prefix=".install-", dir=destination.parent))
+    try:
+        files = temporary / "image"
+        with tarfile.open(fileobj=io.BytesIO(archive)) as bundle:
+            bundle.extractall(files, filter="data")
+        pin = json.loads((files / "joinery-pin.json").read_text())
+        if pin.get("ref") != tool.mcp.ref or pin.get("repo") != tool.mcp.repo:
+            raise ValueError(
+                f"The offline worker carries a different {tool.name} MCP than the "
+                "pinned one. Rebuild the worker."
+            )
+        lock = files / "package-lock.json"
+        lock_sha = hashlib.sha256(lock.read_bytes()).hexdigest()
+        if lock_sha != pin.get("lock_sha256"):
+            raise ValueError("The worker's Godot MCP lock differs from its build record.")
+        if check_deps(files, load_denylist()):
+            raise ValueError(
+                "Pinned server dependencies fail the shared dependency gate."
+            )
+        _lock_gate(lock)
+        script = files / "build/scripts/mcp_interaction_server.gd"
+        runtime = temporary / "runtime"
+        runtime.mkdir()
+        (runtime / script.name).write_bytes(script.read_bytes())
+        spec = ServerSpec(
+            name=tool.mcp.server,
+            command="docker",
+            source=tool.mcp.repo,
+            revision=tool.mcp.ref,
+            worker_image=WORKER_IMAGE,
+        )
+        (temporary / "server.json").write_text(
+            json.dumps(
+                {
+                    "spec": spec.model_dump(),
+                    "image": WORKER_IMAGE,
+                    "lock_sha256": lock_sha,
+                    "runtime_sha256": hashlib.sha256(
+                        script.read_bytes()
+                    ).hexdigest(),
+                },
+                indent=2,
+            )
+            + "\n"
+        )
+        shutil.rmtree(files)
         _place(temporary, destination)
         return spec
     finally:
@@ -224,6 +337,8 @@ def load_installed(tool_id: str) -> ServerSpec:
         raise ReinstallRequired(
             "Installed MCP source identity differs from the selected pin."
         )
+    if tool_id == "godot":
+        return _load_from_worker(path, spec, metadata)
     if not metadata.get("tree_sha256"):
         # Without a recorded hash the source cannot be checked, so it is not
         # trusted: an older Joinery wrote this install.
@@ -243,6 +358,26 @@ def load_installed(tool_id: str) -> ServerSpec:
         raise ValueError("Installed MCP dependency lock has changed. Reinstall it.")
     if not all(Path(arg).is_file() for arg in spec.args if arg.endswith(".js")):
         raise ValueError("Installed MCP executable is missing. Reinstall it.")
+    return spec
+
+
+def _load_from_worker(
+    path: Path, spec: ServerSpec, metadata: dict[str, Any]
+) -> ServerSpec:
+    """A server that runs from its worker image: its record and inspector script."""
+    if spec.command != "docker" or not metadata.get("lock_sha256"):
+        # Recorded by an older Joinery, which ran this server on the host.
+        raise ReinstallRequired(
+            "The Godot tools now run in the offline worker; run Joinery setup to "
+            "move them there."
+        )
+    script = path / "runtime/mcp_interaction_server.gd"
+    if (
+        not script.is_file()
+        or hashlib.sha256(script.read_bytes()).hexdigest()
+        != metadata.get("runtime_sha256")
+    ):
+        raise ReinstallRequired("Installed MCP source or build changed. Reinstall it.")
     return spec
 
 
@@ -272,16 +407,11 @@ def configured(project: Path) -> tuple[list[ServerSpec], list[Readiness]]:
         try:
             spec = load_installed(tool_id)
             if tool_id == "godot":
-                from joinery.distribution import engine_binary
+                from joinery.workers import godot_worker
 
-                try:
-                    binary = engine_binary()
-                except ValueError as exc:
-                    raise _CannotStart(f"the Joinery editor was not found. {exc}") from exc
-                spec.env.update(
-                    GODOT_PATH=str(binary),
-                    GODOT_MCP_ALLOWED_DIRS=str(project.resolve()),
-                )
+                # Reads see the user's folder read-only; every write goes
+                # through a staged change in a writable worker of its own.
+                spec = godot_worker(project, readonly=True)
             elif tool_id == "blender":
                 from joinery.workers import blender_worker
 
@@ -303,7 +433,7 @@ def configured(project: Path) -> tuple[list[ServerSpec], list[Readiness]]:
             specs.append(spec)
         except (OSError, ValueError, KeyError) as exc:
             detail = f"{tool.name} has been selected but its server is not installed."
-            if isinstance(exc, (ReinstallRequired, _CannotStart)):
+            if isinstance(exc, ReinstallRequired):
                 detail = f"{tool.name} has been selected but {_lower(str(exc))}"
             missing.append(
                 Readiness(
@@ -372,6 +502,8 @@ SERVER_LABELS = {
     "joinery-sound": "Sound editing",
     "joinery-materialmaker": "Material editing",
 }
+#: The words every screen uses when Docker is missing or stopped.
+NEEDS_DOCKER = readiness.STATUS_LABELS["needs_docker"]
 #: Servers with no external program; a connection is the whole check.
 _FIRST_PARTY_STATUS = {"joinery-registry", "joinery-verify"}
 
@@ -397,6 +529,8 @@ def describe(item: dict[str, Any], *, offline: bool = False) -> str:
         where = ", offline worker" if offline else ""
         return f"{label} ready ({count} operations{where})"
     if state == "runtime-missing":
+        if detail.startswith(NEEDS_DOCKER):
+            return f"{label}: {NEEDS_DOCKER}. Start Docker, then check again."
         return f"{label}: worker missing. Rebuild the worker."
     if state == "not-installed":
         return f"{label}: not installed. Rebuild the worker." + (
@@ -405,33 +539,6 @@ def describe(item: dict[str, Any], *, offline: bool = False) -> str:
     if state == "error":
         return f"{label}: error: {detail}" if detail else f"{label}: error"
     return f"{label}: {state}"
-
-
-def _write_worker(
-    spec: ServerSpec, servers: dict[str, str]
-) -> tuple[str, WorkerExec | None]:
-    """The offline worker a host-run server's writes need, and its version check.
-
-    Godot's read-only server runs on the host next to the editor, but every
-    staged write and game run happens in its worker image, so the server is
-    only usable when that image exists.
-    """
-    if spec.worker_image or spec.command == "docker":
-        return "", None
-    module = tools.REGISTRY.get(servers.get(spec.name, ""))
-    if module is None or not module.worker_image:
-        return "", None
-    check = next(
-        (
-            c
-            for c in module.checks
-            if isinstance(c, WorkerExec)
-            and not c.feature
-            and c.image == module.worker_image
-        ),
-        None,
-    )
-    return module.worker_image, check
 
 
 async def _image_present(image: str) -> bool:
@@ -454,28 +561,9 @@ async def _image_present(image: str) -> bool:
         return False
 
 
-async def _worker_run(check: WorkerExec) -> tuple[int, str]:
-    """Run a module's version check in its worker, offline."""
-    command = ["docker", "run", "--rm", "--platform", "linux/amd64", "--network", "none"]
-    if check.entrypoint:
-        command += ["--entrypoint", check.entrypoint]
-    try:
-        process = await asyncio.create_subprocess_exec(
-            *command,
-            check.image,
-            *check.argv,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-    except OSError as exc:
-        return 127, str(exc)
-    try:
-        output, _ = await asyncio.wait_for(process.communicate(), check.timeout)
-    except TimeoutError:
-        process.kill()
-        await process.wait()
-        return 124, f"timed out after {check.timeout} s"
-    return process.returncode or 0, output.decode(errors="replace")
+async def _docker_problem() -> str:
+    """Why Docker cannot run workers ("Docker is not running."), or ""."""
+    return await asyncio.to_thread(readiness.DockerHost().docker)
 
 
 def _project_tools(project: Path) -> list[str] | None:
@@ -520,29 +608,28 @@ async def inspect_servers(project: Path, probe: bool = False) -> list[dict[str, 
     The proof is the read-only probe each tool module declares for its server
     (joinery.tools, the same checks `joinery status` runs): Godot's project
     info, Blender's datablocks, joinery-paint and joinery-materialmaker document
-    capabilities, claude-collider's server status. A worker version check runs
-    too for host-run servers whose writes happen in a worker.
+    capabilities, claude-collider's server status. A server whose worker image
+    is missing is not started: it needs Docker, or a rebuild.
     """
     specs, missing = configured(project)
     result = [
         {**item.model_dump(), "summary": describe(item.model_dump())}
         for item in missing
     ]
-    servers = {
-        t.mcp.server: t.id for t in load_catalog().tool if t.mcp is not None
-    }
     chosen = _project_tools(project)
     for spec in specs:
-        image, version_check = _write_worker(spec, servers)
-        offline = bool(image) or spec.command == "docker"
+        image = spec.worker_image
+        offline = spec.command == "docker"
         if image and not await _image_present(image):
+            problem = await _docker_problem()
             item = Readiness(
                 name=spec.name,
                 state="runtime-missing",
                 installed=True,
                 revision=spec.revision,
-                detail=f"Offline image {image} is unavailable or Docker is not "
-                "running. Run Joinery setup.",
+                detail=f"{NEEDS_DOCKER}: {problem} Start Docker, then check again."
+                if problem
+                else f"Offline image {image} is not built. Run Joinery setup.",
             ).model_dump()
             result.append({**item, "summary": describe(item)})
             continue
@@ -559,15 +646,6 @@ async def inspect_servers(project: Path, probe: bool = False) -> list[dict[str, 
                 item["inspected"] = False
                 item["state"] = "runtime-missing" if failed == "needs_image" else "error"
                 item["detail"] = reason
-            elif probe and version_check is not None:
-                code, output = await _worker_run(version_check)
-                if code or not re.search(version_check.expect, output):
-                    item["state"] = (
-                        "runtime-missing"
-                        if version_check.on_failure == "needs_image"
-                        else "error"
-                    )
-                    item["detail"] = version_check.failure or output.strip()[:300]
             result.append({**item, "summary": describe(item, offline=offline)})
         except (OSError, ValueError, RuntimeError, TimeoutError) as exc:
             item = Readiness(name=spec.name, state="error", detail=str(exc)).model_dump()

@@ -14,7 +14,9 @@ PROGRAMS = tuple(desktop.TOOLS)
 #: Desktop programs that are also catalog tools. The rest (Audacity) only open
 #: files by hand and are offered only when installed.
 CATALOG_PROGRAMS = tuple(t for t in PROGRAMS if t in {c.id for c in load_catalog().tool})
-UPSTREAM = ("godot", "blender", "supercollider", "inkscape")
+#: Servers whose pinned source is mounted from the host install. Godot's is
+#: baked into its worker image (tests/test_godot_worker.py).
+UPSTREAM = ("blender", "supercollider", "inkscape")
 
 
 @pytest.fixture
@@ -117,7 +119,6 @@ def installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         source = root / "source"
         source.mkdir(parents=True)
         for entry in {
-            "godot": ["build/index.js"],
             "blender": ["mcp/blmcp/__main__.py"],
             "supercollider": ["dist/index.js"],
             "inkscape": ["src/inkscape_mcp/main.py", "uv.lock"],
@@ -164,12 +165,11 @@ def test_inkscape_inspection_mount_cannot_modify_original_project(
     assert str(project.resolve()) + ":/work:ro" in spec.args
 
 
-@pytest.mark.parametrize("tool", ("godot", "blender", "supercollider"))
+@pytest.mark.parametrize("tool", ("blender", "supercollider"))
 def test_missing_built_entry_is_reported_before_launch(
     project: Path, installed: Path, tool: str
 ) -> None:
     entry = {
-        "godot": "build/index.js",
         "blender": "mcp/blmcp/__main__.py",
         "supercollider": "dist/index.js",
     }[tool]
@@ -196,7 +196,7 @@ def test_pinned_install_load_detects_source_tampering(
         "spec": spec.model_dump(),
         "tree_sha256": server_install.tree_hash(source),
     }
-    if tool in {"godot", "supercollider"}:
+    if tool == "supercollider":
         import hashlib
 
         lock = source / "package-lock.json"

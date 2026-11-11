@@ -55,6 +55,10 @@ def test_linux_recipe_and_all_mcp_launches_use_same_unprivileged_owner(
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text("")
     monkeypatch.setattr("joinery.workers.installation", lambda _tool: tmp_path)
+    monkeypatch.setattr(
+        "joinery.server_install.load_installed",
+        lambda _tool: type("Spec", (), {"revision": "pinned"})(),
+    )
     for factory in (
         godot_worker,
         blender_worker,
@@ -115,6 +119,10 @@ def test_supercollider_worker_can_boot_and_answer_cleanly(
     (tmp_path / "source/dist").mkdir(parents=True)
     (tmp_path / "source/dist/index.js").write_text("")
     monkeypatch.setattr("joinery.workers.installation", lambda _tool: tmp_path)
+    monkeypatch.setattr(
+        "joinery.server_install.load_installed",
+        lambda _tool: type("Spec", (), {"revision": "pinned"})(),
+    )
     with (
         patch("joinery.worker_identity.sys.platform", platform),
         patch("joinery.worker_identity.os.getuid", return_value=1001, create=True),

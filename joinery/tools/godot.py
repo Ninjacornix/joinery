@@ -1,4 +1,4 @@
-"""Godot: the Joinery editor on the host, plus its MCP and headless checks offline."""
+"""Godot: the Joinery editor on the host; its MCP server and headless Godot offline."""
 
 from __future__ import annotations
 
@@ -43,7 +43,14 @@ class Godot(ToolModule):
             failure="Godot is missing from the offline worker; rebuild it",
         ),
         InstallCheck("godot"),
-        McpProbe("godot", "get_project_info", args=(("projectPath", PROJECT),)),
+        # The pinned server runs in the worker, so its answer is cached against
+        # the worker image it came from.
+        McpProbe(
+            "godot",
+            "get_project_info",
+            args=(("projectPath", PROJECT),),
+            image=MCP_WORKER,
+        ),
     )
 
     def replay_argv(self, script: str) -> list[str]:

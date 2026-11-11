@@ -8,7 +8,9 @@ import pytest
 from joinery import server_install
 from joinery.catalog import load_catalog
 
-UPSTREAM = ("godot", "blender", "inkscape", "supercollider")
+#: Servers installed from a host checkout. Godot is checked in its worker
+#: image instead (tests/test_godot_worker.py).
+UPSTREAM = ("blender", "inkscape", "supercollider")
 
 
 @pytest.fixture
@@ -86,7 +88,7 @@ def test_install_uses_exact_pin_and_reuses_verified_installation(
         preferred.repo,
     ]
     assert calls[1][0] == ["git", "checkout", "--detach", preferred.ref]
-    if tool in {"godot", "supercollider"}:
+    if tool == "supercollider":
         commands = [args for args, _ in calls]
         assert ["npm", "ci", "--ignore-scripts"] in commands
         assert commands.index(["npm", "ci", "--ignore-scripts"]) < commands.index(
@@ -124,7 +126,7 @@ def test_incomplete_source_or_missing_lock_fails_before_packages_install(
     assert not any(args[0] == "npm" for args, _ in calls)
 
 
-@pytest.mark.parametrize("tool", ["godot", "supercollider"])
+@pytest.mark.parametrize("tool", ["supercollider"])
 def test_denied_dependency_in_upstream_lock_stops_install_before_npm(
     install_environment: Path, monkeypatch: pytest.MonkeyPatch, tool: str
 ) -> None:
@@ -135,7 +137,7 @@ def test_denied_dependency_in_upstream_lock_stops_install_before_npm(
     assert not server_install.installation(tool).exists()
 
 
-@pytest.mark.parametrize("tool", ["godot", "supercollider"])
+@pytest.mark.parametrize("tool", ["supercollider"])
 def test_missing_node_runtime_is_not_reported_as_an_installed_mcp(
     install_environment: Path, monkeypatch: pytest.MonkeyPatch, tool: str
 ) -> None:
@@ -149,7 +151,7 @@ def test_missing_node_runtime_is_not_reported_as_an_installed_mcp(
 def test_failed_build_keeps_original_user_installation_and_cleans_scratch(
     install_environment: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    fake_commands(monkeypatch, "godot")
+    fake_commands(monkeypatch, "supercollider")
     run = server_install._run
 
     def fail(args, cwd, timeout=600):
@@ -162,7 +164,9 @@ def test_failed_build_keeps_original_user_installation_and_cleans_scratch(
     sentinel.mkdir()
     (sentinel / "local edits.ts").write_text("uncommitted user code")
     with pytest.raises(RuntimeError, match="TypeScript failed"):
-        server_install.install("godot")
+        server_install.install("supercollider")
     assert (sentinel / "local edits.ts").read_text() == "uncommitted user code"
-    assert not server_install.installation("godot").exists()
-    assert not list(server_install.installation("godot").parent.glob(".install-*"))
+    assert not server_install.installation("supercollider").exists()
+    assert not list(
+        server_install.installation("supercollider").parent.glob(".install-*")
+    )

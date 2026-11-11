@@ -12,14 +12,34 @@ from joinery.worker_identity import docker_owner_args
 WORKER_IMAGE = "joinery-mcp-worker"
 
 
-def godot_worker(project: Path) -> ServerSpec:
-    source = installation("godot") / "source"
-    if not (source / "build/index.js").is_file():
-        raise ValueError("Install the pinned Godot MCP first.")
+#: Where the MCP worker image carries the pinned Godot MCP (sandbox/mcp.Dockerfile).
+GODOT_MCP_DIR = "/opt/godot-mcp"
+
+
+def godot_runtime_script() -> Path:
+    """The pinned server's in-game inspector script, copied out of the worker.
+
+    The server adds it to a project when it runs the game; the gateway
+    compares against these bytes to take it out again (and never replaces a
+    different script of the same name).
+    """
+    return installation("godot") / "runtime/mcp_interaction_server.gd"
+
+
+def godot_worker(project: Path, readonly: bool = False) -> ServerSpec:
+    """The pinned Godot MCP, run in the offline worker with `project` at /work.
+
+    The server and the Godot it drives both live in the image, so nothing runs
+    on the host and nothing reaches the network. `readonly` mounts the project
+    read-only, for inspecting the user's own folder outside a staged change.
+    """
+    from joinery.server_install import load_installed
+
+    revision = load_installed("godot").revision
     name = "joinery-mcp-" + uuid.uuid4().hex
     return ServerSpec(
         name="godot",
-        revision=source.parent.name,
+        revision=revision,
         command="docker",
         container_name=name,
         cwd=str(project),
@@ -41,9 +61,7 @@ def godot_worker(project: Path) -> ServerSpec:
             "--memory",
             "4g",
             "-v",
-            f"{source}:/opt/godot-mcp:ro",
-            "-v",
-            f"{project.resolve()}:/work",
+            f"{project.resolve()}:/work" + (":ro" if readonly else ""),
             "-w",
             "/work",
             "-e",
@@ -52,7 +70,7 @@ def godot_worker(project: Path) -> ServerSpec:
             "GODOT_MCP_ALLOWED_DIRS=/work",
             WORKER_IMAGE,
             "node",
-            "/opt/godot-mcp/build/index.js",
+            GODOT_MCP_DIR + "/build/index.js",
         ],
     )
 
