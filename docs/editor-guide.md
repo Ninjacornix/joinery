@@ -105,6 +105,47 @@ invalidates approval; use `/art` to review and approve the current version
 again. An agent cannot approve its own direction or file changes (ADR 0033).
 Use `/tools` for actual MCP connection/probe status; diagnostics stay in Output.
 
+### Reviewing a change
+
+A review is made to be taken in at one look (ADR 0040). The same compact layout
+shows in the Review tab, the bottom panel and for every parallel task:
+
+- **The change itself**, as large as the panel allows:
+  - a texture, a selected material or map, or a live scene edit: one picture
+    split by a line you can drag, the original on the left and the change on
+    the right;
+  - a model: its front and its far side next to each other;
+  - a sound: its waveform with play, so Before and After play A/B at the same
+    position;
+  - code and other text: only the lines that changed, removed above added.
+
+  A change with several items gets a filmstrip of small tiles under it, the
+  most important first; click a tile (or use Left and Right) to show it.
+  **Before** and **After** in the corner show one side in full; with neither
+  pressed a texture shows the split.
+- **One line of facts**: what changed in plain words, for example
+  "Door 20% wider · wood darker · 2 files". The words come from Journeyman
+  (`submit_for_review` takes up to three short `facts`), then from what the
+  review can measure itself (an image darker, lighter, warmer or resized, a
+  sound longer or shorter, lines added and removed), then the counts.
+- **The checks as one quiet line**: "Checks passed" (a review only opens once
+  they pass); hover it for what ran. When a reviewer agent looked at the
+  change, its notes follow as one line, the most serious first ("The hinge
+  side lost its bevel · 1 more").
+- **Discard** and **Accept**, always on screen. **Details** beside them opens
+  everything else on demand: each file with its diff, the checks that ran and
+  every note.
+
+With the focus in the review (click anywhere in it), **Enter** accepts,
+**Backspace** or **Delete** discards, and **A** or **B** flips between before
+and after.
+
+In the chat, the request's card shows the waiting change as a tiny picture,
+the same line of facts and **Discard** / **Accept**, so a small change is
+decided without opening the panel. A bigger one (several assets, many changed
+lines, or a reviewer's warning) offers **Review** instead, which brings the
+panel up.
+
 ### The Review tab
 
 **Review** is always the first tab of the bottom bar (in Godot's classic view
