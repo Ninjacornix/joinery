@@ -17,7 +17,13 @@ from joinery.locking import write_lock
 from joinery.mcp_runtime import validate_arguments
 from joinery.recipe import Recipe, load_recipe, recipe_paths, record, store_preimage
 from joinery.runner import Result, SandboxRunner
-from joinery.tools import blender, blender_export, inkscape, material_maker
+from joinery.tools import (
+    blender,
+    blender_anim,
+    blender_export,
+    inkscape,
+    material_maker,
+)
 from joinery.worker_identity import docker_owner_args
 
 IMAGE = "joinery-creative-worker"
@@ -263,6 +269,9 @@ def _export_facts(project: Path, exports: list[str], output: str) -> dict[str, A
     rows = blender_export.shape_rows(output)
     if rows:
         facts["shape_keys"] = rows
+    animations = blender_anim.animation_rows(output)
+    if animations:
+        facts["animations"] = animations
     models = {}
     for path in exports:
         if Path(path).suffix == ".glb" and (project / path).is_file():
