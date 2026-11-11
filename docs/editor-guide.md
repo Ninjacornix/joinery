@@ -47,6 +47,35 @@ Codex is tested against a real signed-in account. Claude returned an account quo
 error during the live check; Gemini/OpenCode protocol tests pass with fixtures,
 but their CLIs are not installed on the development machine for live verification.
 
+### How a change reaches you
+
+Each request makes at most one change, and Joinery, not the agent, decides when
+you see it. When Journeyman has finished, it hands the change over with
+`submit_for_review` (the same tool for Codex, Claude Code, Gemini CLI and
+opencode). Joinery then checks it: art bible rules, the Godot import, scenes
+that point at missing files, asset provenance and the project's own GUT tests
+when it has them. A problem goes back to Journeyman so it can fix it in the
+same turn, up to three tries. The review opens as soon as the checks pass, with
+Accept ready; model renders fill in a moment later. While the change waits for
+you, Journeyman can still answer questions but changes nothing.
+
+If Journeyman stops without handing the change over, Joinery submits it for it.
+If that fails, Journeyman gets one more try. If the change still fails, Joinery
+drops it and says so in its own line ("Journeyman's change didn't pass Joinery's
+checks: … Nothing was changed."), so you are never left waiting for a review
+that will not come.
+
+A scene open with unsaved edits, or a new scene not saved yet, is changed live
+in the viewport; its Accept and Discard appear once the change is submitted.
+Every saved scene, open or not, is changed as a staged file and reloads when
+you accept. One request never changes the same scene both ways.
+
+When a conversation nears the model's context limit, Joinery asks Journeyman for
+a short summary, adds what it recorded (changes accepted, discarded and still
+open, and your recent requests), and continues in a fresh session from it. The
+chat shows one quiet line when this happens. Summaries are kept in
+`.joinery/summaries/` (the newest 20). Decision record: ADR 0035.
+
 Live scene tools support node creation, deletion, duplication, renaming,
 reparenting, transforms, resources, imported scene instances, existing scripts
 and persistent signals. Accept records native undo/redo; Discard restores the
