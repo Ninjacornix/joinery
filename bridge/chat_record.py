@@ -54,6 +54,8 @@ class ChatRecorder:
         self._summaries = FileSummaryStore(project)
         #: The last state recorded for each parallel task.
         self._tasks: dict[str, str] = {}
+        #: The last state recorded for each variant group.
+        self._groups: dict[str, str] = {}
 
     async def switch(self, chat_id: str, sessions: Sessions) -> dict[str, Any] | None:
         """Open [chat_id] before a prompt ("" starts a new chat). Returns the event that
@@ -151,6 +153,9 @@ class ChatRecorder:
         if not self.chat_id or self._broken:
             return
         kind = event.get("kind")
+        if kind == "variants":
+            self._observe_variants(event)
+            return
         if event.get("task_id"):
             self._observe_task(event)
             return
@@ -237,10 +242,46 @@ class ChatRecorder:
         }
         if started:
             entry["request"] = str(event.get("request", ""))
-        for key in ("transaction_id", "summary", "message"):
+        for key in (
+            "transaction_id",
+            "summary",
+            "message",
+            "variant_group",
+            "direction",
+        ):
             if event.get(key):
                 entry[key] = str(event[key])
         # Not flushed: the chat's own reply may still be streaming beside it.
+        self._save(lambda: chats.append(self.project, self.chat_id, entry))
+
+    def _observe_variants(self, event: dict[str, Any]) -> None:
+        """A variant group (ADR 0042): its ways when it starts, and the pick."""
+        group = str(event.get("group_id", ""))
+        state = str(event.get("state", ""))
+        if not group or self._groups.get(group) == state:
+            return
+        started = group not in self._groups
+        self._groups[group] = state
+        ways = [w for w in event.get("ways", []) if isinstance(w, dict)]
+        entry: dict[str, Any] = {
+            "type": "variants",
+            "group_id": group,
+            "title": str(event.get("title", "")),
+            "state": "started" if started and state == "working" else state,
+            "ways": [str(w.get("direction", "")) for w in ways],
+        }
+        if started:
+            entry["request"] = str(event.get("request", ""))
+        picked = next(
+            (w for w in ways if w.get("task_id") == event.get("picked")), None
+        )
+        if picked is not None:
+            entry["picked"] = {
+                "task_id": str(picked.get("task_id", "")),
+                "variant": int(picked.get("variant", 0) or 0),
+                "direction": str(picked.get("direction", "")),
+                "transaction_id": str(picked.get("transaction_id", "")),
+            }
         self._save(lambda: chats.append(self.project, self.chat_id, entry))
 
     def finish(self, sessions: Sessions) -> None:

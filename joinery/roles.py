@@ -48,6 +48,8 @@ REPRODUCE = "reproduce_error"
 #: Play the game headless: read-only, so the lead, workers and the playtester may.
 PLAYTEST = "playtest"
 ROLE_ONLY = frozenset({REVIEW_REPORT, DIAGNOSIS_REPORT, REPRODUCE})
+#: Only the lead starts more agents: parallel tasks and variants.
+LEAD_ONLY = frozenset({"start_task", "start_variants"})
 
 
 @dataclass(frozen=True)
@@ -74,7 +76,7 @@ SPECS: dict[str, RoleSpec] = {
         "worker",
         "task",
         False,
-        frozenset({"*"}) - ROLE_ONLY - {"start_task"},
+        frozenset({"*"}) - ROLE_ONLY - LEAD_ONLY,
         0,
         "Working…",
     ),
@@ -118,7 +120,7 @@ def registry_allowed(role: str, tool: str) -> bool:
     """May ``role`` call the joinery-registry tool ``tool``?"""
     allowed = spec(role).registry
     if "*" in allowed:
-        excluded = ROLE_ONLY | ({"start_task"} if role == "worker" else set())
+        excluded = ROLE_ONLY | (LEAD_ONLY if role == "worker" else set())
         return tool not in excluded
     return tool in allowed
 
@@ -271,7 +273,7 @@ def role_violation(
             return Verdict(
                 Severity.DENY,
                 "A task can't start further tasks; do this part yourself."
-                if tool == "start_task"
+                if tool in LEAD_ONLY
                 else "That tool belongs to another agent role.",
             )
         return None

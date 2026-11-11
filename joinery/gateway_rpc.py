@@ -105,6 +105,24 @@ def task_request(params: dict[str, Any]) -> dict[str, Any]:
     return {"title": title.strip(), "request": request.strip(), "targets": targets}
 
 
+def variants_request(params: dict[str, Any]) -> dict[str, Any]:
+    """start_variants' arguments, checked: {title, request, directions, targets}."""
+    checked = task_request(params)
+    directions = params.get("directions", [])
+    if (
+        not isinstance(directions, list)
+        or not 2 <= len(directions) <= 4
+        or any(
+            not isinstance(d, str) or not 1 <= len(d.strip()) <= 80 for d in directions
+        )
+    ):
+        raise ValueError(
+            "directions is a list of 2 to 4 short notes (up to 80 characters each), "
+            "one per way."
+        )
+    return {**checked, "directions": [d.strip() for d in directions]}
+
+
 class GatewayRPC:
     def __init__(
         self,
@@ -151,16 +169,22 @@ class GatewayRPC:
             Callable[[list[dict[str, str]]], Awaitable[list[dict[str, str]]]] | None
         ) = None
         #: Hand an independent part of the request to a parallel task (the lead only).
-        self.start_task: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None = (
-            None
-        )
+        self.start_task: (
+            Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None
+        ) = None
         self.task_status: Callable[[str], dict[str, Any]] | None = None
+        #: Make the request a few ways side by side (the lead only, ADR 0042).
+        self.start_variants: (
+            Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None
+        ) = None
         #: What the reviewer or debugger reported (report_review, report_diagnosis).
         self.reports: list[dict[str, Any]] = []
         #: Run the project headless offline to reproduce an error (the debugger only).
         self.reproduce: Callable[[str], Awaitable[dict[str, Any]]] | None = None
         #: Play the game headless with the playtest bot (read-only, so every agent may).
-        self.playtest: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None = None
+        self.playtest: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None = (
+            None
+        )
 
     async def start(self) -> None:
         if self.transport == "tcp":
@@ -329,6 +353,12 @@ class GatewayRPC:
                 if self.start_task is None:
                     raise ValueError("Parallel tasks are not available here.")
                 data = await self.start_task(task_request(params))
+            elif method == "start_variants":
+                if self.worker or self.inspection_only:
+                    raise ValueError(NO_NESTED_TASKS)
+                if self.start_variants is None:
+                    raise ValueError("Variants are not available here.")
+                data = await self.start_variants(variants_request(params))
             elif method == "report_review":
                 if self.role != "reviewer":
                     raise ValueError("Only the reviewer reports a review.")

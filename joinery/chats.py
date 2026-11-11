@@ -53,6 +53,7 @@ ENTRY_TYPES = {
     "session",
     "summary",
     "task",
+    "variants",
 }
 
 
@@ -304,7 +305,8 @@ def turns(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """The chat as turns: {request, reply, changes, tasks, outcome}, oldest first.
 
     ``tasks`` are the parallel tasks started during the turn, {task_id, title,
-    state}, each with the last state recorded for it."""
+    state}, each with the last state recorded for it. ``variants`` are the
+    requests tried several ways, {group_id, title, ways, state, picked}."""
     result: list[dict[str, Any]] = []
     for entry in entries:
         kind = entry.get("type")
@@ -315,11 +317,31 @@ def turns(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "reply": [],
                     "changes": [],
                     "tasks": [],
+                    "variants": [],
                     "outcome": "",
                 }
             )
         elif not result:
             continue
+        elif kind == "variants" and entry.get("group_id"):
+            known_groups = {
+                g["group_id"]: g for turn in result for g in turn["variants"]
+            }
+            group = known_groups.get(str(entry["group_id"]))
+            if group is None:
+                group = {
+                    "group_id": str(entry["group_id"]),
+                    "title": "",
+                    "ways": [],
+                    "state": "",
+                    "picked": {},
+                }
+                result[-1]["variants"].append(group)
+            group["title"] = str(entry.get("title", "")) or group["title"]
+            group["ways"] = list(entry.get("ways", [])) or group["ways"]
+            group["state"] = str(entry.get("state", "")) or group["state"]
+            if isinstance(entry.get("picked"), dict):
+                group["picked"] = dict(entry["picked"])
         elif kind == "task" and entry.get("task_id"):
             known = {t["task_id"]: t for turn in result for t in turn["tasks"]}
             task = known.get(str(entry["task_id"]))
@@ -372,6 +394,20 @@ _TASK_WORDS = {
 }
 
 
+def _variants_line(group: dict[str, Any]) -> str:
+    """How a request tried several ways ended, in one line."""
+    ways = [str(w) for w in group.get("ways", []) if w]
+    head = f'Tried {len(ways)} ways of "{_short(str(group.get("title", "")), 80)}"'
+    if ways:
+        head += " (" + "; ".join(_short(w, 40) for w in ways) + ")"
+    picked = group.get("picked") or {}
+    if group.get("state") == "picked" and picked:
+        return f"{head}: the user kept {_short(str(picked.get('direction', '')), 60)}."
+    if group.get("state") == "discarded":
+        return f"{head}: the user discarded them all."
+    return f"{head}: none was picked."
+
+
 def summary(project: Path, meta: dict[str, Any], entries: list[dict[str, Any]]) -> str:
     """A compact account of an earlier chat for an agent that starts fresh: its last
     turns, what Journeyman said, and what became of each change it proposed."""
@@ -413,6 +449,8 @@ def summary(project: Path, meta: dict[str, Any], entries: list[dict[str, Any]]) 
         for task in turn["tasks"]:
             words = _TASK_WORDS.get(task["state"], task["state"])
             lines.append(f'   Parallel task "{_short(task["title"], 80)}": {words}.')
+        for group in turn.get("variants", []):
+            lines.append(f"   {_variants_line(group)}")
         if turn["outcome"] and turn["outcome"] != "done":
             lines.append(f"   That turn {turn['outcome']}.")
     lines.append("The user's new message follows.")

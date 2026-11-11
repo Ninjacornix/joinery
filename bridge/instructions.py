@@ -108,7 +108,6 @@ BLOCKOUT_REQUEST = (
 )
 
 
-
 def expand_command(text: str) -> str:
     """``/blockout [words]`` as the request it stands for; any other text as it is."""
     stripped = text.strip()
@@ -116,6 +115,41 @@ def expand_command(text: str) -> str:
         return text
     return BLOCKOUT_REQUEST.format(words=stripped[len("/blockout") :].strip()).strip()
 
+
+#: When to offer a few ways side by side, and how to start them.
+VARIANT_GUIDE = (
+    "When the user is unsure how something should look, sound or play, offer in one "
+    "short line to try a few ways side by side (they can type /variants 3 and the "
+    "request). Call start_variants(title, request, directions, targets) only when "
+    "the user asks for options or accepts that offer: directions are 2 to 4 short, "
+    "clearly different notes ('chunky and worn', 'slim and clean'), each made by its "
+    "own agent; the user picks one and the others are discarded. "
+)
+
+#: The prompt each variant starts from (bridge.variants).
+VARIANT_PROMPT = (
+    "You are one of several Journeyman agents making the same request in different "
+    "ways at the same time; the user will see the versions side by side and keep "
+    "one. Yours is way {index} of {count}: {direction}. The others are: {others}. "
+    "Make yours clearly and visibly different in that direction while still doing "
+    "what was asked and following the art bible. Do only this, in one change: make "
+    "it, then call submit_for_review with facts naming how yours looks or sounds. "
+    "Don't call start_task or start_variants. Change only staged files; the other "
+    "ways change the same files in their own stages, which is expected.\n\n"
+    "The request:\n{request}"
+)
+
+#: The prompt for a variant mixed from the others (Mix on the variant strip).
+VARIANT_MIX_PROMPT = (
+    "You are one of several Journeyman agents making the same request in different "
+    "ways; the user compared the ways below side by side and asked for a new one "
+    "that combines them: {note}. Make that version from the project as it is (you "
+    "can't see the other ways' files; work from their descriptions), following the "
+    "art bible. Do only this, in one change: make it, then call submit_for_review "
+    "with facts naming what came from which way. Don't call start_task or "
+    "start_variants. Change only staged files.\n\n"
+    "The ways so far:\n{ways}\n\nThe request:\n{request}"
+)
 
 #: When to play the game rather than reason about it.
 PLAYTEST_GUIDE = (
@@ -150,9 +184,9 @@ PLAYTEST_PROMPT = (
 REVIEW_GUIDE = (
     TASK_GUIDE
     + BLOCKOUT_GUIDE
+    + VARIANT_GUIDE
     + PLAYTEST_GUIDE
-    +
-    "The user accepts or discards every change in the Review panel. "
+    + "The user accepts or discards every change in the Review panel. "
     "When your change is complete, call submit_for_review with one short line naming "
     "what changed. Joinery checks it (art bible rules, Godot import, missing files, "
     "asset provenance, project tests). Fix every problem it returns and submit again. "

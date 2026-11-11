@@ -102,6 +102,26 @@ def make_server(socket: Path) -> MCPServer[Any]:
             {"title": title, "request": request, "targets": targets or []},
         )
 
+    @server.tool()
+    @tool_errors
+    async def start_variants(
+        title: Annotated[str, Field(min_length=1, max_length=80)],
+        request: Annotated[str, Field(min_length=1, max_length=4000)],
+        directions: Annotated[list[str], Field(min_length=2, max_length=4)],
+        targets: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """Make the user's request a few different ways side by side, one parallel agent per direction, so the user can compare and keep one. Only when the user asked for options or accepted your offer. request must be complete on its own. directions: 2 to 4 short, clearly different notes ('chunky and worn', 'slim and clean'). targets: project paths every way will change. The user picks one way and the others are discarded; don't make the request yourself as well."""
+        return await rpc(
+            socket,
+            "start_variants",
+            {
+                "title": title,
+                "request": request,
+                "directions": directions,
+                "targets": targets or [],
+            },
+        )
+
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
     async def task_status(id: str) -> dict[str, Any]:
@@ -121,7 +141,9 @@ def make_server(socket: Path) -> MCPServer[Any]:
             "playtest",
             {"minutes": minutes, "seed": seed, "focus": focus},
         )
-        result = CallToolResult(content=[TextContent(type="text", text=json.dumps(data))])
+        result = CallToolResult(
+            content=[TextContent(type="text", text=json.dumps(data))]
+        )
         for shot in [str(p) for p in data.get("screenshots", [])][:3]:
             try:
                 media, encoded = chat_attachments.encoded(Path(shot))

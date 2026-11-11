@@ -28,6 +28,7 @@ from bridge.protocol import Done, EditorAction, Message, Prompt
 from bridge.reviewer import Debugger, ReviewAgent
 from bridge.specialists import Specialists
 from bridge.turn_runner import run_turn, settle_compaction
+from bridge.variants import Variants, parse_command
 from joinery import bible_lint, blueprints, brief, chat_attachments, chats, playtest
 from joinery.art_approval import approve, review
 from joinery.authoring import run_offline
@@ -186,6 +187,7 @@ async def _serve(
     active: asyncio.Task[None] | None = None
     specialists: Specialists | None = None
     crew: Crew | None = None
+    variants: Variants | None = None
     playtester: Playtester | None = None
     matcher: MatchRun | None = None
     #: The last request's model choice, which the tasks it starts use too.
@@ -436,6 +438,9 @@ async def _serve(
             if specialists is not None:
                 await specialists.close()
             gateway.timing = None
+            if crew is not None:
+                # The chat's own turn is over: a variant waiting for it may start.
+                asyncio.get_running_loop().call_soon(crew.pump)
             # Diagnostics must never turn successful project work into failure.
             try:
                 emit(timing.save(project, outcome))
@@ -527,7 +532,66 @@ async def _serve(
             live=live_edit,
             reviewer=reviewer_for,
             debugger=debugger.diagnose,
+            lead_busy=lambda: active is not None and not active.done(),
         )
+
+        async def lead_decide(transaction_id: str, accept: bool) -> dict[str, Any]:
+            """The chat's own change as one of a group's ways (Try other ways)."""
+            if not controller.review_open:
+                raise ValueError("That change is no longer waiting.")
+            return await controller.decide(transaction_id, accept)
+
+        variants = Variants(crew, lead_decide)
+
+        def emit_decisions(decisions: list[dict[str, Any]]) -> None:
+            for decision in decisions:
+                emit(decision)
+                if "art_review" in decision:
+                    emit(art_review_event(project))
+                after_decision(decision)
+
+        async def start_variants(data: dict[str, Any], origin: str) -> dict[str, Any]:
+            """``/variants``, Try 3 ways, Try other ways, or the lead's start_variants."""
+            assert variants is not None
+            count, request, given = parse_command(str(data.get("text", "")))
+            if data.get("count"):
+                count = int(data["count"])
+            directions = data.get("directions") or given
+            keep = str(data.get("keep_transaction_id", "") or "")
+            if keep and (controller.review_id != keep or not controller.review_open):
+                raise ValueError("That change is no longer waiting.")
+            if origin == "user" and (active is None or active.done()):
+                # Saved chats record the request like any other.
+                if "chat_id" in data and bridge is not None:
+                    switched = await recorder.switch(str(data["chat_id"]), bridge)
+                    if switched is not None:
+                        emit(switched)
+                _, started = recorder.begin(
+                    {
+                        "text": f"/variants {count} {request}",
+                        "targets": data.get("targets", []),
+                    },
+                    (),
+                )
+                if started is not None:
+                    emit(started)
+            prompt = task_prompt(data) if origin == "user" else task_prompt()
+            group = await variants.start(
+                request,
+                prompt=prompt,
+                count=count,
+                directions=[str(d) for d in directions],
+                targets=[str(t) for t in data.get("paths", [])],
+                origin="lead" if origin == "lead" else "user",
+                title=str(data.get("title", "")),
+                lead_tx=keep,
+                lead_summary=str(
+                    data.get("keep_summary") or gateway.request_summary or ""
+                )
+                if keep
+                else "",
+            )
+            return variants.event(group)
 
         async def lead_start(request: dict[str, Any]) -> dict[str, Any]:
             assert crew is not None
@@ -556,6 +620,57 @@ async def _serve(
             lambda argv, root: run_offline(argv, root, 600, readonly=True),
             task_prompt,
         )
+
+        async def variants_action(data: dict[str, Any]) -> None:
+            """Pick, Mix or Discard all on a variant strip. A refusal goes back to
+            that strip, which puts its ways back as they were."""
+            assert variants is not None
+            group = str(data.get("group_id", ""))
+            kind = str(data.get("kind", ""))
+            try:
+                if kind == "variants_pick":
+                    emit_decisions(
+                        await variants.pick(group, str(data.get("task_id", "")))
+                    )
+                elif kind == "variants_mix":
+                    await variants.mix(
+                        group, str(data.get("note", "")), task_prompt(data)
+                    )
+                elif kind == "variants_discard":
+                    emit_decisions(await variants.discard_all(group))
+                else:
+                    raise ValueError("Unknown chat message.")
+            except (OSError, ValueError) as exc:
+                emit(
+                    {
+                        "kind": "notice",
+                        "level": "warn",
+                        "text": str(exc),
+                        "group_id": group,
+                    }
+                )
+
+        async def lead_variants(request: dict[str, Any]) -> dict[str, Any]:
+            if active is None or active.done():
+                raise ValueError("Variants start from an active user request.")
+            event = await start_variants(
+                {
+                    "text": request["request"],
+                    "title": request["title"],
+                    "count": len(request["directions"]),
+                    "directions": request["directions"],
+                    "paths": request["targets"],
+                },
+                "lead",
+            )
+            return {
+                "group_id": event["group_id"],
+                "ways": len(event["ways"]),
+                "next": "Each way is made by its own agent and shown side by side; "
+                "the user picks one. Don't make the request yourself as well.",
+            }
+
+        rpc_server.start_variants = lead_variants
         rpc_server.task_status = crew.status
         emit(
             {
@@ -576,8 +691,13 @@ async def _serve(
                 if not isinstance(data, dict):
                     raise TypeError("Invalid chat message.")
                 owned = crew.owner(str(data.get("transaction_id", "")))
+                assert variants is not None
                 if data.get("kind") == "decision" and owned is not None:
                     try:
+                        if owned.group and bool(data.get("accept", False)):
+                            # Accepting one way is picking it: the rest go.
+                            emit_decisions(await variants.pick(owned.group, owned.id))
+                            continue
                         decided = await crew.decide(
                             owned.transaction_id, bool(data.get("accept", False))
                         )
@@ -605,6 +725,13 @@ async def _serve(
                     if "art_review" in decision:
                         emit(art_review_event(project))
                     after_decision(decision)
+                    # The change was one of a group's ways (Try other ways).
+                    emit_decisions(
+                        await variants.lead_decided(
+                            str(data.get("transaction_id", "")),
+                            bool(decision.get("accepted")),
+                        )
+                    )
                 elif data.get("kind") == "rollback_decision":
                     emit(gateway.rollback_decision(str(data.get("transaction_id", ""))))
                 elif data.get("kind") == "art_review":
@@ -699,6 +826,11 @@ async def _serve(
                 elif data.get("kind") == "match_cancel":
                     assert matcher is not None
                     await matcher.stop()
+                elif data.get("kind") == "variants_start":
+                    # /variants N <request>, Try 3 ways, or Try other ways on a change.
+                    await start_variants(data, "user")
+                elif str(data.get("kind", "")).startswith("variants_"):
+                    await variants_action(data)
                 elif data.get("kind") == "debug_start":
                     # /debug, or Debug on the offer after a new error in Output.
                     await crew.debug(debug_request(data), task_prompt(data))
