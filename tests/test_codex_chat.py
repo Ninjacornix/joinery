@@ -43,6 +43,7 @@ command = next(a for a in sys.argv if a.startswith('hooks.PreToolUse='))
 import re
 command = json.loads(re.search(r'command=("(?:[^"\\\\]|\\\\.)*")',command)[1])
 trusted = Path('hook_trusted').exists()
+Path('argv.json').write_text(json.dumps(sys.argv))
 turn = 0
 for line in sys.stdin:
  r=json.loads(line)
@@ -91,6 +92,23 @@ for line in sys.stdin:
     executable.chmod(0o755)
     monkeypatch.setattr("bridge.codex_session.shutil.which", lambda _: str(executable))
     return game
+
+
+def test_submit_for_review_runs_without_an_approval_prompt(game: Path) -> None:
+    async def run() -> None:
+        session = CodexSession()
+        session.gateway_socket = game / "gateway.sock"
+        try:
+            await session.connect(game)
+        finally:
+            await session.close()
+
+    asyncio.run(run())
+    argv = json.loads((game / "argv.json").read_text())
+    assert (
+        'mcp_servers.joinery-registry.tools.submit_for_review.approval_mode="approve"'
+        in argv
+    )
 
 
 def test_missing_gate_refuses_launch(tmp_path: Path) -> None:

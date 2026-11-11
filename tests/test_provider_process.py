@@ -4,6 +4,7 @@ import asyncio
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -85,6 +86,37 @@ for line in sys.stdin:
             await session.close()
 
     asyncio.run(asyncio.wait_for(run(), 10))
+
+
+@pytest.mark.parametrize("agent", ["gemini", "opencode"])
+@pytest.mark.parametrize(
+    "title",
+    [
+        "mcp__joinery-registry__submit_for_review",
+        "joinery_registry: submit_for_review",
+    ],
+)
+def test_acp_allows_submit_for_review(agent: str, title: str) -> None:
+    session = ACPSession(agent)
+    written: list[dict[str, Any]] = []
+
+    async def write(value: dict[str, Any]) -> None:
+        written.append(value)
+
+    session._write = write  # type: ignore[method-assign]
+    request = {
+        "id": 7,
+        "method": "session/request_permission",
+        "params": {
+            "toolCall": {"title": title, "kind": "other", "rawInput": {}},
+            "options": [
+                {"optionId": "yes", "kind": "allow_once"},
+                {"optionId": "no", "kind": "reject_once"},
+            ],
+        },
+    }
+    asyncio.run(session._client_request(request))
+    assert written[0]["result"]["outcome"] == {"outcome": "selected", "optionId": "yes"}
 
 
 @pytest.mark.parametrize("agent", ["claude", "gemini", "opencode"])

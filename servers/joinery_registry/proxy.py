@@ -5,10 +5,11 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from mcp.server import MCPServer
 from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
+from pydantic import Field
 
 from joinery import chat_attachments
 from joinery.editor_ops import SceneEdit
@@ -21,7 +22,8 @@ def make_server(socket: Path) -> MCPServer[Any]:
         "joinery-registry",
         instructions=(
             "Use discover_tools to check real connected capabilities, then tool_schema before calling a tool. "
-            "Mutations are staged for user review. Never claim staged changes are accepted or saved."
+            "Mutations are staged; call submit_for_review when the change is complete. "
+            "Never claim staged changes are accepted or saved."
         ),
     )
 
@@ -67,6 +69,14 @@ def make_server(socket: Path) -> MCPServer[Any]:
     async def inspect_in_parallel(tasks: list[dict[str, str]]) -> dict[str, Any]:
         """Delegate one or two independent read-only inspection/validation questions to fast specialist agents. Each task has name and question. No edits or nested delegation; use the main agent for all changes. Results can fail independently and must be checked."""
         return await rpc(socket, "delegate", {"tasks": tasks})
+
+    @server.tool()
+    @tool_errors
+    async def submit_for_review(
+        summary: Annotated[str, Field(min_length=1, max_length=160)],
+    ) -> dict[str, Any]:
+        """Hand your finished change to Joinery. Joinery checks it (art bible rules, Godot import, missing res:// files, asset provenance, project tests). status 'in_review': the user now sees it; make no more changes this turn. 'failed' and not final: fix every problem listed and submit again (attempts_left). 'needs_user', or final: stop and tell the user plainly what failed. summary: one short line in the user's words naming what changed."""
+        return await rpc(socket, "submit", {"summary": summary})
 
     @server.tool()
     @tool_errors

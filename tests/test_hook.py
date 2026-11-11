@@ -20,6 +20,7 @@ def run_hook(monkeypatch: pytest.MonkeyPatch, event: Any) -> int:
         ("mcp__godot__scene_create", 0),
         ("mcp__joinery-verify__run_scene", 0),
         ("mcp__joinery_registry__discover_tools", 0),
+        ("mcp__joinery_registry__submit_for_review", 0),
         ("mcp__joinery_verify__run_scene", 0),
         ("mcp__blender__execute", 0),
         ("mcp__inkscape__inkscape_system", 2),  # Vetted, but not selected.

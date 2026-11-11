@@ -27,6 +27,7 @@ from joinery.policy import Severity
         ),
         ("editor_edit", {}),
         ("delegate", {"tasks": []}),
+        ("submit", {"summary": "An ashtray"}),
     ],
 )
 def test_read_only_specialist_endpoint_cannot_mutate_or_delegate(
@@ -90,6 +91,8 @@ def test_specialist_endpoint_allows_only_audited_reads(tmp_path: Path):
             {"server": "blender", "tool": "execute_code"},
         ),
         ("mcp__joinery_registry__inspect_in_parallel", {}),
+        ("mcp__joinery_registry__submit_for_review", {"summary": "An ashtray"}),
+        ("mcp__joinery-registry__submit_for_review", {"summary": "An ashtray"}),
     ],
 )
 def test_specialist_shared_hook_denies_escape_paths(

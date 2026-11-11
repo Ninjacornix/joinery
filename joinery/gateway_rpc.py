@@ -69,7 +69,7 @@ def search_tools(data: dict[str, Any], query: str) -> dict[str, Any]:
             for _, tool in candidates[:24]
         ],
         "total_matches": len(candidates),
-        "hint": "Search by application or operation to narrow results; read tool_schema before calling. Native document operations save, export, import and record provenance automatically. Final validation and a visual review are prepared when the turn finishes.",
+        "hint": "Search by application or operation to narrow results; read tool_schema before calling. Native document operations save, export, import and record provenance automatically. Call submit_for_review when the change is complete; Joinery checks it then and opens the review.",
     }
 
 
@@ -206,7 +206,11 @@ class GatewayRPC:
                         ),
                     }
                 elif self.gateway.transaction is not None:
-                    data["joinery"] = {"status": "staged", "requires_review": True}
+                    data["joinery"] = {
+                        "status": "staged",
+                        "requires_review": True,
+                        "next": "Call submit_for_review when the change is complete.",
+                    }
             elif method == "editor_context":
                 data = {"editor": self.gateway.editor_context}
             elif method == "editor_view":
@@ -220,6 +224,20 @@ class GatewayRPC:
                 if self.gateway.edit_scene is None:
                     raise ValueError("No live editor is connected to this gateway.")
                 data = await self.gateway.edit_scene(params)
+            elif method == "submit":
+                if self.inspection_only:
+                    raise ValueError(
+                        "Specialists cannot submit changes; the main thread does."
+                    )
+                if self.gateway.turn is None:
+                    raise ValueError("No user request is open.")
+                summary = params.get("summary")
+                if not isinstance(summary, str) or not 1 <= len(summary.strip()) <= 160:
+                    raise ValueError(
+                        "Give one short line (1 to 160 characters) naming what changed."
+                    )
+                submitted = await self.gateway.turn.submit(summary, "agent")
+                data = submitted.as_tool_result()
             elif method == "delegate":
                 if self.inspection_only or self.delegate is None:
                     raise ValueError("Nested specialist delegation is unavailable.")
@@ -243,7 +261,7 @@ class GatewayRPC:
                 data = {"results": await self.delegate(jobs)}
             else:
                 raise ValueError(
-                    "The model interface supports inventory, schema and call; no approval methods."
+                    "The model interface supports inventory, schema, call and submit; no approval methods."
                 )
             response = {"ok": True, "result": data}
         except PolicyStop as exc:

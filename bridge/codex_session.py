@@ -144,6 +144,8 @@ class CodexSession:
                 'mcp_servers.joinery-registry.tools.call_tool.approval_mode="approve"',
                 "-c",
                 'mcp_servers.joinery-registry.tools.edit_scene.approval_mode="approve"',
+                "-c",
+                'mcp_servers.joinery-registry.tools.submit_for_review.approval_mode="approve"',
             ]
         self._secrets = [
             env[key]

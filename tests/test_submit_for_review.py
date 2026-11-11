@@ -239,3 +239,42 @@ def test_deciding_ends_the_turn(session: Session) -> None:
     assert session.kinds()[-2:] == ["decided", "idle"]
     assert session.events[-2]["transaction_id"] == tx.id
     assert not session.turn.review_open
+
+
+def test_the_agent_submits_through_the_gateway_rpc(session: Session) -> None:
+    from joinery.gateway_rpc import GatewayRPC, rpc
+
+    session.turn.begin("Make an ashtray")
+    session.stage({"a.gd": "extends Node\n"})
+
+    async def go() -> tuple[dict[str, Any], str]:
+        server = GatewayRPC(session.gateway)
+        await server.start()
+        try:
+            with pytest.raises(RuntimeError, match="one short line"):
+                await rpc(server.path, "submit", {"summary": "  "})
+            data = await rpc(server.path, "submit", {"summary": "An ashtray"})
+            refused = ""
+            try:
+                await rpc(server.path, "submit", {"summary": "Again"})
+            except RuntimeError as exc:
+                refused = str(exc)
+            return data, refused
+        finally:
+            await server.close()
+
+    data, refused = asyncio.run(go())
+    assert data["status"] == "in_review" and data["attempts_left"] == 2
+    assert data["changes"] == [{"path": "a.gd", "change": "created"}]
+    assert "submitted for review" in refused
+
+
+def test_the_proxy_offers_submit_for_review_with_a_short_summary() -> None:
+    from servers.joinery_registry.proxy import make_server
+
+    tools = asyncio.run(make_server(Path("gateway.sock")).list_tools())
+    (tool,) = [t for t in tools if t.name == "submit_for_review"]
+    schema = tool.input_schema
+    assert schema["required"] == ["summary"]
+    assert schema["properties"]["summary"]["minLength"] == 1
+    assert schema["properties"]["summary"]["maxLength"] == 160
