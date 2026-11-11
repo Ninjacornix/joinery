@@ -17,10 +17,12 @@ var clock := 0.0
 var _sides: Array[ClipSide] = []
 
 
-## One clip: the picture stepping through its strip, and its caption.
+## One clip: the picture stepping through its strip, as large as the frame allows, and its
+## caption as a small tag over the picture's foot, so the caption costs the picture no height.
 class ClipSide:
-	extends VBoxContainer
+	extends Control
 	var picture: TextureRect
+	var tag: PanelContainer
 	var caption: Label
 	var strip: Texture2D
 	var frames := 1
@@ -28,20 +30,48 @@ class ClipSide:
 	var frame := 0
 
 	func _init(word: String) -> void:
-		theme_type_variation = "JoineryTight"
 		size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		size_flags_vertical = Control.SIZE_EXPAND_FILL
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		clip_contents = true
 		picture = TextureRect.new()
 		picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		picture.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		picture.texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
 		picture.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		picture.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		picture.texture = AtlasTexture.new()
 		add_child(picture)
+		tag = PanelContainer.new()
+		tag.theme_type_variation = "JoineryPopup"
+		tag.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		add_child(tag)
 		caption = UI.label(word, "JoineryCaption")
 		caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-		add_child(caption)
+		tag.add_child(caption)
+		resized.connect(place_tag)
+		tag.minimum_size_changed.connect(place_tag)
+
+	## Width over height of one frame (1 for the square frames Blender renders).
+	func aspect() -> float:
+		var region := (picture.texture as AtlasTexture).region
+		return region.size.x / region.size.y if region.size.y > 0.0 else 1.0
+
+	## The rectangle the picture is drawn in: the frame's aspect, centred in this side.
+	func drawn() -> Rect2:
+		var height := minf(size.y, size.x / aspect())
+		var width := height * aspect()
+		return Rect2((size - Vector2(width, height)) / 2.0, Vector2(width, height))
+
+	func place_tag() -> void:
+		var shown := drawn()
+		var tag_size := tag.get_combined_minimum_size()
+		var margin := float(get_theme_constant("separation", "JoineryTight"))
+		tag.size = tag_size
+		tag.position = Vector2(
+			roundf(shown.get_center().x - tag_size.x / 2.0),
+			roundf(shown.end.y - tag_size.y - maxf(margin, 4.0))
+		)
 
 	func set_strip(texture: Texture2D, meta: Dictionary) -> void:
 		strip = texture
@@ -86,15 +116,22 @@ func _init() -> void:
 	resized.connect(_fit)
 
 
-## Each clip as a square as tall as the frame allows; the two sit together in the middle.
+## The clips fill the frame like a picture: each as tall as the frame, at its own aspect, and
+## the shown clips share the width when the frame is too narrow for that.
 func _fit() -> void:
+	var shown: Array[ClipSide] = []
 	for side_view: ClipSide in _sides:
-		var room := size.y - side_view.caption.get_combined_minimum_size().y
-		room -= side_view.get_theme_constant("separation")
-		var width := (size.x - get_theme_constant("separation")) / 2.0
-		var square := floorf(maxf(minf(room, width), 0.0))
-		if not is_equal_approx(side_view.picture.custom_minimum_size.x, square):
-			side_view.picture.custom_minimum_size.x = square
+		if side_view.visible:
+			shown.append(side_view)
+	if shown.is_empty():
+		return
+	var gap := float(get_theme_constant("separation"))
+	var share := (size.x - gap * (shown.size() - 1)) / shown.size()
+	for side_view: ClipSide in shown:
+		var width := floorf(maxf(minf(size.y * side_view.aspect(), share), 0.0))
+		if not is_equal_approx(side_view.custom_minimum_size.x, width):
+			side_view.custom_minimum_size.x = width
+		side_view.place_tag()
 
 
 ## Play [param item]'s clips: [param before] and [param after] are its strips (null for a
@@ -112,6 +149,7 @@ func show_clip(item: Dictionary, before: Texture2D, after: Texture2D) -> void:
 	clock = 0.0
 	show()
 	set_process(true)
+	_fit()
 
 
 ## Emphasise "before" or "after" (the other clip's picture dims); "compare" shows both alike.

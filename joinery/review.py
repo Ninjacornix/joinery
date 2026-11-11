@@ -185,9 +185,10 @@ else:
     with open(OUTPUT[:-4] + '.json', 'w') as handle:
         _joinery_json.dump(row, handle)
 """
-#: Pictures per clip strip, and their side in pixels.
+#: Pictures per clip strip, and their side in pixels: large enough to stay crisp
+#: when a clip fills the review frame on a high-DPI screen.
 CLIP_FRAMES = 12
-CLIP_SIZE = 192
+CLIP_SIZE = 384
 #: Where an animation operation lists the actions it touched in the stage.
 ANIMATION_REVIEW = ".joinery/animation_review.json"
 

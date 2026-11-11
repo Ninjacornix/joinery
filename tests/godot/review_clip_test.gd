@@ -67,6 +67,8 @@ func _run() -> void:
 	_check(clip.side_at(1).caption.text == "After", clip.side_at(1).caption.text)
 	_check(clip.side_at(0).frames == 10 and clip.side_at(1).frames == 8, "Frames per strip")
 	_check(media.side == "compare", "Both alike to start: " + media.side)
+	await _check_fills(media, clip)
+	clip.clock = 0.0  # the frames the sizing waited for played the clips on
 	clip._process(0.35)
 	_check(clip.frames_shown() == [3, 3], "In sync at 0.35 s: %s" % [clip.frames_shown()])
 	clip._process(0.5)
@@ -109,6 +111,42 @@ func _run() -> void:
 	await process_frame
 	print("review clip: ", "FAILED" if _failed else "ok")
 	quit(1 if _failed else 0)
+
+
+## The clips fill the review frame like a picture: as tall as the frame when it is wide (the
+## short bottom-panel layout), sharing its width when it is narrow; captions sit over them.
+func _check_fills(media: MEDIA, clip: CLIP) -> void:
+	for spec: Array in [[Vector2(900, 260), "short"], [Vector2(300, 600), "narrow"]]:
+		media.set_anchors_preset(Control.PRESET_TOP_LEFT)
+		media.size = spec[0]
+		await process_frame
+		await process_frame
+		var frame := clip.size
+		var gap := float(clip.get_theme_constant("separation"))
+		var total := 0.0
+		for index: int in 2:
+			var side := clip.side_at(index)
+			var shown := side.drawn()
+			total += shown.size.x
+			_check(is_equal_approx(shown.size.x, shown.size.y), "%s: square frames" % spec[1])
+			_check(
+				Rect2(Vector2.ZERO, side.size).encloses(Rect2(side.tag.position, side.tag.size)),
+				"%s: the caption sits on its clip" % spec[1]
+			)
+			_check(
+				side.tag.position.y + side.tag.size.y <= shown.end.y,
+				"%s: the caption is over the picture, not below it" % spec[1]
+			)
+			if spec[1] == "short":
+				_check(
+					absf(shown.size.y - frame.y) <= 1.0,
+					"short: a clip is as tall as the frame (%s of %s)" % [shown.size.y, frame.y]
+				)
+		_check(total + gap <= frame.x + 1.0, "%s: both clips fit across" % spec[1])
+		if spec[1] == "narrow":
+			_check(total + gap >= frame.x - 2.0, "narrow: the clips share the full width")
+	media.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	await process_frame
 
 
 func _check_facts() -> void:
