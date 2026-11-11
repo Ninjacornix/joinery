@@ -34,8 +34,10 @@ may provision pinned software OpenGL privately for its graphical harness; those
 Mesa DLLs are test infrastructure, not a shipped user dependency.
 
 All bundles require uv and a usable provider CLI/API profile. Offline native
-authoring additionally requires a running Linux-container Docker engine. Server
-setup uses Git and Node.js/npm; Windows setup also uses Git Bash. Creative tool
+authoring additionally requires a running Linux-container Docker engine, which
+also runs the pinned Godot MCP server (built into `joinery-mcp-worker` with its
+own headless Godot, so it needs no Node.js on the host). Server setup uses Git,
+and Node.js/npm for the SuperCollider server; Windows setup also uses Git Bash. Creative tool
 workers are Linux AMD64 and run emulated on Apple Silicon. Host desktop apps are
 optional unless you want to open their native files interactively.
 
@@ -99,7 +101,8 @@ are separate capabilities. Run `joinery mcp status --project ... --probe` (or
 `/tools`) to inspect actual readiness; a server whose runtime is missing counts
 as a failure. `joinery status` and `joinery doctor` report the shared readiness
 checks: Docker, each worker image, a version or feature command run inside the
-worker with no network, and the installed MCP pins. Doctor no longer needs
+worker with no network, and the installed MCP pins (for Godot, the pin built
+into the MCP worker image; with Docker stopped it says Needs Docker). Doctor no longer needs
 Godot, Xvfb or ffmpeg on the host; the checks run in the workers
 (`--cached` answers from the cache alone, `--refresh` runs everything again).
 A pinned MCP without a recorded source hash is reinstalled. Neither command

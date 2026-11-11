@@ -13,8 +13,9 @@ following user requests and failure paths:
 | --- | --- | --- |
 | Native documents | Create a source; edit its existing version; keep an immutable preimage; preserve every export; report save failures; inspect layers/objects/Unicode; reject external SVG content; retain material graph node IDs and connections | [Native authoring](../tests/test_native_authoring.py) — 71 cases |
 | Authoring MCPs | Discover actual capabilities; send a request to its owning app; transform only a named model part; interpret degrees correctly; retain quoted/Unicode part names; reject empty names, booleans and nonfinite transforms before execution; preserve actionable errors | [Authoring MCP](../tests/test_authoring_mcp.py) — 68 cases |
-| Programs and workers | Open the right native document from an exported resource; handle a missing app; open SuperCollider in its IDE without running the patch; mount only the selected project; keep MCP workers offline; detect modified installations; report unavailable automation honestly | [Program workflows](../tests/test_program_workflows.py) — 57 cases |
-| MCP installation | Install the exact source revision; use locked dependencies without install scripts; reuse a verified install; reject wrong revisions, missing builds/locks, denied packages and unavailable Node; clean incomplete installs | [Install workflows](../tests/test_mcp_install_workflows.py) — 17 cases |
+| Programs and workers | Open the right native document from an exported resource; handle a missing app; open SuperCollider in its IDE without running the patch; mount only the selected project; keep MCP workers offline; detect modified installations; report unavailable automation honestly | [Program workflows](../tests/test_program_workflows.py) — 44 cases |
+| MCP installation | Install the exact source revision; use locked dependencies without install scripts; reuse a verified install; reject wrong revisions, missing builds/locks, denied packages and unavailable Node; clean incomplete installs | [Install workflows](../tests/test_mcp_install_workflows.py) — 12 cases |
+| Godot MCP in its worker | Check the pin and dependency gate of the server built into the MCP worker; say Needs Docker or Rebuild when it cannot run; move a host install from an older Joinery; launch it offline with the project at /work (read-only for inspection); map host paths in and worker paths back; keep the image, versions and catalog pins in agreement | [Godot worker](../tests/test_godot_worker.py) — 17 cases |
 | MCP connections | Read every discovery page; reject duplicate tools; validate local schemas without fetching remote references; reject malformed input before forwarding; preserve application errors; distinguish discovery from a successful probe; timeout, close and reconnect; omit provider secrets | [Connection contracts](../tests/test_mcp_connection_contracts.py) — 24 cases |
 | Review | Keep editable sources and game exports together; reject without changing originals; accept and revert both files; preserve newer manual edits; refuse content changed after its preview | [Asset review](../tests/test_asset_review_workflows.py) — 24 cases |
 | Source registry | Resolve a selected Godot file/subresource to its actual native source and owner; refuse outside/unregistered resources; expose art direction without giving the model approval authority | [Registry MCP](../tests/test_registry_mcp_workflows.py) — 18 cases |
@@ -73,7 +74,8 @@ uv run python tests/integration/mcp_round_trip.py
 uv run python tests/integration/cross_tool.py
 ```
 
-They require the pinned Godot MCP installation and prepared worker images.
+They require the prepared worker images (the pinned Godot MCP is built into
+`joinery-mcp-worker`) and `joinery mcp install --tool godot`, which records it.
 They exercise actual scene create/add/read, preview, reject/accept, and a Blender
 source → GLB → immediate Godot import/scene instance → review/accept/revert path.
 They use temporary projects and no model calls. The cross-tool fixture mocks art

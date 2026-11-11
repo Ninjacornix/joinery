@@ -79,9 +79,10 @@ whichever agent you use.
 
 ## Quick start
 
-You need uv, Docker, Git, Node.js and an agent CLI that is signed in (or an API
-key). The first setup downloads several GB of tool images; after that the tools
-run with networking off.
+You need uv, Docker, Git and an agent CLI that is signed in (or an API key).
+Node.js is needed only if you select SuperCollider; the Godot tools are built
+into an offline worker image. The first setup downloads several GB of tool
+images; after that the tools run with networking off.
 
 ```sh
 uv sync --frozen

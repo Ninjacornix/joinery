@@ -85,7 +85,10 @@ preview. Saved scenes/scripts and creative documents use isolated project
 transactions, conflict checks and durable recovery journals.
 
 The shared MCP gateway installs the catalogued Godot, official Blender,
-SuperCollider and Inkscape servers at exact revisions. First-party servers operate
+SuperCollider and Inkscape servers at exact revisions. The Godot server is built
+into the offline MCP worker image and runs there with no network, next to that
+image's headless Godot; it reads your project read-only, and every change it
+makes is staged in its own worker for review. First-party servers operate
 Blender native documents/parts, Material Maker graphs, Krita layers (pixel art
 too), Inkscape SVG and SuperCollider NRT patches. Their offline workers save native sources and
 exports, record replay/provenance, validate Godot import, and show before/after
