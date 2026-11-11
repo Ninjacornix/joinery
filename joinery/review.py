@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -103,6 +104,106 @@ bpy.ops.render.render(write_still=True)
 """
 
 
+# Plays one action and writes a strip of FRAMES square pictures side by side to
+# OUTPUT, with what it measured (length, loop, bounce, foot slide) as JSON beside
+# it, so the review loops it as a clip. Workbench, a three-quarter side view
+# framed on the whole motion. An action the model does not have (a new one, on
+# the original side) writes nothing. Set before it runs: OUTPUT, ACTION, FRAMES.
+BLENDER_CLIP = r"""
+import os, tempfile
+import numpy as _np
+action = bpy.data.actions.get(ACTION)
+if action is None:
+    print('JOINERY_NO_ACTION')
+else:
+    rig = _j_armature(_j_owner(action))
+    st = _JRig(rig)
+    row = _j_measure(st, action)
+    data = rig.animation_data or rig.animation_data_create()
+    data.use_nla = False
+    _j_assign(rig, action)
+    start, end = _j_frames(action)
+    span = max(end - start, 1)
+    loop = row['loop']
+    moments = [start + span * i / (FRAMES if loop else FRAMES - 1) for i in range(FRAMES)]
+    scene = st.scene
+    # Visible meshes only: Rigify keeps its control shapes in a hidden collection.
+    meshes = [o for o in scene.objects if o.type == 'MESH' and o.visible_get() and not o.hide_render]
+    low, high = _JV((1e9,) * 3), _JV((-1e9,) * 3)
+    for moment in moments[:: max(1, FRAMES // 6)]:
+        scene.frame_set(int(moment), subframe=moment - int(moment))
+        depsgraph = bpy.context.evaluated_depsgraph_get()
+        for obj in meshes:
+            evaluated = obj.evaluated_get(depsgraph)
+            for corner in evaluated.bound_box:
+                point = evaluated.matrix_world @ _JV(corner)
+                low = _JV(min(a, b) for a, b in zip(low, point))
+                high = _JV(max(a, b) for a, b in zip(high, point))
+    if not meshes:
+        raise RuntimeError('No visible geometry to preview')
+    center = (low + high) / 2
+    extent = max((high - low).length, 0.1)
+    camera_data = bpy.data.cameras.new('JoineryReviewCamera')
+    camera = bpy.data.objects.new('JoineryReviewCamera', camera_data)
+    scene.collection.objects.link(camera)
+    camera.location = center + (st.left * 1.5 + st.f * 0.9 + _J_UP * 0.35) * extent
+    camera.rotation_euler = (center - camera.location).to_track_quat('-Z', 'Y').to_euler()
+    camera_data.type = 'ORTHO'
+    camera_data.ortho_scale = extent * 1.05
+    scene.camera = camera
+    scene.render.engine = 'BLENDER_WORKBENCH'
+    scene.display.shading.light = 'STUDIO'
+    scene.display.shading.color_type = 'MATERIAL'
+    scene.display.shading.background_type = 'WORLD'
+    scene.display.shading.background_color = (0.12, 0.12, 0.12)
+    side = SIZE
+    scene.render.resolution_x = side
+    scene.render.resolution_y = side
+    scene.render.resolution_percentage = 100
+    scene.render.image_settings.file_format = 'PNG'
+    scene.render.image_settings.color_mode = 'RGB'
+    scene.render.film_transparent = False
+    folder = tempfile.mkdtemp()
+    strip = _np.zeros((side, side * FRAMES, 4), dtype=_np.float32)
+    for index, moment in enumerate(moments):
+        scene.frame_set(int(moment), subframe=moment - int(moment))
+        scene.render.filepath = os.path.join(folder, f'{index}.png')
+        bpy.ops.render.render(write_still=True)
+        picture = bpy.data.images.load(scene.render.filepath)
+        pixels = _np.empty(side * side * 4, dtype=_np.float32)
+        picture.pixels.foreach_get(pixels)
+        strip[:, index * side:(index + 1) * side, :] = pixels.reshape(side, side, 4)
+        bpy.data.images.remove(picture)
+    strip[:, :, 3] = 1.0
+    out = bpy.data.images.new('joinery_clip', side * FRAMES, side, alpha=True)
+    out.pixels.foreach_set(strip.ravel())
+    out.filepath_raw = OUTPUT
+    out.file_format = 'PNG'
+    out.save()
+    row.update({'frames': FRAMES, 'fps': round(FRAMES / max(row['seconds'], 1e-3), 3),
+                'range': [start, end]})
+    with open(OUTPUT[:-4] + '.json', 'w') as handle:
+        _joinery_json.dump(row, handle)
+"""
+#: Pictures per clip strip, and their side in pixels.
+CLIP_FRAMES = 12
+CLIP_SIZE = 192
+#: Where an animation operation lists the actions it touched in the stage.
+ANIMATION_REVIEW = ".joinery/animation_review.json"
+
+
+def clip_script(action: str) -> str:
+    """The Blender script that renders one action as a looping strip."""
+    from joinery.tools import blender_anim
+
+    return (
+        "import bpy\nimport json as _joinery_json\n"
+        + blender_anim.library()
+        + f"\nACTION={action!r}\nFRAMES={CLIP_FRAMES}\nSIZE={CLIP_SIZE}\n"
+        + BLENDER_CLIP
+    )
+
+
 def _order(relative: str) -> int:
     """Map before/after first, then the selected part on the model, then the rest."""
     if Path(relative).parts[:2] == ("art", "textures"):
@@ -150,10 +251,17 @@ class Render:
     relative: str
     name: str
     script: str
+    #: The side may have nothing to show (an action new in this change).
+    optional: bool = False
 
     @property
     def output(self) -> Path:
         return self.root / ".joinery/previews" / self.name
+
+    @property
+    def meta(self) -> Path:
+        """What a clip render measured, beside its strip."""
+        return self.output.with_suffix(".json")
 
     @property
     def back(self) -> Path:
@@ -211,6 +319,31 @@ def plan(
                             )
                         )
                 media.append(view)
+            for anim in _animations_in(tx, relative, parts or []):
+                clip: dict[str, Any] = {
+                    "path": relative,
+                    "media": "clip",
+                    "part": anim["id"],
+                    "label": anim["action"] or anim["was"],
+                }
+                key = hashlib.sha256(anim["id"].encode()).hexdigest()[:8]
+                for side, root, action in (
+                    ("before", tx.original, anim["was"]),
+                    ("after", tx.stage, anim["action"]),
+                ):
+                    if action and (root / relative).is_file():
+                        renders.append(
+                            Render(
+                                clip,
+                                side,
+                                root,
+                                relative,
+                                f"{digest}-{key}-clip.png",
+                                clip_script(action),
+                                optional=True,
+                            )
+                        )
+                media.append(clip)
         for side, root in (("before", tx.original), ("after", tx.stage)):
             path = root / relative
             if not path.is_file():
@@ -228,6 +361,7 @@ def plan(
         # A file left by an earlier review would show before this render is done.
         job.output.unlink(missing_ok=True)
         job.back.unlink(missing_ok=True)
+        job.meta.unlink(missing_ok=True)
         job.item[job.side] = str(job.output)
     return media, renders
 
@@ -243,6 +377,10 @@ async def render(renders: list[Render], *, strict: bool = False) -> None:
         return_exceptions=True,
     )
     for job, result in zip(renders, done, strict=True):
+        if isinstance(result, Exception) and job.optional and not job.output.is_file():
+            # Nothing to show on this side (the action is new, or was deleted).
+            job.item.pop(job.side, None)
+            continue
         if isinstance(result, BaseException):
             if strict or not isinstance(result, Exception):
                 raise result
@@ -253,6 +391,8 @@ async def render(renders: list[Render], *, strict: bool = False) -> None:
             if job.back.is_file():
                 # A full model shows from two angles: the front and the far side.
                 job.item[job.side + "_back"] = str(job.back)
+            if job.meta.is_file():
+                job.item[job.side + "_clip"] = json.loads(job.meta.read_text())
 
 
 async def evidence(
@@ -264,6 +404,60 @@ async def evidence(
     media, renders = plan(tx, changes, parts)
     await render(renders, strict=True)
     return media
+
+
+def _animations_in(
+    tx: FileTransaction, source: str, parts: list[dict[str, str]]
+) -> list[dict[str, str]]:
+    """Actions of one model to show as clips: picked ones, and those this change touched.
+
+    Each is {id, action, was}: ``was`` names it in the original (empty when it
+    is new), ``action`` in the change (empty when it was deleted).
+    """
+    found: dict[tuple[str, str], dict[str, str]] = {}
+    for part in parts:
+        if part.get("part_kind") != "animation" or not part.get("action"):
+            continue
+        if source not in {
+            part.get("owner_source", ""),
+            part.get("source", "").removeprefix("res://"),
+        }:
+            continue
+        name = part["action"]
+        found[(name, name)] = {
+            "id": part.get("id", "") or name,
+            "action": name,
+            "was": name,
+        }
+    path = tx.stage / ANIMATION_REVIEW
+    rows: list[Any] = []
+    if path.is_file():
+        try:
+            rows = list(json.loads(path.read_text()))
+        except (ValueError, TypeError):
+            rows = []
+    for row in rows:
+        if not isinstance(row, dict) or row.get("source") != source:
+            continue
+        recipe = str(row.get("recipe", ""))
+        # Only what this change made: its recipe is new in the stage.
+        if (
+            not recipe
+            or not (tx.stage / recipe).is_file()
+            or (tx.original / recipe).is_file()
+        ):
+            continue
+        action, was = str(row.get("action", "")), str(row.get("was", ""))
+        if (action, was) in found or (action and (action, action) in found):
+            continue
+        if was and was != action and (was, was) in found:
+            del found[(was, was)]
+        found[(action, was)] = {
+            "id": f"res://{source}#action={action or was}",
+            "action": action,
+            "was": was,
+        }
+    return list(found.values())
 
 
 def _parts_in(source: str, parts: list[dict[str, str]]) -> list[dict[str, str]]:
