@@ -174,6 +174,14 @@ def test_save_mix_is_a_reviewed_change(
     # The change is made in the task's stage, by its own Godot worker.
     monkeypatch.setattr("joinery.gateway.MCPConnection", GodotConnection)
 
+    class Installed:
+        revision = "test"
+
+    # The worker's spec names the pinned server; no installed worker is needed.
+    monkeypatch.setattr(
+        "joinery.server_install.load_installed", lambda _tool: Installed()
+    )
+
     async def go() -> None:
         crew = test.crew()
         task = await mixer_save.start(crew, project, _message(), test.prompt())
