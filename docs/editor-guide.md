@@ -36,8 +36,9 @@ opens upward and supports filtering and arrow keys. Tab or a click completes a
 command; Enter sends it in chat. `/help` replies with the command list. System and CLI
 diagnostics go to Output. The sidebar starts wide enough for chat and connects the agent selected at startup.
 
-Changes open in a separate **Review** panel below the viewport. Model/image/audio
-previews appear before the scrollable file details; Accept and Discard stay visible.
+Changes open in a separate **Review** panel below the viewport: the change itself
+on the left, the facts, checks and actions beside it; the file details slide in
+on demand and Accept and Discard stay visible.
 Accepting a model import opens its 3D asset preview automatically. Exporting a
 model does not place an instance in the game scene unless that was requested.
 The chat status shows the current work phase while the native application runs.
@@ -110,13 +111,15 @@ Use `/tools` for actual MCP connection/probe status; diagnostics stay in Output.
 
 ### Reviewing a change
 
-A review is made to be taken in at one look (ADR 0040). The same compact layout
-shows in the Review tab, the bottom panel and for every parallel task:
+A review is made to be taken in at one look (ADR 0040). The same layout shows in
+the Review tab, the bottom panel and for every parallel task: the **stage** with
+the change itself on the left, about 70% of the width at the full height, and the
+**rail** beside it with what you need to decide.
 
-- **The change itself**, as large as the panel allows, with a small
-  **Before** and **After** tag on each side. The tags are the switch: click one
-  to show that side, click it again to see both alike. A change with no
-  original has a single **New** tag.
+- **The stage** shows the change edge to edge on its own background. A small
+  **Before | After | Both** switch floats in its top corner; **Both** appears
+  where the two sides can show together, and then a tiny label names each side.
+  A change with no original shows a **New** badge there instead.
   - a texture, a selected material or map, or a live scene edit: one picture
     split by a line you can drag, the original on the left and the change on
     the right. Scroll or pinch to zoom, drag to pan once zoomed (both sides
@@ -126,33 +129,51 @@ shows in the Review tab, the bottom panel and for every parallel task:
     rendered show first and stay if the model's exported file can't be loaded
     in about a second;
   - an animation: the original and the change playing side by side (in 3D
-    when the model's file loads), with one play/pause and scrub bar for both;
+    when the model's file loads), with one play/pause and scrub bar for both
+    floating over the bottom of the stage; it fades out when the pointer
+    leaves and comes back when it returns. Click a clip to focus it;
   - a sound: its waveform with play, so Before and After play A/B at the same
     position;
   - code and other text: only the lines that changed, removed above added.
 
   A change with several items gets a filmstrip of small tiles under it, the
-  most important first; click a tile (or use Left and Right) to show it.
-- **One line of facts**: what changed in plain words, for example
-  "Door 20% wider · wood darker · 2 files". The words come from Journeyman
-  (`submit_for_review` takes up to three short `facts`), then from what the
-  review can measure itself (an image darker, lighter, warmer or resized, a
-  sound longer or shorter, lines added and removed), then the counts.
-- **The checks as one quiet line**: "Checks passed" (a review only opens once
-  they pass); hover it for what ran. When a reviewer agent looked at the
-  change, its notes follow as one line, the most serious first ("The hinge
-  side lost its bevel · 1 more").
-- **Details**, on its own line, opens everything else on demand: each file
-  with its diff, the checks that ran and every note.
-- **Discard** and **Accept** on the last line, always on screen. A scene edit
-  also offers **Open in editor**, which selects the changed nodes in the open
-  scene.
+  most important first; click a tile (or use Left and Right on it) to show it.
+- **The rail**, top to bottom:
+  - **All approvals**, back to the list, and where this change sits among those
+    waiting, **2 of 5**, with arrows to the previous and next one;
+  - the request as the title;
+  - **one line of facts**: what changed in plain words, for example
+    "Door 20% wider · wood darker · 2 files". The words come from Journeyman
+    (`submit_for_review` takes up to three short `facts`), then from what the
+    review can measure itself (an image darker, lighter, warmer or resized, a
+    sound longer or shorter, lines added and removed), then the counts;
+  - **the checks as small chips**: **Checks passed** (a review only opens once
+    they pass; hover it for what ran), **Reviewer checking…** while a reviewer
+    agent reads the change, and one chip per kind of note it left
+    (**1 warning**, **2 notes**), with the most serious note on a line below;
+  - a request tried several ways lists its ways here, one per line with
+    **Use this**;
+  - at the foot, always on screen: **Details**, **Ask for changes** and, for a
+    scene edit, **Open in editor** (it selects the changed nodes in the open
+    scene), then **Discard** and a large **Accept**.
+- **Details** slide in over the stage from the rail's side: each file with its
+  diff, the checks that ran and every note. Click Details again, the ×, or
+  press Escape to close them. With nothing to preview they fill the stage.
+- **Ask for changes** puts the cursor in the chat's message box with the
+  changed file attached, so you can say what to change. While the change
+  waits, the message is queued until you decide it, like any message.
 
-With the focus in the review (click anywhere in it), **Enter** accepts,
-**Backspace** or **Delete** discards, and **A** or **B** flips between before
-and after. Hovering or scrolling the change never takes the keyboard from the
-editor; after you click an animation, **Space** plays or pauses and **Left** /
-**Right** step a frame.
+When the panel is narrow (for example at the sidebar's width), the rail moves
+under the stage; the stage keeps more than half the height and Discard and
+Accept stay on screen.
+
+Once you click in the review, **A** accepts, **D** discards, **B** flips between
+before and after, **Left** / **Right** go to the previous or next change waiting
+and **Escape** closes Details. The review never takes the keyboard by itself, so
+nothing is decided while you type elsewhere; hovering or scrolling the change
+never takes it either. After you click an animation, **Space** plays or pauses
+and **Left** / **Right** step a frame. Moving to another change crossfades;
+Reduce motion makes every transition instant.
 
 In the chat, the request's card shows the waiting change as a tiny picture,
 the same line of facts and **Discard** / **Accept**, so a small change is
@@ -168,7 +189,8 @@ too, beside Output). Its title counts what waits for you: **Review 2**.
 - **Waiting for you**: every change that needs a decision, one line each:
   what it does, which app made it and when (`Blender · 3 min ago`), with
   **Discard** and **Accept** on the row. Clicking the change Journeyman just
-  made opens its full before/after review; **All approvals** goes back.
+  made opens its full before/after review; **All approvals** in its rail goes
+  back, and its arrows step through the other changes waiting.
   Clicking any other waiting change (for example one made with
   `joinery feature add` in a terminal) shows its files under the row.
   With nothing waiting it says "Nothing waits for your review."
@@ -251,7 +273,7 @@ make it a few different ways at once and keep the one you like (ADR 0042).
   with its number and direction ("2 · slim and clean") and one line of facts.
   A way still working shows its step; one waiting for a free agent says so.
   Click a picture for that way's full before and after in the Review tab, where
-  the same strip sits above it.
+  its rail lists the same ways, one per line.
 - **Use this** keeps that way: it is accepted as one Timeline entry, and every
   other way is discarded (or stopped, if it still works) at once. Accepting a
   way from its own row in the Review tab does the same. If keeping it fails,

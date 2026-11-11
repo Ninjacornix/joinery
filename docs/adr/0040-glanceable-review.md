@@ -98,3 +98,62 @@ let the user look at pictures of the change.
 Consequences: a model whose recipe exports no GLB, or a slow or broken file, keeps the renders;
 the live view shows the exported asset, so it can differ from Blender's Workbench render in
 lighting. Live views cost two small viewports while the panel shows, none when it is hidden.
+
+## Addendum: stage and rail (2026-11-11)
+
+One job per row stacked five rows in a bottom panel that is wide and short: an animated
+character came out a few dozen pixels tall, the media frame showed empty bands beside it, and
+the title, facts, Details and actions each took a full-width row of height.
+
+1. **Two parts, side by side** (`review_layout.gd`). The **stage**, about 70% on the leading
+   side at the full height, is the change itself, edge to edge on its own background
+   (`review_glance.gd`'s ground) with no card around it, as interactive as before (orbit,
+   zoom, scrub, the split line). Its least height grows with the panel's width, so a wide
+   bottom panel opens tall enough to judge the change. The **rail**, the rest on the trailing
+   side (`review_rail.gd`), reads top to bottom: where the change sits among those waiting,
+   the title (two lines at most), one line of facts, the checks as chips, a request's other
+   ways, and at the foot the actions.
+2. **One Before/After control on the stage** (`review_sides.gd`): a compact segmented pill in
+   the stage's top trailing corner, Before | After | Both. Both appears only where both sides
+   can be on screen at once (a split picture, two clips, two live models); model renders still
+   crossfade one side at a time. A new or removed asset shows one quiet badge in that corner.
+   While both sides show, a tiny label sits in the top corner of each so the halves are never
+   ambiguous. The tags under each side are gone; clicking a clip still focuses it.
+3. **The transport floats** over the foot of the stage on a small raised bar
+   (`review_overlay.gd`) instead of taking a row. It is there when an animation opens, fades out
+   when the pointer leaves the stage (never mid-scrub) and back in when it returns.
+4. **The queue in the rail** (`review_queue.gd`): "2 of 5" with previous and next arrows beside
+   All approvals, which replaces the Review tab's own back link. The queue is the Waiting for
+   you order, counting the changes that open a full review (Journeyman's and each parallel
+   task's). The next review crossfades in over the last one: a still of the old one fades out
+   above it (`review_layout.gd`'s ghost).
+5. **Checks as chips** (`review_summary.gd`): "Checks passed", "Reviewer checking…" while the
+   reviewer runs, and one chip per kind of note ("1 warning", "2 notes", "1 blocker"); the worst
+   note follows as one quiet line. Full texts stay in tooltips and Details.
+6. **Actions anchored at the rail's foot**: Details, **Ask for changes** and (for a scene edit)
+   Open in editor as quiet links on one line, then Discard and a large Accept that fills the
+   rest of the rail's width. Ask for changes puts the focus in the chat's message box with the
+   changed asset as its target (`review_flow.gd`); it shows only where the chat listens (the
+   main request's review).
+7. **Details are a drawer** (`review_drawer.gd`) that slides over the stage from the rail's side
+   (where its link is), half the stage wide, eased out on the way in and 20% shorter, eased in,
+   on the way out; Escape or its × closes it. With nothing to preview it is the whole stage and
+   cannot be closed. Opening it moves neither the picture nor the actions.
+8. **Variants in the rail** (`variant_strip.gd`'s dense mode): one way per line, a small square
+   picture, its direction and Use this, with Mix… and Discard all under them.
+9. **Narrow** (the sidebar's width, or a panel under 46 em): the rail stacks under the stage, the
+   stage keeps at least 55% of the height, and the rail never gets less than its actions need;
+   its middle scrolls instead.
+10. **Keyboard, only once the review has the focus by a click**; it never takes the focus
+    itself, so a review opening while the user types cannot be decided by a stray key. A
+    accepts, D discards, B flips Before and After, Left and Right go to the previous or next
+    change waiting, Escape closes Details. With a clicked animation, Space and Left/Right keep
+    playing and stepping frames; the filmstrip keeps Left/Right between its tiles. The hints are
+    in the tooltips. Enter, Backspace and Delete no longer decide (Enter on a focused button
+    still presses it).
+
+Consequences: the stage's pictures, clips and live views size themselves from the stage's width
+rather than their own, so the stage can shrink as well as grow. Reduce motion makes the drawer,
+the crossfade and the transport's fade instant. A rail crowded by many notes or ways scrolls in
+its middle; the actions never scroll away. Ask for changes while a review waits queues the
+message like any other (the composer says so); it does not discard the change.
