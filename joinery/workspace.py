@@ -11,7 +11,7 @@ from typing import Any
 
 from pydantic import TypeAdapter
 
-from joinery import readiness, references
+from joinery import kits, readiness, references
 from joinery.catalog import load_catalog, load_project_tools, selection_ids
 from joinery.desktop import TOOLS, launch, launcher, overrides, project_file
 from joinery.lockfile import (
@@ -116,6 +116,8 @@ class Asset:
     pending: str = ""
     #: Where that change keeps the new file until it is accepted (project-relative).
     staged: str = ""
+    #: For a model made from a parametric kit: the kit, its values and its seed.
+    kit: dict[str, Any] = field(default_factory=dict)
 
 
 #: Model files a scene can load; ones outside art/ are still listed when a scene uses them.
@@ -151,14 +153,18 @@ def _is_asset(path: str) -> bool:
     )
 
 
-def _pending(project: Path) -> tuple[dict[str, tuple[str, str]], dict[str, Recipe]]:
+def _pending(
+    project: Path,
+) -> tuple[dict[str, tuple[str, str]], dict[str, Recipe], dict[str, Path]]:
     """Assets that changes waiting for review add or replace, and those changes' recipes.
 
-    Returns ``{path: (transaction id, app)}`` and ``{recipe path: recipe}`` read from
-    each change's stage, so a new model folds its maps and exports like an accepted one.
+    Returns ``{path: (transaction id, app)}``, ``{recipe path: recipe}`` read from
+    each change's stage, so a new model folds its maps and exports like an accepted one,
+    and ``{recipe path: stage}``.
     """
     found: dict[str, tuple[str, str]] = {}
     recipes: dict[str, Recipe] = {}
+    stages: dict[str, Path] = {}
     for tx in list_transactions(project):
         if tx.state != "review":
             continue
@@ -172,6 +178,7 @@ def _pending(project: Path) -> tuple[dict[str, tuple[str, str]], dict[str, Recip
             elif path.startswith("recipes/") and path.endswith(".toml"):
                 try:
                     recipes[path] = load_recipe(tx.stage / path)
+                    stages[path] = tx.stage
                 except (ValueError, OSError):
                     continue
     # The recipe names the app that made each file; the change only lists its apps.
@@ -179,7 +186,7 @@ def _pending(project: Path) -> tuple[dict[str, tuple[str, str]], dict[str, Recip
         for path in (*recipe.outputs, *recipe.sources):
             if path in found:
                 found[path] = (found[path][0], recipe.tool)
-    return found, recipes
+    return found, recipes, stages
 
 
 def _suffix_kind(path: str) -> str:
@@ -192,6 +199,12 @@ def _is_map(owner: str, part: str) -> bool:
     base = Path(owner).stem.lower()
     name = stem.removeprefix(base).strip("_-. ")
     return name in MAP_NAMES or any(stem.endswith("_" + m) for m in MAP_NAMES)
+
+
+def _same_model(owner: str, part: str) -> bool:
+    """rock_03.blend owns rock_03.glb and rock_03_lod1.glb, not rock_13.glb."""
+    stem, other = Path(owner).stem, Path(part).stem
+    return other == stem or other.startswith(stem + "_lod")
 
 
 def _fold(
@@ -219,18 +232,24 @@ def _fold(
         owners = [p for p in members if Path(p).suffix.lower() in native]
         if not owners:
             continue
-        owner = by_path[owners[0]]
         for path in members:
             part = by_path[path]
             if path in owners or part.part_of or part.parts:
                 continue
+            # A recipe that makes several sources (a kit set) folds each export
+            # under the source of the same name.
+            owner = by_path[
+                next((o for o in owners if _same_model(o, path)), owners[0])
+            ]
             part.part_of = owner.path
             owner.parts.append(path)
-        if owner.parts and all(_suffix_kind(p) == "image" for p in owner.parts):
-            if any(_is_map(owner.path, p) for p in owner.parts):
-                owner.kind = "material"
-            elif all(p in recipe.renders for p in owner.parts):
-                owner.kind = "image"
+        for path in owners:
+            owner = by_path[path]
+            if owner.parts and all(_suffix_kind(p) == "image" for p in owner.parts):
+                if any(_is_map(owner.path, p) for p in owner.parts):
+                    owner.kind = "material"
+                elif all(p in recipe.renders for p in owner.parts):
+                    owner.kind = "image"
     for asset in assets:
         if asset.kind == "other":
             asset.kind = (
@@ -287,7 +306,7 @@ def index(project: Path) -> dict[str, Any]:
         issues.append("joinery.lock is missing; assets have no recorded provenance")
     locked = {entry.path: entry for entry in entries}
     claims = {out: rel for rel, recipe in recipes.items() for out in recipe.outputs}
-    pending, pending_recipes = _pending(project)
+    pending, pending_recipes, pending_stages = _pending(project)
     paths = (
         asset_files(project)
         | set(locked)
@@ -398,6 +417,16 @@ def index(project: Path) -> dict[str, Any]:
         asset.open_options.sort(key=lambda option: (option.tool != tool, option.name))
         assets.append(asset)
     _fold(assets, {**pending_recipes, **recipes}, domains)
+    made_by_kit = kits.kit_records(
+        project,
+        {
+            path: (pending_stages[path], recipe)
+            for path, recipe in pending_recipes.items()
+            if path not in recipes
+        },
+    )
+    for asset in assets:
+        asset.kit = made_by_kit.get(asset.path, {})
     # Readiness comes from the last report only: this index is rebuilt every few
     # seconds, and asking Docker each time would stall the workspace.
     known = readiness.cached_tools()
