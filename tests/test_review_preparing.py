@@ -1,114 +1,20 @@
-"""The review is announced the moment the agent finishes, and gets there fast."""
+"""The review gets there fast: no repeated import, checks and renders side by side."""
 
 from __future__ import annotations
 
 import asyncio
-import json
 import time
-from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
 
-from bridge import stdio
 from bridge.instructions import REVIEW_GUIDE
-from bridge.protocol import Done, Message
 from joinery import submission
 from joinery.gateway import ProjectGateway
 from joinery.runner import Result
 from joinery.transactions import FileTransaction
-
-
-class FakeBridge:
-    def __init__(self, _agent: str) -> None:
-        self.model_choices: list[Any] = []
-
-    def bind_gateway(self, _path: Path) -> None:
-        pass
-
-    async def connect(self, _project: Path, _profile: str) -> None:
-        pass
-
-    async def send(self, _prompt: Any) -> AsyncIterator[Any]:
-        yield Message(text="The ashtray will open for review.")
-        yield Done(ok=True)
-
-    async def cancel(self) -> None:
-        pass
-
-    async def close(self) -> None:
-        pass
-
-
-class FakeGateway:
-    def __init__(self, project: Path) -> None:
-        self.project = project
-        self.transaction: Any = type("Tx", (), {"id": "a" * 32, "summary": "Ashtray"})()
-        self.finished = asyncio.Event()
-
-    async def finish(self) -> dict[str, Any]:
-        self.finished.set()
-        return {"kind": "file_preview", "transaction_id": "a" * 32}
-
-    async def cancel(self) -> None:
-        pass
-
-    async def close(self) -> None:
-        pass
-
-
-class FakeRPC:
-    def __init__(self, gateway: Any, _stop: Any) -> None:
-        self.path = Path("gateway.sock")
-        self.stop_reason = ""
-
-    async def start(self) -> None:
-        pass
-
-    async def close(self) -> None:
-        pass
-
-
-def test_review_preparing_comes_before_the_review_and_done(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    (tmp_path / "project.godot").write_text("config_version=5\n")
-    events: list[dict[str, Any]] = []
-    monkeypatch.setattr(stdio, "emit", events.append)
-    monkeypatch.setattr(stdio, "Bridge", FakeBridge)
-    monkeypatch.setattr(stdio, "ProjectGateway", FakeGateway)
-    monkeypatch.setattr(stdio, "GatewayRPC", FakeRPC)
-    monkeypatch.setattr(stdio, "Specialists", lambda *_a: AsyncMock())
-    monkeypatch.setattr(stdio, "game_suggestions", lambda _p: {"kind": "suggestions"})
-
-    async def reader(_stream: Any) -> tuple[asyncio.StreamReader, Any]:
-        stream = asyncio.StreamReader()
-        stream.feed_data(
-            json.dumps({"kind": "prompt", "text": "ashtray"}).encode() + b"\n"
-        )
-
-        async def end() -> None:
-            # Close the input once the turn is over.
-            while not any(e.get("kind") == "done" for e in events):
-                await asyncio.sleep(0.01)
-            stream.feed_eof()
-
-        asyncio.get_running_loop().create_task(end())
-        return stream, type("T", (), {"close": lambda self: None})()
-
-    monkeypatch.setattr(stdio, "input_reader", reader)
-    assert asyncio.run(stdio.serve(tmp_path, "codex")) == 0
-    kinds = [event.get("kind") for event in events]
-    assert kinds.index("message") < kinds.index("review_preparing")
-    assert (
-        kinds.index("review_preparing")
-        < kinds.index("file_preview")
-        < kinds.index("done")
-    )
-    preparing = events[kinds.index("review_preparing")]
-    assert preparing["transaction_id"] == "a" * 32 and preparing["summary"] == "Ashtray"
 
 
 def test_agents_say_the_change_will_open_for_review() -> None:

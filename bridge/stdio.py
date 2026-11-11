@@ -18,22 +18,16 @@ from typing import Any, BinaryIO, Protocol
 from bridge.chat_record import ChatRecorder
 from bridge.host import Bridge
 from bridge.models import Selection
-from bridge.protocol import (
-    Done,
-    EditorAction,
-    Execution,
-    Message,
-    MessageDelta,
-    Prompt,
-    ToolActivity,
-)
+from bridge.protocol import Done, EditorAction, Message, Prompt
 from bridge.specialists import Specialists
+from bridge.turn_runner import run_turn
 from joinery import bible_lint, blueprints, brief, chat_attachments
 from joinery.art_approval import approve, review
 from joinery.editor_ops import validate_edit
 from joinery.gateway import ProjectGateway
 from joinery.gateway_rpc import GatewayRPC
 from joinery.timing import TurnTiming
+from joinery.turn import TurnController
 
 #: The open chat's recorder while a host serves; it sees every event the sidebar does.
 _recorder: ChatRecorder | None = None
@@ -195,6 +189,7 @@ async def _serve(
         return 1
     editor_calls: dict[str, asyncio.Future[dict[str, Any]]] = {}
     gateway.progress = lambda text: emit({"kind": "progress", "text": text})
+    controller = TurnController(gateway, emit, agent_id)
 
     async def edit_scene(payload: dict[str, Any]) -> dict[str, Any]:
         context = gateway.editor_context
@@ -202,12 +197,7 @@ async def _serve(
         edit = validate_edit(project, payload, tuple(known))
         if active is None or active.done():
             raise ValueError("Editor actions require an active user request.")
-        if gateway.transaction is not None:
-            scene = context.get("scene_path", "").removeprefix("res://")
-            if any(change["path"] == scene for change in gateway.transaction.diff()):
-                raise ValueError(
-                    "The saved scene is already staged; do not mix saved-file and live changes to that scene."
-                )
+        scene = controller.admit_live_edit(context)
         request_id = uuid.uuid4().hex
         future: asyncio.Future[dict[str, Any]] = (
             asyncio.get_running_loop().create_future()
@@ -223,7 +213,7 @@ async def _serve(
         )
         try:
             result = await asyncio.wait_for(future, 30)
-            gateway.live_edit_pending = bool(result.get("success"))
+            controller.record_live_edit(scene, bool(result.get("success")))
             return result
         finally:
             editor_calls.pop(request_id, None)
@@ -255,7 +245,7 @@ async def _serve(
         if active is not None and not active.done():
             active.cancel()
             await asyncio.gather(active, return_exceptions=True)
-        await gateway.cancel()
+        await controller.cancel("stopped")
         emit(
             Message(
                 text="Stopped by project policy: " + reason, level="warn"
@@ -323,56 +313,9 @@ async def _serve(
             gateway.editor_context = prompt.editor_context
             gateway.target_context = prompt.target_context
             gateway.request_summary = str(data["text"])
-            gateway.progress("Thinking through your request…")
-            async for event in bridge.send(prompt):
-                if isinstance(event, Execution):
-                    timing.model, timing.effort, timing.mode = (
-                        event.model,
-                        event.effort,
-                        event.mode,
-                    )
-                if isinstance(event, (MessageDelta, Message)):
-                    timing.response()
-                if isinstance(event, ToolActivity):
-                    gateway.progress("Using " + event.server.capitalize() + "…")
-                if isinstance(event, EditorAction):
-                    if gateway.transaction is not None and any(
-                        change["path"]
-                        == prompt.editor_context.get("scene_path", "").removeprefix(
-                            "res://"
-                        )
-                        for change in gateway.transaction.diff()
-                    ):
-                        bridge.editor_result(
-                            event.request_id,
-                            {
-                                "success": False,
-                                "message": "Finish the staged-file review before live scene changes.",
-                            },
-                        )
-                        continue
-                    gateway.live_edit_pending = True
-                if isinstance(event, Done):
-                    if event.ok:
-                        staged = gateway.transaction
-                        if staged is not None:
-                            # The agent's last words are on screen; the checks and
-                            # renders take a while, so the review shows it is coming.
-                            emit(
-                                {
-                                    "kind": "review_preparing",
-                                    "transaction_id": staged.id,
-                                    "summary": staged.summary,
-                                }
-                            )
-                        with timing.span("review"):
-                            preview = await gateway.finish()
-                        if preview is not None:
-                            emit(preview)
-                        outcome = "done"
-                    else:
-                        await gateway.cancel()
-                emit(event.model_dump())
+            outcome = await run_turn(
+                controller, bridge, prompt, emit, timing, request=str(data["text"])
+            )
         except asyncio.CancelledError:
             outcome = "cancelled"
             raise
@@ -384,7 +327,7 @@ async def _serve(
             KeyError,
             TimeoutError,
         ) as exc:
-            await gateway.cancel()
+            await controller.cancel("failed")
             with contextlib.suppress(Exception):
                 await bridge.cancel()
             emit(
@@ -441,11 +384,11 @@ async def _serve(
                 if not isinstance(data, dict):
                     raise TypeError("Invalid chat message.")
                 if data.get("kind") == "decision":
-                    if active is not None and not active.done():
-                        raise ValueError(
-                            "Wait for the current turn to finish before accepting file changes."
-                        )
-                    decision = await gateway.decide(
+                    # Allowed while the agent still writes its last words: once a
+                    # change is in review the agent can't change anything more.
+                    if not controller.review_open:
+                        raise ValueError("No change is waiting for your decision.")
+                    decision = await controller.decide(
                         str(data.get("transaction_id", "")),
                         bool(data.get("accept", False)),
                     )
@@ -481,17 +424,18 @@ async def _serve(
                     # The sidebar resumes a request the art gate held.
                     emit({"kind": "art_approved", "sha256": expected_sha256})
                 elif data.get("kind") == "live_decision":
-                    gateway.live_edit_pending = False
+                    controller.live_decided()
                 elif data.get("kind") == "editor_result":
                     result = data.get("result")
                     if not isinstance(result, dict):
                         raise TypeError("Invalid editor tool result.")
-                    if not result.get("success", False):
-                        gateway.live_edit_pending = False
                     request_id = str(data.get("request_id", ""))
                     if request_id in editor_calls:
                         editor_calls[request_id].set_result(result)
                     else:
+                        controller.live_result(
+                            request_id, bool(result.get("success", False))
+                        )
                         bridge.editor_result(request_id, result)
                 elif data.get("kind") == "editor_view_result":
                     result = data.get("result")
@@ -509,7 +453,7 @@ async def _serve(
                         active.cancel()
                         await asyncio.gather(active, return_exceptions=True)
                         emit(Done(ok=False).model_dump())
-                    await gateway.cancel()
+                    await controller.cancel()
                 elif data.get("kind") == "prompt":
                     if active is not None and not active.done():
                         emit(

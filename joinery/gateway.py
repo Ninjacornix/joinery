@@ -172,7 +172,6 @@ class ProjectGateway:
         self.staged: dict[str, MCPConnection] = {}
         self.transaction: FileTransaction | None = None
         self._last_accepted: FileTransaction | None = None
-        self.live_edit_pending = False
         #: The turn this gateway serves; it decides when the project may change.
         self.turn: TurnController | None = None
         self.request_summary = ""
@@ -327,14 +326,6 @@ class ProjectGateway:
             raise ValueError(
                 "This call needs a project-owned running-game session; it cannot target an arbitrary global port."
             )
-        if not readonly and self.live_edit_pending and server == "godot":
-            scene = self.editor_context.get("scene_path", "")
-            if scene and str(arguments.get("scenePath", "")).removeprefix(
-                "res://"
-            ) == scene.removeprefix("res://"):
-                raise ValueError(
-                    "This scene has a live preview; use its editor transaction rather than modifying the same scene file."
-                )
         if (
             not readonly
             and server not in {"godot", "joinery-registry"}

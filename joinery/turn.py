@@ -194,6 +194,10 @@ class TurnController:
         #: The session summary the next prompt carries after a fresh provider session.
         self.primer = ""
         self.compaction: asyncio.Task[Any] | None = None
+        #: The last submit's result this turn, the agent's or Joinery's.
+        self.last_result: SubmitResult | None = None
+        #: Live edits the editor is applying: {request id: scene}.
+        self._live_requests: dict[str, str] = {}
         gateway.turn = self
 
     # --- State -----------------------------------------------------------------------
@@ -220,6 +224,7 @@ class TurnController:
             raise ValueError("Journeyman is still working on the last request.")
         self.turn_id = uuid.uuid4().hex
         self.attempts = 0
+        self.last_result = None
         self.request = request
         self.requests = [*self.requests, request.strip()[:160]][-10:]
         if not self.review_open:
@@ -288,6 +293,15 @@ class TurnController:
             self.live_scenes.add(_res(scene))
             self.live_edits += 1
 
+    def expect_live(self, request_id: str, scene: str) -> None:
+        """A live edit was sent to the editor; :meth:`live_result` records its answer."""
+        self._live_requests[request_id] = scene
+
+    def live_result(self, request_id: str, ok: bool) -> None:
+        scene = self._live_requests.pop(request_id, None)
+        if scene is not None:
+            self.record_live_edit(scene, ok)
+
     def live_decided(self) -> None:
         """The user decided the live preview (or it was dropped)."""
         self.live_scenes.clear()
@@ -322,6 +336,11 @@ class TurnController:
         Fixable problems leave the stage as it is so the agent can fix them; the
         last allowed attempt, or a problem no fix can pass, drops it.
         """
+        result = await self._submit(summary, origin)
+        self.last_result = result
+        return result
+
+    async def _submit(self, summary: str, origin: str) -> SubmitResult:
         self.admit_mutation()
         if not self._staged() and not self.live_edits:
             return self._result("nothing_to_review", False, next=NEXT_NOTHING)

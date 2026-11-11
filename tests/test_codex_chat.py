@@ -309,7 +309,7 @@ def test_cli_stdio_conversation_and_eof_cleanup(
             process.stdin.write(b'{"kind":"cancel"}\n')
             await process.stdin.drain()
             cancelled = await read()
-            while cancelled["kind"] in {"progress", "timing", "execution"}:
+            while cancelled["kind"] in {"progress", "timing", "execution", "turn_state"}:
                 cancelled = await read()
             assert cancelled == {"kind": "done", "ok": False}
             process.stdin.close()
