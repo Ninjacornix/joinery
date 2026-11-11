@@ -19,6 +19,7 @@ const CONNECT_SCRIPT := preload("res://addons/joinery/agent_connect.gd")
 const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
 const UI_COMPONENTS := preload("res://addons/joinery/ui_components.gd")
 const REVIEW_TAB_SCRIPT := preload("res://addons/joinery/review_tab.gd")
+const REVIEW_CHECKS := preload("res://addons/joinery/review_checks.gd")
 const FLOW_SCRIPT := preload("res://addons/joinery/review_flow.gd")
 
 ## Focus mode is remembered, so a user who wants the stripped-back layout gets
@@ -103,6 +104,8 @@ func _enter_tree() -> void:
 	load("res://addons/joinery/share_tab.gd").install(self)
 	# Revert runs the sidebar's own, so the chat's change card follows.
 	_review_tab.attach(_dock.get("_slash"), _review_button)
+	# Accessibility and performance (ADR 0049, 0050): last scores, and their cards.
+	REVIEW_CHECKS.attach(_review_tab.get("_bible_decided"), _dock.get("_slash"))
 	_dock.review_requested.connect(_show_edit_review_panel)
 	_dock.review_closed.connect(_hide_edit_review_panel)
 	if _review_panel.has_signal("show_requested"):
