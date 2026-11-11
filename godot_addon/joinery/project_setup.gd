@@ -19,6 +19,7 @@ const UI_COMPONENTS := preload("ui_components.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const FEATURES := preload("project_features.gd")
 const HISTORY := preload("project_history.gd")
+const IMPORTS := preload("project_imports.gd")
 const GROUPS := ["engine", "3d", "2d", "audio", "other"]
 const GROUP_TITLES := {
 	"engine": "Engine", "3d": "3D", "2d": "2D", "audio": "Audio", "other": "Other apps"
@@ -351,6 +352,7 @@ func _build_rows(data: Dictionary) -> void:
 			UI_MOTION.pulse(_status)
 	)
 	_list.add_child(_features)
+	_list.add_child(IMPORTS.new().setup(cli_prefix, _project(), _show_status.bind(false)))
 	_history = HISTORY.new()
 	_history.cli_prefix = cli_prefix
 	_history.project = _project()

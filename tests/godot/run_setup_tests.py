@@ -2,11 +2,12 @@
 
     uv run python tests/godot/run_setup_tests.py [--capture DIR]
 
-The fixture answers `joinery status`, `tools`, `feature`, `history policy` and `bootstrap` the way the
-real CLI does, from the real readiness core (`joinery.readiness`) fed by the fake host
-the Python tests use, with a short delay so the test can see the editor keep drawing
-frames while a command runs. Every call is logged, so the test can prove that a feature
-change is planned before it is applied. Nothing touches Docker or the network.
+The fixture answers `joinery status`, `tools`, `feature`, `references`, `history policy`
+and `bootstrap` the way the real CLI does, from the real readiness core
+(`joinery.readiness`) fed by the fake host the Python tests use, with a short delay so the
+test can see the editor keep drawing frames while a command runs. Every call is logged, so
+the tests can prove that a feature change, or adding references and design documents, is
+planned before it is applied (setup_imports_test.gd). Nothing touches Docker or the network.
 
 With --capture, the editor runs windowed and saves dark and light screenshots of the
 dialog and the rail's readiness card into DIR.
@@ -29,6 +30,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 MARKER = "project setup dialog: ok"
+IMPORTS_MARKER = "setup imports: ok"
 #: Feature names, as `joinery features --json` gives them.
 FEATURES = [
     {"id": "controller", "name": "Controller", "summary": "Play with a gamepad.",
@@ -146,6 +148,8 @@ def fake_cli(state: Path, argv: list[str]) -> int:
             handle.write(feature + " ")
         print(json.dumps({"transaction_id": "fixture", "state": "accepted", "changes": []}))
         return 0
+    if command == "references":
+        return _references(argv)
     if command == "bootstrap":
         time.sleep(0.5)
         print(json.dumps({"installed": [], "unavailable": []}))
@@ -156,6 +160,32 @@ def fake_cli(state: Path, argv: list[str]) -> int:
         return 0
     print(json.dumps({"error": "unknown command " + command}))
     return 2
+
+
+def _references(argv: list[str]) -> int:
+    """`references add`: a plan with its notes, or the applied change's steps."""
+    pictures = [argv[i + 1] for i, word in enumerate(argv) if word == "--reference"]
+    documents = [argv[i + 1] for i, word in enumerate(argv) if word == "--design-doc"]
+    if "--plan" in argv:
+        time.sleep(0.3)
+        names = ["art/reference/" + Path(p.split("=", 1)[0]).name for p in pictures]
+        names += ["design/docs/" + Path(d).name for d in documents]
+        notes = [
+            ("Pictures go on the art bible's reference board. That changes the "
+            "bible, so approve it again in /art afterwards."),
+            ("Documents are listed in the game brief, and its open sections are "
+            "copied from matching headings in Markdown or text ones."),
+        ]
+        print(json.dumps({"changes": names, "notes": notes}))
+        return 0
+    steps = [
+        {"step": "references", "state": "done",
+         "message": f"Added {len(pictures)} reference image to art/reference/ and the art "
+         "bible's reference board. Say what to avoid in each in /art."},
+    ]
+    print(json.dumps({"transaction_id": "fixture", "state": "accepted", "changes": [],
+                      "steps": steps}))
+    return 0
 
 
 def _history_policy(argv: list[str]) -> int:
@@ -230,6 +260,7 @@ def main() -> int:
         commands = [
             ([*base[:1], "--headless", *base[1:], "--editor", "--import"], ""),
             ([*base, "--script", str(ROOT / "tests/godot/project_setup_flow_test.gd")], MARKER),
+            ([*base, "--script", str(ROOT / "tests/godot/setup_imports_test.gd")], IMPORTS_MARKER),
         ]
         for argv, marker in commands:
             result = subprocess.run(
