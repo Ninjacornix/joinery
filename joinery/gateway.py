@@ -206,6 +206,8 @@ class ProjectGateway:
         self.view_editor: Callable[[], Awaitable[dict[str, Any]]] | None = None
         self._discovery_cache: tuple[float, dict[str, Any]] | None = None
         self._discovery_lock = asyncio.Lock()
+        #: One connect at a time per app: lanes share the project's connections.
+        self._connecting: dict[str, asyncio.Lock] = {}
         #: Which task changes which file, shared by every lane of this project.
         self.claims = PathClaims()
         self.slots = WorkerSlots()
@@ -264,6 +266,7 @@ class ProjectGateway:
             "view_editor",
             "_discovery_cache",
             "_discovery_lock",
+            "_connecting",
             "claims",
             "slots",
             "lanes",
@@ -302,8 +305,10 @@ class ProjectGateway:
                 spec.env["JOINERY_WORKER_SCOPE"] = spec.worker_scope
             connection = MCPConnection(spec, self.project)
             self.connections[server] = connection
+        lock = self._connecting.setdefault(server, asyncio.Lock())
         with self.timing.span("tool_connection") if self.timing else nullcontext():
-            await connection.connect()
+            async with lock:
+                await connection.connect()
         return connection
 
     async def discover(self) -> dict[str, Any]:
