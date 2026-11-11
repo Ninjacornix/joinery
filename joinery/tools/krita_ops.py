@@ -10,21 +10,39 @@ can hide or delete in Krita:
   drawn by Krita's own vector renderer.
 * ``adjust``: a Krita filter layer (invert, levels, hue/saturation/value, blur,
   desaturate) that changes everything below it.
+* ``palette_map``: a paint layer that covers every pixel further than
+  ``max_delta_e`` (CIEDE2000) from the palette with its nearest palette colour;
+  pixels already close enough stay as they are, showing through.
+* ``resize`` (``edit_image`` only, never a model's map): scales the whole
+  document, every layer, to a new size.
 
 Colours are sRGB, 0 to 1; positions and sizes are in pixels from the top left.
 """
 
 from __future__ import annotations
 
+import inspect
 import math
+import re
 from typing import Any
+
+from joinery import bible_rules
 
 #: Each operation's parameters; `op` is the operation itself.
 PAINT_OPS: dict[str, frozenset[str]] = {
     "fill": frozenset({"color", "opacity", "rect", "name"}),
     "stroke": frozenset({"points", "color", "width", "opacity", "name"}),
     "adjust": frozenset({"filter", "params", "opacity", "name"}),
+    "palette_map": frozenset({"colours", "max_delta_e", "opacity", "name"}),
 }
+#: A Krita image of its own (``edit_image``) may also be resized.
+IMAGE_OPS: dict[str, frozenset[str]] = {
+    **PAINT_OPS,
+    "resize": frozenset({"width", "height", "name"}),
+}
+MAX_SIDE = 16384
+MAX_PALETTE = 64
+_HEX = re.compile(r"^#[0-9a-fA-F]{6}$")
 #: Filter layers `adjust` makes: Joinery's name -> (Krita filter id, parameters).
 FILTERS: dict[str, tuple[str, frozenset[str]]] = {
     "invert": ("invert", frozenset()),
@@ -94,24 +112,29 @@ def _filter(name: Any, params: Any) -> tuple[str, dict[str, float]]:
     return name, checked
 
 
-def check_ops(ops: Any) -> list[dict[str, Any]]:
+def check_ops(
+    ops: Any, allowed: dict[str, frozenset[str]] = PAINT_OPS
+) -> list[dict[str, Any]]:
     """Refuse unknown operations and bad values before Krita starts."""
     if not isinstance(ops, list) or not 1 <= len(ops) <= MAX_OPS:
         raise ValueError(f"ops is a list of 1 to {MAX_OPS} operations.")
     checked: list[dict[str, Any]] = []
     for number, given in enumerate(ops, 1):
-        if not isinstance(given, dict) or given.get("op") not in PAINT_OPS:
-            raise ValueError(
-                f"Operation {number}: op is one of {', '.join(PAINT_OPS)}."
-            )
+        if not isinstance(given, dict) or given.get("op") not in allowed:
+            raise ValueError(f"Operation {number}: op is one of {', '.join(allowed)}.")
         op = str(given["op"])
-        unknown = set(given) - {"op"} - PAINT_OPS[op]
+        unknown = set(given) - {"op"} - allowed[op]
         if unknown:
             raise ValueError(
                 f"Operation {number} ({op}) does not take {', '.join(sorted(unknown))}."
             )
         row: dict[str, Any] = {"op": op}
-        name = given.get("name", f"{op.capitalize()} {number}")
+        name = given.get(
+            "name",
+            {"palette_map": "Palette map", "resize": "Resize"}.get(
+                op, f"{op.capitalize()} {number}"
+            ),
+        )
         if not isinstance(name, str) or not name.strip() or len(name) > 63:
             raise ValueError(f"Operation {number}: name is 1 to 63 characters.")
         row["name"] = name.strip()
@@ -155,6 +178,34 @@ def check_ops(ops: Any) -> list[dict[str, Any]]:
             row["filter"], row["params"] = _filter(
                 given.get("filter"), given.get("params")
             )
+        if op == "palette_map":
+            colours = given.get("colours")
+            if (
+                not isinstance(colours, list)
+                or not 1 <= len(colours) <= MAX_PALETTE
+                or not all(isinstance(c, str) and _HEX.match(c) for c in colours)
+            ):
+                raise ValueError(
+                    f'Operation {number}: colours is 1 to {MAX_PALETTE} "#rrggbb" colours.'
+                )
+            row["colours"] = [c.lower() for c in colours]
+            limit = given.get("max_delta_e", 12.0)
+            if not _finite(limit) or not 0 <= limit <= 100:
+                raise ValueError(f"Operation {number}: max_delta_e is from 0 to 100.")
+            row["max_delta_e"] = float(limit)
+        if op == "resize":
+            for key in ("width", "height"):
+                value = given.get(key)
+                if (
+                    not isinstance(value, int)
+                    or isinstance(value, bool)
+                    or not 1 <= value <= MAX_SIDE
+                ):
+                    raise ValueError(
+                        f"Operation {number}: {key} is whole pixels, 1 to {MAX_SIDE}."
+                    )
+                row[key] = value
+            row.pop("opacity")
         checked.append(row)
     return checked
 
@@ -247,11 +298,83 @@ def _joinery_adjust(document, name, kind, params, opacity):
 """
 
 
+#: CIEDE2000 inside Krita: the very functions the art bible measures with.
+COLOUR_MATHS = "\n".join(
+    [
+        "import math",
+        "Sequence = list",
+        *(
+            inspect.getsource(function)
+            for function in (
+                bible_rules._channel_linear,
+                bible_rules._lab_linear,
+                bible_rules._lab,
+                bible_rules.delta_e_2000,
+            )
+        ),
+    ]
+)
+
+PALETTE_HELPERS = r"""
+def _joinery_palette_map(document, name, colours, limit, opacity):
+    # Every pixel further than `limit` from the palette gets its nearest palette
+    # colour on a layer of its own; the rest stays transparent, so the painting
+    # below shows wherever it already matches. Colours are judged on a 6-bit
+    # grid, so a large texture stays quick.
+    document.refreshProjection()
+    document.waitForDone()
+    width, height = document.width(), document.height()
+    data = bytes(document.pixelData(0, 0, width, height))
+    palette = [(int(c[1:3], 16), int(c[3:5], 16), int(c[5:7], 16)) for c in colours]
+    labs = [_lab(p) for p in palette]
+    cache = {}
+    out = bytearray(len(data))
+    changed = 0
+    for i in range(0, len(data), 4):
+        alpha = data[i + 3]
+        if alpha < 8:
+            continue
+        key = (data[i + 2] & 0xFC, data[i + 1] & 0xFC, data[i] & 0xFC)
+        hit = cache.get(key, False)
+        if hit is False:
+            lab = _lab((key[0] | 2, key[1] | 2, key[2] | 2))
+            distances = [delta_e_2000(lab, p) for p in labs]
+            best = min(range(len(labs)), key=distances.__getitem__)
+            hit = cache[key] = palette[best] if distances[best] > limit else None
+        if hit is not None:
+            out[i] = hit[2]
+            out[i + 1] = hit[1]
+            out[i + 2] = hit[0]
+            out[i + 3] = alpha
+            changed += 1
+    layer = document.createNode(name, 'paintlayer')
+    layer.setPixelData(bytes(out), 0, 0, width, height)
+    _joinery_add(document, layer, opacity)
+    print('JOINERY_PALETTE_MAP:%d/%d' % (changed, width * height))
+
+def _joinery_resize(document, width, height):
+    document.scaleImage(width, height, int(document.xRes()), int(document.yRes()), 'Bicubic')
+    document.waitForDone()
+"""
+
+
 def paint_code(ops: list[dict[str, Any]]) -> str:
     """Krita code (for the recipe's open `document`) that applies checked operations."""
     lines = [HELPERS]
+    if any(row["op"] in {"palette_map", "resize"} for row in ops):
+        # The palette helper only calls the colour maths when it runs.
+        lines += [COLOUR_MATHS, PALETTE_HELPERS]
     for row in ops:
-        if row["op"] == "fill":
+        if row["op"] == "resize":
+            lines.append(
+                f"_joinery_resize(document, {row['width']!r}, {row['height']!r})"
+            )
+        elif row["op"] == "palette_map":
+            lines.append(
+                f"_joinery_palette_map(document, {row['name']!r}, {row['colours']!r}, "
+                f"{row['max_delta_e']!r}, {row['opacity']!r})"
+            )
+        elif row["op"] == "fill":
             lines.append(
                 f"_joinery_fill(document, {row['name']!r}, {row['color']!r}, "
                 f"{row['opacity']!r}, {row.get('rect')!r})"

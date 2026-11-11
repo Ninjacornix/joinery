@@ -491,6 +491,9 @@ async def edit_shape_key(
 
 def register(server: MCPServer[Any], project: Path) -> None:
     """Add the map, material copy, bone and shape key operations to joinery-blender-ops."""
+    from servers.blender_ops import model_ops
+
+    model_ops.register(server, project)
 
     @server.tool(name="make_map_editable")
     @tool_errors

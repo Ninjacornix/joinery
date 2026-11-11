@@ -32,12 +32,19 @@ FAMILIES = {
         "split_material",
         "edit_bone",
         "edit_shape_key",
+        # Whole-model operations (servers/blender_ops/model_ops.py).
+        "apply_scale",
+        "set_pivot",
+        "reduce_triangles",
+        "set_texel_density",
     },
     "joinery-paint": {
         "inspect_document",
         "document_capabilities",
         "operate_document",
         "operate_vector",
+        # Typed Krita operations on a painting (servers/paint/ops.py).
+        "edit_image",
     },
     "joinery-sound": {
         "inspect_document",
