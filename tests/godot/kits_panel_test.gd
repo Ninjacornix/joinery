@@ -126,7 +126,10 @@ func _check_preview(kits: Variant) -> void:
 
 ## For screenshots: a preview Blender really drew (JOINERY_KITS_PREVIEW, JSON by state).
 func _show_real(kits: Variant, state: String) -> void:
-	var drawn: Variant = JSON.parse_string(OS.get_environment("JOINERY_KITS_PREVIEW"))
+	var given := OS.get_environment("JOINERY_KITS_PREVIEW")
+	if given.is_empty():
+		return
+	var drawn: Variant = JSON.parse_string(given)
 	if drawn is Dictionary and (drawn as Dictionary).has(state):
 		kits.show_preview(drawn[state])
 
