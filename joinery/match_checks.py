@@ -11,6 +11,7 @@ from __future__ import annotations
 import math
 import re
 from collections.abc import Iterable
+from pathlib import PurePosixPath
 from typing import Any
 
 from joinery import match_look
@@ -39,6 +40,7 @@ from joinery.match import (
     _Audit,
     _suffix,
 )
+from joinery.music_track import mix_measure_script, section_mixes
 
 # --- palette and textures ------------------------------------------------------------
 
@@ -574,6 +576,50 @@ def _themed(text: str) -> bool:
 # --- sound ---------------------------------------------------------------------------
 
 
+def _music_mix(
+    audit: _Audit, label: str, stems: list[str], values: dict[str, float]
+) -> None:
+    """A track section's mix against the music loudness; fixed by rendering again."""
+    rules = audit.rules.audio
+    description, _, rest = label.partition(" (")
+    subject = rest.rstrip(")")
+    if "lufs" not in values:
+        audit.errors.append(f"{label}: its loudness could not be measured")
+        return
+    target = _folder_value(rules.lufs, stems[0])
+    if target is None or abs(values["lufs"] - target) <= rules.lufs_tolerance:
+        return
+    name = PurePosixPath(description).stem
+    owner, why = audit.owner(stems[0], SOUND_TOOLS)
+    fix = (
+        None
+        if owner is None
+        else Fix(
+            server="joinery-sound",
+            tool="edit_track",
+            arguments={"name": name, "changes": {}, "lufs": target},
+            apps=[owner.tool],
+            source=description,
+            label=f"Render {name} again at {target:g} LUFS",
+            outputs=stems,
+        )
+    )
+    gap = abs(values["lufs"] - target)
+    audit.finding(
+        "sound",
+        description,
+        "loudness",
+        "high" if gap > 3 * max(rules.lufs_tolerance, 1) else "medium",
+        f"{values['lufs']:.1f} LUFS",
+        f"{target:g} LUFS",
+        f"the {subject} is {values['lufs']:.1f} LUFS, the art bible asks for "
+        f"{target:g} ± {rules.lufs_tolerance:g}",
+        fix=fix,
+        needs_you=why,
+        subject=subject,
+    )
+
+
 async def sound(audit: _Audit, paths: list[str]) -> None:
     rules = audit.rules.audio
     audio = [
@@ -590,18 +636,32 @@ async def sound(audit: _Audit, paths: list[str]) -> None:
         return
     for path in audio:
         audit.checked["sound"].add(path)
+    # A music track's stems are judged as the section mix they play in.
+    mixes = {
+        label: group
+        for label, group in section_mixes(audit.project).items()
+        if set(group) <= set(audio)
+    }
+    stems = {stem for group in mixes.values() for stem in group}
     try:
         got = await audit.measure(["sh", "-c", _MEASURE, "sh", *audio], audit.project)
         loudness = parse_loudness(got.output) if got.ok else {}
+        if mixes:
+            got = await audit.measure(
+                ["sh", "-c", mix_measure_script(mixes)], audit.project
+            )
+            loudness.update(parse_loudness(got.output) if got.ok else {})
     except (OSError, RuntimeError, TimeoutError) as error:
         audit.errors.append(f"Loudness could not be measured: {error}")
         loudness = {}
+    for label, group in mixes.items():
+        _music_mix(audit, label, group, loudness.get(label, {}))
     for path in audio:
         values = loudness.get(path, {})
         if "lufs" not in values or "true_peak" not in values:
             audit.errors.append(f"{path}: its loudness could not be measured")
             continue
-        target = _folder_value(rules.lufs, path)
+        target = None if path in stems else _folder_value(rules.lufs, path)
         ceiling = rules.true_peak_max_dbtp
         loud_off = (
             target is not None and abs(values["lufs"] - target) > rules.lufs_tolerance

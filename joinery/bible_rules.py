@@ -41,6 +41,7 @@ from joinery.bible_blend import (
     measure_argv,
     parse_measures,
 )
+from joinery.music_track import mix_measure_script, section_mixes
 from joinery.runner import Result
 
 #: The Blender script that measures `.blend` files (kept in bible_blend).
@@ -1678,11 +1679,23 @@ async def check_rules(
             or _folder_value(rules.audio.lufs, p) is not None
         )
     ]
+    # A music track's stems play together: the bible's loudness is the section
+    # mix's, and each stem only has to keep under the true-peak ceiling.
+    mixes = section_mixes(stage)
+    stems = {stem for group in mixes.values() for stem in group}
+    changed_mixes = {
+        label: group
+        for label, group in mixes.items()
+        if set(group) & set(audio) and all((stage / s).is_file() for s in group)
+    }
     if not audio:
         return problems
     got = await measure(["sh", "-c", _MEASURE, "sh", *audio], stage)
     loudness = parse_loudness(got.output) if got.ok else {}
-    for path in audio:
+    if changed_mixes:
+        got = await measure(["sh", "-c", mix_measure_script(changed_mixes)], stage)
+        loudness.update(parse_loudness(got.output) if got.ok else {})
+    for path in [*audio, *changed_mixes]:
         values = loudness.get(path, {})
         if "true_peak" not in values or "lufs" not in values:
             problems.append(f"{path}: loudness could not be measured")
@@ -1693,7 +1706,11 @@ async def check_rules(
                 f"{path}: true peak {values['true_peak']:.1f} dBTP, above the art "
                 f"bible's {ceiling:.1f} dBTP"
             )
-        target = _folder_value(rules.audio.lufs, path)
+        if path in stems:
+            continue
+        target = _folder_value(
+            rules.audio.lufs, changed_mixes[path][0] if path in changed_mixes else path
+        )
         if (
             target is not None
             and abs(values["lufs"] - target) > rules.audio.lufs_tolerance

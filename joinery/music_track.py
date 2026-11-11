@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -238,3 +240,43 @@ def from_tres(text: str) -> MusicTrack:
     # Godot writes StringNames as &"name"; JSON has no such thing.
     raw = re.sub(r'&(")', r"\1", raw)
     return MusicTrack.model_validate(json.loads(raw))
+
+
+# --- Stems in the project --------------------------------------------------------
+
+
+def section_mixes(root: Path) -> dict[str, list[str]]:
+    """Every section of every track in ``root``: "music/<name>.tres (<section> mix)" -> its stems.
+
+    A stem is quieter than the music target on its own; what the player hears
+    is the section's mix, so loudness is judged on the mix, not the stem.
+    """
+    out: dict[str, list[str]] = {}
+    for path in sorted((root / "music").glob("*.tres")):
+        try:
+            track = from_tres(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        for section in track.sections:
+            stems = [
+                stem.removeprefix("res://") for _, stem in sorted(section.stems.items())
+            ]
+            where = path.relative_to(root).as_posix()
+            out[f"{where} ({section.name} mix)"] = stems
+    return out
+
+
+def mix_measure_script(mixes: dict[str, list[str]]) -> str:
+    """A shell script printing the EBU R128 loudness of each mix, like the file check."""
+    lines = []
+    for label, stems in mixes.items():
+        inputs = " ".join("-i " + shlex.quote(stem) for stem in stems)
+        graph = (
+            f"amix=inputs={len(stems)}:normalize=0:duration=longest,ebur128=peak=true"
+        )
+        lines.append(
+            f"echo {shlex.quote('JOINERY_FILE:' + label)}; "
+            f"ffmpeg -nostats -hide_banner {inputs} -filter_complex {shlex.quote(graph)} "
+            "-f null - 2>&1 | sed -n '/Summary:/,$p'"
+        )
+    return "\n".join(lines) + "\n"
