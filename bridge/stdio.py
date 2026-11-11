@@ -475,7 +475,7 @@ async def _serve(
             return await specialists.inspect(jobs)
 
         rpc_server.delegate = delegate
-        # The playtester plays read-only, like an inspection specialist.
+        # The playtester plays in its own read-only role (joinery.roles).
         playtester = Playtester(
             project,
             emit,

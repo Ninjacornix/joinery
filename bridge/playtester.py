@@ -2,9 +2,9 @@
 
 ``/playtest`` in the sidebar (or, with ``[agents] playtest_after_change = true``, an
 accepted gameplay change) starts one. It is the chat's own provider (Codex, Claude Code,
-Gemini CLI or opencode), launched read-only like an inspection specialist: the same
-policy hook judges its calls, and its gateway endpoint allows only inspection tools and
-``playtest``. It never edits the game. It calls ``playtest(minutes?, seed?, focus?)``,
+Gemini CLI or opencode) in the read-only ``playtester`` role (``joinery.roles``): the
+policy hook and its gateway endpoint judge its calls by the same role table, which allows
+reads and ``playtest`` and nothing that changes the project. It never edits the game. It calls ``playtest(minutes?, seed?, focus?)``,
 reads the report and the screenshots, and writes a short report: bugs with repro steps
 and the seed, softlocks, balance notes, each with a severity. Lines it starts with
 ``Fix:`` become "Ask Journeyman to fix" follow-ups, which the user sends as a normal
