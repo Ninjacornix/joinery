@@ -52,8 +52,8 @@ the model runtime and keep the user's subscription.
 5. **Context summaries.** The controller tracks `Usage`. At 80 % of a known context window,
    after the turn, Joinery runs a read-only summary turn: mutations and submit are refused
    while the controller is `compacting`. Joinery adds the facts it recorded itself (accepted,
-   discarded and open changes, the last 10 requests), saves the summary (`SummaryStore`, by
-   default `.joinery/summaries/`) and starts a fresh provider session (`new_session()` on each
+   discarded and open changes, the last 10 requests), saves the summary (`SummaryStore`: the open saved chat, or
+   `.joinery/summaries/` when no chat can be saved) and starts a fresh provider session (`new_session()` on each
    adapter). The next prompt carries the summary as `Prompt.primer`. The user sees one quiet
    line. If the summary turn fails, the facts Joinery recorded stand alone.
 

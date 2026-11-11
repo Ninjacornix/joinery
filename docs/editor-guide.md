@@ -73,8 +73,9 @@ you accept. One request never changes the same scene both ways.
 When a conversation nears the model's context limit, Joinery asks Journeyman for
 a short summary, adds what it recorded (changes accepted, discarded and still
 open, and your recent requests), and continues in a fresh session from it. The
-chat shows one quiet line when this happens. Summaries are kept in
-`.joinery/summaries/` (the newest 20). Decision record: ADR 0035.
+chat shows one quiet line when this happens. The summary is kept with the saved
+chat (or in `.joinery/summaries/`, the newest 20, when the chat can't be saved).
+Decision record: ADR 0035.
 
 Live scene tools support node creation, deletion, duplication, renaming,
 reparenting, transforms, resources, imported scene instances, existing scripts
