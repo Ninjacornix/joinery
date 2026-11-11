@@ -67,6 +67,10 @@ func _run() -> void:
 	_check(clip.side_at(1).caption.text == "After", clip.side_at(1).caption.text)
 	_check(clip.side_at(0).frames == 10 and clip.side_at(1).frames == 8, "Frames per strip")
 	_check(media.side == "compare", "Both alike to start: " + media.side)
+	_check(
+		media.frame_ground().to_html(false) == "1f1f1f",
+		"The frame takes the clips' background: %s" % media.frame_ground().to_html(false)
+	)
 	await _check_fills(media, clip)
 	clip.clock = 0.0  # the frames the sizing waited for played the clips on
 	clip._process(0.35)

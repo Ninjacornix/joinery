@@ -630,6 +630,8 @@ func _show_both(item: Dictionary, swap: bool) -> void:
 		_fail(str(item.get("error", "")))
 		return
 	_frame.show()
+	# The clips' own background fills the frame, like a model's two renders.
+	_set_ground(_common_ground(before if before != null else after, after if before else null))
 	if not _clip.visible or _clip.get_meta("item", {}) != item:
 		_clip.show_clip(item, before, after)
 		_clip.set_meta("item", item)
