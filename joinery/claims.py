@@ -7,7 +7,8 @@ to a file another task has claimed is refused with a plain tool error. Claims la
 until the user decides the change (or it is dropped).
 
 ``joinery.lock`` is shared bookkeeping, not anyone's work: it is never claimed,
-and :mod:`joinery.rebase` merges it instead. Folders are never claimed either.
+and :mod:`joinery.rebase` merges it instead. Folders are never claimed either, nor
+the empty ``.gdignore`` markers that every change making a source folder writes.
 
 Game features are one claim for the whole project (:data:`FEATURES`): a change
 that adds or removes a feature rewrites the carried game manifest, so only one
@@ -33,6 +34,8 @@ MAIN = "main"
 MAIN_TITLE = "the main request"
 #: Files every change may touch; merged on accept rather than claimed.
 UNCLAIMED = frozenset({"joinery.lock"})
+#: Godot's "don't import this folder" marker: empty, the same in every change.
+MARKER = ".gdignore"
 #: Concurrent turns per project, the chat's own included, unless joinery.toml says.
 DEFAULT_PARALLEL = 3
 MAX_PARALLEL = 6
@@ -234,7 +237,7 @@ class PathClaims:
         """Claim ``paths`` for ``task``; returns the ones refused, with their holders."""
         refused: dict[str, str] = {}
         for path in sorted(paths):
-            if path in UNCLAIMED:
+            if path in UNCLAIMED or PurePosixPath(path).name == MARKER:
                 continue
             title = self.holder(path, task)
             if title:
