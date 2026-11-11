@@ -63,6 +63,10 @@ class Options:
     extra_env: dict[str, str] = field(default_factory=dict)
     #: Play an exported game's pack (the .pck a build ships) instead of the project.
     pack: Path | None = None
+    #: Measure the game too: "perf" or "access" (``joinery perf`` / ``joinery access``).
+    probe: str = ""
+    #: Record each rendered frame's luminance (flash measurement; windowed runs only).
+    luma: bool = False
 
     def public(self) -> dict[str, Any]:
         data = asdict(self)
@@ -183,6 +187,10 @@ def _bot_args(
         args.append("--shots=" + ",".join(str(f) for f in shots))
     if options.route is not None:
         args.append(f"--route={options.route}")
+    if options.probe:
+        args.append(f"--probe={options.probe}")
+    if options.luma:
+        args.append("--luma")
     return args
 
 

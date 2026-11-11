@@ -135,6 +135,8 @@ func summary() -> Dictionary:
 		"frame_ms_p50": snappedf(sorted[count / 2], 0.01) if count else 0.0,
 		"frame_ms_p95":
 		snappedf(sorted[mini(count - 1, int(count * 0.95))], 0.01) if count else 0.0,
+		"frame_ms_p99":
+		snappedf(sorted[mini(count - 1, int(count * 0.99))], 0.01) if count else 0.0,
 		"frame_ms_max": snappedf(sorted[count - 1], 0.01) if count else 0.0,
 		"spikes": spikes,
 		"samples": samples,

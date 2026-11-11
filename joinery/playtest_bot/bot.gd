@@ -4,7 +4,7 @@ extends SceneTree
 ## Run (joinery/playtest.py does): godot --headless --path <game> --fixed-fps 60
 ##   --script <this file> -- --playtest-out=<dir> --seed=<n> --seconds=<n>
 ##   [--scene=res://…] [--softlock=<seconds>] [--focus=word,word] [--shots=f,f,…]
-##   [--route=<file>] --settings-path=<file>
+##   [--route=<file>] [--probe=perf|access] [--luma] --settings-path=<file>
 ##
 ## It loads the game's main scene (or --scene), starts the level the way the game core's
 ## own tests do, and plays it through the input map (bot_drive.gd) while bot_watch.gd and
@@ -14,12 +14,13 @@ extends SceneTree
 ## <out>/bot.json every few seconds and at the end, so a crash still leaves what it saw.
 ## With --shots it saves a picture at those frames instead (a windowed replay of the same
 ## seed). With --route it only walks the player along a blockout's routes (bot_route.gd)
-## and reports which targets it reached.
+## and reports which targets it reached. With --probe it also measures the game for
+## `joinery perf` or `joinery access` (bot_probe.gd), its numbers under "probe" in bot.json.
 ##
 ## The bot never writes inside the project: everything goes to --playtest-out, and the
 ## game's user:// is wherever the caller's HOME points.
 
-const SCRIPTS := ["bot_logger.gd", "bot_watch.gd", "bot_drive.gd", "bot_route.gd"]
+const SCRIPTS := ["bot_logger.gd", "bot_watch.gd", "bot_drive.gd", "bot_route.gd", "bot_probe.gd"]
 const SAVE_SLOT := 2
 const SHOT_WIDTH := 480
 const LIMIT_EVENTS := 300
@@ -34,6 +35,10 @@ var focus: PackedStringArray = PackedStringArray()
 ## A blockout's routes to walk (--route), and the walker once it runs.
 var route: Dictionary = {}
 var walker: RefCounted
+## --probe=perf|access and --luma: what bot_probe.gd measures, and the probe once it runs.
+var probe_kind: String = ""
+var luma: bool = false
+var probe: RefCounted
 var fps: int = 60
 var frame: int = 0
 var rng: RandomNumberGenerator = RandomNumberGenerator.new()
@@ -80,6 +85,10 @@ func _initialize() -> void:
 	if not route.is_empty():
 		walker = (load(base.path_join(SCRIPTS[3])) as GDScript).new(self, route, fps)
 	process_frame.connect(func() -> void: watch.call(&"tick_process"))
+	if not probe_kind.is_empty() or luma:
+		var probe_script := load(base.path_join(SCRIPTS[4])) as GDScript
+		probe = probe_script.new(self, probe_kind, luma, int(seconds * fps))
+		process_frame.connect(func() -> void: probe.call(&"drawn", frame))
 	_run.call_deferred()
 
 
@@ -127,6 +136,10 @@ func _run() -> void:
 		_busy = true
 		await check.call()
 		_busy = false
+	if probe != null:
+		_busy = true
+		drive.call(&"release_all")
+		await probe.call(&"finish")
 	_finish()
 
 
@@ -135,6 +148,8 @@ func _tick(play: bool) -> void:
 	await physics_frame
 	frame += 1
 	logger.set(&"frame", frame)
+	if probe != null:
+		probe.call(&"tick", frame, paused, menus != null and bool(menus.call(&"is_open")))
 	if current_scene != _scene:
 		_scene = current_scene
 		watch.call(&"scene_changed", frame)
@@ -179,6 +194,8 @@ func _boot() -> bool:
 		return false
 	if game != null and scene_path.is_empty():
 		game.set(&"autostart", true)
+	if probe != null:
+		probe.call(&"boot_started")
 	if change_scene_to_file(path) != OK:
 		_finding({"kind": "boot", "detail": "The scene %s did not load." % path, "frame": 0})
 		return false
@@ -645,6 +662,7 @@ func _write(done: bool) -> void:
 		"moments": moments,
 		"route": walker.get(&"results") if walker != null else [],
 		"perf": watch.call(&"summary"),
+		"probe": probe.call(&"result") if probe != null and done else {},
 		"log": logger.call(&"entries"),
 		"log_dropped": int(logger.get(&"dropped")),
 	}
@@ -672,6 +690,10 @@ func _parse_args() -> void:
 		elif arg.begins_with("--route="):
 			var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(value))
 			route = parsed if parsed is Dictionary else {}
+		elif arg.begins_with("--probe="):
+			probe_kind = value
+		elif arg == "--luma":
+			luma = true
 		elif arg.begins_with("--shots="):
 			for part: String in value.split(",", false):
 				shots[part.to_int()] = "shot_%06d.png" % part.to_int()
