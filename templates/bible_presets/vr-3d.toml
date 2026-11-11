@@ -1,0 +1,70 @@
+# VR 3D: comfortable, true-to-scale rooms that hold the headset's frame rate.
+# Fills technical sections only. Vision, references, look, palette, sound and
+# bans are always the user's.
+id = "vr-3d"
+name = "VR 3D"
+
+[sections]
+camera = """
+- The camera is the player's head: never move, turn, shake or bob it from code. No head bob, no camera shake, no cutscene camera.
+- Eye height comes from the headset; the desktop fallback uses 1.6 m. Seated play lifts the view by 0.45 m so the world keeps its scale.
+- Turning: snap 30° or 45° (setting), with a 0.25 s vignette. Smooth turning only as an opt-in setting.
+- Moving: smooth move at 1–3 m/s (default 2 m/s, setting) with the comfort vignette, or teleport; no acceleration curves, no forced movement.
+- Near plane 0.05 m, far 100 m. Nothing important closer than 0.5 m to the eyes; reading distance 1–3 m.
+- Performance: hold the headset's refresh rate (72 fps on standalone headsets, 90 fps on PC headsets) in every room; a dropped frame is a comfort bug, not a polish item.
+"""
+models = """
+- Units: metres, +Y up in Godot, true scale: the player knows how big things are. Door 2.1 × 0.9 m; table top 0.75 m; counter 0.9 m; ceiling at least 2.5 m.
+- Reach: things to grab between 0.6 m and 1.6 m above the floor, within 0.7 m of where the player stands; buttons at 0.9–1.2 m.
+- Grabbable props 0.05–0.4 m across, pivot at the centre of mass; hands grab within 0.2 m.
+- Triangle budgets (per eye-visible frame, standalone headset): whole view ≤ 300 000; room ≤ 50 000; grabbable prop ≤ 2 000; hero prop ≤ 5 000; hands ≤ 4 000 each.
+- Draw calls: ≤ 150 per eye on standalone headsets, ≤ 400 on PC; merge static meshes per room.
+- Scale and rotation applied; named `Part_Material_Variant`; files lower_snake_case.
+"""
+materials = """
+- Built in Material Maker or Blender shader nodes, baked to textures at 256 px/m ± 25 %.
+- Roughness 0.3–1.0; metallic 0 or 1, only on real metal. No transparent surfaces larger than 1 m² in view (fill rate).
+- Albedo between luminance 0.04 and 0.85: no pure black or white, nothing that glares in a headset.
+- Textures power of two, at most 1024 px on standalone headsets (2048 on PC); suffixes `_albedo`, `_normal`, `_orm`.
+"""
+animation = """
+- Feel: grounded, 3 on a 1 (floaty) to 5 (snappy) scale.
+- Animate objects, never the player's view. Buttons travel 2–3 cm in 0.08 s and spring back in 0.15 s.
+- Held objects follow the hand on every physics frame with no lag or smoothing.
+- Physics at the headset's refresh rate (72 or 90 Hz).
+"""
+vfx = """
+- Technique: GPUParticles3D and simple shaders; flipbooks only when painted in Krita.
+- At most 64 particles per effect and 512 in view; no full-screen effects, no motion blur, no chromatic aberration, no depth of field.
+- No flashing: never more than 3 flashes per second, and no large bright flash in the view.
+- Teleport arc and pointer beams thin (4 mm), unshaded, readable against every surface.
+"""
+ui = """
+- In the headset, UI lives in the world: panels 1.2–1.6 m wide at 1.5 m, the top no higher than eye level. Never fixed to the face.
+- Text at least 24 px at 1080p on panels (about 1° of view); body 28 px; high contrast.
+- Pointer ray and trigger drive every panel; the desktop fallback keeps keyboard, mouse and pad.
+- Motion: 150 ms ease-in-out; nothing moves when reduced motion is on.
+"""
+accessibility = """
+- Comfort settings on one page: smooth move or teleport, movement speed, snap turn 30° or 45°, vignette strength, seated play, left-handed.
+- Seated play reaches everything: no object only reachable from the floor or above 1.6 m.
+- Every hand action has a pointer alternative; no action needs both hands at once.
+- Subtitles; remappable controls on the desktop; no more than 3 flashes per second.
+"""
+
+[rules.models.max_triangles]
+"art/characters" = 10000
+"art/props" = 2000
+"art/environment" = 50000
+
+[rules.models.max_bones]
+"art/characters" = 60
+
+[rules.models.texel_density]
+"art" = { px_per_m = 256, tolerance = 0.25 }
+
+[rules.materials]
+roughness = [0.3, 1.0]
+
+[rules.textures.max_size]
+"art" = 1024

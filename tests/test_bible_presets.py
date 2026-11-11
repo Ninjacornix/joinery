@@ -12,7 +12,7 @@ from joinery.bible_rules import BibleRules, load_rules, parse_rules
 from joinery.catalog import ROOT
 
 TEMPLATE = ROOT / "templates" / "art_bible.md"
-IDS = ["none", "cards-ui", "flat-2d", "lowpoly-3d", "pixel-2d", "stylised-pbr-3d"]
+IDS = ["none", "cards-ui", "flat-2d", "lowpoly-3d", "pixel-2d", "stylised-pbr-3d", "vr-3d"]
 ANSWERS = {
     "title": "Hollow Keep",
     "vision": "Quiet, heavy stone at dusk. Never cartoonish.",
