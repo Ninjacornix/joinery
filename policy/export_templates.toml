@@ -1,0 +1,30 @@
+# The one Godot export-template release Joinery exports games with: the
+# official 4.7.2 templates, matching the engine base (godot_patches/UPSTREAM).
+# `joinery share build` and the release checks (release/export_smoke.py) read
+# this file, so the pin lives in one place. See docs/adr/0046-share-your-game.md.
+#
+# The archive is 1.2 GB. Joinery downloads it only when the user asks
+# (`joinery share build --download-templates`, or the Download button on the
+# Share page), never on its own. A copy already on disk is used when its
+# SHA-512 matches, and so are templates installed by Godot's own template
+# manager when each file's SHA-256 below matches.
+#
+# Change it only through a reviewed change: download the new release once,
+# record its SHA-512 and the SHA-256 of every file listed under [files].
+
+version = "4.7.2.stable"
+url = "https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_export_templates.tpz"
+sha512 = "ca4d71c4d7b81dfc15d1a98baa07534aa95b03fdda78a0075b06672e1648d2e5f40980c9adc28d23e1b92e732ee7bf3461997aa804af74ec2fcd7a93ccb84079"
+size = 1281349702
+licence = "MIT"
+
+# The files Joinery takes from the archive (under templates/), with their
+# SHA-256. Nothing else is extracted.
+[files]
+"version.txt" = "38885c88f75abbc797a1db7559719800279a00cfb9fa8b2e2868a7f6f84bad2e"
+"web_nothreads_release.zip" = "d3ee2f08cef0cf3cf6678a6355a92a8db48ccdd35cbd2e8bfd5f0e8a0b4032a0"
+"web_release.zip" = "02f0dca13ed3d8343fa68f8f88ac80295562408d71aa67157e8b96ddebaa67a3"
+"windows_release_x86_64.exe" = "d34d36f3be1a6c49c56525ae86469b92e4f417ddf0b43cf00dd80c385c4b0562"
+"windows_release_x86_64_console.exe" = "52bdcae9068e8d23b840e5c63b0c1798ffe2cb66144e5c4bc7af11fb8c8600df"
+"macos.zip" = "88df5e2e6fee99088699be66e6d42e4da4fb0c5619d054297d755a49558a4792"
+"linux_release.x86_64" = "d9f79ab89b5ae369aeed11c6052d402e8218cd503bf85b4a235f9c30c46a7c63"

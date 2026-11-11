@@ -21,13 +21,13 @@ from pathlib import Path
 
 from joinery.catalog import ROOT
 from joinery.distribution import binary_target, engine_binary
+from joinery.export_templates import load_pin
 
-TEMPLATE_NAME = "Godot_v4.7.2-stable_export_templates.tpz"
-TEMPLATE_SHA512 = "ca4d71c4d7b81dfc15d1a98baa07534aa95b03fdda78a0075b06672e1648d2e5f40980c9adc28d23e1b92e732ee7bf3461997aa804af74ec2fcd7a93ccb84079"
-TEMPLATE_URL = (
-    "https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/"
-    + TEMPLATE_NAME
-)
+# One pin for the release checks and `joinery share build`: policy/export_templates.toml.
+_PIN = load_pin()
+TEMPLATE_NAME = _PIN.archive_name
+TEMPLATE_SHA512 = _PIN.sha512
+TEMPLATE_URL = _PIN.url
 DESKTOP_TEMPLATES = {
     "linux_release.x86_64",
     "windows_release_x86_64.exe",
