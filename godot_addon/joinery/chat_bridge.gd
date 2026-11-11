@@ -47,6 +47,9 @@ signal chat_changed(event: Dictionary)
 signal task_event(event: Dictionary)
 ## The user asked to see a task's change ([param transaction_id]) in the Review tab.
 signal task_review(transaction_id: String)
+## A playtest (ADR 0038), tagged with its playtest_id: {state: starting|playing|writing|done|
+## failed|stopped, elapsed, seconds, report, summary, followups, message, origin}.
+signal playtest_event(event: Dictionary)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 const ATTACHMENTS := preload("chat_attachments.gd")
@@ -200,6 +203,20 @@ func cancel_tasks() -> void:
 		_job.send_line(JSON.stringify({"kind": "cancel_tasks"}))
 
 
+## "/playtest": the playtester plays the game and reports; [param focus] says what to aim for.
+func start_playtest(focus: String) -> bool:
+	if _job == null or not _connected:
+		return false
+	_job.send_line(JSON.stringify({"kind": "playtest_start", "focus": focus}))
+	return true
+
+
+## Stop the playtest [param playtest_id].
+func cancel_playtest(playtest_id: String) -> void:
+	if _job != null and _connected:
+		_job.send_line(JSON.stringify({"kind": "playtest_cancel", "playtest_id": playtest_id}))
+
+
 ## Show a task's change in the Review tab.
 func show_task_review(transaction_id: String) -> void:
 	task_review.emit(transaction_id)
@@ -245,6 +262,9 @@ func _process(_delta: float) -> void:
 func _handle(event: Dictionary) -> void:
 	if not str(event.get("task_id", "")).is_empty():
 		task_event.emit(event)
+		return
+	if not str(event.get("playtest_id", "")).is_empty():
+		playtest_event.emit(event)
 		return
 	match str(event.get("kind", "")):
 		"connection":

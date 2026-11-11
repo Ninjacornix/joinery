@@ -30,6 +30,8 @@ signal readiness_changed(report: Dictionary)
 signal revertible_changed(states: Dictionary)
 ## "Update to the new layout" on a first-format art bible finished.
 signal bible_upgraded(ok: bool, message: String)
+## "/playtest [focus]": the playtester plays the game; [param focus] is the words after it.
+signal playtest_requested(focus: String)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 ## Everyday commands first; descriptions stay at 32 characters or fewer.
@@ -37,6 +39,7 @@ const COMMANDS := {
 	"/art": ["Review the art direction", "ui"],
 	"/brief": ["Read the game brief", "ui"],
 	"/feature": ["Add or remove a game feature", "cli"],
+	"/playtest": ["Play the game and report bugs", "ui"],
 	"/setup": ["Change project apps", "ui"],
 	"/focus": ["Toggle focus mode", "ui"],
 	"/toolbar": ["Show or hide viewport tools", "ui"],
@@ -121,6 +124,8 @@ func run(entry: String) -> bool:
 	if COMMANDS[command][1] in ["ui", "debug"]:
 		if command == "/debug":
 			debug_requested.emit(" ".join(arguments(entry)))
+		elif command == "/playtest":
+			playtest_requested.emit(" ".join(arguments(entry)))
 		else:
 			requested.emit(command)
 		return true
