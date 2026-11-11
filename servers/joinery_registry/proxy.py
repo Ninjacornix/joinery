@@ -12,6 +12,7 @@ from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
 from pydantic import BaseModel, Field
 
 from joinery import chat_attachments
+from joinery.blockout.layout import Layout
 from joinery.editor_ops import SceneEdit
 from joinery.gateway_rpc import rpc
 from servers.errors import tool_errors
@@ -129,6 +130,35 @@ def make_server(socket: Path) -> MCPServer[Any]:
             result.content.append(
                 ImageContent(type="image", data=encoded, mime_type=media)
             )
+        return result
+
+    @server.tool()
+    @tool_errors
+    async def blockout(
+        layout: Layout,
+        scene: Annotated[str, Field(max_length=200)] = "",
+        blueprint: Annotated[str, Field(max_length=40)] = "",
+        sketch: Annotated[str, Field(max_length=1000)] = "",
+    ) -> CallToolResult:
+        """Build a greybox level from a layout: rooms, walls with doors and windows, corridors, stairs, platforms, a spawn and goal/coin/pickup/checkpoint/hazard markers. Read the user's sketch (an attached image; a reference only) and write the layout: plan x right (east), y down (south); 3D in metres (plan x,y become Godot X,Z; heights in metres), 2D in tiles (2d-side for platformers, 2d-topdown). Rect = [x, y, width, height]; rooms that touch share an edge line; a corridor cuts the room walls it crosses; openings sit on a room wall (north/east/south/west, or e0.. for polygons) at a distance from its west or north end. No size given: a door gap is about 1 m (3D) or 2 tiles (2D). Joinery checks the layout (closed rooms, sizes, every goal reachable from the spawn) and returns problems to fix and a picture of the plan; when sound it stages design/blockouts/<name>.toml (the source to edit for changes; call again with the whole layout) and the scene (default res://game/<name>_blockout.tscn), walks spawn to goals in Godot, and returns facts for submit_for_review. scene: another res:// target. blueprint: the starting point whose player to check with (default the project's). sketch: the attachment path shown beside the plan in the review (default the message's first image)."""
+        data = await rpc(
+            socket,
+            "blockout",
+            {
+                "layout": layout.model_dump(mode="json", exclude_none=True),
+                "scene": scene,
+                "blueprint": blueprint,
+                "sketch": sketch,
+            },
+        )
+        result = CallToolResult(content=[TextContent(type="text", text=json.dumps(data))])
+        picture = str(data.get("picture", "") or "")
+        if picture:
+            try:
+                media, encoded = chat_attachments.encoded(Path(picture))
+            except (OSError, ValueError):
+                return result
+            result.content.append(ImageContent(type="image", data=encoded, mime_type=media))
         return result
 
     @server.tool()

@@ -15,6 +15,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal
 
+from joinery.blockout import stage as blockout_stage
 from joinery.debugging import diagnosis_from
 from joinery.gateway import ProjectGateway
 from joinery.mcp_runtime import PolicyStop
@@ -358,6 +359,12 @@ class GatewayRPC:
                 if self.role != "debugger" or self.reproduce is None:
                     raise ValueError("Only the debugger reproduces errors.")
                 data = await self.reproduce(str(params.get("scene", "") or ""))
+            elif method == "blockout":
+                if self.inspection_only:
+                    raise ValueError(
+                        "Specialists cannot build blockouts; the main thread does."
+                    )
+                data = await blockout_stage.tool(self.gateway, params)
             elif method == "playtest":
                 if self.playtest is None:
                     raise ValueError("Playtests are not available here.")
@@ -368,7 +375,7 @@ class GatewayRPC:
                 data = self.task_status(str(params.get("id", "")))
             else:
                 raise ValueError(
-                    "The model interface supports inventory, schema, call, submit and playtest; no approval methods."
+                    "The model interface supports inventory, schema, call, submit, blockout and playtest; no approval methods."
                 )
             response = {"ok": True, "result": data}
         except PolicyStop as exc:

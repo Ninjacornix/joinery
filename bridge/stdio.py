@@ -20,6 +20,7 @@ from bridge import compaction
 from bridge.chat_record import ChatRecorder
 from bridge.crew import Crew
 from bridge.host import Bridge
+from bridge.instructions import expand_command
 from bridge.match_runner import MatchRun
 from bridge.models import Selection
 from bridge.playtester import Playtester, gameplay_change
@@ -371,6 +372,10 @@ async def _serve(
             text, started = recorder.begin(data, attachments)
             if started is not None:
                 emit(started)
+            # A sidebar command that is a request ("/blockout") reaches the agent in words.
+            raw = str(data.get("text", ""))
+            if text.endswith(raw) and expand_command(raw) != raw:
+                text = text[: len(text) - len(raw)] + expand_command(raw)
             prompt = Prompt(
                 text=text,
                 project_dir=str(project),
@@ -383,6 +388,7 @@ async def _serve(
             gateway.editor_context = prompt.editor_context
             gateway.target_context = prompt.target_context
             gateway.request_summary = str(data["text"])
+            gateway.attachments = attachments
             selection.clear()
             selection.update(prompt.selection.model_dump())
             outcome = await run_turn(

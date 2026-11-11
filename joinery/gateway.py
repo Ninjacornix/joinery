@@ -237,6 +237,10 @@ class ProjectGateway:
         self.request_summary = ""
         #: The prompt's selection targets; part targets scope typed part edits.
         self.target_context: tuple[dict[str, str], ...] = ()
+        #: The prompt's attached images (a sketch to build a blockout from).
+        self.attachments: tuple[str, ...] = ()
+        #: Joinery's own review facts and media for a staged change, by transaction id.
+        self.review_extras: dict[str, dict[str, Any]] = {}
         #: Set when a call needed an approved art bible; the turn's end reports it.
         self.art_gate: dict[str, Any] | None = None
         self.runtime_owned = False
@@ -468,17 +472,9 @@ class ProjectGateway:
                 structured_content={k: v for k, v in gate.items() if k != "kind"},
                 is_error=True,
             )
-        if not readonly and self.transaction is None:
-            self.transaction = FileTransaction(self.project)
-            self.transaction.begin(self.request_summary[:160] or "Project changes")
-            self._synced = self.claims.generation
-        elif not readonly and self._synced < self.claims.generation:
-            # Another task's change was accepted: follow it before writing.
-            self.follow_project(take_theirs=False)
-        if self.transaction is not None and self.transaction.state != "staging":
-            if not readonly:
-                raise ValueError("Accept or reject the pending transaction first.")
-        elif self.transaction is not None:
+        if not readonly:
+            self.staging()
+        if self.transaction is not None and self.transaction.state == "staging":
             if not readonly:
                 # The Review tab names the app that made each change.
                 self.transaction.note_tool(
@@ -616,6 +612,20 @@ class ProjectGateway:
         elif server == "godot" and tool == "stop_project" and not result.is_error:
             self.runtime_owned = False
         return result
+
+    def staging(self) -> FileTransaction:
+        """This turn's staged change, begun on its first write and brought up to date
+        with changes accepted since; refused while a change waits for the user."""
+        if self.transaction is None:
+            self.transaction = FileTransaction(self.project)
+            self.transaction.begin(self.request_summary[:160] or "Project changes")
+            self._synced = self.claims.generation
+        elif self._synced < self.claims.generation:
+            # Another task's change was accepted: follow it before writing.
+            self.follow_project(take_theirs=False)
+        if self.transaction.state != "staging":
+            raise ValueError("Accept or reject the pending transaction first.")
+        return self.transaction
 
     def claim_stage(self, *, strict: bool) -> None:
         """Claim every file this turn's stage changed, hashing the whole stage.
@@ -898,13 +908,16 @@ class ProjectGateway:
             tx, reviewed, [dict(t) for t in self.target_context if t.get("part_kind")]
         )
         self._media_jobs = (tx.id, media, jobs)
+        extras = self.review_extras.pop(tx.id, {})
+        self.review_extras.clear()
         return {
+            "joinery_facts": list(extras.get("facts", [])),
             "kind": "file_preview",
             "diff": "\n".join(text_diffs[:400]),
             "transaction_id": tx.id,
             "summary": tx.summary,
             "changes": reviewed,
-            "media": media,
+            "media": [*extras.get("media", []), *media],
             "media_pending": bool(jobs),
         }
 

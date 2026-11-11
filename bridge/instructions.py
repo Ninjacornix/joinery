@@ -86,6 +86,37 @@ TASK_PROMPT = (
     "that file alone and say so in one line.\n\nYour task:\n{request}"
 )
 
+#: Building a level from the user's sketch (ADR 0043).
+BLOCKOUT_GUIDE = (
+    "When the user shows a level sketch (or a top-down screenshot) and asks to build "
+    "it, or types /blockout, read the attached image and call blockout(layout) with "
+    "rooms, walls, doors, corridors, stairs, platforms, the spawn and the goals it "
+    "shows, at the sketch's proportions; the sketch is a reference only, never an "
+    "asset. Fix every problem blockout returns and call it again. To change a built "
+    "blockout ('move the door to the north wall', 'make room B bigger'), read "
+    "design/blockouts/<name>.toml, change the layout and call blockout again; don't "
+    "edit the built scene. Then submit_for_review with blockout's facts. "
+)
+
+#: The request ``/blockout [words]`` stands for; ``{words}`` is what the user added.
+BLOCKOUT_REQUEST = (
+    "Build a greybox blockout of the level in the attached sketch with the blockout "
+    "tool: read its rooms, walls, doors and windows, corridors, stairs, platforms, "
+    "spawn and goals, keep its proportions (no measure given: a door is about 1 m, or "
+    "2 tiles in 2D), fix whatever blockout reports, then submit_for_review with its "
+    "facts. {words}"
+)
+
+
+
+def expand_command(text: str) -> str:
+    """``/blockout [words]`` as the request it stands for; any other text as it is."""
+    stripped = text.strip()
+    if stripped != "/blockout" and not stripped.startswith("/blockout "):
+        return text
+    return BLOCKOUT_REQUEST.format(words=stripped[len("/blockout") :].strip()).strip()
+
+
 #: When to play the game rather than reason about it.
 PLAYTEST_GUIDE = (
     "To try the game, call playtest(minutes?, seed?, focus?): a bot plays it headless "
@@ -118,6 +149,7 @@ PLAYTEST_PROMPT = (
 #: How the user decides, in the words the editor shows.
 REVIEW_GUIDE = (
     TASK_GUIDE
+    + BLOCKOUT_GUIDE
     + PLAYTEST_GUIDE
     +
     "The user accepts or discards every change in the Review panel. "

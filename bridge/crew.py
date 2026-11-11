@@ -359,6 +359,7 @@ class Crew:
         lane.editor_context = dict(prompt.editor_context)
         lane.target_context = prompt.target_context
         lane.request_summary = title
+        lane.attachments = prompt.attachments
         holder: list[Task] = []
         controller = TurnController(
             lane, lambda event: self._emit(holder[0], event), self.agent

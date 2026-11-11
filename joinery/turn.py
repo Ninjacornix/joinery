@@ -698,8 +698,10 @@ class TurnController:
             preview["art_gate"] = {k: v for k, v in gate.items() if k != "kind"}
         preview["origin"] = origin
         preview["checks"] = self._passed
-        if self._facts:
-            preview["facts"] = self._facts
+        # Joinery's own measured facts ("Walkable: …") lead; the agent's follow.
+        facts = list(dict.fromkeys([*preview.pop("joinery_facts", []), *self._facts]))
+        if facts:
+            preview["facts"] = facts[:3]
         self.review_id = str(preview["transaction_id"])
         return preview
 
