@@ -4,10 +4,12 @@ extends VBoxContainer
 ## One request in the transcript, kept as a change card so the session reads as a history you
 ## can trace and revert. The user's bubble holds only the request text. Under it, on the
 ## transcript inset, Journeyman's side: the apps at work and a quiet timer, the live
-## steps, a thumbnail when a change is ready, and inline errors. The decision line
-## ("Change accepted", with "Revert" on accepted file changes) is placed by the transcript at
-## the end of the turn, after the reply ([signal outcome_placing]). The decision itself is
-## always made in the Review panel; its only trigger in the sidebar is the footer.
+## steps, the change when it is ready, and inline errors. A ready change shows a tiny picture,
+## one line of what changed and Discard / Accept (sidebar_review_row.gd), so a small change is
+## decided right here; a bigger one offers Review, which opens the Review panel. Either way the
+## decision runs through the panel. The decision line ("Change accepted", with "Revert" on
+## accepted file changes) is placed by the transcript at the end of the turn, after the reply
+## ([signal outcome_placing]).
 ##
 ## Revert is not optimistic: the line says "Reverting…" until Joinery confirms, then
 ## "Reverted", or shows the error in place with Revert offered again. A change whose restore
@@ -52,6 +54,7 @@ const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
 const INDICATOR := preload("activity_indicator.gd")
 const ATTACHMENT_ROW := preload("sidebar_attachments.gd")
+const REVIEW_ROW := preload("sidebar_review_row.gd")
 ## Apps recognised in step text; the card shows each one it sees once.
 const APPS := ["Blender", "Krita", "GIMP", "Material Maker", "Surge XT", "SuperCollider", "Godot"]
 ## Shown instead of Revert once the change's restore data is gone.
@@ -118,8 +121,8 @@ var _retry: Button
 var _reason := ""
 var _retry_allowed := true
 var _steps: VBoxContainer
-var _ready_row: HBoxContainer
-var _thumb: TextureRect
+## The ready change: picture, one line, Discard / Accept or Review.
+var _ready_row: REVIEW_ROW
 var _outcome: HBoxContainer
 var _outcome_icon: TextureRect
 var _outcome_text: Label
@@ -224,24 +227,8 @@ func _init(text := "", context: Array = []) -> void:
 	_steps.theme_type_variation = "JoineryTight"
 	_steps.hide()
 	_progress.add_child(_steps)
-	_ready_row = _row(_column)
-	var frame := PanelContainer.new()
-	frame.theme_type_variation = "JoineryMediaFrame"
-	frame.clip_children = CanvasItem.CLIP_CHILDREN_AND_DRAW
-	frame.tooltip_text = "The change after it was made. Decide in the Review panel."
-	_ready_row.add_child(frame)
-	_thumb = TextureRect.new()
-	_thumb.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	_thumb.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
-	_thumb.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	STYLE.on_theme(
-		_thumb,
-		func() -> void:
-			var side := float(UI_THEME.control_h(_thumb, "lg")) * 1.5
-			_thumb.custom_minimum_size = Vector2(side, side)
-	)
-	frame.add_child(_thumb)
-	_ready_row.hide()
+	_ready_row = REVIEW_ROW.new()
+	_column.add_child(_ready_row)
 	_error = UI.label("", "JoineryError", true)
 	_error.hide()
 	_column.add_child(_error)
@@ -438,34 +425,23 @@ func finish(outcome: String) -> void:
 	_sync_activity()
 
 
-## A change is waiting in the Review panel. [param media] is the review's media list; the
-## first "after" image becomes the thumbnail.
-func set_ready(media: Array = []) -> void:
+## A change is waiting for a decision. [param media] is the review's media list (its first
+## "after" image is the picture until the panel has one); [param review] is the Review panel
+## (review_panel.gd) that decides it, kept from an earlier call when null.
+func set_ready(media: Array = [], review: Object = null) -> void:
 	set_sent()
 	_timer.hide()
 	_tick_current("success")
 	state = "ready"
 	_error.hide()
 	_outcome.hide()
-	var texture: Texture2D = null
-	for item: Dictionary in media:
-		# A render still running has no file yet; review_media brings it.
-		if (
-			item.get("media") == "image"
-			and item.has("after")
-			and FileAccess.file_exists(str(item["after"]))
-		):
-			var image := Image.load_from_file(str(item["after"]))
-			if image != null and not image.is_empty():
-				texture = ImageTexture.create_from_image(image)
-				break
-	_thumb.texture = texture
-	_thumb.get_parent().visible = texture != null
-	# Only a picture is worth a row here; "Show review" lives in the footer.
-	_ready_row.visible = texture != null
-	if _ready_row.visible:
-		UI_MOTION.reveal(_ready_row)
+	_ready_row.show_for(media, review)
 	_sync_activity()
+
+
+## The ready change's row in this card (picture, line, Discard / Accept).
+func review_row() -> REVIEW_ROW:
+	return _ready_row
 
 
 ## Show the decision. [param kind]: "success", "rejected", "stopped", "error" or "info".

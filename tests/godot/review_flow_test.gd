@@ -158,8 +158,8 @@ func _run() -> void:
 	var card: VBoxContainer = CARD.new("Weather the crate")
 	root.add_child(card)
 	card.set_ready([{"path": "art/crate.blend", "media": "image", "after": "/x/not_yet.png"}])
-	_check(card._thumb.texture == null, "No thumbnail before the render exists")
-	_check(not card._ready_row.visible, "No empty picture row while the render runs")
+	_check(card.review_row().thumbnail() == null, "No thumbnail before the render exists")
+	_check(not card.review_row().visible, "No empty picture row while the render runs")
 	card.queue_free()
 
 	# A task's live edit, once the main request is idle: its own turn moves its review.

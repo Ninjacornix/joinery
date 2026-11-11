@@ -939,7 +939,7 @@ func _open_review(media: Array) -> void:
 	_review_pending = true
 	var card := _card()
 	if card != null:
-		card.set_ready(media)
+		card.set_ready(media, _review)
 	_command_popup.close()
 	_sync()
 	review_requested.emit()
