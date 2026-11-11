@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from joinery import references
+from joinery import complex_models, references
 from joinery.art_approval import approved
 from joinery.art_approval import fingerprint as bible_fingerprint
 from joinery.authoring import run_offline
@@ -212,6 +212,16 @@ async def validate(
             Problem("references", references.refusal(gaps), sorted(gaps))
         )
     found.ran.append("references")
+    # Complex objects are Blender (or kit) models, not piles of placeholder shapes.
+    if complex_models.setting(gateway.project) == complex_models.BLENDER and any(
+        c["path"].endswith(".tscn") and c["after"] for c in changes
+    ):
+        shapes = complex_models.check_scenes(
+            gateway.project, tx.stage, tx.original, changes
+        )
+        if shapes is not None:
+            found.problems.append(shapes)
+        found.ran.append("complex models")
     asset_changes = [
         change["path"]
         for change in changes

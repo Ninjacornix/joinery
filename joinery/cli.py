@@ -19,6 +19,7 @@ from joinery import (
     brief,
     chats,
     claims,
+    complex_models,
     connection,
     game_setup,
     godotsteam,
@@ -1063,6 +1064,11 @@ def _parser() -> argparse.ArgumentParser:
         "--model", default=None, help="the reviewer's model; empty for the author's"
     )
     reviewer_cmd.add_argument("--json", action="store_true")
+    complex_models.add_arguments(
+        commands.add_parser(
+            "complex-models", help="show or change who makes complex models"
+        )
+    )
     workspace = commands.add_parser(
         "workspace", help="list assets and desktop viewers as JSON"
     )
@@ -1430,6 +1436,8 @@ def main(argv: list[str] | None = None) -> int:
         return _setup(args.tools, args.project, payload_text, args)
     if args.command == "reviewer":
         return _reviewer(args)
+    if args.command == "complex-models":
+        return complex_models.main(args)
     if args.command == "agents":
         if args.json:
             print(
