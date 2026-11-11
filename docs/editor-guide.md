@@ -732,6 +732,16 @@ From a terminal: `joinery kits list`, `joinery kits preview --kit rock
 `joinery kits edit --asset art/environment/rock.glb --params '{"size": 2}'`
 (`--yes` accepts the change at once).
 
+### Complex models in Blender
+
+A chair, a lamp or a car is made in Blender (or with a kit) and placed as one
+model. A change that stacks Godot's box, cylinder or CSG shapes into one object
+goes back to the agent before you see it. Floors, walls, platforms, ramps,
+collision shapes, sketch-built levels and placeholders you ask for by name are
+fine, and only what a change adds or modifies is judged. Prototyping? Turn off
+Settings → Project → **Complex models in Blender** (`[agents] complex_models =
+"placeholders"`, or `joinery complex-models --set placeholders`).
+
 ### Shared kits
 
 Things you made in one game can go into the next as a shared kit: a
