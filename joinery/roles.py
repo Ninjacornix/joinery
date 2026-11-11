@@ -35,7 +35,13 @@ from joinery.policy import Severity, Verdict
 from joinery.read_access import read_only
 
 Role = Literal[
-    "lead", "worker", "reviewer", "debugger", "playtester", "accessibility", "performance"
+    "lead",
+    "worker",
+    "reviewer",
+    "debugger",
+    "playtester",
+    "accessibility",
+    "performance",
 ]
 ROLES: tuple[Role, ...] = get_args(Role)
 #: The policy hook reads the role from here; absent means ``lead``.

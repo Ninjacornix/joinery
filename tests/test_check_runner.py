@@ -283,7 +283,7 @@ def test_access_areas_are_labels_the_card_shows() -> None:
         "assists",
         "menus",
     ]
-    assert list(perf.AREAS)[0] == "frames"
+    assert next(iter(perf.AREAS)) == "frames"
 
 
 def test_the_endpoint_serves_each_check_to_the_roles_that_may_read_it() -> None:
