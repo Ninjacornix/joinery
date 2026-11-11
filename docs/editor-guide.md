@@ -216,6 +216,37 @@ its own.
   Each task is a separate session with your provider and uses its own
   context and tokens. Saved chats keep each task and what became of it.
 
+### Reviewer and debugger agents
+
+Two more kinds of agent help, and both only read (ADR 0037).
+
+- **The reviewer** reads each change after it passes Joinery's checks and
+  before you see it: your request, the diff, the art bible, the game brief,
+  the check results and the staged images. The request's card says
+  "Reviewing the change…". If it finds a real problem it sends the change
+  back to Journeyman to fix, at most twice; then the review opens with
+  whatever notes are left: the worst as the review's notes line ("… · 2
+  more"), every note in **Details**. A reviewer that takes longer than 90
+  seconds, or fails, is skipped and the review's status says so ("Reviewer
+  ran out of time").
+  It never accepts, discards or changes anything; you decide.
+- **The debugger** works on an error. When Godot's Output shows a new error
+  (in the editor or while the game runs), the sidebar offers it once:
+  "Godot reported an error: … **Debug** / **Dismiss**". `/debug` does the
+  same for the last error, and `/debug the player can't jump` adds your own
+  words. A card "Debugging: <error>" follows it: the debugger reads the
+  error, the Output text and the game's log, looks at the scripts and
+  scenes, and can run the game headless in the offline worker to see the
+  error happen (no network, a throwaway copy of the project). Then a worker
+  agent makes its fix as a normal change, checked and reviewed, and it opens
+  in the Review tab. If nothing in the project needs to change, the card
+  ends with the cause.
+- Settings → Project → **Reviewer agent** turns the reviewer on or off, and
+  **Reviewer model** picks its model (empty: the one Journeyman uses). They
+  are `[agents] reviewer` and `reviewer_model` in `joinery.toml`, also set
+  with `joinery reviewer --set on|off --model <name>`. `joinery transactions
+  list` shows each change's `review_notes` and `reviewer`.
+
 ### The Timeline tab
 
 **Timeline**, beside Review in the bottom bar, shows how the project changed
@@ -264,6 +295,8 @@ scene, so it joins the timeline when you save it. Switch it all off with
   once its restore data is gone. When `project.godot` changed, the editor
   offers to reload the project so its settings in memory never overwrite the
   new ones.
+- `/debug` debugs the last error Godot reported; words after it say what
+  goes wrong (see Reviewer and debugger agents).
 - `/brief` opens `design/brief.md` read-only, with **Ask Journeyman to change
   it**. With no brief, **Write the brief** drafts one from the starting point.
 - `/tools` gives each app's state and its one action (for example Start Docker
