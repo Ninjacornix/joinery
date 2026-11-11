@@ -9,10 +9,11 @@ extends SceneTree
 ## It loads the game's main scene (or --scene), starts the level the way the game core's
 ## own tests do, and plays it through the input map (bot_drive.gd) while bot_watch.gd and
 ## bot_logger.gd watch. Where the game has them it also checks pause and resume, save and
-## load, and text that does not fit in the menus in every language. Every second it prints
-## a `PLAYTEST {…}` line, and it writes <out>/bot.json every few seconds and at the end, so
-## a crash still leaves what it saw. With --shots it saves a picture at those frames instead
-## (a windowed replay of the same seed).
+## load (on the result screen too, once a level ends), and text that does not fit in the
+## menus in every language. Every second it prints a `PLAYTEST {…}` line, and it writes
+## <out>/bot.json every few seconds and at the end, so a crash still leaves what it saw.
+## With --shots it saves a picture at those frames instead (a windowed replay of the same
+## seed).
 ##
 ## The bot never writes inside the project: everything goes to --playtest-out, and the
 ## game's user:// is wherever the caller's HOME points.
@@ -99,11 +100,18 @@ func _run() -> void:
 	}
 	while frame < total and not _finished:
 		await _tick(true)
-		if not check_at.has(frame) or _busy:
+		if _busy:
+			continue
+		if _level_over >= 0 and frame - _level_over == fps and not checks.has("save_after_end"):
+			_busy = true
+			await _check_save_after_end()
+			_busy = false
+			continue
+		if not check_at.has(frame):
 			continue
 		var check: Callable = check_at[frame]
 		if _level_over >= 0 or paused:
-			# Between levels: check once the next one is under way.
+			# These compare a running level: check once the next one is under way.
 			check_at[frame + fps * 5] = check
 			continue
 		_busy = true
@@ -345,6 +353,58 @@ func _check_save_load() -> void:
 		)
 		return
 	checks["save_load"] = "ok"
+
+
+## On the result screen a level shows when it ends: a save made there (if the game takes
+## one at all) must load into that result again or into a game the player can go on with.
+func _check_save_after_end() -> void:
+	if save_game == null or not save_game.has_method(&"save_slot"):
+		return
+	drive.call(&"release_all")
+	var saved := int(save_game.call(&"save_slot", SAVE_SLOT))
+	if saved != OK:
+		checks["save_after_end"] = "ok: refused"
+		return
+	var started := int(goals["levels_started"])
+	var ends := _ends()
+	var loaded := int(save_game.call(&"load_slot", SAVE_SLOT))
+	if loaded != OK:
+		_save_after_end_problem(
+			"A save made after the level ended doesn't load: %s." % error_string(loaded)
+		)
+		return
+	for _i: int in fps * 5:
+		if int(goals["levels_started"]) > started:
+			break
+		await _tick(false)
+	await _wait(fps)
+	if _ends() > ends or _can_play(_find_player()):
+		checks["save_after_end"] = "ok: loads"
+		return
+	var stuck := "A save made after the level ended loads a level nobody can play: "
+	_save_after_end_problem(stuck + "no result screen, and the player can't move.")
+	await _recover()
+
+
+func _save_after_end_problem(detail: String) -> void:
+	checks["save_after_end"] = "failed"
+	_finding({"kind": "save", "detail": detail, "frame": frame})
+
+
+## Levels ended so far, won or lost.
+func _ends() -> int:
+	return (goals["completed"] as Array).size() + (goals["failed"] as Array).size()
+
+
+## The player is up and taking input (true when the game doesn't say).
+static func _can_play(player: Node) -> bool:
+	if player == null:
+		return true
+	if "controls_enabled" in player and not bool(player.get(&"controls_enabled")):
+		return false
+	if player.has_method(&"is_alive") and not bool(player.call(&"is_alive")):
+		return false
+	return true
 
 
 func _save_problem(detail: String) -> void:

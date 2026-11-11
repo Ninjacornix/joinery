@@ -75,6 +75,23 @@ def test_a_short_playtest_of_each_blueprint_finds_nothing_serious(
 
 
 @needs_godot
+def test_a_save_on_the_result_screen_never_loads_a_stuck_level(tmp_path: Path) -> None:
+    """Seed 7 loses the top-down fight; the bot then saves on the result screen.
+
+    The game refuses that save (the level is over), so Continue can never bring back
+    a defeated player with no result panel.
+    """
+    features = sorted({*blueprints.describe("top-down")["default_features"], "save-load"})
+    project = make_project(tmp_path, "top-down", features)
+    report = _play(project, 40, seed=7)
+    assert report["status"] == "played", report
+    assert report["goals"]["failed"], "the seeded run loses the fight"
+    assert report["checks"]["save_after_end"] == "ok: refused"
+    assert report["checks"]["save_load"] == "ok"
+    assert _serious(report) == []
+
+
+@needs_godot
 def test_a_seeded_run_finds_the_planted_faults_and_replays_exactly(
     tmp_path: Path,
 ) -> None:

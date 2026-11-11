@@ -26,7 +26,9 @@ code. Custom games made from the blank blueprint have no play tests at all.
    - **It uses the game core where there is one**: it boots like the PlayHarness
      (`Game.autostart`), listens to `GameEvents` for levels, scores, checkpoints and world
      changes, carries on after a level ends, and checks pause and resume. With the
-     save-load feature it saves, plays on, loads and compares every `saveable` node. With
+     save-load feature it saves, plays on, loads and compares every `saveable` node, and
+     a second after a level ends it saves on the result screen: the game must refuse, or
+     the save must load into the result again or a game the player can go on with. With
      translations it checks the pause menu's text in every language and in the
      pseudo-locale.
    - **It watches** (`bot_watch.gd`, `bot_logger.gd`): every error and warning through a
