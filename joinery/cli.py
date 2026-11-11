@@ -22,6 +22,7 @@ from joinery import (
     claims,
     complex_models,
     connection,
+    design_cli,
     game_setup,
     godotsteam,
     history,
@@ -1009,6 +1010,10 @@ def _parser() -> argparse.ArgumentParser:
         "match", help="audit the project against the art bible; list what drifts"
     )
     match_cli.add_arguments(match_cmd)
+    design_cmd = commands.add_parser(
+        "design", help="check the game design against its brief; list what breaks it"
+    )
+    design_cli.add_arguments(design_cmd)
     steam_cmd = commands.add_parser(
         "steam", help="show or set the Steam app ID (it can be added any time)"
     )
@@ -1420,6 +1425,8 @@ def main(argv: list[str] | None = None) -> int:
         return match_cli.main(args)
     if args.command in {"access", "perf"}:
         return checks_cli.main(args)
+    if args.command == "design":
+        return design_cli.main(args)
     if args.command == "blockout":
         return blockout_command.main(args)
     if args.command == "kits":
