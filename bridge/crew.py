@@ -9,6 +9,11 @@ starts one with ``start_task``. Tasks can't start tasks.
 Nothing here knows which provider runs: the same scheduler serves Codex, Claude
 Code, Gemini CLI and opencode, and every task's provider runs the same policy hook
 as the chat's own, reporting a Rule Zero stop to the task's gateway endpoint.
+
+A *scripted* task (``start_scripted``, "Make it match") has no provider of its own:
+Joinery already knows the typed calls that make its change, so it runs them through
+the task's lane and submits. The change is checked, read by the reviewer agent and
+reviewed by the user exactly like any other task's.
 """
 
 from __future__ import annotations
@@ -27,7 +32,8 @@ from bridge.turn_runner import run_turn
 from joinery import agents
 from joinery.claims import refusal
 from joinery.debugging import DebugRequest, Diagnosis
-from joinery.gateway import ProjectGateway
+from joinery.gateway import ProjectGateway, result_text
+from joinery.mcp_runtime import PolicyStop
 from joinery.peer_review import Reviewer
 from joinery.timing import TurnTiming
 from joinery.turn import TurnController
@@ -76,7 +82,7 @@ class Task:
     id: str
     title: str
     request: str
-    origin: Literal["user", "lead", "debug"]
+    origin: Literal["user", "lead", "debug", "match"]
     gateway: ProjectGateway
     controller: TurnController
     #: The agent role at work now (joinery.roles): a debug task is a debugger, then
@@ -122,6 +128,16 @@ class Task:
             "context_used": meter.used,
             "context_window": meter.window,
         }
+
+
+@dataclass(frozen=True)
+class ScriptedCall:
+    """One typed call a scripted task makes, with its words for the card."""
+
+    server: str
+    tool: str
+    arguments: dict[str, Any]
+    label: str
 
 
 def _reserved(targets: list[str] | tuple[str, ...]) -> list[str]:
@@ -247,11 +263,84 @@ class Crew:
         task.job = asyncio.create_task(self._run(task, work))
         return task
 
+    async def start_scripted(
+        self,
+        title: str,
+        request: str,
+        calls: list[ScriptedCall],
+        *,
+        prompt: Prompt,
+        targets: list[str] | tuple[str, ...] = (),
+        facts: list[str] | tuple[str, ...] = (),
+    ) -> Task:
+        """Start a task that makes its change with known typed calls, no agent of its
+        own. Its claims on ``targets`` come first; a held file refuses it in plain
+        words. The caller decides how many run at once."""
+        task = self._open(title, request, "match", prompt, targets)
+        task.step = "Waiting for its apps…"
+        task.job = asyncio.create_task(
+            self._scripted(task, calls, list(facts), prompt.selection.model_dump())
+        )
+        return task
+
+    async def _scripted(
+        self,
+        task: Task,
+        calls: list[ScriptedCall],
+        facts: list[str],
+        selection: dict[str, Any],
+    ) -> None:
+        lane = task.gateway
+        controller = task.controller
+        timing = TurnTiming()
+        lane.timing = timing
+        outcome = "failed"
+        try:
+            controller.selection = selection
+            controller.begin(task.request)
+            for call in calls:
+                lane.progress(call.label + "…")
+                result = await lane.call(call.server, call.tool, call.arguments)
+                if result.is_error:
+                    raise RuntimeError(f"{call.label}: {result_text(result)[-400:]}")
+            submitted = await controller.submit(task.title, "joinery", facts)
+            if not submitted.final:
+                # Nobody is left to fix what the checks found: it stops here.
+                await controller.end(True, last=True)
+            last = controller.last_result
+            if last is not None and last.status in {"in_review", "nothing_to_review"}:
+                outcome = "done"
+            elif last is not None and last.problems:
+                task.message = "; ".join(p.message for p in last.problems)[:300]
+        except asyncio.CancelledError:
+            outcome = "stopped"
+            with contextlib.suppress(Exception):
+                await controller.cancel("stopped")
+        except PolicyStop as exc:
+            task.message = str(exc)[:300]
+            with contextlib.suppress(Exception):
+                await controller.cancel("stopped")
+            await self._on_stop(str(exc))
+        except (
+            OSError,
+            RuntimeError,
+            ValueError,
+            TypeError,
+            KeyError,
+            TimeoutError,
+        ) as exc:
+            task.message = str(exc)[:300] or "The change couldn't be made."
+            with contextlib.suppress(Exception):
+                await controller.cancel("failed")
+        finally:
+            lane.timing = None
+        await self._conclude(task, outcome)
+
     def _open(
         self,
         title: str,
         request: str,
-        origin: Literal["user", "lead", "debug"],
+        origin: Literal["user", "lead", "debug", "match"],
         prompt: Prompt,
         targets: list[str] | tuple[str, ...] = (),
         *,
@@ -417,6 +506,10 @@ class Crew:
                     await agent.close()
             with contextlib.suppress(Exception):
                 await endpoint.close()
+        await self._conclude(task, outcome)
+
+    async def _conclude(self, task: Task, outcome: str) -> None:
+        """A task's turn is over: in review, or final with its lane closed."""
         task.ended = time.time()
         task.step = ""
         controller = task.controller

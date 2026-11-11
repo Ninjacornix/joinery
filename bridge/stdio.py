@@ -20,6 +20,7 @@ from bridge import compaction
 from bridge.chat_record import ChatRecorder
 from bridge.crew import Crew
 from bridge.host import Bridge
+from bridge.match_runner import MatchRun
 from bridge.models import Selection
 from bridge.playtester import Playtester, gameplay_change
 from bridge.protocol import Done, EditorAction, Message, Prompt
@@ -28,6 +29,7 @@ from bridge.specialists import Specialists
 from bridge.turn_runner import run_turn, settle_compaction
 from joinery import bible_lint, blueprints, brief, chat_attachments, chats, playtest
 from joinery.art_approval import approve, review
+from joinery.authoring import run_offline
 from joinery.claims import parallel_limit
 from joinery.debugging import debug_request
 from joinery.editor_ops import validate_edit
@@ -184,6 +186,7 @@ async def _serve(
     specialists: Specialists | None = None
     crew: Crew | None = None
     playtester: Playtester | None = None
+    matcher: MatchRun | None = None
     #: The last request's model choice, which the tasks it starts use too.
     selection: dict[str, Any] = {}
     try:
@@ -264,6 +267,8 @@ async def _serve(
 
     async def policy_stop(reason: str) -> None:
         # A Rule Zero stop in any agent stops every agent: no task routes around it.
+        if matcher is not None:
+            await matcher.stop()
         if crew is not None:
             await crew.stop_all()
         if playtester is not None:
@@ -537,6 +542,14 @@ async def _serve(
             }
 
         rpc_server.start_task = lead_start
+        # "Make it match": the audit's fixes as scripted tasks of the crew (ADR 0045).
+        matcher = MatchRun(
+            crew,
+            project,
+            emit,
+            lambda argv, root: run_offline(argv, root, 600, readonly=True),
+            task_prompt,
+        )
         rpc_server.task_status = crew.status
         emit(
             {
@@ -671,6 +684,15 @@ async def _serve(
                         origin="user",
                         prompt=task_prompt(data),
                     )
+                elif data.get("kind") == "match_fix":
+                    assert matcher is not None
+                    matcher.start(
+                        [str(a) for a in data.get("areas") or []],
+                        [str(f) for f in data.get("findings") or []],
+                    )
+                elif data.get("kind") == "match_cancel":
+                    assert matcher is not None
+                    await matcher.stop()
                 elif data.get("kind") == "debug_start":
                     # /debug, or Debug on the offer after a new error in Output.
                     await crew.debug(debug_request(data), task_prompt(data))
@@ -707,6 +729,8 @@ async def _serve(
         )
         return 1
     finally:
+        if matcher is not None:
+            await matcher.stop()
         if crew is not None:
             await crew.close()
         if playtester is not None:
