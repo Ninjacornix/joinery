@@ -319,7 +319,7 @@ def make_server(project: Path) -> MCPServer[Any]:
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
     async def kit_list() -> dict[str, Any]:
-        """List the parametric kits Joinery makes models with in Blender (rocks, crates, barrels, fences, huts, trees, bushes): each kit's typed parameters with ranges, its materials under this project's art bible (palette colour, roughness, metallic), and the triangle budget and pivot of its folder. Make models with kit_make, kit_batch and kit_edit of joinery-blender-ops; place them with scatter."""
+        """List the parametric kits Joinery makes models with in Blender (rocks, crates, barrels, fences, huts, trees, bushes): each kit's typed parameters with ranges, its materials under this project's art bible (palette colour, roughness, metallic), and the triangle budget and pivot of its folder. Kits from shared kits the user imported are listed too, with where they came from and their presets. Make models with kit_make, kit_batch and kit_edit of joinery-blender-ops; place them with scatter."""
         return kits.describe(project)
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))

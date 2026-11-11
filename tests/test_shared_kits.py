@@ -552,6 +552,7 @@ def test_imported_generators_are_kits_the_agents_can_use(tmp_path: Path) -> None
     assert list(found) == ["harbour_rock"]
     rock = kits.get("harbour_rock", target)
     assert rock.credit == "Harbour 1.0.0 by Ana Harbour, CC-BY-4.0"
+    assert rock.label == "Harbour rock"  # not a second "Rock" in the Kits list
     assert rock.limits is None  # the generator's code never runs on the host
     assert [p["name"] for p in rock.presets] == ["Harbour rock", "Rocks"]
     listed = {k["id"]: k for k in kits.describe(target)["kits"]}

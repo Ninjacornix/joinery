@@ -70,7 +70,7 @@ def register(server: MCPServer[Any], project: Path) -> None:
     @server.tool(name="kit_list", annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
     async def kit_list_tool() -> dict[str, Any]:
-        """List the parametric kits (procedural generators run in Blender): each kit's typed parameters (kind, default, range or choices, what it does), its materials as the art bible makes them (palette colour, roughness, metallic), and the triangle budget and pivot of its default folder."""
+        """List the parametric kits (procedural generators run in Blender): each kit's typed parameters (kind, default, range or choices, what it does), its materials as the art bible makes them (palette colour, roughness, metallic), and the triangle budget and pivot of its default folder. A kit from a shared kit the user imported says where it came from (from: name, version, author, licence) and lists its presets (named parameter sets to pass as params)."""
         return kits.describe(project)
 
     @server.tool(name="kit_make")

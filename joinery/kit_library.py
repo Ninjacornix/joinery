@@ -113,7 +113,7 @@ def project_kits(project: Path) -> dict[str, Kit]:
                     read_spec(source, generator.file),
                     source,
                     id=kit_id,
-                    label=generator.label,
+                    label=f"{manifest.name} {generator.label.lower()}",
                     credit=manifest.credit(),
                     presets=presets,
                 )
