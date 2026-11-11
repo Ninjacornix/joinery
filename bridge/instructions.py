@@ -11,14 +11,23 @@ from joinery.bible_writing import AGENT_GUIDE
 from joinery.chat_attachments import NOTE as ATTACHMENT_NOTE
 
 #: Objects move as one piece. A chair built from loose boxes in the level selects
-#: a box, not the chair.
+#: a box, not the chair. Complex models are made in Blender by default (ADR 0052).
 OBJECT_GUIDE = (
     "Build every object the player would think of as one thing (a chair, a table, a TV, a door) "
-    "as one unit: a Blender model when art work is allowed, otherwise its own scene "
-    "(scenes/props/<name>.tscn) whose root is the object, with its parts as children. "
-    "Place it in the level as an instance of that scene or model, once per copy, so clicking "
-    "any part selects the whole object and it moves as one. Never assemble an object from "
-    "loose meshes directly in the level. "
+    "as one unit and place it in the level as an instance of that model or scene, once per "
+    "copy, so clicking any part selects the whole object and it moves as one. Never assemble "
+    "an object from loose meshes directly in the level. "
+    'When editor_context.complex_models is "blender" (the default), every object with more '
+    "than one part is a model made in Blender: use a kit when one fits (the quick path), "
+    "otherwise model it in Blender. Never build one from primitive meshes or CSG shapes; "
+    "submit_for_review sends such a pile back. Before the art bible is approved, say so and "
+    "offer a placeholder instead. Use placeholder shapes only when the user asks for a "
+    "placeholder, and then set metadata/joinery_placeholder = true on its root. Simple "
+    "level geometry (one shape per floor, wall, platform or ramp), collision and trigger "
+    "shapes, and blockout levels are fine as primitives. "
+    'When it is "placeholders", the user allows quick placeholder shapes for prototyping: '
+    "an object may be its own scene (scenes/props/<name>.tscn) whose root is the object, "
+    "with primitive parts as children. "
     "The scene on screen (editor_context.scene_path), a scene in "
     "editor_context.unsaved_scenes (open with edits not saved yet) and a new scene with "
     "no saved file change live with edit_scene, so the user sees the change in the "
@@ -205,7 +214,8 @@ REVIEW_GUIDE = (
     + "The user accepts or discards every change in the Review panel. "
     "When your change is complete, call submit_for_review with one short line naming "
     "what changed. Joinery checks it (art bible rules, Godot import, missing files, "
-    "asset provenance, project tests). Fix every problem it returns and submit again. "
+    "asset provenance, project tests, objects built from placeholder shapes). Fix "
+    "every problem it returns and submit again. "
     "Only after it returns status in_review say the change is open for review; never "
     "ask the user to accept before that, and make no more changes this turn. "
     "If it returns needs_user or final, stop and do what its next field says; Joinery "
