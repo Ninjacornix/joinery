@@ -17,12 +17,11 @@ from joinery.runner import Result
 from joinery.transactions import FileTransaction
 
 
-def test_agents_say_the_change_will_open_for_review() -> None:
-    assert "say the change will open for review" in REVIEW_GUIDE
-    assert (
-        "never tell the user to accept something that is not on screen yet"
-        in REVIEW_GUIDE
-    )
+def test_agents_hand_off_with_submit_for_review() -> None:
+    assert "call submit_for_review with one short line" in REVIEW_GUIDE
+    assert "Only after it returns status in_review" in REVIEW_GUIDE
+    assert "never ask the user to accept before that" in REVIEW_GUIDE
+    assert "needs_user or final" in REVIEW_GUIDE
 
 
 def staged(
