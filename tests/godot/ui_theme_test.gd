@@ -106,8 +106,33 @@ func _check_contrast() -> void:
 				_check(ratio >= 3.0, "%s input border on %s is %.2f:1" % [where, surface, ratio])
 			for alias: String in ["secondary", "inset", "raised", "border", "focus", "primary"]:
 				_check(not colors.has(alias), "The old palette name %s is gone" % alias)
+			_check_sliders(where, colors)
 	_check(UI_THEME.set_pref("theme", "match") == OK, "Restore the theme preference")
 	_check(UI_THEME.set_pref("accent", "brass") == OK, "Restore the accent preference")
+
+
+## Slider knobs and tracks, as built, read on every surface (3:1), both ways round.
+func _check_sliders(where: String, colors: Dictionary) -> void:
+	var theme := UI_THEME.build(_host)
+	for type_name: String in ["HSlider", "VSlider"]:
+		var track := theme.get_stylebox("slider", type_name) as StyleBoxFlat
+		var filled := theme.get_stylebox("grabber_area", type_name) as StyleBoxFlat
+		var knob := theme.get_icon("grabber", type_name)
+		_check(track != null and filled != null and knob != null, "%s is styled" % type_name)
+		if track == null or filled == null or knob == null:
+			continue
+		var image := knob.get_image()
+		var middle := image.get_pixel(image.get_width() / 2, image.get_height() / 2)
+		var edge := image.get_pixel(image.get_width() / 2, 0)
+		_check(edge.a < 1.0 and middle.a == 1.0, "%s knob is a disc" % type_name)
+		var parts := {"track": track.bg_color, "fill": filled.bg_color, "knob": middle}
+		for part: String in parts:
+			for surface: String in SURFACES:
+				var ratio := _contrast(parts[part], colors[surface])
+				_check(
+					ratio >= 3.0,
+					"%s %s %s on %s is %.2f:1" % [where, type_name, part, surface, ratio]
+				)
 
 
 func _check_tokens() -> void:

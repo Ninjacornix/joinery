@@ -266,6 +266,37 @@ def _pairs() -> list[tuple[str, str, str, str, float, float]]:
     return pairs
 
 
+def _slider_roles() -> dict[str, str]:
+    """ui_theme_build.gd's SLIDER_ROLES: the roles a slider's track, fill and knob use."""
+    build = (ADDON / "ui_theme_build.gd").read_text(encoding="utf-8")
+    block = re.search(r"^const SLIDER_ROLES := \{(.*?)\}", build, re.MULTILINE)
+    assert block, "SLIDER_ROLES"
+    return dict(re.findall(r'"(\w+)": "(\w+)"', block.group(1)))
+
+
+def test_slider_track_fill_and_knob_read_on_every_surface_in_both_themes() -> None:
+    """A slider's knob and track are non-text controls: 3:1 on every surface a slider sits
+    on, light and dark, every accent. A border_subtle track or a default white knob fails."""
+    roles = _slider_roles()
+    assert set(roles) == {"track", "fill", "knob"}
+    _themes, accents = _palette_tokens()
+    failures = []
+    for theme in ("dark", "light"):
+        for accent in accents:
+            p = _palette(theme, accent)
+            for part, role in roles.items():
+                for bg in NON_TEXT_FILLS:
+                    ratio = contrast(p[role], p[bg])
+                    if ratio < NON_TEXT_AA:
+                        failures.append(
+                            f"{theme}/{accent}: slider {part} ({role}) on {bg} is "
+                            f"{ratio:.2f}:1"
+                        )
+    assert not failures, "\n".join(failures)
+    p = _palette("light", "brass")
+    assert contrast(p["border_subtle"], p["surface"]) < NON_TEXT_AA  # the guard bites
+
+
 def test_every_role_meets_wcag_aa_on_every_surface_in_both_themes() -> None:
     failures = [
         f"{theme}/{accent}: {fg} on {bg} is {ratio:.2f}:1, needs {required}:1"

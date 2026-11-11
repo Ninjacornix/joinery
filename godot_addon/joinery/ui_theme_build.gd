@@ -4,6 +4,9 @@ extends RefCounted
 ## screens call ui_theme.build(), never this script directly.
 
 const UI_THEME := preload("ui_theme.gd")
+## The palette roles a slider is drawn in. Each is a non-text role held to 3:1 on every surface
+## (tests/test_ui_tokens.py reads this): the empty track, the filled part and the knob.
+const SLIDER_ROLES := {"track": "border_strong", "fill": "accent", "knob": "accent"}
 
 
 ## The full Theme: palette roles under "Joinery", base types and every type variation listed
@@ -22,6 +25,7 @@ static func theme(context: Node, c: Dictionary) -> Theme:
 	_switch(t, c, m)
 	_checks(t, c, m)
 	_scrollbars(t, c, m)
+	_sliders(t, c, m)
 	_panels(t, c, m)
 	_lists(t, c, m)
 	return t
@@ -595,15 +599,56 @@ static func _lists(t: Theme, c: Dictionary, m: Dictionary) -> void:
 	t.set_stylebox("cursor_unfocused", "ItemList", StyleBoxEmpty.new())
 	t.set_constant("v_separation", "ItemList", int(_sp(m, 2)))
 	t.set_constant("h_separation", "ItemList", int(_sp(m, 2)))
-	var track := _box(
-		c["border_subtle"], Color.TRANSPARENT, 0, _rad(m, "full"), 0, roundf(2 * float(m["u"]))
-	)
-	var filled := _box(
-		c["accent"], Color.TRANSPARENT, 0, _rad(m, "full"), 0, roundf(2 * float(m["u"]))
-	)
-	t.set_stylebox("slider", "HSlider", track)
-	t.set_stylebox("grabber_area", "HSlider", filled)
-	t.set_stylebox("grabber_area_highlight", "HSlider", filled)
+
+
+## Sliders, both ways: a border_strong track, the accent fill up to the knob, and an accent
+## knob ringed in the surface so it reads on its own fill. Every part is 3:1 on the surfaces
+## it sits on in both themes (SLIDER_ROLES); a disabled slider is the same at reduced opacity.
+static func _sliders(t: Theme, c: Dictionary, m: Dictionary) -> void:
+	var thick := roundf(2 * float(m["u"]))
+	var side := roundi(float(m["icon"]))
+	var ring := maxf(1.0, roundf(1.5 * float(m["u"])))
+	var knob: Color = c[SLIDER_ROLES["knob"]]
+	var halo: Color = c["surface"]
+	var icons := {
+		"grabber": knob_texture(side, knob, halo, ring),
+		"grabber_highlight": knob_texture(side, c["accent_hover"], halo, ring),
+		"grabber_disabled": knob_texture(side, c[SLIDER_ROLES["track"]], halo, ring, 0.45),
+	}
+	for type_name: String in ["HSlider", "VSlider"]:
+		var pad_h := 0.0 if type_name == "HSlider" else thick
+		var pad_v := thick if type_name == "HSlider" else 0.0
+		var track := _box(
+			c[SLIDER_ROLES["track"]], Color.TRANSPARENT, 0, _rad(m, "full"), pad_h, pad_v
+		)
+		var filled := _box(
+			c[SLIDER_ROLES["fill"]], Color.TRANSPARENT, 0, _rad(m, "full"), pad_h, pad_v
+		)
+		t.set_stylebox("slider", type_name, track)
+		t.set_stylebox("grabber_area", type_name, filled)
+		t.set_stylebox("grabber_area_highlight", type_name, filled)
+		for name: String in icons:
+			t.set_icon(name, type_name, icons[name])
+		t.set_icon("tick", type_name, ImageTexture.new())
+
+
+## A slider knob [param side] pixels square: a [param fill] disc inside a [param halo] ring
+## [param ring] pixels wide, anti-aliased.
+static func knob_texture(
+	side: int, fill: Color, halo: Color, ring: float, alpha := 1.0
+) -> ImageTexture:
+	var image := Image.create(side, side, false, Image.FORMAT_RGBA8)
+	var half := side / 2.0
+	var center := Vector2(half, half)
+	for py: int in side:
+		for px: int in side:
+			var d := Vector2(px + 0.5, py + 0.5).distance_to(center)
+			var outer := Color(halo, halo.a * clampf(half - d, 0.0, 1.0))
+			var inner := Color(fill, fill.a * clampf(half - ring - d, 0.0, 1.0))
+			var colour := outer.blend(inner)
+			colour.a *= alpha
+			image.set_pixel(px, py, colour)
+	return ImageTexture.create_from_image(image)
 
 
 ## A switch track and knob at [param progress] (0 off, 1 on), anti-aliased, with the knob
