@@ -1,0 +1,61 @@
+id = "vr-room"
+name = "VR room"
+pitch = "A small room for VR: walk or teleport, press the button to open the glass case, and put the cube on the table."
+version = 1
+dimension = "3d"
+icon = "XROrigin3D"
+default_features = ["vr", "controller", "save-load"]
+bible_preset = "vr-3d"
+suggested_tools = ["godot", "blender", "material-maker", "krita", "surge-xt"]
+main_scene = "res://core/main.tscn"
+
+[hooks]
+level_scene = "res://game/level.tscn"
+player_scene = "res://game/player/player.tscn"
+spawnable_scenes = []
+
+[brief]
+genre = ["vr", "room-scale", "puzzle"]
+camera = "First person at the player's own eye height in a headset (1.6 m on the desktop). No camera motion the player did not make: turning snaps 30 or 45 degrees, and a vignette darkens the edges while moving."
+core_loop = "30 s: look around, walk or teleport to something and pick it up. 5 min: press the button to open the glass case, take the cube and set it down on the table. Session: try the other objects, throw them, and get the cube there faster."
+progression = "Win: the cube rests on the table. Lose: none; a dropped object stays where it falls and can be picked up again."
+verbs = [
+  ["Look", "head (headset) / mouse / look_left / look_right / look_up / look_down", "The view follows the head; nothing moves the camera on its own"],
+  ["Walk", "move stick (headset) / move_forward / move_back / move_left / move_right", "Steady walking speed set on the VR comfort page"],
+  ["Turn", "turn stick left or right (headset)", "Snaps 30 or 45 degrees with a short vignette"],
+  ["Teleport", "turn stick forward, then let go (headset)", "An arc shows where you land; blue on floor, red where you cannot"],
+  ["Grab", "grip (headset) / interact (desktop)", "The object follows the hand; let go to drop or throw it"],
+  ["Press", "trigger on the pointer (headset) / interact (desktop)", "The button sinks and the glass case lifts away"],
+]
+
+[project.settings]
+"display/window/size/viewport_width" = 1280
+"display/window/size/viewport_height" = 720
+
+[input.move_forward]
+keys = ["W", "Up"]
+
+[input.move_back]
+keys = ["S", "Down"]
+
+[input.move_left]
+keys = ["A", "Left"]
+
+[input.move_right]
+keys = ["D", "Right"]
+
+[input.look_left]
+keys = ["J"]
+
+[input.look_right]
+keys = ["L"]
+
+[input.look_up]
+keys = ["I"]
+
+[input.look_down]
+keys = ["K"]
+
+[input.interact]
+keys = ["E", "F"]
+mouse = ["left"]

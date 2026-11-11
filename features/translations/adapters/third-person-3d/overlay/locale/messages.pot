@@ -634,6 +634,14 @@ msgstr ""
 msgid "Only English so far. Add a language as a .po file in locale/."
 msgstr ""
 
+#: res://features/vr/comfort_page.gd
+msgid "Snap turn"
+msgstr ""
+
+#: res://features/vr/vr.gd
+msgid "VR comfort"
+msgstr ""
+
 #: res://game/level.gd
 msgid "Camera"
 msgstr ""

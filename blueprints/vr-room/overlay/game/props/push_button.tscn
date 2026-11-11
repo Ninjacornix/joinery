@@ -1,0 +1,42 @@
+[gd_scene format=3 uid="uid://ej628a3ge75"]
+
+[ext_resource type="Script" uid="uid://ds8cqeynuhg8p" path="res://game/props/push_button.gd" id="1_button"]
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_button"]
+height = 0.08
+radius = 0.13
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_base"]
+albedo_color = Color(0.22, 0.24, 0.28, 1)
+roughness = 0.5
+metallic = 0.6
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_base"]
+material = SubResource("StandardMaterial3D_base")
+top_radius = 0.12
+bottom_radius = 0.13
+height = 0.04
+radial_segments = 24
+rings = 1
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_cap"]
+top_radius = 0.08
+bottom_radius = 0.085
+height = 0.04
+radial_segments = 24
+rings = 1
+
+[node name="PushButton" type="StaticBody3D"]
+script = ExtResource("1_button")
+
+[node name="Collision" type="CollisionShape3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.04, 0)
+shape = SubResource("CylinderShape3D_button")
+
+[node name="Base" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.02, 0)
+mesh = SubResource("CylinderMesh_base")
+
+[node name="Cap" type="MeshInstance3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.04, 0)
+mesh = SubResource("CylinderMesh_cap")

@@ -1,0 +1,314 @@
+[gd_scene format=3 uid="uid://dets8pwnc3rui"]
+
+[ext_resource type="Script" uid="uid://bem1llpjdftyb" path="res://game/level.gd" id="1_level"]
+[ext_resource type="Script" uid="uid://cxar82e6y7su8" path="res://game/props/pickup.gd" id="2_pickup"]
+[ext_resource type="PackedScene" uid="uid://ej628a3ge75" path="res://game/props/push_button.tscn" id="3_button"]
+
+[sub_resource type="ProceduralSkyMaterial" id="ProceduralSkyMaterial_sky"]
+sky_top_color = Color(0.4, 0.52, 0.68, 1)
+sky_horizon_color = Color(0.74, 0.75, 0.76, 1)
+ground_bottom_color = Color(0.22, 0.2, 0.19, 1)
+ground_horizon_color = Color(0.74, 0.75, 0.76, 1)
+
+[sub_resource type="Sky" id="Sky_room"]
+sky_material = SubResource("ProceduralSkyMaterial_sky")
+
+[sub_resource type="Environment" id="Environment_room"]
+background_mode = 2
+sky = SubResource("Sky_room")
+ambient_light_source = 3
+ambient_light_energy = 0.7
+tonemap_mode = 2
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_floor"]
+albedo_color = Color(0.45, 0.47, 0.5, 1)
+roughness = 0.95
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_wall"]
+albedo_color = Color(0.76, 0.75, 0.72, 1)
+roughness = 0.9
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_wood"]
+albedo_color = Color(0.62, 0.45, 0.3, 1)
+roughness = 0.8
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_post"]
+albedo_color = Color(0.3, 0.33, 0.38, 1)
+roughness = 0.85
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_goal"]
+albedo_color = Color(0.3, 0.8, 0.45, 1)
+roughness = 0.6
+emission_enabled = true
+emission = Color(0.3, 0.8, 0.45, 1)
+emission_energy_multiplier = 0.6
+
+[sub_resource type="BoxMesh" id="BoxMesh_goal"]
+material = SubResource("StandardMaterial3D_goal")
+size = Vector3(0.36, 0.004, 0.36)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_glass"]
+transparency = 1
+albedo_color = Color(0.7, 0.85, 0.95, 0.3)
+roughness = 0.1
+
+[sub_resource type="BoxMesh" id="BoxMesh_glass_side"]
+material = SubResource("StandardMaterial3D_glass")
+size = Vector3(0.36, 0.3, 0.01)
+
+[sub_resource type="BoxMesh" id="BoxMesh_glass_lid"]
+material = SubResource("StandardMaterial3D_glass")
+size = Vector3(0.37, 0.01, 0.37)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_glass_side"]
+size = Vector3(0.36, 0.3, 0.01)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_glass_lid"]
+size = Vector3(0.37, 0.01, 0.37)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_cube"]
+albedo_color = Color(0.95, 0.72, 0.2, 1)
+roughness = 0.6
+
+[sub_resource type="BoxMesh" id="BoxMesh_cube"]
+material = SubResource("StandardMaterial3D_cube")
+size = Vector3(0.14, 0.14, 0.14)
+
+[sub_resource type="BoxShape3D" id="BoxShape3D_cube"]
+size = Vector3(0.14, 0.14, 0.14)
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_ball"]
+albedo_color = Color(0.35, 0.6, 0.9, 1)
+roughness = 0.5
+
+[sub_resource type="SphereMesh" id="SphereMesh_ball"]
+material = SubResource("StandardMaterial3D_ball")
+radius = 0.07
+height = 0.14
+radial_segments = 24
+rings = 12
+
+[sub_resource type="SphereShape3D" id="SphereShape3D_ball"]
+radius = 0.07
+
+[sub_resource type="StandardMaterial3D" id="StandardMaterial3D_can"]
+albedo_color = Color(0.85, 0.3, 0.35, 1)
+roughness = 0.4
+metallic = 0.5
+
+[sub_resource type="CylinderMesh" id="CylinderMesh_can"]
+material = SubResource("StandardMaterial3D_can")
+top_radius = 0.04
+bottom_radius = 0.04
+height = 0.12
+radial_segments = 20
+rings = 1
+
+[sub_resource type="CylinderShape3D" id="CylinderShape3D_can"]
+height = 0.12
+radius = 0.04
+
+[node name="Level" type="Node3D"]
+script = ExtResource("1_level")
+
+[node name="WorldEnvironment" type="WorldEnvironment" parent="."]
+environment = SubResource("Environment_room")
+
+[node name="Sun" type="DirectionalLight3D" parent="."]
+transform = Transform3D(0.866025, -0.383022, 0.321394, 0, 0.642788, 0.766044, -0.5, -0.663414, 0.55667, 0, 8, 0)
+light_energy = 0.9
+shadow_enabled = true
+
+[node name="RoomLight" type="OmniLight3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.7, 0)
+light_energy = 0.8
+omni_range = 7.0
+
+[node name="Room" type="Node3D" parent="."]
+
+[node name="Floor" type="CSGBox3D" parent="Room"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, -0.1, 0)
+use_collision = true
+size = Vector3(8, 0.2, 8)
+material = SubResource("StandardMaterial3D_floor")
+
+[node name="WallNorth" type="CSGBox3D" parent="Room" groups=["no_teleport"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, -4.1)
+use_collision = true
+size = Vector3(8.4, 3, 0.2)
+material = SubResource("StandardMaterial3D_wall")
+
+[node name="WallSouth" type="CSGBox3D" parent="Room" groups=["no_teleport"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1.5, 4.1)
+use_collision = true
+size = Vector3(8.4, 3, 0.2)
+material = SubResource("StandardMaterial3D_wall")
+
+[node name="WallEast" type="CSGBox3D" parent="Room" groups=["no_teleport"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 4.1, 1.5, 0)
+use_collision = true
+size = Vector3(0.2, 3, 8)
+material = SubResource("StandardMaterial3D_wall")
+
+[node name="WallWest" type="CSGBox3D" parent="Room" groups=["no_teleport"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -4.1, 1.5, 0)
+use_collision = true
+size = Vector3(0.2, 3, 8)
+material = SubResource("StandardMaterial3D_wall")
+
+[node name="Table" type="CSGCombiner3D" parent="." groups=["no_teleport"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, -2.6)
+use_collision = true
+
+[node name="Top" type="CSGBox3D" parent="Table"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.72, 0)
+size = Vector3(1.4, 0.06, 0.8)
+material = SubResource("StandardMaterial3D_wood")
+
+[node name="Leg1" type="CSGBox3D" parent="Table"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.62, 0.345, -0.32)
+size = Vector3(0.06, 0.69, 0.06)
+material = SubResource("StandardMaterial3D_wood")
+
+[node name="Leg2" type="CSGBox3D" parent="Table"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.62, 0.345, -0.32)
+size = Vector3(0.06, 0.69, 0.06)
+material = SubResource("StandardMaterial3D_wood")
+
+[node name="Leg3" type="CSGBox3D" parent="Table"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -0.62, 0.345, 0.32)
+size = Vector3(0.06, 0.69, 0.06)
+material = SubResource("StandardMaterial3D_wood")
+
+[node name="Leg4" type="CSGBox3D" parent="Table"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0.62, 0.345, 0.32)
+size = Vector3(0.06, 0.69, 0.06)
+material = SubResource("StandardMaterial3D_wood")
+
+[node name="GoalMark" type="MeshInstance3D" parent="Table"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.752, 0)
+cast_shadow = 0
+mesh = SubResource("BoxMesh_goal")
+
+[node name="CasePedestal" type="CSGBox3D" parent="." groups=["no_teleport"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.6, 0.45, -1.2)
+use_collision = true
+size = Vector3(0.5, 0.9, 0.5)
+material = SubResource("StandardMaterial3D_post")
+
+[node name="Case" type="StaticBody3D" parent="." groups=["no_teleport"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.6, 0.9, -1.2)
+
+[node name="North" type="MeshInstance3D" parent="Case"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.15, -0.18)
+mesh = SubResource("BoxMesh_glass_side")
+
+[node name="NorthShape" type="CollisionShape3D" parent="Case"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.15, -0.18)
+shape = SubResource("BoxShape3D_glass_side")
+
+[node name="South" type="MeshInstance3D" parent="Case"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.15, 0.18)
+mesh = SubResource("BoxMesh_glass_side")
+
+[node name="SouthShape" type="CollisionShape3D" parent="Case"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.15, 0.18)
+shape = SubResource("BoxShape3D_glass_side")
+
+[node name="East" type="MeshInstance3D" parent="Case"]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 0.18, 0.15, 0)
+mesh = SubResource("BoxMesh_glass_side")
+
+[node name="EastShape" type="CollisionShape3D" parent="Case"]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, 0.18, 0.15, 0)
+shape = SubResource("BoxShape3D_glass_side")
+
+[node name="West" type="MeshInstance3D" parent="Case"]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, -0.18, 0.15, 0)
+mesh = SubResource("BoxMesh_glass_side")
+
+[node name="WestShape" type="CollisionShape3D" parent="Case"]
+transform = Transform3D(0, 0, 1, 0, 1, 0, -1, 0, 0, -0.18, 0.15, 0)
+shape = SubResource("BoxShape3D_glass_side")
+
+[node name="Lid" type="MeshInstance3D" parent="Case"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.305, 0)
+mesh = SubResource("BoxMesh_glass_lid")
+
+[node name="LidShape" type="CollisionShape3D" parent="Case"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.305, 0)
+shape = SubResource("BoxShape3D_glass_lid")
+
+[node name="ButtonPost" type="CSGBox3D" parent="." groups=["no_teleport"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.6, 0.5, -1.2)
+use_collision = true
+size = Vector3(0.3, 1, 0.3)
+material = SubResource("StandardMaterial3D_post")
+
+[node name="PushButton" parent="." instance=ExtResource("3_button")]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.6, 1, -1.2)
+save_id = "button"
+
+[node name="Shelf" type="CSGBox3D" parent="." groups=["no_teleport"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.8, 0.4, 0.8)
+use_collision = true
+size = Vector3(1, 0.8, 0.4)
+material = SubResource("StandardMaterial3D_wood")
+
+[node name="Pickups" type="Node3D" parent="."]
+
+[node name="Cube" type="RigidBody3D" parent="Pickups"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, -1.6, 0.975, -1.2)
+mass = 0.5
+script = ExtResource("2_pickup")
+save_id = "cube"
+display_name = "cube"
+can_be_grabbed = false
+
+[node name="Mesh" type="MeshInstance3D" parent="Pickups/Cube"]
+mesh = SubResource("BoxMesh_cube")
+
+[node name="Shape" type="CollisionShape3D" parent="Pickups/Cube"]
+shape = SubResource("BoxShape3D_cube")
+
+[node name="Ball" type="RigidBody3D" parent="Pickups"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 2.55, 0.875, 0.8)
+mass = 0.3
+script = ExtResource("2_pickup")
+save_id = "ball"
+display_name = "ball"
+
+[node name="Mesh" type="MeshInstance3D" parent="Pickups/Ball"]
+mesh = SubResource("SphereMesh_ball")
+
+[node name="Shape" type="CollisionShape3D" parent="Pickups/Ball"]
+shape = SubResource("SphereShape3D_ball")
+
+[node name="Can" type="RigidBody3D" parent="Pickups"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 3.0, 0.865, 0.8)
+mass = 0.3
+script = ExtResource("2_pickup")
+save_id = "can"
+display_name = "can"
+
+[node name="Mesh" type="MeshInstance3D" parent="Pickups/Can"]
+mesh = SubResource("CylinderMesh_can")
+
+[node name="Shape" type="CollisionShape3D" parent="Pickups/Can"]
+shape = SubResource("CylinderShape3D_can")
+
+[node name="Sign" type="Label3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 2.2, -3.98)
+pixel_size = 0.005
+modulate = Color(0.16, 0.18, 0.22, 1)
+outline_modulate = Color(0.95, 0.95, 0.93, 1)
+text = "Press the button, take the cube from the glass case and put it on the table."
+font_size = 64
+outline_size = 6
+autowrap_mode = 3
+width = 1000.0
+
+[node name="Players" type="Node3D" parent="."]
+
+[node name="PlayerSpawn" type="Marker3D" parent="." groups=["player_spawn"]]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.05, 2)

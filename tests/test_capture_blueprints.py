@@ -33,7 +33,7 @@ def _png_size(data: bytes) -> tuple[int, int]:
 
 
 def test_every_blueprint_has_a_capture() -> None:
-    assert len(IDS) == 6
+    assert len(IDS) == 7
     for blueprint_id in IDS:
         directory = blueprints.BLUEPRINTS_DIR / blueprint_id
         assert (directory / blueprints.CAPTURE_IMAGE).is_file(), blueprint_id

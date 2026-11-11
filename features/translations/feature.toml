@@ -115,3 +115,16 @@ Language = "res://features/translations/language.gd"
 	"res://game/level.gd",
 	"res://game/ui/hud.gd",
 ]
+
+[adapters.vr-room.append]
+"internationalization/locale/translations_pot_files" = [
+	"res://core/menus.gd",
+	"res://core/ui/settings_pages.gd",
+	"res://core/ui/ui_style.gd",
+	"res://features/translations/language.gd",
+	"res://features/translations/language_page.gd",
+	"res://game/level.tscn",
+	"res://game/props/pickup.gd",
+	"res://game/props/push_button.gd",
+	"res://game/ui/hud.gd",
+]
