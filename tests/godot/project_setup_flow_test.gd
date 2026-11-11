@@ -418,6 +418,7 @@ func _wizard(create: Button) -> void:
 	next.pressed.emit()
 	await process_frame
 	_check((first_field as TextEdit).text.contains("retained"), "Back must retain answers")
+	var material := await _drop_material(dialog)
 	if _failed:
 		return
 	# Create only the temporary fixture; do not register it or launch an editor.
@@ -443,6 +444,7 @@ func _wizard(create: Button) -> void:
 		_check(false, "Creating the project failed: " + details.left(600))
 		return
 	_check(FileAccess.file_exists(project.path_join("project.godot")), "Create a Godot project")
+	_check_material(project, material)
 	_check(FileAccess.file_exists(project.path_join("joinery.toml")), "Custom choices must save")
 	# Windows writes the file with CRLF line ends.
 	var config := FileAccess.get_file_as_string(project.path_join("joinery.toml")).replace(
@@ -470,6 +472,75 @@ func _wizard(create: Button) -> void:
 			server.get("args", []) == ["--stdio", "argument with spaces"],
 			"Preserve argument boundaries"
 		)
+
+
+## Step 3: drop a picture, a design document and a file of neither kind on the window, and
+## note what to take from the picture. Returns the folder they came from.
+func _drop_material(dialog: ConfirmationDialog) -> String:
+	var folder := OS.get_environment("JOINERY_SETUP_CHECK_DIR") + "-material"
+	DirAccess.make_dir_recursive_absolute(folder)
+	var image := Image.create(32, 24, false, Image.FORMAT_RGB8)
+	image.fill(Color(0.8, 0.5, 0.3))
+	image.save_png(folder.path_join("dusk.png"))
+	for name: String in ["gdd.md", "notes.docx"]:
+		var file := FileAccess.open(folder.path_join(name), FileAccess.WRITE)
+		file.store_string("# Harbour\n\n## Core loop\nPatch a leak, then sail on.\n")
+		file.close()
+	var files := PackedStringArray(["dusk.png", "gdd.md", "notes.docx"])
+	for index: int in files.size():
+		files[index] = folder.path_join(files[index])
+	dialog.files_dropped.emit(files)
+	await process_frame
+	_check(_label_text(dialog, "dusk.png") != null, "A dropped picture is listed")
+	_check(_label_text(dialog, "gdd.md") != null, "A dropped design document is listed")
+	var refused := "notes.docx isn't a picture or a design document."
+	var said := false
+	for node: Node in dialog.find_children("*", "Label", true, false):
+		said = said or ((node as Label).text.begins_with(refused) and node.is_visible_in_tree())
+	_check(said, "A file of neither kind is refused in plain words")
+	var note: LineEdit = null
+	for node: Node in dialog.find_children("*", "LineEdit", true, false):
+		if node.get_accessibility_name() == "What to take from dusk.png":
+			note = node
+	_check(note != null, "A picture has a note field")
+	if note != null:
+		note.text = "the warm low light"
+	# The same picture again is listed once, and every file has a ×.
+	dialog.files_dropped.emit(PackedStringArray([files[0]]))
+	await process_frame
+	var listed := dialog.find_children("*", "Label", true, false).filter(
+		func(node: Node) -> bool: return (node as Label).text == "dusk.png"
+	)
+	_check(listed.size() == 1, "A picture dropped twice is listed once")
+	var remove := _shown_button(dialog, "×")
+	_check(remove != null and remove.tooltip_text == "Remove gdd.md", "Each file has a ×")
+	return folder
+
+
+## The created project holds the picture and the document, locked, on the board and briefed.
+func _check_material(project: String, folder: String) -> void:
+	var copied := project.path_join("art/reference/dusk.png")
+	_check(FileAccess.file_exists(copied), "The picture is copied into art/reference/")
+	_check(
+		(
+			FileAccess.get_file_as_bytes(copied)
+			== FileAccess.get_file_as_bytes(folder.path_join("dusk.png"))
+		),
+		"The picture is copied unchanged"
+	)
+	_check(FileAccess.file_exists(project.path_join("design/docs/gdd.md")), "The document too")
+	_check(not FileAccess.file_exists(project.path_join("art/reference/notes.docx")), "Not refused")
+	var bible := FileAccess.get_file_as_string(project.path_join("art/bible.md"))
+	_check(
+		bible.contains("| R1 | dusk |  | the warm low light |  | art/reference/dusk.png |"),
+		"The picture is on the bible's board with its note"
+	)
+	var lock := FileAccess.get_file_as_string(project.path_join("joinery.lock"))
+	_check(lock.contains('path = "art/reference/dusk.png"'), "The picture is locked")
+	_check(lock.contains('origin = "human-import"'), "As the user's own import")
+	var brief := FileAccess.get_file_as_string(project.path_join("design/brief.md"))
+	_check(brief.contains("## Design documents"), "The brief lists the documents")
+	_check(not FileAccess.file_exists(project.path_join(".joinery-references.json")), "Consumed")
 
 
 ## Step 2 ends with "Keep older versions": the three presets, the default first. Choose the

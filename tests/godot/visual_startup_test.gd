@@ -206,6 +206,7 @@ func _wizard(create: Button) -> void:
 		await _scroll_to(dialog, references.get_parent().get_child(0) as Control)
 	_check(next.text == "Create project", "The last step offers Create project")
 	await _shot("setup-3-art", dialog)
+	await _references(dialog, folder + "-material")
 
 	# Never register or open the project: the suite only looks at the pages.
 	for connection: Dictionary in dialog.get_signal_connection_list("project_created"):
@@ -416,3 +417,54 @@ func _label_visible(parent: Node, text: String) -> bool:
 		if (node as Label).text == text and (node as Label).is_visible_in_tree():
 			return true
 	return false
+
+
+## Step 3's reference images and design documents, dropped on the window: thumbnails with a
+## note each, the documents by name and kind, and a plain refusal for a file of neither kind.
+func _references(dialog: Window, folder: String) -> void:
+	DirAccess.make_dir_recursive_absolute(folder)
+	var files := PackedStringArray()
+	for index: int in 2:
+		var image := Image.create(96, 64, false, Image.FORMAT_RGB8)
+		image.fill(Color(0.85, 0.55, 0.3) if index == 0 else Color(0.25, 0.4, 0.6))
+		image.fill_rect(Rect2i(0, 40, 96, 24), Color(0.2, 0.18, 0.16))
+		var path := folder.path_join(["harbour dusk.png", "quarry.png"][index])
+		image.save_png(path)
+		files.append(path)
+	for name: String in ["gdd.md", "pitch.pdf", "notes.docx"]:
+		var file := FileAccess.open(folder.path_join(name), FileAccess.WRITE)
+		file.store_string("%PDF-1.4\n" if name.ends_with(".pdf") else "## Core loop\nFix a leak.\n")
+		file.close()
+		files.append(folder.path_join(name))
+	dialog.files_dropped.emit(files)
+	await _frames()
+	_check(_label_visible(dialog, "harbour dusk.png"), "A dropped picture is listed")
+	_check(_label_visible(dialog, "gdd.md"), "A dropped document is listed")
+	_check(
+		_label_visible(
+			dialog,
+			(
+				"notes.docx isn't a picture or a design document. Drop PNG, JPEG or WebP "
+				+ "pictures, or Markdown, text or PDF documents."
+			)
+		),
+		"A file of neither kind is refused in plain words"
+	)
+	var note := _field(dialog, "What to take from harbour dusk.png") as LineEdit
+	_check(note != null, "Each picture has a note")
+	if note != null:
+		note.text = "the warm low light"
+	var heading: Label = null
+	for node: Node in dialog.find_children("*", "Label", true, false):
+		if (node as Label).text == "Reference images":
+			heading = node
+	if heading != null:
+		await _scroll_to(dialog, heading)
+	await _shot("setup-3-references", dialog)
+	var documents: Label = null
+	for node: Node in dialog.find_children("*", "Label", true, false):
+		if (node as Label).text == "Design documents":
+			documents = node
+	if documents != null:
+		await _scroll_to(dialog, documents)
+	await _shot("setup-3-documents", dialog)

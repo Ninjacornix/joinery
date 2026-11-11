@@ -1,0 +1,547 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Wed, 11 Nov 2026 12:58:44 +0100
+Subject: [PATCH] feat(editor): add reference images and design documents to a
+ new game
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Joinery-only, not meant for upstream: it extends the Joinery wizard.
+
+Brief and art direction gains Design documents under Game brief and
+Reference images after References. Files are added with Add documents…
+and Add images… or dropped on the window (the Project Manager forwards
+drops while that step shows). Each picture shows a thumbnail and a
+one-line note for what to take from it, each document its name and
+kind, and × takes a file off the list. A file of the wrong kind is
+refused with a plain sentence.
+
+On create the lists travel in .joinery-references.json and
+.joinery-design-docs.json beside the project, never through a shell,
+for joinery game apply (or joinery brief and bible without a starting
+point), which checks and copies each file.
+---
+ editor/project_manager/project_dialog.cpp  | 352 ++++++++++++++++++++-
+ editor/project_manager/project_dialog.h    |  31 ++
+ editor/project_manager/project_manager.cpp |   4 +
+ 3 files changed, 382 insertions(+), 5 deletions(-)
+
+diff --git a/editor/project_manager/project_dialog.cpp b/editor/project_manager/project_dialog.cpp
+index 0659601..1876a3d 100644
+--- a/editor/project_manager/project_dialog.cpp
++++ b/editor/project_manager/project_dialog.cpp
+@@ -41,9 +41,11 @@
+ // App list rows, in multiples of the editor font size.
+ #define JOINERY_APP_ROW 2.0
+ #include "core/io/file_access.h"
++#include "core/io/image.h"
+ #include "core/io/zip_io.h"
+ #include "core/object/callable_mp.h"
+ #include "core/os/os.h"
++#include "core/templates/pair.h"
+ #include "core/version.h"
+ #include "editor/editor_node.h"
+ #include "editor/editor_string_names.h"
+@@ -799,6 +801,11 @@ void ProjectDialog::_joinery_apply_sizes() {
+ 			c->set_custom_minimum_size(control);
+ 		}
+ 	}
++	for (Control *c : { (Control *)joinery_ref_add, (Control *)joinery_doc_add }) {
++		if (c) {
++			c->set_custom_minimum_size(control);
++		}
++	}
+ 	_joinery_fit_scroll();
+ 	_joinery_align_names();
+ }
+@@ -998,6 +1005,7 @@ void ProjectDialog::_joinery_reset_pages() {
+ 		joinery_steam_app_id->clear();
+ 	}
+ 	joinery_brief_filled.clear();
++	_joinery_clear_imports();
+ 	// A fresh dialog starts from the starting point's defaults again.
+ 	joinery_features_for = String();
+ 	joinery_preset_for = String();
+@@ -1908,6 +1916,306 @@ void ProjectDialog::_joinery_build_brief_questions(const Array &p_pages) {
+ 	}
+ }
+ 
++// The user's own material on step 3: reference images under References and
++// design documents under Game brief. Only what they pick or drop is listed;
++// the CLI checks every file again and copies it in (setup_imports.py).
++
++static const int JOINERY_MAX_REFERENCES = 20;
++static const int JOINERY_MAX_DOCUMENTS = 10;
++
++static bool _joinery_is_image(const String &p_path) {
++	const String ext = p_path.get_extension().to_lower();
++	return ext == "png" || ext == "jpg" || ext == "jpeg" || ext == "webp";
++}
++
++static bool _joinery_is_document(const String &p_path) {
++	const String ext = p_path.get_extension().to_lower();
++	return ext == "md" || ext == "markdown" || ext == "txt" || ext == "pdf";
++}
++
++void ProjectDialog::_joinery_build_imports(VBoxContainer *p_brief_section) {
++	const auto block = [this](VBoxContainer *p_parent, const String &p_label, const String &p_caption) {
++		VBoxContainer *box = memnew(VBoxContainer);
++		box->add_theme_constant_override(SNAME("separation"), _joinery_space(2));
++		p_parent->add_child(box);
++		Label *label = memnew(Label);
++		label->set_theme_type_variation(SNAME("JoineryLabel"));
++		label->set_text(p_label);
++		box->add_child(label);
++		box->add_child(_joinery_caption(p_caption));
++		return box;
++	};
++	const auto add_button = [](VBoxContainer *p_box, const String &p_text, Label **r_error) {
++		VBoxContainer *rows = memnew(VBoxContainer);
++		rows->add_theme_constant_override(SNAME("separation"), _joinery_space(2));
++		p_box->add_child(rows);
++		Button *button = memnew(Button);
++		button->set_theme_type_variation(SNAME("JoinerySecondaryButton"));
++		button->set_text(p_text);
++		button->set_h_size_flags(Control::SIZE_SHRINK_BEGIN);
++		p_box->add_child(button);
++		*r_error = memnew(Label);
++		(*r_error)->set_theme_type_variation(SNAME("JoineryError"));
++		(*r_error)->set_autowrap_mode(TextServer::AUTOWRAP_WORD_SMART);
++		(*r_error)->set_auto_translate_mode(AUTO_TRANSLATE_MODE_DISABLED);
++		(*r_error)->set_accessibility_live(AccessibilityServerEnums::LIVE_POLITE);
++		(*r_error)->hide();
++		p_box->add_child(*r_error);
++		return Pair<VBoxContainer *, Button *>(rows, button);
++	};
++
++	VBoxContainer *docs = block(p_brief_section, TTR("Design documents"), TTR("Your design document or notes: Markdown, text or PDF, up to 10. Open parts of the brief are copied from their matching headings."));
++	Pair<VBoxContainer *, Button *> doc_parts = add_button(docs, TTR(String::utf8("Add documents…")), &joinery_doc_error);
++	joinery_doc_rows = doc_parts.first;
++	joinery_doc_add = doc_parts.second;
++	joinery_doc_add->connect(SceneStringName(pressed), callable_mp(this, &ProjectDialog::_joinery_browse_documents));
++
++	VBoxContainer *refs = block(joinery_look_page, TTR("Reference images"), TTR("Your own pictures: PNG, JPEG or WebP, up to 20. Drop them on this window or add them, and say what to take from each."));
++	Pair<VBoxContainer *, Button *> ref_parts = add_button(refs, TTR(String::utf8("Add images…")), &joinery_ref_error);
++	joinery_ref_rows = ref_parts.first;
++	joinery_ref_add = ref_parts.second;
++	joinery_ref_add->connect(SceneStringName(pressed), callable_mp(this, &ProjectDialog::_joinery_browse_references));
++
++	joinery_ref_dialog = memnew(EditorFileDialog);
++	joinery_ref_dialog->set_access(EditorFileDialog::ACCESS_FILESYSTEM);
++	joinery_ref_dialog->set_file_mode(EditorFileDialog::FILE_MODE_OPEN_FILES);
++	joinery_ref_dialog->set_title(TTR("Add reference images"));
++	joinery_ref_dialog->add_filter("*.png,*.jpg,*.jpeg,*.webp", TTR("Images"));
++	joinery_ref_dialog->connect("files_selected", callable_mp(this, &ProjectDialog::_joinery_add_references));
++	add_child(joinery_ref_dialog);
++	joinery_doc_dialog = memnew(EditorFileDialog);
++	joinery_doc_dialog->set_access(EditorFileDialog::ACCESS_FILESYSTEM);
++	joinery_doc_dialog->set_file_mode(EditorFileDialog::FILE_MODE_OPEN_FILES);
++	joinery_doc_dialog->set_title(TTR("Add design documents"));
++	joinery_doc_dialog->add_filter("*.md,*.markdown,*.txt,*.pdf", TTR("Markdown, text or PDF"));
++	joinery_doc_dialog->connect("files_selected", callable_mp(this, &ProjectDialog::_joinery_add_documents));
++	add_child(joinery_doc_dialog);
++}
++
++void ProjectDialog::_joinery_browse_references() {
++	joinery_ref_dialog->popup_file_dialog();
++}
++
++void ProjectDialog::_joinery_browse_documents() {
++	joinery_doc_dialog->popup_file_dialog();
++}
++
++// The × that takes a file off the list, named for screen readers, a square
++// one control tall so it is easy to hit.
++static Button *_joinery_remove_button(const String &p_name, int p_side) {
++	Button *remove = memnew(Button);
++	remove->set_custom_minimum_size(Size2(p_side, p_side));
++	remove->set_theme_type_variation(SNAME("JoineryTextButton"));
++	remove->set_text(String::utf8("×"));
++	remove->set_tooltip_text(vformat(TTR("Remove %s"), p_name));
++	remove->set_accessibility_name(vformat(TTR("Remove %s"), p_name));
++	remove->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
++	return remove;
++}
++
++static Label *_joinery_file_name(const String &p_name) {
++	Label *name = memnew(Label);
++	name->set_theme_type_variation(SNAME("JoineryLabel"));
++	name->set_text(p_name);
++	name->set_tooltip_text(p_name);
++	name->set_mouse_filter(Control::MOUSE_FILTER_PASS);
++	name->set_text_overrun_behavior(TextServer::OVERRUN_TRIM_ELLIPSIS);
++	name->set_auto_translate_mode(Node::AUTO_TRANSLATE_MODE_DISABLED);
++	name->set_h_size_flags(Control::SIZE_EXPAND_FILL);
++	return name;
++}
++
++void ProjectDialog::_joinery_add_references(const PackedStringArray &p_paths) {
++	String problem;
++	const int thumb = _joinery_control_h(2.5) * 2;
++	for (const String &raw : p_paths) {
++		const String path = raw.simplify_path();
++		const String name = path.get_file();
++		if (DirAccess::dir_exists_absolute(path)) {
++			problem = vformat(TTR("%s is a folder. Pick the files inside it instead."), name);
++			continue;
++		}
++		if (!_joinery_is_image(path)) {
++			problem = vformat(TTR("%s isn't a picture. References can be PNG, JPEG or WebP images."), name);
++			if (_joinery_is_document(path)) {
++				problem += " " + TTR("If it describes the game, add it under Design documents.");
++			}
++			continue;
++		}
++		if (joinery_ref_paths.has(path)) {
++			continue;
++		}
++		if (joinery_ref_paths.size() >= JOINERY_MAX_REFERENCES) {
++			problem = vformat(TTR("Add up to %d references."), JOINERY_MAX_REFERENCES);
++			break;
++		}
++		Ref<Image> image = Image::load_from_file(path);
++		if (image.is_null() || image->is_empty()) {
++			problem = vformat(TTR("%s doesn't hold a picture Joinery can read."), name);
++			continue;
++		}
++		// A small copy for the thumbnail; the file itself is copied unchanged.
++		const float scale = MIN(1.0f, (float)thumb / MAX(1, MAX(image->get_width(), image->get_height())));
++		if (scale < 1.0f) {
++			image->resize(MAX(1, (int)(image->get_width() * scale)), MAX(1, (int)(image->get_height() * scale)), Image::INTERPOLATE_BILINEAR);
++		}
++
++		HBoxContainer *row = memnew(HBoxContainer);
++		row->add_theme_constant_override(SNAME("separation"), _joinery_space(3));
++		TextureRect *picture = memnew(TextureRect);
++		picture->set_texture(ImageTexture::create_from_image(image));
++		picture->set_expand_mode(TextureRect::EXPAND_IGNORE_SIZE);
++		picture->set_stretch_mode(TextureRect::STRETCH_KEEP_ASPECT_COVERED);
++		picture->set_clip_contents(true);
++		picture->set_custom_minimum_size(Size2(thumb, thumb));
++		picture->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
++		row->add_child(picture);
++		VBoxContainer *words = memnew(VBoxContainer);
++		words->add_theme_constant_override(SNAME("separation"), _joinery_space(1));
++		words->set_h_size_flags(Control::SIZE_EXPAND_FILL);
++		words->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
++		row->add_child(words);
++		words->add_child(_joinery_file_name(name));
++		LineEdit *note = memnew(LineEdit);
++		note->set_theme_type_variation(SNAME("JoineryField"));
++		note->set_placeholder(TTR("What to take from it (optional)"));
++		note->set_accessibility_name(vformat(TTR("What to take from %s"), name));
++		note->set_max_length(200);
++		note->set_h_size_flags(Control::SIZE_EXPAND_FILL);
++		note->set_custom_minimum_size(Size2(0, _joinery_control_h(2.5)));
++		words->add_child(note);
++		Button *remove = _joinery_remove_button(name, _joinery_control_h(2.5));
++		remove->connect(SceneStringName(pressed), callable_mp(this, &ProjectDialog::_joinery_remove_reference).bind(path));
++		row->add_child(remove);
++		joinery_ref_rows->add_child(row);
++		joinery_ref_paths.push_back(path);
++		joinery_ref_notes.push_back(note);
++		joinery_ref_row_nodes.push_back(row);
++	}
++	joinery_ref_error->set_text(problem);
++	joinery_ref_error->set_visible(!problem.is_empty());
++	_joinery_update_import_buttons();
++}
++
++void ProjectDialog::_joinery_add_documents(const PackedStringArray &p_paths) {
++	String problem;
++	for (const String &raw : p_paths) {
++		const String path = raw.simplify_path();
++		const String name = path.get_file();
++		if (DirAccess::dir_exists_absolute(path)) {
++			problem = vformat(TTR("%s is a folder. Pick the files inside it instead."), name);
++			continue;
++		}
++		if (!_joinery_is_document(path)) {
++			problem = vformat(TTR("%s can't be a design document. Use Markdown (.md), text (.txt) or PDF."), name);
++			continue;
++		}
++		if (joinery_doc_paths.has(path)) {
++			continue;
++		}
++		if (joinery_doc_paths.size() >= JOINERY_MAX_DOCUMENTS) {
++			problem = vformat(TTR("Add up to %d design documents."), JOINERY_MAX_DOCUMENTS);
++			break;
++		}
++		const String ext = path.get_extension().to_lower();
++		HBoxContainer *row = memnew(HBoxContainer);
++		row->add_theme_constant_override(SNAME("separation"), _joinery_space(3));
++		row->set_custom_minimum_size(Size2(0, _joinery_control_h(2.5)));
++		row->add_child(_joinery_file_name(name));
++		Label *kind = memnew(Label);
++		kind->set_theme_type_variation(SNAME("JoineryCaption"));
++		kind->set_text(ext == "pdf" ? TTR("PDF") : (ext == "txt" ? TTR("Text") : TTR("Markdown")));
++		row->add_child(kind);
++		Button *remove = _joinery_remove_button(name, _joinery_control_h(2.5));
++		remove->connect(SceneStringName(pressed), callable_mp(this, &ProjectDialog::_joinery_remove_document).bind(path));
++		row->add_child(remove);
++		joinery_doc_rows->add_child(row);
++		joinery_doc_paths.push_back(path);
++		joinery_doc_row_nodes.push_back(row);
++	}
++	joinery_doc_error->set_text(problem);
++	joinery_doc_error->set_visible(!problem.is_empty());
++	_joinery_update_import_buttons();
++}
++
++void ProjectDialog::_joinery_remove_reference(const String &p_path) {
++	const int index = joinery_ref_paths.find(p_path);
++	if (index < 0) {
++		return;
++	}
++	joinery_ref_row_nodes[index]->queue_free();
++	joinery_ref_paths.remove_at(index);
++	joinery_ref_notes.remove_at(index);
++	joinery_ref_row_nodes.remove_at(index);
++	joinery_ref_error->hide();
++	_joinery_update_import_buttons();
++	joinery_ref_add->grab_focus();
++}
++
++void ProjectDialog::_joinery_remove_document(const String &p_path) {
++	const int index = joinery_doc_paths.find(p_path);
++	if (index < 0) {
++		return;
++	}
++	joinery_doc_row_nodes[index]->queue_free();
++	joinery_doc_paths.remove_at(index);
++	joinery_doc_row_nodes.remove_at(index);
++	joinery_doc_error->hide();
++	_joinery_update_import_buttons();
++	joinery_doc_add->grab_focus();
++}
++
++void ProjectDialog::_joinery_update_import_buttons() {
++	joinery_ref_add->set_disabled(joinery_ref_paths.size() >= JOINERY_MAX_REFERENCES);
++	joinery_doc_add->set_disabled(joinery_doc_paths.size() >= JOINERY_MAX_DOCUMENTS);
++}
++
++void ProjectDialog::_joinery_clear_imports() {
++	for (Control *row : joinery_ref_row_nodes) {
++		memdelete(row);
++	}
++	for (Control *row : joinery_doc_row_nodes) {
++		memdelete(row);
++	}
++	joinery_ref_paths.clear();
++	joinery_ref_notes.clear();
++	joinery_ref_row_nodes.clear();
++	joinery_doc_paths.clear();
++	joinery_doc_row_nodes.clear();
++	joinery_ref_error->hide();
++	joinery_doc_error->hide();
++	_joinery_update_import_buttons();
++}
++
++bool ProjectDialog::joinery_take_dropped_files(const PackedStringArray &p_files) {
++	if (!joinery_wizard || !is_visible() || joinery_page != JOINERY_PAGE_LOOK) {
++		return false;
++	}
++	PackedStringArray images;
++	PackedStringArray documents;
++	String other;
++	for (const String &file : p_files) {
++		if (_joinery_is_document(file)) {
++			documents.push_back(file);
++		} else if (_joinery_is_image(file) || DirAccess::dir_exists_absolute(file)) {
++			images.push_back(file);
++		} else {
++			other = file.get_file();
++		}
++	}
++	if (!images.is_empty()) {
++		_joinery_add_references(images);
++	}
++	if (!documents.is_empty()) {
++		_joinery_add_documents(documents);
++	}
++	if (!other.is_empty()) {
++		joinery_ref_error->set_text(vformat(TTR("%s isn't a picture or a design document. Drop PNG, JPEG or WebP pictures, or Markdown, text or PDF documents."), other));
++		joinery_ref_error->show();
++	}
++	return true;
++}
++
+ // Starting points.
+ 
+ Dictionary ProjectDialog::_joinery_current_blueprint() const {
+@@ -2963,6 +3271,19 @@ void ProjectDialog::_joinery_begin_create() {
+ 	joinery_job_answers = joinery_bible_keys.is_empty() ? String() : JSON::stringify(answers);
+ 	const Dictionary brief = _joinery_field_values(joinery_brief_inputs, joinery_brief_keys);
+ 	joinery_job_brief = joinery_brief_keys.is_empty() ? String() : JSON::stringify(brief);
++	Array references;
++	for (int i = 0; i < joinery_ref_paths.size(); i++) {
++		Dictionary entry;
++		entry["path"] = joinery_ref_paths[i];
++		entry["note"] = joinery_ref_notes[i]->get_text().strip_edges();
++		references.push_back(entry);
++	}
++	joinery_job_references = references.is_empty() ? String() : JSON::stringify(references);
++	Array documents;
++	for (const String &path : joinery_doc_paths) {
++		documents.push_back(path);
++	}
++	joinery_job_documents = documents.is_empty() ? String() : JSON::stringify(documents);
+ 
+ 	// The step list names what this project gets.
+ 	joinery_create_labels[2]->set_text(vformat(TTR("Copying the %s starting point"), _joinery_blueprint_name()));
+@@ -3100,6 +3421,14 @@ bool ProjectDialog::_joinery_run_create_step(int p_step, String &r_output, Strin
+ 			if (!joinery_job_answers.is_empty() && !FileAccess::exists(path.path_join("art/bible.md")) && !write_answers(".joinery-bible-answers.json", joinery_job_answers)) {
+ 				return false;
+ 			}
++			// The user's references and design documents: `game apply` checks
++			// and copies each one, then puts them on the board and in the brief.
++			if (!joinery_job_references.is_empty() && !write_answers(".joinery-references.json", joinery_job_references)) {
++				return false;
++			}
++			if (!joinery_job_documents.is_empty() && !write_answers(".joinery-design-docs.json", joinery_job_documents)) {
++				return false;
++			}
+ 			// The addon is already in place (step 0), and --features is always
+ 			// passed: an empty list means none, not the starting point's defaults.
+ 			// One "--features=" token, because Windows drops an empty argument
+@@ -3158,10 +3487,13 @@ bool ProjectDialog::_joinery_run_create_step(int p_step, String &r_output, Strin
+ 			if (FileAccess::exists(path.path_join("design/brief.md"))) {
+ 				return true;
+ 			}
+-			if (joinery_job_brief.is_empty()) {
++			if (joinery_job_brief.is_empty() && joinery_job_documents.is_empty()) {
+ 				return true;
+ 			}
+-			if (!write_answers(".joinery-brief-answers.json", joinery_job_brief)) {
++			if (!joinery_job_brief.is_empty() && !write_answers(".joinery-brief-answers.json", joinery_job_brief)) {
++				return false;
++			}
++			if (!joinery_job_documents.is_empty() && !write_answers(".joinery-design-docs.json", joinery_job_documents)) {
+ 				return false;
+ 			}
+ 			return _joinery_uv(home, { "brief", "--project", path }, r_output);
+@@ -3173,10 +3505,13 @@ bool ProjectDialog::_joinery_run_create_step(int p_step, String &r_output, Strin
+ 			if (FileAccess::exists(path.path_join("art/bible.md"))) {
+ 				return true;
+ 			}
+-			if (joinery_job_answers.is_empty()) {
++			if (joinery_job_answers.is_empty() && joinery_job_references.is_empty()) {
+ 				return true;
+ 			}
+-			if (!write_answers(".joinery-bible-answers.json", joinery_job_answers)) {
++			if (!joinery_job_answers.is_empty() && !write_answers(".joinery-bible-answers.json", joinery_job_answers)) {
++				return false;
++			}
++			if (!joinery_job_references.is_empty() && !write_answers(".joinery-references.json", joinery_job_references)) {
+ 				return false;
+ 			}
+ 			return _joinery_uv(home, { "bible", "--project", path }, r_output);
+@@ -4003,6 +4338,11 @@ void ProjectDialog::_notification(int p_what) {
+ 			joinery_details->add_theme_font_size_override(SceneStringName(font_size), get_theme_font_size(SNAME("source_size"), EditorStringName(EditorFonts)));
+ 		} break;
+ 		case NOTIFICATION_READY: {
++			// Joinery: pictures and documents dropped on the wizard (when the
++			// dialog is its own window; embedded, the Project Manager forwards
++			// them). Connected here: the signal is not there yet while
++			// the dialog is being constructed.
++			connect(SNAME("files_dropped"), callable_mp(this, &ProjectDialog::joinery_take_dropped_files));
+ 			fdialog_project = memnew(EditorFileDialog);
+ 			fdialog_project->set_access(EditorFileDialog::ACCESS_FILESYSTEM);
+ 			fdialog_project->connect("dir_selected", callable_mp(this, &ProjectDialog::_project_path_selected));
+@@ -4644,7 +4984,8 @@ ProjectDialog::ProjectDialog() {
+ 	// 24 between questions; 4 from a label to its field.
+ 	joinery_brief_fields = memnew(VBoxContainer);
+ 	joinery_brief_fields->add_theme_constant_override(SNAME("separation"), _joinery_space(5));
+-	section(TTRC("Game brief"))->add_child(joinery_brief_fields);
++	VBoxContainer *brief_section = section(TTRC("Game brief"));
++	brief_section->add_child(joinery_brief_fields);
+ 	joinery_look_fields = memnew(VBoxContainer);
+ 	joinery_look_fields->add_theme_constant_override(SNAME("separation"), _joinery_space(5));
+ 	section(TTRC("Look and sound"))->add_child(joinery_look_fields);
+@@ -4652,6 +4993,7 @@ ProjectDialog::ProjectDialog() {
+ 	joinery_references_box = memnew(VBoxContainer);
+ 	joinery_references_box->add_theme_constant_override(SNAME("separation"), _joinery_space(5));
+ 	joinery_look_page->add_child(joinery_references_box);
++	_joinery_build_imports(brief_section);
+ 	joinery_preset_box = section(TTRC("Starting rules"));
+ 	joinery_preset_picker = memnew(OptionButton);
+ 	joinery_preset_picker->set_theme_type_variation(SNAME("JoineryFieldPicker"));
+diff --git a/editor/project_manager/project_dialog.h b/editor/project_manager/project_dialog.h
+index b2ecf39..1af621e 100644
+--- a/editor/project_manager/project_dialog.h
++++ b/editor/project_manager/project_dialog.h
+@@ -243,6 +243,23 @@ private:
+ 	// What the brief fields were last filled with, so a value the user typed
+ 	// is never replaced when they go back and change step 1.
+ 	Dictionary joinery_brief_filled;
++	// Step 3: the user's own reference images and design documents. Picked
++	// with Add… or dropped on the window; each image has a one-line note.
++	// `joinery game apply` copies them in (setup_imports.py), from a file
++	// beside the project, so no path or note goes through a shell.
++	VBoxContainer *joinery_ref_rows = nullptr;
++	Button *joinery_ref_add = nullptr;
++	Label *joinery_ref_error = nullptr;
++	Vector<String> joinery_ref_paths;
++	Vector<LineEdit *> joinery_ref_notes;
++	Vector<Control *> joinery_ref_row_nodes;
++	VBoxContainer *joinery_doc_rows = nullptr;
++	Button *joinery_doc_add = nullptr;
++	Label *joinery_doc_error = nullptr;
++	Vector<String> joinery_doc_paths;
++	Vector<Control *> joinery_doc_row_nodes;
++	EditorFileDialog *joinery_ref_dialog = nullptr;
++	EditorFileDialog *joinery_doc_dialog = nullptr;
+ 
+ 	// The "Setting up your project" page.
+ 	VBoxContainer *joinery_creating = nullptr;
+@@ -313,6 +330,8 @@ private:
+ 	String joinery_job_connect;
+ 	String joinery_job_history;
+ 	String joinery_job_brief;
++	String joinery_job_references;
++	String joinery_job_documents;
+ 	Ref<FileAccess> joinery_choices_file;
+ 	Ref<ButtonGroup> renderer_button_group;
+ 	bool rendering_device_supported = false;
+@@ -409,6 +428,15 @@ private:
+ 	void _joinery_build_questions(const Array &p_pages);
+ 	void _joinery_build_brief_questions(const Array &p_pages);
+ 	Control *_joinery_add_question(VBoxContainer *p_parent, const Dictionary &p_question, const String &p_label);
++	void _joinery_build_imports(VBoxContainer *p_brief_section);
++	void _joinery_add_references(const PackedStringArray &p_paths);
++	void _joinery_add_documents(const PackedStringArray &p_paths);
++	void _joinery_remove_reference(const String &p_path);
++	void _joinery_remove_document(const String &p_path);
++	void _joinery_update_import_buttons();
++	void _joinery_clear_imports();
++	void _joinery_browse_references();
++	void _joinery_browse_documents();
+ 
+ 	// Step 1: starting points.
+ 	void _joinery_build_cards();
+@@ -479,6 +507,9 @@ public:
+ 	void set_duplicate_can_edit(bool p_duplicate_can_edit);
+ 
+ 	void ask_for_path_and_show();
++	// Files dropped on the Project Manager while the wizard's step 3 shows go
++	// to its references and design documents. True when they were taken.
++	bool joinery_take_dropped_files(const PackedStringArray &p_files);
+ 	void show_dialog(bool p_reset_name = true, bool p_is_confirmed = true);
+ 
+ 	ProjectDialog();
+diff --git a/editor/project_manager/project_manager.cpp b/editor/project_manager/project_manager.cpp
+index c921760..966455f 100644
+--- a/editor/project_manager/project_manager.cpp
++++ b/editor/project_manager/project_manager.cpp
+@@ -1341,6 +1341,10 @@ void ProjectManager::shortcut_input(const Ref<InputEvent> &p_ev) {
+ }
+ 
+ void ProjectManager::_files_dropped(PackedStringArray p_files) {
++	// Joinery: the new-project wizard's references and design documents.
++	if (project_dialog && project_dialog->joinery_take_dropped_files(p_files)) {
++		return;
++	}
+ 	// TODO: Support installing multiple ZIPs at the same time?
+ 	if (p_files.size() == 1 && p_files[0].ends_with(".zip")) {
+ 		const String &file = p_files[0];
