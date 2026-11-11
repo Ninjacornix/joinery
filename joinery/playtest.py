@@ -314,7 +314,9 @@ def _screenshots(
         if item.get("t") is not None and item["severity"] != "note":
             frames.append(max(1, int(float(item["t"]) * 60)))
     for moment in report.get("moments", []):
-        frames.append(max(1, int(moment.get("frame", 0))))
+        # The run's last frame only when nothing else is worth a picture.
+        if moment.get("label") != "end" or not frames:
+            frames.append(max(1, int(moment.get("frame", 0))))
     frames = sorted({f for f in frames if f > 0})[:SHOTS_LIMIT]
     if not frames:
         return
@@ -336,6 +338,8 @@ def _screenshots(
         "60",
         "--resolution",
         "960x540",
+        # Without vsync the replay runs as fast as it can draw, not in real time.
+        "--disable-vsync",
         "--script",
         str(BOT),
         "--",

@@ -106,6 +106,8 @@ class FakeAgent:
 
     async def send(self, prompt: Prompt) -> AsyncIterator[Any]:
         self.prompts.append(prompt)
+        # Narration before the run is not the report.
+        yield MessageDelta(text="I'll play the game now.", new_message=True)
         if self.play:
             result = await self.endpoint.playtest({"minutes": 0.5, "focus": "coins"})
             assert result["counts"]["high"] == 1

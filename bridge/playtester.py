@@ -251,22 +251,24 @@ class Playtester:
                 ),
                 project_dir=str(self.project),
             )
-            parts: list[str] = []
+            # Only the last message is the report; earlier ones narrate the run.
+            messages: list[str] = []
             async for event in child.send(prompt):
                 if isinstance(event, MessageDelta):
-                    if event.new_message and parts:
-                        parts.append("\n\n")
-                    parts.append(event.text)
+                    if event.new_message or not messages:
+                        messages.append("")
+                    messages[-1] += event.text
                 elif isinstance(event, Message) and event.level != "refuse":
-                    parts.append(event.text)
+                    messages.append(event.text)
                 elif isinstance(event, Done):
                     break
+            written = next((m for m in reversed(messages) if m.strip()), "")
             if run.report is None:
                 # The agent wrote without playing: play anyway, so the card has facts.
                 await self._play(
                     run, {"minutes": minutes, "seed": 0, "focus": run.focus}
                 )
-            run.summary, run.followups = split_followups("".join(parts))
+            run.summary, run.followups = split_followups(written)
             if not run.summary and run.report is not None:
                 run.summary = str(run.report.get("summary", ""))
             run.state = "done"
