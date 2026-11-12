@@ -86,6 +86,14 @@ func _report() -> Dictionary:
 			"start": [0, 0],
 			"grid": ["##..", "#  .", "#..."],
 		},
+		"heatmap":
+		{
+			"runs": 3,
+			"grid": ["##..", "#  .", "#..."],
+			"deaths": [[0, 0, 2]],
+			"stuck": [[3, 2, 1]],
+			"time": [[0, 0, 12.5], [1, 0, 3.0]],
+		},
 	}
 
 
@@ -150,6 +158,15 @@ func _run() -> void:
 	var map: Control = card.find_child("CoverageMap", true, false)
 	_check(map != null and map.is_visible_in_tree(), "The map shows")
 	_check(map.call("counts") == [4, 6], "Reached and unreached cells: %s" % [map.call("counts")])
+	# The last runs' heat on the same map: deaths and stuck on, time spent one click away.
+	var layers: PackedStringArray = card.call("layer_words")
+	_check(layers == PackedStringArray(["Deaths 2", "Stuck 1", "Time spent"]), "%s" % layers)
+	_check(map.call("layer_on", "deaths") and map.call("layer_on", "stuck"), "Deaths, stuck show")
+	_check(not map.call("layer_on", "time"), "Time spent waits for its toggle")
+	card.call("show_layer", "time", true)
+	_check(map.call("layer_on", "time") and map.call("layer_cells", "time") == 2, "Time shows")
+	card.call("show_layer", "deaths", false)
+	_check(not map.call("layer_on", "deaths"), "A layer turns off")
 	var rows: Array[Control] = card.call("item_rows")
 	_check(rows.size() == 4, "The first four findings show")
 	var more := _button(card, "Show all 6")

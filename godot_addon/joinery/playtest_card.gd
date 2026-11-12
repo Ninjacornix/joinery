@@ -6,8 +6,9 @@ extends PanelContainer
 ## as a row that opens to its detail, the place in the code, the seed and a screenshot,
 ## with "Fix this" to put a ready request in the composer. Under the counts, how much of the
 ## level the bot reached ("Explored 34% of the level") over a top-down map with the places
-## nobody reached marked (playtest_map.gd). The playtester's written report goes to the
-## transcript (sidebar_tasks.gd), not here.
+## nobody reached marked (playtest_map.gd). Under the map, one toggle per heat layer from the
+## last few playtests (joinery/playtest_heat.py): Deaths, Stuck and Time spent paint on the same
+## map. The playtester's written report goes to the transcript (sidebar_tasks.gd), not here.
 
 signal stop_pressed
 signal close_pressed
@@ -38,6 +39,12 @@ const STEPS := {
 const FIRST_ITEMS := 4
 ## The findings scroll past this share of the window's height, so the composer stays put.
 const MAX_LIST_SHARE := 0.3
+## Heat layer -> [toggle words, what it shows]; deaths and stuck start on when they have any.
+const LAYERS := {
+	"deaths": ["Deaths", "Where the bot died or was respawned"],
+	"stuck": ["Stuck", "Where the bot got stuck: softlocks and falls out of the world"],
+	"time": ["Time spent", "Where the bot spent its time: the stronger, the longer"],
+}
 
 var playtest_id := ""
 ## starting, playing, writing, done, failed or stopped.
@@ -58,6 +65,9 @@ var _more: Button
 var _coverage: VBoxContainer
 var _coverage_text: Label
 var _map: Control
+var _layers: HBoxContainer
+var _layer_buttons: Dictionary = {}
+var _runs_text: Label
 var _seconds := 0.0
 
 
@@ -149,6 +159,20 @@ func _init(identifier := "") -> void:
 	legend.add_child(key)
 	_map = MAP.new()
 	_coverage.add_child(_map)
+	_layers = HBoxContainer.new()
+	_layers.theme_type_variation = "JoineryRowTight"
+	_layers.accessibility_name = "Heat layers on the map"
+	_layers.hide()
+	_coverage.add_child(_layers)
+	for layer: String in LAYERS:
+		var toggle := _layer_toggle(layer)
+		_layer_buttons[layer] = toggle
+		_layers.add_child(toggle)
+	_runs_text = UI.label("", "JoineryCaption")
+	_runs_text.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_runs_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_runs_text.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
+	_layers.add_child(_runs_text)
 	_items = VBoxContainer.new()
 	_items.theme_type_variation = "JoineryTight"
 	_items.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -227,6 +251,25 @@ func coverage_text() -> String:
 	return _coverage_text.text if _coverage.visible else ""
 
 
+## The heat toggles as shown ("Deaths 4", "Stuck 1", "Time spent"); [] without a heatmap.
+func layer_words() -> PackedStringArray:
+	var words := PackedStringArray()
+	if not _layers.visible:
+		return words
+	for layer: String in _layer_buttons:
+		var toggle := _layer_buttons[layer] as Button
+		if toggle.visible:
+			words.append(toggle.text)
+	return words
+
+
+## Turn heat [param layer] on or off, as its toggle does.
+func show_layer(layer: String, on: bool) -> void:
+	var toggle := _layer_buttons.get(layer) as Button
+	if toggle != null:
+		toggle.button_pressed = on
+
+
 ## Words of the counts row ("1 high", "2 low", …).
 func count_words() -> PackedStringArray:
 	var words := PackedStringArray()
@@ -303,8 +346,47 @@ func _show_coverage(coverage: Dictionary) -> void:
 		% [int(coverage.get("visited", 0)), int(coverage.get("navigable", 0))]
 	)
 	_map.call("set_coverage", coverage)
+	_show_heat(report.get("heatmap", {}) as Dictionary)
 	_coverage.show()
 	UI_MOTION.fade_in(_coverage)
+
+
+## The recent runs' heat on the map: a toggle per layer that has anything to show.
+func _show_heat(heat: Dictionary) -> void:
+	_map.call("set_heat", heat)
+	var any := false
+	for layer: String in _layer_buttons:
+		var toggle := _layer_buttons[layer] as Button
+		var cells := int(_map.call("layer_cells", layer))
+		toggle.visible = cells > 0
+		any = any or toggle.visible
+		if layer != "time":
+			var total := int(_map.call("layer_total", layer))
+			toggle.text = "%s %d" % [str(LAYERS[layer][0]), total]
+		toggle.set_pressed_no_signal(cells > 0 and layer != "time")
+		_map.call("set_layer", layer, toggle.button_pressed)
+	var runs := int(heat.get("runs", 0))
+	_runs_text.text = (
+		"last %d playtests" % runs if runs > 1 else ("this playtest" if runs == 1 else "")
+	)
+	_runs_text.tooltip_text = "Deaths, stuck points and time spent, added up over these runs"
+	_layers.visible = any
+
+
+func _layer_toggle(layer: String) -> Button:
+	var toggle := Button.new()
+	toggle.text = str(LAYERS[layer][0])
+	toggle.tooltip_text = str(LAYERS[layer][1])
+	toggle.accessibility_name = str(LAYERS[layer][1])
+	toggle.theme_type_variation = "JoinerySegment"
+	toggle.toggle_mode = true
+	toggle.focus_mode = Control.FOCUS_ALL
+	toggle.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	UI.bind_height(toggle, "sm", false)
+	UI_MOTION.press_feedback(toggle)
+	toggle.toggled.connect(func(on: bool) -> void: _map.call("set_layer", layer, on))
+	toggle.hide()
+	return toggle
 
 
 static func _percent(value: float) -> String:
