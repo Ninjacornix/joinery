@@ -101,6 +101,10 @@ the desktop without a headset), dialogue, enemy behaviour trees and camera rigs.
 `--blueprint` out for an empty project. The **New project** wizard in the
 Project Manager asks the same questions.
 
+New to Joinery? [Your first project](docs/getting-started.md) walks through one
+small game from start to a shared build. A short tour also opens on a new
+project's first open (`/tour` shows it again).
+
 In the editor:
 
 - Type `/art` to read the art bible drafted for your game, and to finish or
@@ -138,6 +142,8 @@ The [editor guide](docs/editor-guide.md) has every option.
 
 ## Documentation
 
+- [Your first project](docs/getting-started.md): a walkthrough from a starting
+  point to a shared build
 - [Editor guide](docs/editor-guide.md): the editor, sidebar commands and CLI
 - [Support matrix](docs/support-matrix.md): platforms, tools and agents
 - [Testing guide](docs/testing.md): how each part is checked

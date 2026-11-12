@@ -251,6 +251,39 @@ its own.
   once, Journeyman included (at most 6). `parallel = 1` turns tasks off.
   Each task is a separate session with your provider and uses its own
   context and tokens. Saved chats keep each task and what became of it.
+- **Steps that run together** (ADR 0072): with `[agents] run_steps =
+  "together"` (the default is `"one_by_one"`), a to-do whose steps say that
+  two or more of them need nothing first (two separate models) has those steps
+  made by tasks at the same time; its card says "Making steps 1 and 2 at
+  once…". Journeyman hears back once: when they are done, or as soon as one
+  fails. Steps that need the others wait until you have accepted or discarded
+  those first, then Journeyman makes them on top. When nothing is left,
+  Journeyman takes no turn at all, and its done-when items read Inconclusive,
+  since each step was its own change. Removing or adding a step on the to-do
+  card puts the steps back in order, one after another. `joinery metrics`
+  shows how each request's steps ran.
+
+### When you're away
+
+Make it match, the accessibility and performance fixes and the design check's
+deeper look need no one watching. Providers sell slower, cheaper capacity for
+such work (batch APIs), but none of the agent CLIs Joinery drives can use it:
+`joinery idle --project P batch` says what was found for each. What Joinery
+does instead (ADR 0072):
+
+- `[agents] unhurried = "idle"` in `joinery.toml` (the default is `"now"`)
+  makes **Fix**, **Fix all** and **Look deeper** wait in a queue instead of
+  starting. A notice says when they will run.
+- They start inside `idle_hours` (default `"22:00-07:00"`, your local time;
+  `""` for any hour) once the editor has been quiet for `idle_minutes`
+  (default 15) and nothing else is running, one at a time, on the project's
+  light model (`[agents] light_model`) when one is set. Their changes wait in
+  the Review tab like any others. The editor must be open for them to run.
+- `/idle`, `/idle now` and `/idle clear` in the sidebar, or `joinery idle
+  --project P [list|add KIND|remove ID|clear]` on the command line.
+- `uv run python evals/run.py --suite benchmark --live --agent A --off-peak`
+  waits for the testbed's off-peak hours and runs on its light model unless
+  `--model` pins one.
 
 ### Trying a few ways
 
@@ -662,6 +695,13 @@ again.
   Building a level from a sketch above).
 - `/sound-pass [what to aim for]` gives the level its missing sounds and places
   them, as reviewed changes (see Sound and music above).
+- `/tour` shows the first-project tour again: six short steps over the sidebar,
+  picking something, asking for a change, the review, the Timeline and Share.
+  It opens by itself once on a new project's first open; **Skip tour**, **Done**
+  or Esc close it and it is remembered for that project. It is also under
+  **Help › Joinery Tour** and **Project › Tools › Joinery: Tour**.
+- `/idle` lists the fixes and checks waiting for when you're away, `/idle now`
+  starts them at once and `/idle clear` drops them (see When you're away below).
 - `/brief` opens `design/brief.md` read-only, with **Ask Journeyman to change
   it**. With no brief, **Write the brief** drafts one from the starting point.
 - `/tools` gives each app's state and its one action (for example Start Docker
