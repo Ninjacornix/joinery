@@ -14,10 +14,10 @@ the dialog ("Joinery 0.6.0 is available", "Restart to finish updating").
  2 files changed, 48 insertions(+)
 
 diff --git a/editor/project_manager/project_manager.cpp b/editor/project_manager/project_manager.cpp
-index 966455f..efe7ee9 100644
+index 6c793da..7e83afa 100644
 --- a/editor/project_manager/project_manager.cpp
 +++ b/editor/project_manager/project_manager.cpp
-@@ -2159,6 +2159,47 @@ void ProjectManager::_joinery_show_connection() {
+@@ -2168,6 +2168,47 @@ void ProjectManager::_joinery_show_connection() {
  		local_projects_vb->add_child(joinery_agent_row);
  	}
  	_joinery_update_agent_chip();
@@ -66,11 +66,11 @@ index 966455f..efe7ee9 100644
  
  void ProjectManager::_joinery_update_agent_chip() {
 diff --git a/editor/project_manager/project_manager.h b/editor/project_manager/project_manager.h
-index d8739e2..dcc4db0 100644
+index 2933473..5046350 100644
 --- a/editor/project_manager/project_manager.h
 +++ b/editor/project_manager/project_manager.h
-@@ -191,6 +191,13 @@ class ProjectManager : public Control {
- 	void _joinery_fit_header();
+@@ -192,6 +192,13 @@ class ProjectManager : public Control {
+ 	void _joinery_set_mark();
  	String joinery_home;
  	void _joinery_update_agent_chip();
 +	// "Check for updates" in the top bar: the addon's update dialog (ADR 0083),
