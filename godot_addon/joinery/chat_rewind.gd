@@ -226,14 +226,20 @@ func ask(card: Control, turn: int) -> void:
 	var transcript: Variant = sessions.get("_transcript")
 	if transcript is ScrollContainer and (transcript as Node).is_inside_tree():
 		(transcript as Node).set("_follow", false)
-		var shown := confirm
+		# Weak references: the question may be answered and freed before the next frame.
+		var shown := weakref(confirm)
+		var scroll := weakref(transcript)
 		var show := func() -> void:
-			if is_instance_valid(shown) and shown.is_inside_tree():
-				(transcript as ScrollContainer).ensure_control_visible(shown)
+			var question := shown.get_ref() as Control
+			var view := scroll.get_ref() as ScrollContainer
+			if question != null and view != null and question.is_inside_tree():
+				view.ensure_control_visible(question)
 		(transcript as Node).get_tree().process_frame.connect(show, CONNECT_ONE_SHOT)
+	var button := weakref(go)
 	var focus := func() -> void:
-		if is_instance_valid(go) and go.is_inside_tree():
-			go.grab_focus()
+		var target := button.get_ref() as Control
+		if target != null and target.is_inside_tree():
+			target.grab_focus()
 	focus.call_deferred()
 
 
