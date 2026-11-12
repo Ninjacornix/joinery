@@ -145,6 +145,8 @@ static func _text_types(t: Theme, c: Dictionary, m: Dictionary, context: Node) -
 	var labels := {
 		"JoineryCaption": [caption, c["text_muted"], null],
 		"JoineryFaint": [caption, c["text_faint"], null],
+		"JoineryAccentCaption": [caption, c["accent"], null],
+		"JoineryDangerCaption": [caption, c["danger"], null],
 		"JoineryBodyLarge": [roundi(size * float(UI_THEME.TYPE["body_lg"])), c["text"], semibold],
 		"JoineryTitle": [roundi(size * float(UI_THEME.TYPE["title"])), c["text"], bold],
 		"JoineryDisplay": [roundi(size * float(UI_THEME.TYPE["display"])), c["text"], bold],

@@ -175,9 +175,11 @@ class Row:
 	func _tint() -> void:
 		if not is_inside_tree():
 			return
-		name_label.add_theme_color_override("font_color", UI_THEME.color(self, "text"))
-		var role := "accent" if mark == "new" else ("danger" if mark == "removed" else "text_faint")
-		mark_label.add_theme_color_override("font_color", UI_THEME.color(self, role))
+		mark_label.theme_type_variation = (
+			"JoineryAccentCaption"
+			if mark == "new"
+			else ("JoineryDangerCaption" if mark == "removed" else "JoineryFaint")
+		)
 		_icon.self_modulate = UI_THEME.color(self, "text_muted")
 		queue_redraw()
 
