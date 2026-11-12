@@ -174,6 +174,10 @@ async def edit_document(
     if not module.script_ext:
         raise ValueError("Use edit_graph or edit_vector for this application.")
     validate_arguments({"code": code})
+    # Agents name files the way Godot shows them (res://art/models/x.glb, as a
+    # part's resource reads); the recipe and every check use project paths.
+    source = source.removeprefix("res://")
+    exports = [output.removeprefix("res://") for output in exports]
     target = confined(project, source)
     if target.suffix != module.suffix or Path(source).parts[0] not in {"art", "audio"}:
         raise ValueError("Use the owning tool's native format under art/ or audio/.")

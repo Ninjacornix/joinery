@@ -417,6 +417,60 @@ def test_blender_textures_are_separate_recorded_outputs(
     assert "_joinery_export_textures" in script and "art/textures/hammer" in script
 
 
+def test_godot_paths_name_the_same_project_files(
+    stage: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An agent copies a model's path from a part's resource (res://...). The
+    # edit must take it, not refuse it as outside art/ and audio/.
+    async def run(_argv: list[str], _project: Path, *_args: object) -> Result:
+        return Result(True, "saved", "", 0.01)
+
+    record = AsyncMock(return_value={"status": "staged", "requires_review": True})
+    monkeypatch.setattr(authoring, "run_offline", run)
+    monkeypatch.setattr(authoring, "_record", record)
+    asyncio.run(
+        authoring.edit_document(
+            stage,
+            "blender",
+            "res://art/sources/hammer.blend",
+            "pass",
+            ["res://art/models/hammer.glb"],
+        )
+    )
+    recipe: Recipe = record.await_args.args[1]
+    assert recipe.outputs[:2] == ("art/sources/hammer.blend", "art/models/hammer.glb")
+    script = (stage / recipe.script).read_text()
+    assert "res://" not in script
+
+
+def test_edit_action_takes_godot_paths_on_its_first_call(
+    stage: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from servers.blender_ops import animation
+
+    (stage / "art/sources").mkdir(parents=True)
+    (stage / "art/sources/hero.blend").write_bytes(b"BLENDER")
+
+    async def run(_argv: list[str], _project: Path, *_args: object) -> Result:
+        return Result(True, "saved", "", 0.01)
+
+    record = AsyncMock(return_value={"status": "staged", "requires_review": True})
+    monkeypatch.setattr(authoring, "run_offline", run)
+    monkeypatch.setattr(authoring, "_record", record)
+    asyncio.run(
+        animation.edit_action(
+            stage,
+            "res://art/sources/hero.blend",
+            "run",
+            [{"op": "retime", "speed": 1.25}],
+            "",
+            ["res://art/models/hero.glb"],
+        )
+    )
+    recipe: Recipe = record.await_args.args[1]
+    assert recipe.outputs[:2] == ("art/sources/hero.blend", "art/models/hero.glb")
+
+
 # --- part selection: export names, typed part edits, scope guard ---------------
 
 
