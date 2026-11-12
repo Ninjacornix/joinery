@@ -76,6 +76,8 @@ from joinery.workers import (
     inkscape_worker,
     supercollider_worker,
 )
+from joinery.write_check import WriteCheck
+from joinery.write_check import checked as write_checked
 
 if TYPE_CHECKING:
     from joinery.turn import TurnController
@@ -132,6 +134,14 @@ OP_APPS: dict[str, tuple[str, ...]] = {
 NATIVE_OPS = frozenset(OP_APPS)
 #: Key prefix of a read-only agent's connection on the stage, beside the staged ones.
 VIEW = "view:"
+#: Script checks of finished stages, closing in the background.
+_CLOSING: set[asyncio.Task[None]] = set()
+
+
+def _close_later(check: WriteCheck) -> None:
+    task = asyncio.get_running_loop().create_task(check.close())
+    _CLOSING.add(task)
+    task.add_done_callback(_CLOSING.discard)
 
 
 def op_apps(tool: str, arguments: dict[str, Any]) -> tuple[str, ...]:
@@ -314,6 +324,8 @@ class ProjectGateway:
         self._write_notes: list[str] = []
         #: Span attributes the call adds as it goes (a refused raw script, a check).
         self._call_attrs: dict[str, Any] = {}
+        #: Godot's check of this stage's script writes.
+        self._checks: WriteCheck | None = None
 
     @property
     def is_lane(self) -> bool:
@@ -560,6 +572,67 @@ class ProjectGateway:
             "content": content,
         }
 
+    def _write_check(self) -> WriteCheck:
+        """This stage's script check (a new one for a new stage)."""
+        tx = self.transaction
+        assert tx is not None
+        if self._checks is None or self._checks.stage != tx.stage:
+            if self._checks is not None:
+                _close_later(self._checks)
+            self._checks = WriteCheck(tx.stage, cache=self.project / ".godot")
+        return self._checks
+
+    async def _close_check(self) -> None:
+        check, self._checks = self._checks, None
+        if check is not None:
+            await check.close()
+
+    def _before_write(self, arguments: dict[str, Any]) -> tuple[str, str | None] | None:
+        """(path, its text before) when this ``write_file`` stages a file Godot
+        checks (ADR 0078); None otherwise."""
+        tx = self.transaction
+        assert tx is not None
+        relative = str(arguments.get("filePath", "")).removeprefix("res://")
+        stage = tx.stage.resolve()
+        target = (stage / relative).resolve()
+        if (
+            not relative
+            or not write_checked(relative)
+            or not target.is_relative_to(stage)
+        ):
+            return None
+        self._write_check().warm()
+        try:
+            before = target.read_text(encoding="utf-8") if target.is_file() else None
+        except (OSError, UnicodeDecodeError):
+            return None
+        return target.relative_to(stage).as_posix(), before
+
+    async def _after_write(self, path: str, before: str | None) -> None:
+        """Godot's check of the file just written: what this write added is said
+        after the call's result, and recorded on its span."""
+        tx = self.transaction
+        if tx is None:
+            return
+        try:
+            after = (tx.stage / path).read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            return
+        self.progress("Checking " + path + " in Godot…")
+        outcome = await self._write_check().check(path, before, after)
+        self._call_attrs.update(
+            {
+                metrics.WRITE_CHECK: outcome.backend or "none",
+                metrics.WRITE_CHECK_SECONDS: outcome.seconds,
+                metrics.WRITE_CHECK_ERRORS: outcome.errors,
+                metrics.WRITE_CHECK_WARNINGS: outcome.warnings,
+                metrics.WRITE_CHECK_STREAK: outcome.streak,
+            }
+        )
+        message = outcome.message()
+        if message:
+            self._write_notes.append(message)
+
     def _view(self, server: str) -> MCPConnection | None:
         """A read-only connection on this gateway's stage; None for an app whose
         worker can't mount it read-only (its reads use the staged connection)."""
@@ -637,6 +710,7 @@ class ProjectGateway:
         if not readonly and named:
             self._team_check(named)
         connection = await self.connection(server)
+        check: tuple[str, str | None] | None = None
         if server == "godot" and tool.startswith("game_") and not self.runtime_owned:
             raise ValueError(
                 "This call needs a project-owned running-game session; it cannot target an arbitrary global port."
@@ -700,6 +774,8 @@ class ProjectGateway:
             connection = staged
             if server == "godot" and tool == "write_file" and "patch" in arguments:
                 arguments = self._patched(arguments)
+            if server == "godot" and tool == "write_file" and not view:
+                check = self._before_write(arguments)
             arguments = _map_paths(arguments, self.project, self.transaction.stage)
             if not readonly and self.claims.contended():
                 self._watch_stage()
@@ -754,6 +830,8 @@ class ProjectGateway:
                 result = rewrite_root(result, staged_root, self.project)
         if result.is_error and result_text(result).startswith("Rule Zero STOP:"):
             raise PolicyStop(result_text(result))
+        if check is not None and not result.is_error:
+            await self._after_write(*check)
         if not readonly:
             self._claim_features()
         if not readonly and self.claims.contended():
@@ -1330,6 +1408,7 @@ class ProjectGateway:
         for connection in self.staged.values():
             await connection.close()
         self.staged.clear()
+        await self._close_check()
         event: dict[str, Any] = {
             "kind": "file_decision",
             "transaction_id": identifier,
@@ -1399,6 +1478,7 @@ class ProjectGateway:
         for connection in self.staged.values():
             await connection.close()
         self.staged.clear()
+        await self._close_check()
         if self.transaction is not None and self.transaction.state in {
             "staging",
             "review",
@@ -1409,6 +1489,7 @@ class ProjectGateway:
 
     async def close(self) -> None:
         await self.stop_media()
+        await self._close_check()
         if self.transaction is not None and self.transaction.state in {
             "staging",
             "review",
