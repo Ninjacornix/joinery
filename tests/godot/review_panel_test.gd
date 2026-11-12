@@ -107,6 +107,16 @@ func _image(name: String, tint: Color, size := Vector2i(64, 48)) -> String:
 	return path
 
 
+## A model's render: a small model (20 × 40 px) on a wide plain ground, like Blender's still.
+func _render(name: String) -> String:
+	var image := Image.create(300, 180, false, Image.FORMAT_RGBA8)
+	image.fill(Color(0.3, 0.3, 0.32))
+	image.fill_rect(Rect2i(140, 70, 20, 40), Color(0.6, 0.4, 0.2))
+	var path := _cache.path_join(name)
+	image.save_png(path)
+	return path
+
+
 func _note(name: String) -> String:
 	var path := _cache.path_join(name)
 	var file := FileAccess.open(path, FileAccess.WRITE)
@@ -834,7 +844,7 @@ func _check_files(panel: PANEL) -> void:
 				"media": "image",
 				"before": _image("crate-a.png", Color(0.3, 0.3, 0.32)),
 				"before_back": _image("crate-a-back.png", Color(0.3, 0.3, 0.32)),
-				"after": _image("crate-b.png", Color(0.4, 0.35, 0.3)),
+				"after": _render("crate-b.png"),
 				"after_back": _image("crate-b-back.png", Color(0.4, 0.35, 0.3)),
 			}
 		)
@@ -873,6 +883,17 @@ func _check_files(panel: PANEL) -> void:
 	_check(rows[1].mark_label.text == "Changed", "A changed file is marked Changed")
 	_check(rows[17].mark_label.text == "New", "A new file is marked New")
 	_check(rows[1].picture != null, "A texture's row shows its picture")
+	_check(rows[0].picture != null and rows[0].framed, "The model's row shows its render")
+	var shown: Rect2 = rows[0]._region(rows[0].thumb.size)
+	_check(
+		(
+			shown.encloses(Rect2(140, 70, 20, 40))
+			and shown.size.x < 60.0
+			and is_equal_approx(shown.size.x, shown.size.y)
+		),
+		"…framed on the model, not its ground: %s" % shown
+	)
+	_check(not rows[1].framed, "A texture's row is not framed")
 	_check(rows[0].button_pressed and not rows[1].button_pressed, "The shown row is selected")
 	var list := files.get_global_rect()
 	var frame: Rect2 = panel._media._frame.get_global_rect()

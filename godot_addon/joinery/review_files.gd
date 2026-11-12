@@ -30,6 +30,8 @@ class Row:
 	var glyph := ""
 	var word := ""
 	var mark := ""
+	## True for a model's render: the thumbnail shows the model itself, not the ground around it.
+	var framed := false
 	## 0 for a file of its own, 1 for one grouped under the model above it.
 	var depth := 0
 	var thumb: Control
@@ -110,6 +112,7 @@ class Row:
 		word = str(spec.get("word", ""))
 		mark = str(spec.get("mark", ""))
 		depth = int(spec.get("depth", 0))
+		framed = bool(spec.get("framed", false))
 		mark_label.text = MARKS.get(mark, "")
 		mark_label.visible = not mark_label.text.is_empty()
 		if not glyph.is_empty():
@@ -123,9 +126,21 @@ class Row:
 		_icon.visible = picture == null and not glyph.is_empty()
 		if picture != null and picture.get_width() > 0 and picture.get_height() > 0:
 			var side := thumb.custom_minimum_size.x
-			var cover := maxf(side / picture.get_width(), side / picture.get_height())
-			thumb.texture_filter = GLANCE.picture_filter(picture, picture.get_size() * cover)
+			var region := _region(Vector2(side, side))
+			var shown := picture.get_size() * side / maxf(region.size.x, 1.0)
+			thumb.texture_filter = GLANCE.picture_filter(picture, shown)
 		thumb.queue_redraw()
+
+	## The part of the picture the thumbnail shows, in its pixels: for a model's render the
+	## model with a little room around it (it may reach past the picture's edges, where the
+	## render's ground carries on), else the centre that covers [param rect].
+	func _region(rect: Vector2) -> Rect2:
+		if framed:
+			return GLANCE.subject(picture)
+		var scale := maxf(rect.x / picture.get_width(), rect.y / picture.get_height())
+		var region := Rect2(Vector2.ZERO, rect / scale)
+		region.position = (picture.get_size() - region.size) / 2.0
+		return region
 
 	func _size_parts() -> void:
 		if not is_inside_tree():
@@ -208,13 +223,21 @@ class Row:
 		)
 		var ground := StyleBoxFlat.new()
 		ground.bg_color = UI_THEME.color(self, "surface_sunken")
+		var has_picture := picture != null and picture.get_width() > 0
+		if has_picture and framed and GLANCE.ground(picture).a > 0.0:
+			# The render's own ground carries on where the framed square runs past its edges.
+			ground.bg_color = GLANCE.ground(picture)
 		ground.set_corner_radius_all(corner)
 		thumb.draw_style_box(ground, rect)
-		if picture != null and picture.get_width() > 0:
-			var scale := maxf(rect.size.x / picture.get_width(), rect.size.y / picture.get_height())
-			var region := Rect2(Vector2.ZERO, rect.size / scale)
-			region.position = (picture.get_size() - region.size) / 2.0
-			thumb.draw_texture_rect_region(picture, rect, region)
+		if has_picture:
+			var region := _region(rect.size)
+			var inside := region.intersection(Rect2(Vector2.ZERO, picture.get_size()))
+			if inside.has_area():
+				var scale := rect.size.x / region.size.x
+				var shown := Rect2(
+					rect.position + (inside.position - region.position) * scale, inside.size * scale
+				)
+				thumb.draw_texture_rect_region(picture, shown, inside)
 		elif not word.is_empty() and glyph.is_empty():
 			var font := UI_THEME.mono_font(self)
 			var font_size := UI_THEME.font_size(self, "caption")

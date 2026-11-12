@@ -26,6 +26,12 @@ const CRISP_SIDE := 256
 const CRISP_COLOURS := 64
 ## Samples per side when counting a picture's colours.
 const CRISP_SAMPLE := 64
+## Longest side, in pixels, of the copy a picture's subject is found on.
+const SUBJECT_SAMPLE := 96
+## How far from the ground (0..1 per channel, or alpha) a pixel must be to be the subject.
+const SUBJECT_TOLERANCE := 0.08
+## Room left around a subject, as a share of its longest side on each edge.
+const SUBJECT_MARGIN := 0.08
 ## How far apart (0..1 per channel) a picture's edge colours may be and still be one ground.
 const GROUND_TOLERANCE := 0.03
 ## Severity order of reviewer notes, worst last.
@@ -317,3 +323,57 @@ static func ground(texture: Texture2D) -> Color:
 				break
 	texture.set_meta(&"joinery_ground", found)
 	return found
+
+
+## The part of [param texture] that shows its subject: the box around every pixel that differs
+## from the ground (or is not see-through), with a margin, as a square in the picture's pixels.
+## A model render frames its model small on a wide ground; a thumbnail cropped to this shows
+## the model, not the ground. The whole picture when it has no plain ground to tell apart.
+static func subject(texture: Texture2D) -> Rect2:
+	if texture == null:
+		return Rect2()
+	if texture.has_meta(&"joinery_subject"):
+		return texture.get_meta(&"joinery_subject")
+	var found := Rect2(Vector2.ZERO, texture.get_size())
+	var image := texture.get_image()
+	if image != null and not image.is_empty():
+		image = image.duplicate() as Image
+		if image.is_compressed():
+			image.decompress()
+		var box := _subject_box(image, ground(texture))
+		if box.has_area():
+			var side := maxf(box.size.x, box.size.y) * (1.0 + SUBJECT_MARGIN * 2.0)
+			found = Rect2(box.get_center() - Vector2(side, side) / 2.0, Vector2(side, side))
+	texture.set_meta(&"joinery_subject", found)
+	return found
+
+
+## The box (in [param image]'s pixels) around what is not [param plain], or see-through
+## ground when [param plain] is clear; empty when there is no plain ground to tell apart.
+static func _subject_box(image: Image, plain: Color) -> Rect2:
+	if plain.a <= 0.0 and image.detect_alpha() == Image.ALPHA_NONE:
+		return Rect2()
+	# Measured on a small copy: the box only has to be right to a few pixels.
+	var scale := minf(1.0, float(SUBJECT_SAMPLE) / maxf(image.get_width(), image.get_height()))
+	var small := Vector2i(
+		maxi(1, roundi(image.get_width() * scale)), maxi(1, roundi(image.get_height() * scale))
+	)
+	image.resize(small.x, small.y, Image.INTERPOLATE_BILINEAR)
+	var low := small
+	var high := Vector2i(-1, -1)
+	for y: int in small.y:
+		for x: int in small.x:
+			var colour := image.get_pixel(x, y)
+			var apart := colour.a
+			if plain.a > 0.0:
+				apart = maxf(
+					absf(colour.r - plain.r),
+					maxf(absf(colour.g - plain.g), absf(colour.b - plain.b))
+				)
+			if apart > SUBJECT_TOLERANCE:
+				low = Vector2i(mini(low.x, x), mini(low.y, y))
+				high = Vector2i(maxi(high.x, x), maxi(high.y, y))
+	if high.x < 0:
+		return Rect2()
+	var box := Rect2(Vector2(low), Vector2(high - low + Vector2i.ONE))
+	return Rect2(box.position / scale, box.size / scale)

@@ -566,6 +566,8 @@ func _row_specs(depths: Array[int]) -> Array:
 			var kind:
 				spec["picture"] = _tile_picture(item)
 				spec["glyph"] = {"model": "model", "clip": "animation"}.get(kind, "image")
+				# A render frames the model small on its ground: the row shows the model.
+				spec["framed"] = kind in ["model", "clip"]
 		specs.append(spec)
 	return specs
 
