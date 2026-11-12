@@ -20,6 +20,11 @@ Every agent Joinery runs has one role:
   report of what is missing and what the sound pass makes. Read-only; the sounds
   themselves are made by scripted tasks, each a reviewed change.
 
+Every role may look into the game its gateway is running (``inspect_game``). Playing it
+with timed input (``drive_game``) is the lead's and workers'; the playtester and the
+debugger may too where the project says so (``[agents] game_input_roles``), and no other
+read-only role ever does (ADR 0067).
+
 The role reaches the provider's policy hook as ``JOINERY_AGENT_ROLE`` and the
 gateway endpoint as its ``role``; both judge each call against the same tables
 here, so no provider can widen what a role may do. No role can approve, accept or
@@ -66,10 +71,22 @@ READ_ONLY_ROLES: frozenset[str] = frozenset(
     }
 )
 
+#: The running game: look (any role) and play with timed input (``may_drive``).
+INSPECT_GAME = "inspect_game"
+DRIVE_GAME = "drive_game"
 #: joinery-registry tools every read-only role may call.
 REGISTRY_READS = frozenset(
-    {"discover_tools", "tool_schema", "inspect_editor", "view_editor", "details"}
+    {
+        "discover_tools",
+        "tool_schema",
+        "inspect_editor",
+        "view_editor",
+        "details",
+        INSPECT_GAME,
+    }
 )
+#: Read-only roles a project may let drive the running game; the rest never may.
+MAY_DRIVE_ROLES = frozenset({"playtester", "debugger"})
 #: Tools that only one role reports through.
 REVIEW_REPORT = "report_review"
 DIAGNOSIS_REPORT = "report_diagnosis"
@@ -208,6 +225,8 @@ REGISTRY_TOOLS: tuple[str, ...] = (
     "view_editor",
     "details",
     "find_recipe",
+    INSPECT_GAME,
+    DRIVE_GAME,
     "inspect_in_parallel",
     "submit_for_review",
     "precheck",
@@ -235,8 +254,34 @@ def offered_tools(role: str) -> frozenset[str]:
     read-only role never sees a writer's schema. Listing is not the gate: the policy
     hook and the gateway still judge every call (``role_violation``, GatewayRPC)."""
     if spec(role).read_only:
-        return frozenset(spec(role).registry | {CALL_TOOL}) & frozenset(REGISTRY_TOOLS)
+        # drive_game is listed to the roles a project may let drive; the call is judged
+        # against the project's own setting (may_drive).
+        driving = {DRIVE_GAME} if role in MAY_DRIVE_ROLES else set()
+        return frozenset(spec(role).registry | {CALL_TOOL} | driving) & frozenset(
+            REGISTRY_TOOLS
+        )
     return frozenset(t for t in REGISTRY_TOOLS if registry_allowed(role, t))
+
+
+def game_input_roles(project: Path) -> frozenset[str]:
+    """``[agents] game_input_roles``: the read-only roles allowed to drive the game."""
+    try:
+        raw = tomllib.loads((project / "joinery.toml").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return frozenset()
+    table = raw.get("agents", {})
+    value = table.get("game_input_roles", []) if isinstance(table, dict) else []
+    if not isinstance(value, list):
+        return frozenset()
+    return frozenset(str(v) for v in value if isinstance(v, str)) & MAY_DRIVE_ROLES
+
+
+def may_drive(role: str, project: Path | None) -> bool:
+    """May ``role`` send input to the running game (``drive_game``)? Writers may; the
+    playtester and debugger where the project lists them; other read-only roles never."""
+    if not spec(role).read_only:
+        return True
+    return project is not None and role in game_input_roles(project)
 
 
 # --- Provider built-in tools offered to read-only roles -------------------------------
@@ -357,6 +402,12 @@ def native_writer(native: str) -> bool:
     return native.lower() in _WRITERS
 
 
+NO_DRIVING = (
+    "This agent may look at the running game (inspect_game) but not play it: the "
+    "project doesn't let this role send input ([agents] game_input_roles)."
+)
+
+
 def refusal(role: str) -> str:
     if role == "reviewer":
         return (
@@ -399,6 +450,7 @@ def role_violation(
     command: str = "",
     native: str = "",
     arguments: Mapping[str, Any] | None = None,
+    project: Path | None = None,
 ) -> Verdict | None:
     """What ``role`` may not do, beyond Rule Zero (which the caller judges first).
 
@@ -424,6 +476,12 @@ def role_violation(
         if registry:
             if registry_allowed(role, tool):
                 return None
+            if tool == DRIVE_GAME:
+                return (
+                    None
+                    if may_drive(role, project)
+                    else Verdict(Severity.DENY, NO_DRIVING)
+                )
             # call_tool is judged by what it calls: only audited reads pass.
             values = arguments or {}
             if tool == "call_tool" and read_only(

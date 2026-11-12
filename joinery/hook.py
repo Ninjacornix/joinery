@@ -260,6 +260,7 @@ def violation(raw: dict[str, Any]) -> Verdict | None:
             event.command,
             str(raw.get("tool_name") or raw.get("tool") or ""),
             values if isinstance(values, dict) else {},
+            event.project_dir,
         )
         return refused or verdict
     if os.environ.get("JOINERY_INSPECTION_ONLY") == "1":
@@ -271,6 +272,7 @@ def violation(raw: dict[str, Any]) -> Verdict | None:
                 "tool_schema",
                 "inspect_editor",
                 "view_editor",
+                "inspect_game",
             }
             if event.tool == "call_tool" and isinstance(values, dict):
                 allowed = read_only(

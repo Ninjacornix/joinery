@@ -15,7 +15,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal
 
-from joinery import compact, design, skills
+from joinery import compact, design, live_game, skills
 from joinery.blockout import stage as blockout_stage
 from joinery.debugging import diagnosis_from
 from joinery.gateway import ProjectGateway
@@ -23,7 +23,14 @@ from joinery.mcp_runtime import PolicyStop
 from joinery.peer_review import notes_from
 from joinery.platform_support import private_directory
 from joinery.read_access import read_only
-from joinery.roles import READ_ONLY_ROLES, refusal, registry_allowed, spec
+from joinery.roles import (
+    NO_DRIVING,
+    READ_ONLY_ROLES,
+    may_drive,
+    refusal,
+    registry_allowed,
+    spec,
+)
 
 #: Methods whose answer reaches the agent as a summary with a details reference when
 #: it is long (joinery.compact). The editor context has its own outline; schemas,
@@ -204,7 +211,9 @@ class GatewayRPC:
         #: Run the project headless offline to reproduce an error (the debugger only).
         self.reproduce: Callable[[str], Awaitable[dict[str, Any]]] | None = None
         #: Play the game headless with the playtest bot (read-only, so every agent may).
-        self.playtest: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None = None
+        self.playtest: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None = (
+            None
+        )
         #: What the level is missing to sound like a game (read-only, any agent may).
         self.sound_audit: (
             Callable[[dict[str, Any]], Awaitable[dict[str, Any]]] | None
@@ -213,6 +222,13 @@ class GatewayRPC:
         self.checks: (
             Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]] | None
         ) = None
+
+    def may_drive(self) -> bool:
+        """May this endpoint's agent send input to the running game? A specialist with
+        no role only reads; a role as joinery.roles.may_drive says."""
+        if not self.role:
+            return not self.inspection_only
+        return may_drive(self.role, self.gateway.project)
 
     async def start(self) -> None:
         if self.transport == "tcp":
@@ -352,6 +368,22 @@ class GatewayRPC:
                 if self.gateway.view_editor is None:
                     raise ValueError("No live editor is connected to this gateway.")
                 data = await self.gateway.view_editor()
+            elif method == "inspect_game":
+                # Reads only, so every agent may look, specialists too.
+                data = await live_game.inspect(
+                    self.gateway.game_call, self.gateway.project, params
+                )
+            elif method == "drive_game":
+                if not self.may_drive():
+                    raise ValueError(NO_DRIVING)
+                data = await live_game.drive(self.gateway.game_call, params)
+                if params.get("screenshot_after"):
+                    shot = await live_game.inspect(
+                        self.gateway.game_call,
+                        self.gateway.project,
+                        {"tree": False, "screenshot": True},
+                    )
+                    data["screenshot"] = shot["screenshot"]
             elif method == "editor_edit":
                 if self.inspection_only:
                     raise ValueError("Specialists cannot change the live editor.")
@@ -507,7 +539,7 @@ class GatewayRPC:
                 data = self.task_status(str(params.get("id", "")))
             else:
                 raise ValueError(
-                    "The model interface supports inventory, schema, call, submit, propose_todo, blockout, playtest, the checks and sound_audit; no approval methods."
+                    "The model interface supports inventory, schema, call, submit, propose_todo, blockout, playtest, the checks, sound_audit and the running game's inspect_game and drive_game; no approval methods."
                 )
             project = getattr(self.gateway, "project", None)
             if method in COMPACTED and isinstance(project, Path):

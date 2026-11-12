@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from mcp.types import CallToolResult, TextContent
 
-from joinery import metrics, references, sound_kit, staged_assets, submission
+from joinery import live_game, metrics, references, sound_kit, staged_assets, submission
 from joinery import parts as part_targets
 from joinery import tools as tool_modules
 from joinery.art_approval import approved, review
@@ -345,6 +345,20 @@ class ProjectGateway:
     def call_lock(self) -> asyncio.Lock:
         """Held for every tool call; a submit holds it while the change is checked."""
         return self._call_lock
+
+    async def game_call(self, tool: str, arguments: dict[str, Any]) -> CallToolResult:
+        """One runtime-inspector call on the game this gateway started (``inspect_game``
+        and ``drive_game``, joinery.live_game): reads and input only, never a file."""
+        if tool not in live_game.GAME_READS | live_game.GAME_INPUTS:
+            raise ValueError(f"{tool} is not a running-game read or input.")
+        if not self.runtime_owned:
+            raise ValueError(live_game.NO_GAME)
+        async with self._call_lock:
+            # The game answers the connection that started it: the staged one in a change.
+            connection = self.staged.get("godot")
+            if connection is None:
+                connection = await self.connection("godot")
+            return await connection.call(tool, arguments, timeout=30)
 
     async def connection(self, server: str) -> MCPConnection:
         """Start just the requested server; unrelated creative apps stay idle."""
