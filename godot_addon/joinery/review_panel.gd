@@ -43,12 +43,16 @@ signal step_requested(step: int)
 ## Ask for changes: the chat should take a message about this change; [param path] is the
 ## changed asset ("" for a scene edit). Shown only when something listens.
 signal revise_requested(path: String)
+## A part of the reviewed model was clicked (review_media.gd): the next message's target.
+signal part_picked(target: Dictionary)
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const INDICATOR := preload("activity_indicator.gd")
 const MEDIA := preload("review_media.gd")
+const PART_PICK := preload("part_pick.gd")
+const TARGET_CHIP := preload("target_chip.gd")
 const MUSIC := preload("review_music.gd")
 const DETAILS := preload("review_details.gd")
 const SUMMARY := preload("review_summary.gd")
@@ -156,6 +160,23 @@ func _queue_sizes() -> void:
 		return
 	_sizes_queued = true
 	_apply_sizes.call_deferred()
+
+
+## A click on the reviewed model picks a part of it (part_pick.gd: on a character, the body
+## region there): the next message's target, with a region tinted on both sides.
+func _on_model_clicked(hit: Dictionary, _side: int) -> void:
+	var item := _media.current_item()
+	var resource := str(item.get("model_resource", ""))
+	if resource.is_empty():
+		return
+	var part := PART_PICK.part_for(hit, resource)
+	part["owner"] = "blender"
+	part["owner_source"] = str(item.get("path", ""))
+	var bones := PackedStringArray()
+	if str(part.get("part_kind", "")) == "region":
+		bones = str(part.get("bones", "")).split(",", false)
+	_media.model_view().highlight_region(str(part.get("object", "")), bones)
+	part_picked.emit(TARGET_CHIP.for_part(part))
 
 
 ## Review a live scene edit: the viewport before and after as one split picture when the
@@ -496,6 +517,7 @@ func _build_body() -> void:
 	)
 	_media = MEDIA.new()
 	_media.hide()
+	_media.model_view().part_clicked.connect(_on_model_clicked)
 	_media.set_room(_stage_area)
 	column.add_child(_media)
 	_music = MUSIC.new()

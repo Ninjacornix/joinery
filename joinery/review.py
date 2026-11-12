@@ -526,11 +526,13 @@ def _exports(tx: FileTransaction, source: str) -> dict[str, str]:
     exported = resource.removeprefix("res://")
     if Path(exported).suffix.lower() not in {".glb", ".gltf"}:
         return {}
-    return {
+    found = {
         f"{side}_model": str(root / exported)
         for side, root in (("before", tx.original), ("after", tx.stage))
         if (root / exported).is_file()
     }
+    # The game's name for the model: a part picked on the live view targets it.
+    return {**found, "model_resource": resource} if found else {}
 
 
 def _animations_in(

@@ -142,6 +142,8 @@ def test_a_model_names_the_glb_each_side_exports_for_live_3d(
     (item,) = media
     assert item["before_model"] == str(tx.original / "art/models/crate.glb")
     assert item["after_model"] == str(tx.stage / "art/models/crate.glb")
+    # A part picked on the live model targets the game's model.
+    assert item["model_resource"] == "res://art/models/crate.glb"
     (tx.original / "art/models/crate.glb").unlink()
     media, _renders = review.plan(
         tx, [{"path": "art/crate.blend", "change": "modified"}]

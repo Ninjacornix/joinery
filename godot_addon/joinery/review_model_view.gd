@@ -15,6 +15,10 @@ extends HBoxContainer
 ##
 ## An animation plays the same way: [method set_time] poses both models at one time, driven by
 ## the review's shared transport.
+##
+## A click (a press and release without dragging) picks the part under the pointer, as on
+## the asset page (part_pick.gd): on a character, the body region there. [method
+## highlight_region] tints a region on both sides.
 
 ## The live views are on screen.
 signal loaded
@@ -22,8 +26,14 @@ signal loaded
 signal failed
 ## A key was pressed while a view had focus.
 signal key_pressed(event: InputEventKey)
+## A click hit a part of one side's model (0 before, 1 after): part_pick.gd's hit.
+signal part_clicked(hit: Dictionary, side: int)
 
 const UI_THEME := preload("ui_theme.gd")
+const PICK := preload("part_pick.gd")
+const PREVIEW := preload("model_preview.gd")
+## A press that moves less than this many pixels before release is a click, not an orbit.
+const CLICK_SLOP := 4.0
 ## Seconds the live views may take to load before the renders stay.
 const BUDGET := 1.0
 ## Orbit radians per dragged pixel.
@@ -59,6 +69,10 @@ var _waited := 0.0
 var _stale := false
 var _bounds := AABB()
 var _side := "compare"
+## Each view's model root, and which file side (0 before, 1 after) it shows.
+var _scenes: Array[Node] = []
+var _sides: Array[int] = []
+var _press_at := Vector2.INF
 
 
 func _init() -> void:
@@ -119,6 +133,8 @@ func release() -> void:
 	_views.clear()
 	_cameras.clear()
 	_players.clear()
+	_scenes.clear()
+	_sides.clear()
 	hide()
 	if _task < 0:
 		_free_results()
@@ -263,6 +279,9 @@ static func scene_of(state: GLTFState) -> Node:
 			shown.mesh = source.mesh.get_mesh()
 		shown.skin = source.skin
 		shown.skeleton = source.skeleton_path
+		# extras (joinery_name, joinery_regions) name the parts a click picks.
+		for key: StringName in source.get_meta_list():
+			shown.set_meta(key, source.get_meta(key))
 		source.replace_by(shown)
 		shown.owner = scene
 		source.free()
@@ -313,6 +332,8 @@ func _build() -> void:
 		if scene == null:
 			continue
 		var view := _make_view(scene, _actions[index] if index < _actions.size() else "")
+		_scenes.append(scene)
+		_sides.append(index)
 		var box := _scene_bounds(scene)
 		if box.size != Vector3.ZERO:
 			_bounds = _bounds.merge(box) if found else box
@@ -339,8 +360,12 @@ func _make_view(scene: Node, action: String) -> SubViewportContainer:
 	view.mouse_default_cursor_shape = Control.CURSOR_DRAG
 	# A click on the model gives the review its keys; hovering or the wheel never takes focus.
 	view.focus_mode = Control.FOCUS_CLICK
-	view.tooltip_text = "Drag to turn both models, scroll to zoom, double-click to reset"
+	view.tooltip_text = (
+		"Click a part to make it the message's target. Drag to turn both models, scroll to"
+		+ " zoom, double-click to reset"
+	)
 	view.gui_input.connect(_on_input)
+	view.gui_input.connect(_on_click.bind(view))
 	add_child(view)
 	var viewport := SubViewport.new()
 	viewport.own_world_3d = true
@@ -487,6 +512,49 @@ func _fit() -> void:
 	for view: SubViewportContainer in _views:
 		view.custom_minimum_size.x = width
 	_aim.call_deferred()
+
+
+## The part under [param point] in [param view] (its own coordinates), with "side", or {}.
+func pick_at(view: SubViewportContainer, point: Vector2) -> Dictionary:
+	var index := _views.find(view)
+	if index < 0 or index >= _scenes.size():
+		return {}
+	var camera := _cameras[index]
+	var viewport := view.get_child(0) as SubViewport
+	var scale := Vector2(viewport.size) / view.size if view.size.x > 0 else Vector2.ONE
+	var at := point * scale
+	var hit := PICK.pick(
+		_scenes[index], camera.project_ray_origin(at), camera.project_ray_normal(at)
+	)
+	if not hit.is_empty():
+		hit["side"] = _sides[index]
+	return hit
+
+
+## Tint the triangles of [param object] (every skinned mesh when "") following [param bones]
+## on both sides; empty bones clear it. Returns the tinted triangles over both sides.
+func highlight_region(object: String, bones: PackedStringArray) -> int:
+	var tinted := 0
+	var tint := PREVIEW.region_tint(self)
+	for scene: Node in _scenes:
+		tinted += PICK.show_region(scene, object, bones, tint)
+	return tinted
+
+
+func _on_click(event: InputEvent, view: SubViewportContainer) -> void:
+	var button := event as InputEventMouseButton
+	if button == null or button.button_index != MOUSE_BUTTON_LEFT or button.double_click:
+		return
+	if button.pressed:
+		_press_at = button.position
+		return
+	var moved := _press_at.distance_to(button.position)
+	_press_at = Vector2.INF
+	if moved > CLICK_SLOP:
+		return
+	var hit := pick_at(view, button.position)
+	if not hit.is_empty():
+		part_clicked.emit(hit, int(hit["side"]))
 
 
 func _on_input(event: InputEvent) -> void:

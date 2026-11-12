@@ -514,8 +514,7 @@ func _sync_send_slot() -> void:
 	_composer.set_placeholder(_waiting_placeholder())
 
 
-## Run a slash command ("/doctor", "/help", …) without posting it as a message. Unknown
-## commands get a notice.
+## Run a slash command ("/doctor", "/help", …) without posting it; an unknown one gets a notice.
 func run_command(entry: String) -> void:
 	if entry == "reconnect":
 		reconnect_requested.emit()
@@ -974,6 +973,7 @@ func _make_review() -> Control:
 		"accept_pressed": _on_accept,
 		"reject_pressed": _on_reject,
 		"show_requested": func() -> void: review_requested.emit(),
+		"part_picked": set_part_target,
 	}
 	for signal_name: String in links:
 		if panel.has_signal(signal_name):

@@ -11,8 +11,7 @@ extends VBoxContainer
 ## - Models: live 3D, the original and the change side by side with one shared orbit
 ##   (review_model_view.gd), once their GLB files load; until then, or when they do not load in
 ##   time, the renders: the front and the far side, Before and After crossfading both.
-## - Sounds: one compact audio_preview with its waveform, so Before and After play A/B at the
-##   same position.
+## - Sounds: one compact audio_preview with its waveform; Before and After play A/B in step.
 ## - Text: only the changed lines (review_diff.gd).
 ## - A scene variant (ADR 0066): its base and the variant as one split picture, with only
 ##   what it overrides listed under it (review_overrides.gd, which draws the pictures).
@@ -25,9 +24,8 @@ extends VBoxContainer
 ##   (review_transport.gd); it floats over the foot of the stage (review_overlay.gd) and fades
 ##   out when the pointer leaves. Left and Right step a frame.
 ##
-## Before | After | Both is the corner pill (review_sides.gd), never over the media. Pictures
-## keep their shape on their own background, with no empty bands; a side still rendering pulses
-## until [method update_media] brings it. ADR 0040 has the rest.
+## Before | After | Both is the corner pill (review_sides.gd), never over the media (ADR 0040).
+## Pictures keep their shape, no empty bands; a side still rendering pulses until update_media.
 
 ## The shown item changed (several items), so Before/After availability may differ.
 signal item_changed
@@ -331,9 +329,7 @@ func current_paired() -> bool:
 
 ## True when the shown item is a new asset (After only).
 func current_is_new() -> bool:
-	if _items.is_empty():
-		return false
-	var item: Dictionary = _items[_index]
+	var item := current_item()
 	return item.has("after") and not item.has("before")
 
 
@@ -364,8 +360,7 @@ func set_side(value: String) -> void:
 		_show_current(true)
 
 
-## Flip between the original and the change (A or B): a comparison goes to the original
-## first. Returns the side now on show.
+## Flip between the original and the change (A or B), a comparison to the original first.
 func flip() -> String:
 	if _items.is_empty() or not current_paired():
 		return side
@@ -387,6 +382,11 @@ func step_item(by: int) -> bool:
 ## The index of the item on show.
 func current_index() -> int:
 	return _index
+
+
+## The item on show ({path, media, before?, after?, model_resource?, ...}), or {}.
+func current_item() -> Dictionary:
+	return _items[_index] if not _items.is_empty() else {}
 
 
 ## The list of files beside the preview (several files only).
