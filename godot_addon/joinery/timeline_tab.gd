@@ -14,6 +14,11 @@ extends VBoxContainer
 ##
 ## The list comes from `joinery timeline list` (command_job.gd), read when the tab is shown and
 ## when the editor gets focus back while it is shown; it never polls.
+##
+## A project shared with teammates (`joinery team connect`, ADR 0071) has Pull and Push beside
+## the filter, with how many changes each would move; the remote is asked when the tab is shown
+## (at most once a minute). A teammate's entry names them; the last pull's entries carry a dot.
+## What a pull or push did shows under the bar, with Review when a choice waits there.
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
@@ -30,6 +35,8 @@ const OFFER_TEXT := (
 	+ "and put any file back. Git keeps it, in this project's folder."
 )
 const PENDING_SCENES := "Scene edits you accepted join the timeline when you save the scene."
+## The remote is asked again when the tab is shown this long after the last time, in seconds.
+const FETCH_EVERY := 60.0
 
 ## Off in tests: nothing runs the CLI; data comes through apply_listing and the entry view.
 var cli_enabled := true
@@ -59,6 +66,16 @@ var _loaded := false
 ## Scenes with accepted live edits not saved yet: {res path: [summaries]}.
 var _unsaved: Dictionary = {}
 var _jobs: Dictionary = {}
+## Sharing with teammates, from the listing and `team status --fetch`: {connected, ahead,
+## behind, conflicts, last_fetch}.
+var _team: Dictionary = {}
+var _sync: HBoxContainer
+var _pull: Button
+var _push: Button
+var _sync_note: HBoxContainer
+var _sync_text: Label
+var _sync_review: Button
+var _fetched_at := -1.0e9
 
 
 ## Add the Timeline tab to [param plugin]'s bottom panel, after Review. It removes itself when
@@ -154,6 +171,9 @@ func apply_listing(data: Dictionary, append := false) -> void:
 		"message": str(data.get("message", "")),
 		"auto_commit": bool(data.get("auto_commit", true)),
 	}
+	var team: Variant = data.get("team", {})
+	if team is Dictionary and not append:
+		apply_team(team)
 	if not append:
 		_entries.clear()
 	for entry: Variant in data.get("entries", []):
@@ -161,6 +181,27 @@ func apply_listing(data: Dictionary, append := false) -> void:
 			_entries.append(entry)
 	_has_more = bool(data.get("more", false))
 	_render(append)
+
+
+## Show where sharing stands ({connected, ahead, behind, conflicts}); asks the remote when
+## it has not been asked for a minute.
+func apply_team(team: Dictionary) -> void:
+	_team = team
+	_render_sync()
+	var now := Time.get_ticks_msec() / 1000.0
+	if cli_enabled and bool(team.get("connected", false)) and now - _fetched_at > FETCH_EVERY:
+		_fetched_at = now
+		_start("team", ["team", "status", "--project", _project(), "--fetch", "--json"], _on_team)
+
+
+## What a pull or push answered: its sentence, or why it failed. [param review] shows Review.
+func show_sync_result(text: String, failed := false, review := false) -> void:
+	_sync_text.text = text
+	_sync_text.theme_type_variation = "JoineryError" if failed else "JoineryCaption"
+	_sync_review.visible = review
+	_sync_note.visible = not text.is_empty()
+	if not failed and not text.is_empty():
+		UI_MOTION.pulse(_sync_note)
 
 
 ## Back from an entry to the list.
@@ -220,6 +261,11 @@ func scene_saved(path: String) -> void:
 	_start("record:" + path, args, func(_result: Dictionary) -> void: refresh())
 
 
+## "Pull 2" / "Push": a sync button's words for [param count] changes to move.
+static func sync_text(word: String, count: int) -> String:
+	return word if count <= 0 else "%s %d" % [word, count]
+
+
 ## "Ada Lovelace · 3 files · 2 h ago" for a list entry.
 static func meta_text(entry: Dictionary, now: float) -> String:
 	var parts: Array[String] = []
@@ -242,9 +288,12 @@ func _build_list() -> void:
 	_list_view.theme_type_variation = "JoineryTight"
 	_list_view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	add_child(_list_view)
-	var bar := MarginContainer.new()
-	bar.theme_type_variation = "JoineryGutter"
-	_list_view.add_child(bar)
+	var gutter_bar := MarginContainer.new()
+	gutter_bar.theme_type_variation = "JoineryGutter"
+	_list_view.add_child(gutter_bar)
+	var bar := HBoxContainer.new()
+	bar.theme_type_variation = "JoineryRow"
+	gutter_bar.add_child(bar)
 	_filter = LineEdit.new()
 	_filter.name = "Filter"
 	_filter.placeholder_text = "Filter by change, file or person"
@@ -259,6 +308,7 @@ func _build_list() -> void:
 			refresh()
 	)
 	bar.add_child(_filter)
+	_build_sync(bar)
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -287,6 +337,7 @@ func _build_list() -> void:
 	_load_error.hide()
 	_content.add_child(_load_error)
 	_build_offer()
+	_build_sync_note()
 	_note = UI.label("", "JoineryCaption", true)
 	_note.name = "Note"
 	_note.hide()
@@ -327,7 +378,78 @@ func _build_offer() -> void:
 	_offer.add_child(_offer_button)
 
 
+## Pull and Push beside the filter, shown while the project is shared.
+func _build_sync(bar: HBoxContainer) -> void:
+	_sync = HBoxContainer.new()
+	_sync.name = "Sync"
+	_sync.theme_type_variation = "JoineryRowTight"
+	_sync.hide()
+	bar.add_child(_sync)
+	_pull = UI.secondary("Pull")
+	_pull.name = "Pull"
+	_pull.tooltip_text = "Bring in your teammates' changes"
+	_pull.pressed.connect(sync.bind("pull"))
+	UI_MOTION.press_feedback(_pull)
+	_sync.add_child(_pull)
+	_push = UI.secondary("Push")
+	_push.name = "Push"
+	_push.tooltip_text = "Share the changes you accepted with your teammates"
+	_push.pressed.connect(sync.bind("push"))
+	UI_MOTION.press_feedback(_push)
+	_sync.add_child(_push)
+
+
+## What the last pull or push did, under the bar.
+func _build_sync_note() -> void:
+	_sync_note = HBoxContainer.new()
+	_sync_note.name = "SyncNote"
+	_sync_note.theme_type_variation = "JoineryRow"
+	_sync_note.hide()
+	_content.add_child(_sync_note)
+	_sync_text = UI.label("", "JoineryCaption", true)
+	_sync_text.name = "Text"
+	_sync_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_sync_note.add_child(_sync_text)
+	_sync_review = UI.quiet("Review")
+	_sync_review.name = "Review"
+	_sync_review.tooltip_text = "Open the Review tab"
+	_sync_review.hide()
+	_sync_review.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_sync_review.pressed.connect(_show_review)
+	_sync_note.add_child(_sync_review)
+
+
 # --- Rendering ---------------------------------------------------------------------------------
+
+
+## Pull and Push say what they would move; the one worth doing next is the primary button.
+func _render_sync() -> void:
+	if _sync == null:
+		return
+	var ready := str(_status.get("state", "")) == "ready"
+	_sync.visible = ready and bool(_team.get("connected", false))
+	var behind := int(_team.get("behind", 0))
+	var ahead := int(_team.get("ahead", 0))
+	var waiting := int(_team.get("conflicts", 0)) > 0
+	var busy := str(_team.get("busy", ""))
+	_pull.text = "Pulling…" if busy == "pull" else sync_text("Pull", behind)
+	_push.text = "Pushing…" if busy == "push" else sync_text("Push", ahead)
+	_pull.disabled = not busy.is_empty()
+	_push.disabled = not busy.is_empty()
+	_pull.theme_type_variation = (
+		"JoineryPrimaryButton" if behind > 0 else "JoinerySecondaryButton"
+	)
+	_push.theme_type_variation = (
+		"JoineryPrimaryButton"
+		if ahead > 0 and behind == 0 and not waiting
+		else "JoinerySecondaryButton"
+	)
+	_pull.accessibility_name = "Pull %d changes from your teammates" % behind
+	_push.accessibility_name = "Push %d changes to your teammates" % ahead
+	if waiting:
+		_push.tooltip_text = "Choose between your version and your teammate's in Review first"
+	else:
+		_push.tooltip_text = "Share the changes you accepted with your teammates"
 
 
 func _render(appended := false) -> void:
@@ -345,6 +467,7 @@ func _render(appended := false) -> void:
 		notes.append(PENDING_SCENES)
 	_note.text = "\n".join(notes)
 	_note.visible = not notes.is_empty()
+	_render_sync()
 	var first_new := 0 if not appended else _rows.get_child_count()
 	if not appended:
 		for child: Node in _rows.get_children():
@@ -399,6 +522,14 @@ func _row(entry: Dictionary, now: float) -> HBoxContainer:
 	meta.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 	meta.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	line.add_child(meta)
+	if bool(entry.get("pulled", false)):
+		# Arrived with the last pull: a dot before who and when, said in words for readers.
+		var dot := UI.status_dot("working")
+		dot.name = "Pulled"
+		dot.tooltip_text = "New from your last pull"
+		line.add_child(dot)
+		line.move_child(dot, meta.get_index())
+		open.accessibility_name = subject + ", new from your last pull, show its files"
 	return line
 
 
@@ -410,6 +541,53 @@ func _show_load_error(why := "") -> void:
 
 
 # --- Actions -----------------------------------------------------------------------------------
+
+
+## Pull or push ([param action]): the button says so at once, the list follows the result.
+func sync(action: String) -> void:
+	if not cli_enabled or _jobs.has("sync"):
+		return
+	_team["busy"] = action
+	_render_sync()
+	var args := ["team", action, "--project", _project(), "--json"]
+	if not _start("sync", args, _on_synced.bind(action)):
+		_team.erase("busy")
+		_render_sync()
+		show_sync_result("Couldn't start Joinery. Is uv installed?", true)
+
+
+func _on_synced(data: Dictionary, action: String) -> void:
+	_team.erase("busy")
+	if data.has("error"):
+		_render_sync()
+		show_sync_result(_why(data, "Couldn't %s." % action), true)
+		return
+	var waiting := not str(data.get("review_id", "")).is_empty()
+	waiting = waiting or not (data.get("documents", []) as Array).is_empty()
+	waiting = waiting or not (data.get("reviews", {}).get("conflicting", []) as Array).is_empty()
+	show_sync_result(str(data.get("message", "")), false, waiting)
+	_fetched_at = -1.0e9
+	refresh()
+	if waiting:
+		var review: Variant = _plugin.get("_review_tab") if _plugin != null else null
+		if review is Object and (review as Object).has_method("refresh"):
+			(review as Object).call("refresh")
+
+
+func _on_team(data: Dictionary) -> void:
+	if data.has("error") or not data.has("connected"):
+		return
+	var conflicts: Variant = data.get("conflicts", [])
+	apply_team(
+		{
+			"connected": bool(data.get("connected", false)),
+			"ahead": int(data.get("ahead", 0)),
+			"behind": int(data.get("behind", 0)),
+			"conflicts": (conflicts as Array).size() if conflicts is Array else 0,
+		}
+	)
+	if data.has("fetch_error"):
+		show_sync_result(str(data["fetch_error"]), true)
 
 
 func _load_more() -> void:
