@@ -214,6 +214,9 @@ async def main() -> dict[str, Any]:
         facts["failure"] = text[:300]
         for tx in (single_tx, batch_tx, failing_tx):
             tx.reject()
+    from joinery.warm_workers import close_blenders
+
+    await close_blenders()
     return facts
 
 
