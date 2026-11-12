@@ -17,6 +17,9 @@ const BARS := 2
 const LAYERS: Array[String] = ["pads", "bass", "percussion", "tension"]
 ## Sync tolerance between layers of one section, in seconds.
 const SYNC_TOLERANCE := 0.003
+## Float rounding between two readings of the music clock, in seconds; far
+## below one sample (1 / MIX_RATE, 23 us), so it cannot hide a late change.
+const CLOCK_EPSILON := 0.000001
 const WALKER_SOURCE := """extends CharacterBody3D
 
 var drive: Vector3 = Vector3.ZERO
@@ -46,6 +49,8 @@ var ui_sounds: Node
 var world: Node3D
 var max_drift: float = 0.0
 var drift_samples: int = 0
+## The music clock as the previous frame left it (read before Music runs).
+var clock_before: float = 0.0
 
 
 func _initialize() -> void:
@@ -58,6 +63,8 @@ func _run() -> void:
 	music = root.get_node_or_null(^"Music")
 	ui_sounds = root.get_node_or_null(^"UiSounds")
 	play.expect(music != null and ui_sounds != null, "Music and UiSounds are autoloads")
+	# process_frame comes before the nodes' _process, so this is last frame's clock.
+	process_frame.connect(_remember_clock)
 	await play.boot(true)
 	world = Node3D.new()
 	world.name = "AudioTestWorld"
@@ -164,6 +171,26 @@ func _streams() -> Dictionary:
 	return streams
 
 
+func _remember_clock() -> void:
+	if music != null:
+		clock_before = float(music.call(&"position_seconds"))
+
+
+## Like play.watch, and also records the music clock of the frame before the
+## latest firing ("before") and of the frame that fired it ("at").
+func _watch_clock(signal_ref: Signal) -> Dictionary:
+	var record: Dictionary = {"signal": signal_ref, "count": 0, "args": []}
+	var catch: Callable = func(...args: Array) -> void:
+		record["count"] = int(record["count"]) + 1
+		record["args"] = args
+		record["before"] = clock_before
+		record["at"] = float(music.call(&"position_seconds"))
+		record["frame"] = Engine.get_process_frames()
+	record["callable"] = catch
+	signal_ref.connect(catch)
+	return record
+
+
 ## Seconds past the last bar line (0 just after a bar starts).
 func _into_bar() -> float:
 	return fposmod(float(music.call(&"position_seconds")), _bar())
@@ -215,9 +242,9 @@ func _expect_sync(where: String) -> void:
 		)
 
 
-## The state the music changes to next, with where in the bar it happened.
-func _await_intensity(state: StringName, max_seconds: float) -> float:
-	var record: Dictionary = play.watch(music.intensity_changed)
+## Waits for the music to change to `state`; the change's _watch_clock record.
+func _await_intensity(state: StringName, max_seconds: float) -> Dictionary:
+	var record: Dictionary = _watch_clock(music.intensity_changed)
 	var frames: int = 0
 	while frames < int(max_seconds * 60.0):
 		await process_frame
@@ -229,12 +256,32 @@ func _await_intensity(state: StringName, max_seconds: float) -> float:
 		StringName(music.get(&"intensity")) == state,
 		"music reached %s within %.1f s (at %s)" % [state, max_seconds, music.get(&"intensity")]
 	)
-	return _into_bar()
+	return record
 
 
-func _expect_on_bar(into: float, what: String) -> void:
-	# A change lands in the first frames of a bar; the clock reads in mix chunks.
-	play.expect(into < 0.12, "%s lands on a bar line (%.3f s into the bar)" % [what, into])
+## A quantised change happens in the first frame whose clock has passed its
+## line (a bar, or a beat): the line lies between the clock of the frame
+## before and the clock of the frame that made the change. How far past the
+## line that frame is depends only on frame timing (a busy machine stalls a
+## frame for 100 ms and more), so it is not bounded here; music.gd places the
+## change on the line itself, and the section and stinger checks show that.
+func _expect_on_line(record: Dictionary, line: float, what: String) -> void:
+	if int(record["count"]) == 0:
+		play.expect(false, "%s happened" % what)
+		return
+	var step: float = fposmod(float(record["at"]) - float(record["before"]), _section_seconds())
+	var into: float = fposmod(float(record["at"]), line)
+	play.expect(
+		into <= step + CLOCK_EPSILON,
+		(
+			"%s lands on the first frame past a line (%.3f s past it, the frame moved %.3f s)"
+			% [what, into, step]
+		)
+	)
+
+
+func _expect_on_bar(record: Dictionary, what: String) -> void:
+	_expect_on_line(record, _bar(), what)
 
 
 # --- buses and settings --------------------------------------------------------
@@ -316,8 +363,7 @@ func _music_bar_changes() -> void:
 	play.expect(music.get(&"intensity") == &"explore", "the state does not change mid-bar")
 	await _seconds(0.2)
 	play.expect(music.get(&"intensity") == &"explore", "still explore before the bar line")
-	var into: float = await _await_intensity(&"calm", 1.5)
-	_expect_on_bar(into, "calm")
+	_expect_on_bar(await _await_intensity(&"calm", 1.5), "calm")
 	play.expect(int(music.call(&"bar_index")) != bar_before, "calm starts in a new bar")
 	await _seconds(60.0 / BPM * 2.0 + 0.2)
 	play.expect_near(_layer_db("pads"), 0.0, 0.5, "calm: pads at full")
@@ -345,13 +391,11 @@ func _music_bar_changes() -> void:
 func _music_events() -> void:
 	var events: Node = play.events
 	await _wait_into_bar(0.1, 0.2)
-	var stingers: Dictionary = play.watch(music.stinger_played)
+	var stingers: Dictionary = _watch_clock(music.stinger_played)
 	events.level_completed.emit({"time": 1.0, "score": 0})
 	play.expect(music.get(&"pending_intensity") == &"victory", "level_completed asks for victory")
 	await play.wait_watched(stingers, 60)
-	var beat: float = 60.0 / BPM
-	var into_beat: float = fposmod(float(music.call(&"position_seconds")), beat)
-	play.expect(into_beat < 0.08, "the stinger starts on a beat (%.3f s in)" % into_beat)
+	_expect_on_line(stingers, 60.0 / BPM, "the stinger")
 	play.expect(
 		stingers["args"] == [&"victory"], "the victory stinger played %s" % [stingers["args"]]
 	)
@@ -359,8 +403,7 @@ func _music_events() -> void:
 	var stinger_player: AudioStreamPlayer = music.get_node(^"Stinger")
 	play.expect(stinger_player.playing, "the stinger is sounding")
 	play.expect_near(_layer_db("pads"), -6.0, 0.6, "layers duck 6 dB under the stinger")
-	var into: float = await _await_intensity(&"victory", 1.5)
-	_expect_on_bar(into, "victory")
+	_expect_on_bar(await _await_intensity(&"victory", 1.5), "victory")
 	await _seconds(0.7)
 	play.expect_near(_layer_db("pads"), 0.0, 0.6, "the duck lets go after the stinger")
 	# The drivers leave victory alone until the next level starts.
@@ -389,18 +432,25 @@ func _music_enemies_and_sync() -> void:
 	await _seconds(0.6)
 	play.expect(music.get(&"intensity") == &"explore", "a far enemy keeps explore")
 	enemy.position = Vector3(10, 0, 0)
-	var into: float = await _await_intensity(&"danger", 1.8)
-	_expect_on_bar(into, "danger")
-	var sections: Dictionary = play.watch(music.section_changed)
+	_expect_on_bar(await _await_intensity(&"danger", 1.8), "danger")
+	var sections: Dictionary = _watch_clock(music.section_changed)
 	enemy.position = Vector3(3, 0, 0)
-	into = await _await_intensity(&"combat", 1.8)
-	_expect_on_bar(into, "combat")
+	var combat: Dictionary = await _await_intensity(&"combat", 1.8)
+	_expect_on_bar(combat, "combat")
 	await play.wait_watched(sections, 150)
 	play.expect(
 		sections["args"] == [&"fight"], "combat switches to its section %s" % [sections["args"]]
 	)
 	play.expect(music.call(&"current_section") == &"fight", "the fight section plays")
-	play.expect(float(music.call(&"position_seconds")) < 0.2, "a new section starts at bar 0")
+	if int(sections["count"]) > 0 and int(combat["count"]) > 0:
+		# On the same bar line, at bar 0, already as far in as the clock is past that line.
+		var past_line: float = fposmod(float(combat["at"]), _bar())
+		play.expect(
+			sections["frame"] == combat["frame"], "the section switches on combat's bar line"
+		)
+		play.expect_near(
+			float(sections["at"]), past_line, CLOCK_EPSILON, "a new section starts at bar 0"
+		)
 	await _seconds(0.3)
 	_expect_sync("after a section switch")
 	# Several seconds and two loops of the section later, still sample-locked.
@@ -426,8 +476,7 @@ func _music_health() -> void:
 	await _seconds(0.6)
 	play.expect(music.get(&"intensity") == &"explore", "full health keeps explore")
 	player.set(&"health", 2.0)
-	var into: float = await _await_intensity(&"danger", 1.8)
-	_expect_on_bar(into, "low health")
+	_expect_on_bar(await _await_intensity(&"danger", 1.8), "low health")
 	player.set(&"health", 10.0)
 	await _await_intensity(&"explore", 1.8)
 	player.queue_free()

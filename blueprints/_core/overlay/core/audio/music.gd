@@ -11,7 +11,11 @@ extends Node
 ## duck the layers by 6 dB while they play.
 ##
 ## The clock is the audio itself: the first sounding layer's playback position
-## plus the time since the last mix, so bars line up with what is heard.
+## plus the time since the last mix, so bars line up with what is heard. A
+## change is applied in the first frame after its bar line (or beat), and
+## placed as if it had started on that line: a section starts that far in, a
+## stinger too, and an intensity fade is already that far along. A slow frame
+## then delays when a change is applied, never where it sits in the music.
 ##
 ## With `auto` on, game events drive it: level_started plays the project
 ## setting `audio/music/track`, level_completed plays the victory stinger and
@@ -259,32 +263,38 @@ func _process(delta: float) -> void:
 			_clear()
 			return
 	var t: float = _time(delta)
+	# Fades move first: a change on this frame's bar line places its own fade.
+	_advance_gains(delta)
 	var beat: int = int(floor(t / beat_seconds()))
 	if beat != _last_beat:
 		_last_beat = beat
 		_on_beat(beat, t - beat * beat_seconds())
-	for layer: String in _gains:
-		_gains[layer] = move_toward(
-			float(_gains[layer]), float(_targets[layer]), float(_rates[layer]) * delta
-		)
 	var duck: float = STINGER_DUCK_DB if _stinger_player.playing else 0.0
 	_duck_db = move_toward(_duck_db, duck, DUCK_SPEED_DB * delta)
 	_apply_volumes()
 	_drive(delta)
 
 
+func _advance_gains(seconds: float) -> void:
+	for layer: String in _gains:
+		_gains[layer] = move_toward(
+			float(_gains[layer]), float(_targets[layer]), float(_rates[layer]) * seconds
+		)
+
+
+## `overshoot` is how far past the beat line the clock already is.
 func _on_beat(beat: int, overshoot: float) -> void:
 	var per_bar: int = maxi(int(_track.get("beats_per_bar", 4)), 1)
 	var on_bar: bool = beat % per_bar == 0
 	if not _pending_stinger.is_empty():
 		_stinger_player.bus = _bus()
 		_stinger_player.stream = _pending_stinger_stream
-		_stinger_player.play()
+		_stinger_player.play(overshoot)
 		var event: StringName = _pending_stinger
 		_pending_stinger = &""
 		stinger_played.emit(event)
 	if not pending_intensity.is_empty() and (on_bar or str(_track.get("change_on")) == "beat"):
-		_apply_intensity()
+		_apply_intensity(overshoot)
 	if not on_bar:
 		return
 	if not _pending_section.is_empty():
@@ -296,12 +306,14 @@ func _on_beat(beat: int, overshoot: float) -> void:
 	bar_started.emit(beat / per_bar)
 
 
-func _apply_intensity() -> void:
+## The fade starts on the line `overshoot` seconds ago, so it is that far along.
+func _apply_intensity(overshoot: float = 0.0) -> void:
 	intensity = pending_intensity
 	pending_intensity = &""
 	var fade: float = maxf(float(_track.get("fade_beats", 2.0)) * beat_seconds(), 0.001)
 	for layer: String in _layer_names():
 		_retarget(layer, fade)
+	_advance_gains(overshoot)
 	var section: StringName = _state_section(intensity, _section)
 	if section != _section:
 		_pending_section = section
