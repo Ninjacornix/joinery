@@ -12,6 +12,7 @@ from joinery import tools
 from joinery.recipe import (
     Recipe,
     _tool_argv,
+    fingerprint,
     load_recipe,
     rebuild_one,
     recipe_paths,
@@ -303,3 +304,37 @@ def test_recipe_paths_are_sorted(tmp_path: Path) -> None:
             f'outputs = ["art/{name}.blend"]\n',
         )
     assert [p.stem for p in recipe_paths(tmp_path)] == ["a", "b", "c"]
+
+
+def _kra(path: Path, filterconfig: str) -> None:
+    import zipfile
+
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr("mimetype", "application/x-krita")
+        archive.writestr(
+            "maindoc.xml",
+            '<DOC><IMAGE name="Unnamed"><layers><layer name="Adjust 3" '
+            'uuid="{a}" filename="layer2"/></layers></IMAGE></DOC>',
+        )
+        archive.writestr("Unnamed/layers/layer2.filterconfig", filterconfig)
+
+
+#: One levels filter layer's settings as Krita 5.2 wrote them in two runs of the
+#: same recipe: Qt orders XML attributes by a per-process hash seed.
+FILTER = (
+    '<!DOCTYPE params>\n<params version="2">\n'
+    ' <param name="lightness">0.1;1;1.3;0;1</param>\n'
+    ' <param {first}="{a}" {second}="{b}">26</param>\n</params>\n'
+)
+
+
+def test_kra_fingerprint_ignores_filter_layer_attribute_order(tmp_path: Path) -> None:
+    one, two, other = (tmp_path / f"{n}.kra" for n in ("one", "two", "other"))
+    _kra(one, FILTER.format(first="type", a="internal", second="name", b="blackvalue"))
+    _kra(two, FILTER.format(first="name", a="blackvalue", second="type", b="internal"))
+    _kra(
+        other, FILTER.format(first="name", a="whitevalue", second="type", b="internal")
+    )
+    found = [fingerprint(p.name, tmp_path, FakeRunner()) for p in (one, two, other)]
+    assert found[0] == found[1], "the same layers fingerprinted differently"
+    assert found[0] != found[2], "a changed filter setting went unnoticed"

@@ -61,6 +61,8 @@ IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".exr"})
 #: Downsample size and bit depth for a render signature. 32x16 averages ~1000
 #: source pixels into each cell, and 4 bits per channel then ignores the last
 #: of the path-tracing noise while keeping real changes visible.
+#: Entries of a Krita document that are XML, compared without attribute order.
+_KRA_XML = (".xml", ".filterconfig")
 IMG_GRID = (32, 16)
 IMG_BITS = 4
 
@@ -303,7 +305,10 @@ def fingerprint(
                 if name in {"documentinfo.xml", "preview.png"} or name.endswith("/"):
                     continue
                 data = archive.read(name)
-                if name.endswith(".xml"):
+                # Krita writes XML attributes in Qt hash order, which changes
+                # from run to run; that holds for a filter layer's settings
+                # (layerN.filterconfig) as much as for maindoc.xml.
+                if name.endswith(_KRA_XML):
                     xml = ElementTree.fromstring(data)
                     for element in xml.iter():
                         for key in list(element.attrib):
