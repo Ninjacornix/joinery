@@ -16,7 +16,11 @@ extends Node
 ##
 ## Changing what a node saves: raise `save/data_version` and register a step
 ## with `add_migration(old_version, step)`; older slots are upgraded on load,
-## one version at a time. A damaged file, a newer format or version, an older
+## one version at a time. The game's own steps live in
+## `res://game/save_migrations.gd` (`extends RefCounted`,
+## `func migrations() -> Dictionary` returning `{old_version: Callable}`), loaded
+## at start like the adapter's; Joinery checks kept saves still load (ADR 0066).
+## A damaged file, a newer format or version, an older
 ## version with a missing upgrade step, or a save from another starting point
 ## is reported (`slot_info`, `load_failed`) and never loaded.
 ##
@@ -53,6 +57,8 @@ const DEFAULT_DIR := "user://saves"
 const DIR_ARG := "--saves-dir="
 const SETTINGS_ARG := "--settings-path="
 const ADAPTER_PATH := "res://features/save-load/blueprint_adapter.gd"
+## The game's own upgrade steps for older saves (optional).
+const MIGRATIONS_PATH := "res://game/save_migrations.gd"
 const SlotsPage := preload("res://features/save-load/slots_page.gd")
 
 ## Why a slot cannot be loaded (English msgids; show them with `tr`).
@@ -69,6 +75,8 @@ const REASON_LEVEL_OVER := "The level is over. Play again to save."
 var directory: String = DEFAULT_DIR
 ## The blueprint's adapter, or null.
 var adapter: RefCounted = null
+## The game's migrations (res://game/save_migrations.gd), or null.
+var migrations: RefCounted = null
 
 var _temporary_dir: bool = false
 var _migrations: Dictionary = {}
@@ -86,6 +94,7 @@ var _over_level_id: int = 0
 func _ready() -> void:
 	directory = _pick_directory()
 	_load_adapter()
+	_load_migrations()
 	GameEvents.checkpoint_reached.connect(_on_checkpoint_reached)
 	GameEvents.level_started.connect(_on_level_started)
 	GameEvents.level_completed.connect(_on_level_over.unbind(1))
@@ -431,6 +440,23 @@ func _load_adapter() -> void:
 			add_migration(int(from_version), steps[from_version])
 	if adapter.has_method(&"watch"):
 		adapter.call(&"watch", request_autosave.bind(true))
+
+
+## Registers the steps of res://game/save_migrations.gd; they win over the
+## adapter's for the same version, since the game's own code changed shape.
+func _load_migrations() -> void:
+	if not ResourceLoader.exists(MIGRATIONS_PATH):
+		return
+	var script: GDScript = load(MIGRATIONS_PATH) as GDScript
+	if script == null:
+		return
+	migrations = script.new() as RefCounted
+	if migrations == null or not migrations.has_method(&"migrations"):
+		return
+	var steps: Dictionary = migrations.call(&"migrations")
+	for from_version: Variant in steps:
+		if steps[from_version] is Callable:
+			add_migration(int(from_version), steps[from_version])
 
 
 func _add_menu_entries() -> void:

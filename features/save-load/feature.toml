@@ -10,7 +10,10 @@ extra_roots = []
 
 # Saves live in `save/directory` as slot_<n>.json (slot 0 is the autosave).
 # Raise `save/data_version` when saved state changes shape and register a
-# step with `SaveGame.add_migration`; older slots are upgraded on load.
+# step in res://game/save_migrations.gd (`func migrations() -> Dictionary`,
+# {old_version: Callable}) or with `SaveGame.add_migration`; older slots are
+# upgraded on load. `joinery saves` keeps saves from playtests and checks every
+# change that touches saved state still loads them (ADR 0066).
 [project.settings]
 "save/directory" = "user://saves"
 "save/data_version" = 1
