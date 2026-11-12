@@ -17,6 +17,11 @@ can hide or delete in Krita:
   document, every layer, to a new size.
 
 Colours are sRGB, 0 to 1; positions and sizes are in pixels from the top left.
+
+``operate_layer`` (LAYER_OPS) works on the stack itself, by layer name: add a
+paint or group layer, rename, reorder, hide, set opacity or blending mode,
+merge down, duplicate, delete, and add a fill layer or a filter layer with the
+same typed filters as ``adjust``.
 """
 
 from __future__ import annotations
@@ -257,6 +262,9 @@ def _joinery_stroke(document, name, points, color, width, opacity):
         raise RuntimeError(f'Krita could not draw the stroke {name!r}.')
 
 def _joinery_adjust(document, name, kind, params, opacity):
+    _joinery_add(document, _joinery_filter_layer(document, name, kind, params), opacity)
+
+def _joinery_filter_layer(document, name, kind, params):
     if kind == 'invert':
         filter_id, config = 'invert', {}
     elif kind == 'levels':
@@ -293,8 +301,7 @@ def _joinery_adjust(document, name, kind, params, opacity):
     adjustment.setConfiguration(settings)
     everywhere = _JoinerySelection()
     everywhere.select(0, 0, document.width(), document.height(), 255)
-    layer = document.createFilterLayer(name, adjustment, everywhere)
-    _joinery_add(document, layer, opacity)
+    return document.createFilterLayer(name, adjustment, everywhere)
 """
 
 
@@ -408,3 +415,328 @@ def seed_code(image: str) -> str:
             "",
         ]
     )
+
+
+# --- operate_layer: the layer stack of a Krita document ----------------------------
+
+#: Each layer operation's parameters; `op` is the operation itself. Layers are
+#: named; a name must pick out exactly one layer anywhere in the document.
+LAYER_OPS: dict[str, frozenset[str]] = {
+    "add": frozenset({"name", "kind", "above", "into", "opacity", "blend"}),
+    "rename": frozenset({"layer", "to"}),
+    "reorder": frozenset({"layer", "above", "position"}),
+    "hide": frozenset({"layer", "hidden"}),
+    "opacity": frozenset({"layer", "opacity"}),
+    "blend": frozenset({"layer", "mode"}),
+    "merge": frozenset({"layer"}),
+    "duplicate": frozenset({"layer", "name"}),
+    "delete": frozenset({"layer"}),
+    "fill_layer": frozenset({"name", "color", "above", "into", "opacity", "blend"}),
+    "filter_layer": frozenset(
+        {"name", "filter", "params", "above", "into", "opacity", "blend"}
+    ),
+}
+#: Operations that make a new layer, named by "name"; the rest change "layer".
+NEW_LAYER_OPS = frozenset({"add", "fill_layer", "filter_layer"})
+#: Blending modes by Joinery's name -> Krita's composite op id. Krita accepts
+#: any text as a mode, so only these are let through.
+BLEND_MODES: dict[str, str] = {
+    "normal": "normal",
+    "multiply": "multiply",
+    "screen": "screen",
+    "overlay": "overlay",
+    "add": "add",
+    "subtract": "subtract",
+    "darken": "darken",
+    "lighten": "lighten",
+    "color_dodge": "dodge",
+    "color_burn": "burn",
+    "soft_light": "soft_light",
+    "hard_light": "hard_light",
+    "difference": "diff",
+    "hue": "hue",
+    "saturation": "saturation",
+    "color": "color",
+    "luminosity": "luminize",
+    "erase": "erase",
+}
+LAYER_KINDS = ("paint", "group")
+
+
+def _layer_name(value: Any, what: str, number: int) -> str:
+    if not isinstance(value, str) or not value.strip() or len(value) > 63:
+        raise ValueError(
+            f"Operation {number}: {what} is a layer name, 1 to 63 characters."
+        )
+    return value.strip()
+
+
+def _blend(value: Any, number: int) -> str:
+    if value not in BLEND_MODES:
+        raise ValueError(
+            f"Operation {number}: the blend mode is one of: {', '.join(BLEND_MODES)}."
+        )
+    return BLEND_MODES[str(value)]
+
+
+def check_layer_ops(ops: Any) -> list[dict[str, Any]]:
+    """Refuse unknown layer operations and bad values before Krita starts."""
+    if not isinstance(ops, list) or not 1 <= len(ops) <= MAX_OPS:
+        raise ValueError(f"ops is a list of 1 to {MAX_OPS} operations.")
+    checked: list[dict[str, Any]] = []
+    for number, given in enumerate(ops, 1):
+        if not isinstance(given, dict) or given.get("op") not in LAYER_OPS:
+            raise ValueError(
+                f"Operation {number}: op is one of {', '.join(LAYER_OPS)}."
+            )
+        op = str(given["op"])
+        unknown = set(given) - {"op"} - LAYER_OPS[op]
+        if unknown:
+            raise ValueError(
+                f"Operation {number} ({op}) does not take {', '.join(sorted(unknown))}."
+            )
+        row: dict[str, Any] = {"op": op}
+        for key in ("layer", "name", "to", "above", "into"):
+            if key in LAYER_OPS[op] and given.get(key) is not None:
+                row[key] = _layer_name(given[key], key, number)
+        needed = "name" if op in NEW_LAYER_OPS else "layer"
+        if needed not in row:
+            raise ValueError(f"Operation {number} ({op}) needs {needed}.")
+        if op == "rename" and "to" not in row:
+            raise ValueError(f"Operation {number} (rename) needs to, the new name.")
+        if "above" in row and "into" in row:
+            raise ValueError(f"Operation {number}: give above or into, not both.")
+        if op == "add":
+            kind = given.get("kind", "paint")
+            if kind not in LAYER_KINDS:
+                raise ValueError(f"Operation {number}: kind is paint or group.")
+            row["kind"] = kind
+        if op == "reorder":
+            position = given.get("position")
+            if ("above" in row) == (position is not None):
+                raise ValueError(
+                    f"Operation {number} (reorder): give above (a layer) or "
+                    'position ("top" or "bottom").'
+                )
+            if position is not None:
+                if position not in ("top", "bottom"):
+                    raise ValueError(
+                        f'Operation {number}: position is "top" or "bottom".'
+                    )
+                row["position"] = position
+            if row.get("above") == row["layer"]:
+                raise ValueError(f"Operation {number}: a layer cannot go above itself.")
+        if op == "hide":
+            hidden = given.get("hidden", True)
+            if not isinstance(hidden, bool):
+                raise ValueError(f"Operation {number}: hidden is true or false.")
+            row["hidden"] = hidden
+        if op == "opacity" and "opacity" not in given:
+            raise ValueError(f"Operation {number} (opacity) needs an opacity.")
+        if "opacity" in LAYER_OPS[op] and "opacity" in given:
+            row["opacity"] = _unit(given["opacity"], "opacity")
+        if op == "blend":
+            row["mode"] = _blend(given.get("mode"), number)
+        elif "blend" in given:
+            row["mode"] = _blend(given["blend"], number)
+        if op == "duplicate":
+            row.setdefault("name", (row["layer"] + " copy")[:63])
+        if op == "fill_layer":
+            colour = given.get("color")
+            if (
+                not isinstance(colour, list)
+                or len(colour) != 3
+                or not all(_finite(x) and 0 <= x <= 1 for x in colour)
+            ):
+                raise ValueError(
+                    f"Operation {number}: color is three numbers from 0 to 1 (sRGB); "
+                    "set how much it covers with opacity."
+                )
+            row["color"] = [float(x) for x in colour]
+        if op == "filter_layer":
+            row["filter"], row["params"] = _filter(
+                given.get("filter"), given.get("params")
+            )
+        checked.append(row)
+    return checked
+
+
+LAYER_HELPERS = r"""
+from krita import InfoObject as _JoineryInfo
+
+def _joinery_nodes(node):
+    for child in node.childNodes():
+        yield child
+        yield from _joinery_nodes(child)
+
+def _joinery_layer(document, name):
+    found = [n for n in _joinery_nodes(document.rootNode()) if n.name() == name]
+    if not found:
+        names = ', '.join(n.name() for n in _joinery_nodes(document.rootNode()))
+        raise RuntimeError(f'There is no layer {name!r}. Layers: {names}.')
+    if len(found) > 1:
+        raise RuntimeError(f'{len(found)} layers are called {name!r}; rename one first.')
+    return found[0]
+
+def _joinery_free(document, name):
+    if any(n.name() == name for n in _joinery_nodes(document.rootNode())):
+        raise RuntimeError(f'A layer is already called {name!r}.')
+
+def _joinery_on_top(parent, node):
+    # A child added with no layer to go above lands on top of its parent.
+    parent.addChildNode(node, None)
+
+def _joinery_place(document, node, row):
+    if row.get('above') is not None:
+        anchor = _joinery_layer(document, row['above'])
+        anchor.parentNode().addChildNode(node, anchor)
+    elif row.get('into') is not None:
+        group = _joinery_layer(document, row['into'])
+        if group.type() != 'grouplayer':
+            raise RuntimeError(f"{row['into']!r} is not a group layer.")
+        _joinery_on_top(group, node)
+    else:
+        _joinery_on_top(document.rootNode(), node)
+
+def _joinery_look(node, row):
+    if 'opacity' in row:
+        node.setOpacity(round(row['opacity'] * 255))
+    if 'mode' in row:
+        node.setBlendingMode(row['mode'])
+        if node.blendingMode() != row['mode']:
+            raise RuntimeError(f"Krita did not take the blending mode {row['mode']!r}.")
+
+def _joinery_move(node, parent, above):
+    # Taking a group out and adding it back loses its layers in Krita 5.2, so
+    # a layer moves as its own copy (children, masks, settings and all).
+    copy = node.duplicate()
+    copy.setName(node.name())
+    parent.addChildNode(copy, above)
+    node.remove()
+    return copy
+
+def _joinery_inside(node, other):
+    while other is not None:
+        if other == node:
+            return True
+        other = other.parentNode()
+    return False
+
+def _joinery_rgb_xml(document, color):
+    # A colour as Krita itself writes one into a fill layer's settings.
+    if document.colorModel() != 'RGBA':
+        raise RuntimeError('A fill layer needs an RGBA document; this one is ' + document.colorModel() + '.')
+    r, g, b = color
+    return (
+        '<!DOCTYPE color><color>'
+        f'<RGB r="{r!r}" g="{g!r}" b="{b!r}" space="{document.colorProfile()}"/>'
+        '</color>'
+    )
+
+def _joinery_layer_op(document, row):
+    op = row['op']
+    if op in ('add', 'fill_layer', 'filter_layer'):
+        _joinery_free(document, row['name'])
+        if op == 'add':
+            kind = 'paintlayer' if row['kind'] == 'paint' else 'grouplayer'
+            node = document.createNode(row['name'], kind)
+        elif op == 'fill_layer':
+            settings = _JoineryInfo()
+            settings.setProperty('color', _joinery_rgb_xml(document, row['color']))
+            everywhere = _JoinerySelection()
+            everywhere.select(0, 0, document.width(), document.height(), 255)
+            node = document.createFillLayer(row['name'], 'color', settings, everywhere)
+        else:
+            node = _joinery_filter_layer(document, row['name'], row['filter'], row['params'])
+        if node is None:
+            raise RuntimeError(f"Krita could not make the layer {row['name']!r}.")
+        _joinery_place(document, node, row)
+        _joinery_look(node, row)
+        document.waitForDone()
+        return
+    node = _joinery_layer(document, row['layer'])
+    parent = node.parentNode()
+    if op == 'rename':
+        if row['to'] != row['layer']:
+            _joinery_free(document, row['to'])
+        node.setName(row['to'])
+    elif op == 'reorder':
+        if row.get('above') is not None:
+            anchor = _joinery_layer(document, row['above'])
+            if _joinery_inside(node, anchor):
+                raise RuntimeError(f"{row['layer']!r} cannot go inside itself.")
+            _joinery_move(node, anchor.parentNode(), anchor)
+        elif row['position'] == 'top':
+            _joinery_move(node, parent, None)
+        else:
+            first = parent.childNodes()[0]
+            if first != node:
+                # Krita places a layer above another or on top, never at the
+                # bottom: put it above the lowest layer, then that one above it.
+                moved = _joinery_move(node, parent, first)
+                _joinery_move(first, parent, moved)
+    elif op == 'hide':
+        node.setVisible(not row['hidden'])
+    elif op in ('opacity', 'blend'):
+        _joinery_look(node, row)
+    elif op == 'merge':
+        siblings = parent.childNodes()
+        index = next(i for i, n in enumerate(siblings) if n == node)
+        if index == 0:
+            raise RuntimeError(f"{row['layer']!r} has no layer below it to merge into.")
+        below = siblings[index - 1].name()
+        node.mergeDown()
+        document.waitForDone()
+        _joinery_layer(document, below)
+    elif op == 'duplicate':
+        _joinery_free(document, row['name'])
+        copy = node.duplicate()
+        copy.setName(row['name'])
+        parent.addChildNode(copy, node)
+    elif op == 'delete':
+        if parent == document.rootNode() and len(parent.childNodes()) == 1:
+            raise RuntimeError('A document keeps at least one layer.')
+        node.remove()
+    document.waitForDone()
+"""
+
+
+def layer_code(ops: list[dict[str, Any]]) -> str:
+    """Krita code (for the recipe's open `document`) that applies checked layer operations."""
+    return "\n".join(
+        [
+            HELPERS,
+            LAYER_HELPERS,
+            f"for _row in {ops!r}:",
+            "    _joinery_layer_op(document, _row)",
+            "document.refreshProjection()",
+            "document.waitForDone()",
+            "",
+        ]
+    )
+
+
+def describe_layer_op(row: dict[str, Any]) -> str:
+    """One layer operation, as the recipe's note lists it."""
+    op = row["op"]
+    if op in NEW_LAYER_OPS:
+        kind = {"add": row.get("kind", "paint"), "fill_layer": "fill"}.get(
+            op, str(row.get("filter"))
+        )
+        return f"add {kind} layer {row['name']!r}"
+    if op == "rename":
+        return f"rename {row['layer']!r} to {row['to']!r}"
+    if op == "reorder":
+        where = (
+            f"above {row['above']!r}" if "above" in row else f"to the {row['position']}"
+        )
+        return f"move {row['layer']!r} {where}"
+    if op == "hide":
+        return f"{'hide' if row['hidden'] else 'show'} {row['layer']!r}"
+    if op == "opacity":
+        return f"opacity of {row['layer']!r} {row['opacity']:g}"
+    if op == "blend":
+        return f"blend {row['layer']!r} {row['mode']}"
+    if op == "duplicate":
+        return f"duplicate {row['layer']!r} as {row['name']!r}"
+    return f"{op} {row['layer']!r}"

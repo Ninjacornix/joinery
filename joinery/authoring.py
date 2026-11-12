@@ -644,7 +644,11 @@ async def _record(project: Path, recipe: Recipe, path: Path) -> dict[str, Any]:
 
 
 async def edit_graph(
-    project: Path, source: str, graph: dict[str, Any], output_directory: str
+    project: Path,
+    source: str,
+    graph: dict[str, Any],
+    output_directory: str,
+    note: str = "",
 ) -> dict[str, Any]:
     enabled(project, "material-maker")
     target = confined(project, source)
@@ -665,12 +669,18 @@ async def edit_graph(
     output.mkdir(parents=True, exist_ok=True)
     code = material_maker.graph_code(source, stored, output_directory, runtime)
     return await _scripted_export(
-        project, "material-maker", source, code, output_directory, sources=inputs
+        project,
+        "material-maker",
+        source,
+        code,
+        output_directory,
+        sources=inputs,
+        note=note,
     )
 
 
 async def edit_vector(
-    project: Path, source: str, svg: str, export: str
+    project: Path, source: str, svg: str, export: str, note: str = ""
 ) -> dict[str, Any]:
     enabled(project, "inkscape")
     for relative in (source, export):
@@ -683,7 +693,7 @@ async def edit_vector(
     inkscape.check_svg(svg)
     code = inkscape.vector_code(source, svg, export)
     return await _scripted_export(
-        project, "inkscape", source, code, str(Path(export).parent), [export]
+        project, "inkscape", source, code, str(Path(export).parent), [export], note=note
     )
 
 
@@ -695,6 +705,7 @@ async def _scripted_export(
     directory: str,
     outputs: list[str] | None = None,
     sources: tuple[str, ...] = (),
+    note: str = "",
 ) -> dict[str, Any]:
     before = _export_inventory(project, directory) if outputs is None else {}
     previous_outputs: set[str] = set()
@@ -727,6 +738,7 @@ async def _scripted_export(
         script=script.relative_to(project).as_posix(),
         outputs=(source, *outputs),
         sources=sources,
+        note=note,
     )
     return await _record(project, recipe, script.with_suffix(".toml"))
 
