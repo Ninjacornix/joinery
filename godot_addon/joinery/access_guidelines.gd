@@ -123,6 +123,7 @@ func show_xag(xag: Dictionary, findings: Array) -> void:
 ## Open or close the list.
 func set_open(open: bool) -> void:
 	toggle.set_pressed_no_signal(open)
+	UI.bind_icon(toggle, "disclosure_open" if open else "disclosure_closed")
 	var changed := visible != open
 	visible = open
 	if changed:
