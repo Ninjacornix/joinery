@@ -160,8 +160,16 @@ func _client() -> void:
 	h.expect(_turn_text(level) == "Your turn", "the HUD says it is this player's turn")
 
 	var pair: PackedInt32Array = _matching_pair(level)
+	# Read the card as the click lands: by the time the click has finished,
+	# the server's answer may already be here.
+	var on_press: Dictionary = {}
+	var first_card: Button = _card(level, pair[0])
+	var read_press: Callable = func() -> void: on_press["up"] = _up(level, pair[0])
+	first_card.pressed.connect(read_press)
 	await _click(level, pair[0])
-	h.expect(not _up(level, pair[0]), "a client's flip does not run locally first")
+	first_card.pressed.disconnect(read_press)
+	h.expect(on_press.has("up"), "the client's click reaches the card")
+	h.expect(not bool(on_press.get("up", true)), "a client's flip does not run locally first")
 	await _until(
 		func() -> bool: return _up(level, pair[0]), "the server flips the card for the client"
 	)
@@ -180,9 +188,21 @@ func _client() -> void:
 	var miss: PackedInt32Array = _mismatch(level)
 	await _click(level, miss[0])
 	await _until(func() -> bool: return _up(level, miss[0]), "the first card of the miss flips")
+	# Read the HUD whenever the board changes: the miss and the turn passing
+	# arrive in order but may land within one frame, so a once-a-frame look
+	# can miss the moment both cards are up.
+	var shown: Dictionary = {}
+	var read_miss: Callable = func() -> void:
+		if shown.is_empty() and _up(level, miss[0]) and _up(level, miss[1]):
+			shown["turn"] = _turn_text(level)
+	level.connect(&"changed", read_miss)
 	await _click(level, miss[1])
-	await _until(func() -> bool: return bool(level.call(&"is_resolving")), "the miss shows here")
-	h.expect(_turn_text(level) == "Your turn", "the turn holds while the miss shows")
+	await _until(func() -> bool: return not shown.is_empty(), "the miss shows here")
+	level.disconnect(&"changed", read_miss)
+	h.expect(
+		shown.get("turn", "") == "Your turn",
+		"the turn holds while the miss shows (got '%s')" % shown.get("turn", "")
+	)
 	await _until(
 		func() -> bool: return int(level.get(&"turn")) == 1, "the miss passes the turn back"
 	)
