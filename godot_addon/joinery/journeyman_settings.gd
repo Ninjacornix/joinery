@@ -14,6 +14,7 @@ const INDICATOR_SCRIPT := preload("activity_indicator.gd")
 const STYLE := preload("sidebar_style.gd")
 const POLICY := preload("history_policy.gd")
 const TIMELINE_SETTING := preload("timeline_setting.gd")
+const TEAM_SETTING := preload("team_setting.gd")
 const REVIEWER_SETTING := preload("reviewer_setting.gd")
 const DESIGN_SETTING := preload("design_setting.gd")
 const COMPLEX_MODELS_SETTING := preload("complex_models_setting.gd")
@@ -450,6 +451,8 @@ func _build_project() -> void:
 	section.body.add_child(_policy_panel)
 	# Each accepted change as a Timeline entry (`[timeline] auto_commit`), read when shown.
 	section.body.add_child(TIMELINE_SETTING.new())
+	# The shared remote and the teammates seen in the history (`joinery team status`).
+	section.body.add_child(TEAM_SETTING.new())
 	# A second agent reads each change first (`[agents] reviewer`, `reviewer_model`).
 	section.body.add_child(REVIEWER_SETTING.new())
 	# Complex models made in Blender or with a kit (`[agents] complex_models`).
