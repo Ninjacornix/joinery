@@ -32,6 +32,9 @@ FAMILIES = {
         "split_material",
         "edit_bone",
         "edit_shape_key",
+        # Character operations (servers/blender_ops/character.py).
+        "set_body_shape",
+        "bake_shape_keys",
         # Whole-model operations (servers/blender_ops/model_ops.py).
         "apply_scale",
         "set_pivot",

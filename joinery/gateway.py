@@ -97,6 +97,9 @@ OP_APPS: dict[str, tuple[str, ...]] = {
     "split_material": ("blender",),
     "edit_bone": ("blender",),
     "edit_shape_key": ("blender",),
+    # Characters: an MPFB2 body, and the shape keys the game gets.
+    "set_body_shape": ("blender",),
+    "bake_shape_keys": ("blender",),
     # Whole-model operations (joinery match) and Krita paintings of their own.
     "apply_scale": ("blender",),
     "set_pivot": ("blender",),

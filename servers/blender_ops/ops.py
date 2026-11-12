@@ -517,9 +517,10 @@ async def edit_shape_key(
 
 def register(server: MCPServer[Any], project: Path) -> None:
     """Add the map, material copy, bone, shape key, whole-model, kit and animation operations."""
-    from servers.blender_ops import animation, batch, kits, model_ops
+    from servers.blender_ops import animation, batch, character, kits, model_ops
 
     model_ops.register(server, project)
+    character.register(server, project)
     kits.register(server, project)
     animation.register(server, project)
     batch.register(server, project)

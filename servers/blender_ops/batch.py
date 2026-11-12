@@ -32,6 +32,7 @@ from servers.blender_ops.animation import (
     plan_edit_action,
     plan_make_cycle,
 )
+from servers.blender_ops.character import plan_set_body_shape
 from servers.blender_ops.model_ops import (
     plan_apply_scale,
     plan_reduce_triangles,
@@ -56,6 +57,7 @@ PLANNERS: dict[str, Callable[..., Step]] = {
     "set_texel_density": plan_set_texel_density,
     "edit_bone": plan_edit_bone,
     "edit_shape_key": plan_edit_shape_key,
+    "set_body_shape": plan_set_body_shape,
     "make_cycle": plan_make_cycle,
     "edit_action": plan_edit_action,
 }
@@ -200,7 +202,7 @@ def register(server: MCPServer[Any], project: Path) -> None:
         exports: list[str] | None = None,
         keep_macro_shape_keys: bool | None = None,
     ) -> dict[str, Any]:
-        """Run several typed operations on one Blender model in one call and one Blender run. Prefer it whenever a change to one model takes two or more of these operations: transform_parts, set_material_value, adjust_map, bake_height_to_normal, apply_scale, set_pivot, reduce_triangles, set_texel_density, edit_bone, edit_shape_key, make_cycle, edit_action. steps is an ordered list of {"op": name, "arguments": {...}} where arguments are that operation's own arguments without source/model and exports (the batch gives them: source is the .blend or its GLB; exports default to the model's GLB). Every step is checked before Blender starts; an invalid step refuses the whole batch. Steps run in order; the first that fails stops the batch and the error says which step and why (steps before it stay applied). Each step is recorded as its own replayable recipe, exactly as if called alone. Returns one line per step and the changed files."""
+        """Run several typed operations on one Blender model in one call and one Blender run. Prefer it whenever a change to one model takes two or more of these operations: transform_parts, set_material_value, adjust_map, bake_height_to_normal, apply_scale, set_pivot, reduce_triangles, set_texel_density, edit_bone, edit_shape_key, set_body_shape, make_cycle, edit_action. steps is an ordered list of {"op": name, "arguments": {...}} where arguments are that operation's own arguments without source/model and exports (the batch gives them: source is the .blend or its GLB; exports default to the model's GLB). Every step is checked before Blender starts; an invalid step refuses the whole batch. Steps run in order; the first that fails stops the batch and the error says which step and why (steps before it stay applied). Each step is recorded as its own replayable recipe, exactly as if called alone. Returns one line per step and the changed files."""
         return await blender_batch(
             project, source, steps, exports, keep_macro_shape_keys
         )
