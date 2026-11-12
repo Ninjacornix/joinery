@@ -638,10 +638,20 @@ def entries(
     else:
         page = list(_log(project, f"--skip={skip}", f"--max-count={limit + 1}"))
     result["more"] = len(page) > limit
+    _name, email = identity(project)
+    from joinery import team  # Late: team builds on this module.
+
+    pulled = team.last_pulled(project)
     result["entries"] = [
-        {key: value for key, value in entry.items() if key != "paths"}
+        {
+            **{key: value for key, value in entry.items() if key != "paths"},
+            # A teammate's entry names them; the last pull's entries are new here.
+            "teammate": entry["email"].lower() != email.lower(),
+            "pulled": entry["commit"] in pulled,
+        }
         for entry in page[:limit]
     ]
+    result["team"] = team.sync_summary(project)
     return result
 
 
