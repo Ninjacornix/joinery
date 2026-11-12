@@ -633,7 +633,6 @@ async def _serve(
         fixer = ErrorFixer(project, crew, emit, task_prompt, pending=pending_changes)
         # A playtest's script and engine errors join the list too.
         playtester.on_report = fixer.take_playtest
-        fixer.publish()
 
         async def lead_decide(transaction_id: str, accept: bool) -> dict[str, Any]:
             """The chat's own change as one of a group's ways (Try other ways)."""
@@ -861,6 +860,9 @@ async def _serve(
             }
         )
         emit(game_suggestions(project))
+        # The console errors kept from earlier sessions, for the sidebar's list.
+        if fixer.book.listed():
+            fixer.publish()
         assert crew is not None and idle is not None
         while line := await reader.readline():
             try:
