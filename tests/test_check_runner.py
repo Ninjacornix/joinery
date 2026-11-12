@@ -282,6 +282,7 @@ def test_access_areas_are_labels_the_card_shows() -> None:
         "pause",
         "assists",
         "menus",
+        "translation",
     ]
     assert next(iter(perf.AREAS)) == "frames"
 
