@@ -300,6 +300,9 @@ class Audacity:
             LANG="C.UTF-8",
             LC_ALL="C.UTF-8",
         )
+        # `docker exec` into a warm worker does not inherit the entrypoint's
+        # DISPLAY; its Xvfb is always :99.
+        env.setdefault("DISPLAY", ":99")
         self._log = self.log_path.open("wb")
         self.process = subprocess.Popen(
             ["audacity"],
@@ -334,8 +337,17 @@ class Audacity:
         if not self.connect:
             self.started_seconds = time.monotonic() - began
             return
-        self._to = self._bounded(lambda: open(to_pipe, "w"), 60, "open its command pipe")
-        self._from = self._bounded(lambda: open(from_pipe), 60, "open its reply pipe")
+        # Held for the whole run; Audacity serves one connection per launch.
+        self._to = self._bounded(
+            lambda: open(to_pipe, "w"),  # noqa: SIM115 - lives as long as Audacity
+            60,
+            "open its command pipe",
+        )
+        self._from = self._bounded(
+            lambda: open(from_pipe),  # noqa: SIM115 - lives as long as Audacity
+            60,
+            "open its reply pipe",
+        )
         self.command("GetInfo: Type=Tracks Format=JSON", log=False)
         self.started_seconds = time.monotonic() - began
 
@@ -403,7 +415,7 @@ class Audacity:
         reply, status = self._bounded(exchange, timeout, f"answer {text.split(':')[0]}")
         if not status.endswith("OK"):
             raise AudacityError(f"{text.split(':')[0]} failed: {reply.strip()[-600:]}")
-        return reply
+        return str(reply)
 
     def info(self, kind: str) -> Any:
         reply = self.command(f"GetInfo: Type={kind} Format=JSON", log=False)

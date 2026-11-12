@@ -76,9 +76,7 @@ USER joiner
 # the image stops Xvfb in any container where that ID is in use, so nothing
 # the runs leave in /tmp may stay in the layer.
 RUN joinery-sandbox sh -c 'joinery-audacity --prime && joinery-audacity --check' && \
-    rm -rf /tmp/.X99-lock /tmp/.X11-unix /tmp/xvfb.log /tmp/runtime-joiner \
-      /tmp/audacity_script_pipe.* /var/tmp/audacity-joiner && \
-    left=$(find /tmp -mindepth 1 -maxdepth 1 -user joiner 2>/dev/null || true) && \
-    { test -z "${left}" || { echo "left in /tmp: ${left}" >&2; exit 1; }; }
+    find /tmp /var/tmp -mindepth 1 -maxdepth 1 -user joiner -exec rm -rf {} + && \
+    test ! -e /tmp/.X99-lock
 WORKDIR /work
 ENV PYTHONPATH=/opt/audacity-mcp DO_NOT_TRACK=1
