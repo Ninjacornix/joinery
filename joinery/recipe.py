@@ -478,25 +478,32 @@ def record(path: Path, project: Path, runner: Runner) -> Recipe:
             raise value
         expect[rel] = value
     updated = recipe.model_copy(update={"expect": expect})
+    path.write_text(recipe_text(updated))
+    return updated
+
+
+def recipe_text(recipe: Recipe) -> str:
+    """A recipe file's text, with its measured expectations."""
     lines = [
-        f"version = {updated.version}",
-        f"tool = {json.dumps(updated.tool)}",
-        f"script = {json.dumps(updated.script)}",
-        "outputs = [" + ", ".join(json.dumps(o) for o in updated.outputs) + "]",
+        f"version = {recipe.version}",
+        f"tool = {json.dumps(recipe.tool)}",
+        f"script = {json.dumps(recipe.script)}",
+        "outputs = [" + ", ".join(json.dumps(o) for o in recipe.outputs) + "]",
     ]
-    if updated.renders:
+    if recipe.renders:
         lines.append(
-            "renders = [" + ", ".join(json.dumps(r) for r in updated.renders) + "]"
+            "renders = [" + ", ".join(json.dumps(r) for r in recipe.renders) + "]"
         )
-    if updated.sources:
+    if recipe.sources:
         lines.append(
-            "sources = [" + ", ".join(json.dumps(s) for s in updated.sources) + "]"
+            "sources = [" + ", ".join(json.dumps(s) for s in recipe.sources) + "]"
         )
-    if updated.note:
-        lines.append(f"note = {json.dumps(updated.note)}")
+    if recipe.note:
+        lines.append(f"note = {json.dumps(recipe.note)}")
     lines.append("")
     lines.append("# Measured from the real outputs by `joinery rebuild --record`.")
     lines.append("[expect]")
-    lines += [f"{json.dumps(k)} = {json.dumps(v)}" for k, v in sorted(expect.items())]
-    path.write_text("\n".join(lines) + "\n")
-    return updated
+    lines += [
+        f"{json.dumps(k)} = {json.dumps(v)}" for k, v in sorted(recipe.expect.items())
+    ]
+    return "\n".join(lines) + "\n"
