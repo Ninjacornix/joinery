@@ -101,6 +101,38 @@ func _status(cache: String) -> Dictionary:
 			"cover": cover,
 			"trailer": {"preview": null, "seconds": 31.5, "sound": "Silent."}
 		},
+		"steam":
+		{
+			"ready": true,
+			"checked": "2026-11-12",
+			"images":
+			[
+				{
+					"id": "header",
+					"label": "Header capsule",
+					"size": [920, 430],
+					"path": cover,
+					"status": "ok",
+					"problems": [],
+				},
+				{
+					"id": "library_hero",
+					"label": "Library hero",
+					"size": [3840, 1240],
+					"path": cover,
+					"status": "warning",
+					"problems": ["The screenshot is enlarged 3.0×, so it looks soft."],
+				},
+				{
+					"id": "library_logo",
+					"label": "Library logo",
+					"size": [1280, 360],
+					"path": null,
+					"status": "",
+					"problems": [],
+				},
+			],
+		},
 		"page": "<!-- d -->\n\n# Moss Run\n\n_Write this part._\n\n## About\n\nRoll.\n",
 		"itch": {"butler": null, "version": "15.24.0", "pinned": true, "signed_in": null},
 	}
@@ -119,6 +151,14 @@ func _check_builds(tab: TAB, cache: String) -> void:
 	_check(tab._cover.visible and tab._cover.texture != null, "The cover shows")
 	_check(not tab._trailer_box.visible, "No trailer preview without the file")
 	_check(tab._media_button.text == "Remake", "Media can be remade")
+	_check(tab._steam_grid.get_child_count() == 2, "Each Steam image that exists shows")
+	_check("verify against Steamworks" in tab._steam_note.text, "Steam sizes say to verify them")
+	_check(tab._steam_problems.get_child_count() == 1, "A Steam check's problem is spelled out")
+	_check(tab._steam_button.text == "Remake Steam art", "Steam art can be remade")
+	tab._steam_button.pressed.emit()
+	_check(tab.commands[-1].slice(0, 2) == ["share", "steam-art"], "Steam art runs its command")
+	tab.finish_job("steam", {"error": "Docker isn't running."})
+	_check(tab._steam_note.text == "Docker isn't running.", "A failed run says why")
 	_check("Roll." in tab._page_text.text and not "<!--" in tab._page_text.text, "Page preview")
 	_check(tab._page_note.text == "1 part still to write.", "Gaps are counted")
 	_check(tab._publish_button.disabled, "Nothing to publish before a build")

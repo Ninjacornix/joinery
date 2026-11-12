@@ -8,6 +8,8 @@ extends VBoxContainer
 ##   after, one row per target with its size, whether it started, and the playtest's verdict.
 ## - Store media: the screenshots, the trailer (an Ogg preview Godot can play) and the cover,
 ##   with Remake (a new seeded run).
+## - Steam art: every store capsule and library image, composed in Krita from the
+##   screenshots, each with its size and its check (size, safe area, title readability).
 ## - Page: the drafted share/page.md, with Edit (opens it in the user's own editor).
 ## - Publish to itch.io…: share_publish.gd, which names the target and channels before pushing.
 ##
@@ -23,6 +25,11 @@ const PUBLISH := preload("share_publish.gd")
 const SELF_PATH := "res://addons/joinery/share_tab.gd"
 const THUMB := Vector2(176, 99)
 const COVER := Vector2(126, 100)
+## Steam art thumbnails share one height; their width follows each image's shape.
+const STEAM_HEIGHT := 96.0
+const STEAM_WIDEST := 260.0
+## Check status -> status icon.
+const STEAM_ICONS := {"ok": "done", "warning": "warning", "failed": "failed"}
 
 ## Off in tests: nothing runs; commands that would run are appended to [member commands].
 var cli_enabled := true
@@ -49,6 +56,12 @@ var _trailer: VideoStreamPlayer
 var _trailer_box: VBoxContainer
 var _trailer_text: Label
 var _cover: TextureRect
+var _steam_note: Label
+var _steam_grid: HFlowContainer
+var _steam_problems: VBoxContainer
+var _steam_button: Button
+## Why the last Steam art run failed, until the next one starts.
+var _steam_error := ""
 var _page_text: Label
 var _page_note: Label
 var _page_button: Button
@@ -102,6 +115,7 @@ func _init() -> void:
 	_content.add_child(_load_error)
 	_build_builds()
 	_build_media()
+	_build_steam()
 	_build_page()
 	_build_publish()
 	_dialog = PUBLISH.new()
@@ -287,6 +301,28 @@ func _build_media() -> void:
 	group.add_child(_media_button)
 
 
+func _build_steam() -> void:
+	var group := _group("Steam art")
+	group.name = "Steam"
+	_steam_note = UI.label("", "JoineryCaption", true)
+	group.add_child(_steam_note)
+	_steam_grid = HFlowContainer.new()
+	_steam_grid.name = "SteamImages"
+	_steam_grid.theme_type_variation = "JoineryRow"
+	group.add_child(_steam_grid)
+	_steam_problems = VBoxContainer.new()
+	_steam_problems.name = "SteamProblems"
+	_steam_problems.theme_type_variation = "JoineryFlush"
+	group.add_child(_steam_problems)
+	_steam_button = UI.secondary("Make Steam art")
+	_steam_button.name = "SteamMake"
+	_steam_button.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	_steam_button.tooltip_text = "Composes every capsule and library image in Krita"
+	_steam_button.pressed.connect(_make_steam)
+	UI_MOTION.press_feedback(_steam_button)
+	group.add_child(_steam_button)
+
+
 func _build_page() -> void:
 	var group := _group("Page text")
 	group.name = "Page"
@@ -329,6 +365,7 @@ func _render() -> void:
 		return
 	_render_builds()
 	_render_media()
+	_render_steam()
 	_render_page()
 	var built := _built()
 	_publish_button.disabled = built.is_empty() or _jobs.has("itch")
@@ -432,6 +469,83 @@ func _render_media() -> void:
 	var seconds := float(trailer.get("seconds", 0.0)) if trailer.get("seconds") != null else 0.0
 	var sound := "with sound" if str(trailer.get("sound", "")).begins_with("With") else "silent"
 	_trailer_text.text = "Trailer · %d s · %s" % [roundi(seconds), sound]
+
+
+func _render_steam() -> void:
+	var steam: Dictionary = _status.get("steam", {}) if _status.get("steam") is Dictionary else {}
+	var made: Array = []
+	for item: Variant in steam.get("images", []):
+		if (item as Dictionary).get("path") != null:
+			made.append(item)
+	var busy := _jobs.has("steam")
+	var ready := bool(steam.get("ready", false))
+	_steam_button.text = (
+		"Making…" if busy else ("Remake Steam art" if not made.is_empty() else "Make Steam art")
+	)
+	_steam_button.disabled = busy or not ready
+	if not _steam_error.is_empty():
+		_steam_note.text = _steam_error
+	elif not ready:
+		_steam_note.text = "Make the screenshots first: every Steam image is composed from them."
+	else:
+		_steam_note.text = (
+			"Every capsule and library image, composed in Krita from the screenshots. Sizes as "
+			+ (
+				"Steamworks documented them on %s; verify against Steamworks before uploading."
+				% str(steam.get("checked", ""))
+			)
+		)
+	for child: Node in _steam_grid.get_children() + _steam_problems.get_children():
+		child.get_parent().remove_child(child)
+		child.queue_free()
+	_steam_grid.visible = not made.is_empty()
+	for item: Variant in made:
+		var entry := item as Dictionary
+		_steam_grid.add_child(_steam_tile(entry))
+		var status := str(entry.get("status", ""))
+		for problem: Variant in entry.get("problems", []):
+			var row := HBoxContainer.new()
+			row.theme_type_variation = "JoineryRowTight"
+			row.add_child(UI.status_icon(str(STEAM_ICONS.get(status, "warning"))))
+			row.add_child(
+				UI.label("%s: %s" % [entry.get("label", ""), problem], "JoineryCaption", true)
+			)
+			_steam_problems.add_child(row)
+	_steam_problems.visible = _steam_problems.get_child_count() > 0
+
+
+## One Steam image: the picture at a shared height on the sunken media ground (the logo is
+## transparent), then its check and name, then its size.
+func _steam_tile(entry: Dictionary) -> VBoxContainer:
+	var tile := VBoxContainer.new()
+	tile.name = str(entry.get("id", "image"))
+	tile.theme_type_variation = "JoineryTight"
+	var size: Array = entry.get("size", [1, 1])
+	var aspect := float(size[0]) / maxf(1.0, float(size[1]))
+	var frame := PanelContainer.new()
+	frame.theme_type_variation = "JoineryMediaFrame"
+	frame.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+	tile.add_child(frame)
+	var picture := TextureRect.new()
+	picture.texture = _texture(_absolute(str(entry.get("path", ""))))
+	picture.custom_minimum_size = Vector2(minf(STEAM_WIDEST, STEAM_HEIGHT * aspect), STEAM_HEIGHT)
+	picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	picture.tooltip_text = "%s, %d × %d" % [entry.get("label", ""), int(size[0]), int(size[1])]
+	frame.add_child(picture)
+	var line := HBoxContainer.new()
+	line.theme_type_variation = "JoineryRowTight"
+	tile.add_child(line)
+	var status := str(entry.get("status", ""))
+	if STEAM_ICONS.has(status):
+		var icon := UI.status_icon(str(STEAM_ICONS[status]))
+		var problems: Array = entry.get("problems", [])
+		icon.tooltip_text = "Passes its checks" if problems.is_empty() else "\n".join(problems)
+		line.add_child(icon)
+	line.add_child(UI.label(str(entry.get("label", "")), "JoineryCaption"))
+	# The size on its own line keeps each tile about as wide as its picture.
+	tile.add_child(UI.label("%d × %d" % [int(size[0]), int(size[1])], "JoineryNumeric"))
+	return tile
 
 
 func _render_page() -> void:
@@ -554,6 +668,22 @@ func _after_media(data: Dictionary) -> void:
 		return
 	refresh()
 	UI_MOTION.pulse(_gallery)
+
+
+func _make_steam() -> void:
+	_steam_error = ""
+	if _start("steam", ["share", "steam-art"], _after_steam):
+		apply_progress("Composing the Steam art in Krita")
+	_render()
+
+
+func _after_steam(data: Dictionary) -> void:
+	if data.has("error"):
+		_steam_error = _why(data, "Couldn't make the Steam art.")
+		_render_steam()
+		return
+	refresh()
+	UI_MOTION.pulse(_steam_grid)
 
 
 func _edit_page() -> void:

@@ -829,6 +829,10 @@ func _share() -> void:
 		"cover": cover,
 		"trailer": {"preview": null, "seconds": 31.5, "sound": "Silent."},
 	}
+	var share: GDScript = load(
+		get_script().resource_path.get_base_dir().path_join("visual_share.gd")
+	)
+	status["steam"] = share.call("steam_status", cache, _scene_picture)
 	status["page"] = page
 	status["itch"] = {
 		"butler": null,
@@ -840,6 +844,17 @@ func _share() -> void:
 	tab.call("apply_status", status)
 	await get_tree().create_timer(0.3).timeout
 	await _shot("share-built", [bottom])
+	# The Steam art set, scrolled into view.
+	var scroll := tab.get_child(0) as ScrollContainer
+	var group := tab.find_child("Steam", true, false) as Control
+	if scroll != null and group != null:
+		scroll.scroll_vertical = int(
+			group.get_global_rect().position.y - scroll.get_global_rect().position.y
+		)
+	await get_tree().create_timer(0.3).timeout
+	await _shot("share-steam", [bottom])
+	if scroll != null:
+		scroll.scroll_vertical = 0
 	var publish: Button = tab.get("_publish_button")
 	publish.pressed.emit()
 	var dialog: Window = tab.call("publish_dialog")
