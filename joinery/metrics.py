@@ -672,6 +672,11 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
         action="store_true",
         help="which check rules send changes back most often",
     )
+    parser.add_argument(
+        "--errors",
+        action="store_true",
+        help="console errors seen, fixed and accepted (ADR 0075)",
+    )
 
 
 def run(args: argparse.Namespace) -> int:
@@ -680,6 +685,16 @@ def run(args: argparse.Namespace) -> int:
         message = f"No project at {project}."
         print(json.dumps({"error": message}) if args.json else message)
         return 1
+    if getattr(args, "errors", False):
+        from joinery import console_errors
+
+        counts = console_errors.totals(project)
+        print(
+            json.dumps({"errors": counts})
+            if args.json
+            else console_errors.render_totals(counts)
+        )
+        return 0
     if getattr(args, "rules", False):
         rows = rules(project, max(int(args.last or 0), 0))
         print(json.dumps({"rules": rows}) if args.json else render_rules(rows))
