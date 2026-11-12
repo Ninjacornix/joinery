@@ -1,0 +1,45 @@
+# Larger terrain and scatter add-ons, noted beside Joinery's own terrain feature
+# (docs/adr/0068-terrain-feature.md). They are third-party code, so they follow
+# the GodotSteam model (docs/adr/0027-godotsteam.md): one pinned release each,
+# downloaded only after the user's explicit consent, its SHA-256 checked before
+# the archive is opened.
+#
+# None is pinned: every sha256 is empty, so `joinery.terrain.install_alternative`
+# refuses them and nothing downloads. The terrain feature works without them. To
+# pin one, a reviewed change picks a release at least two weeks old, downloads the
+# archive once from its official release page, records its version, URL,
+# SHA-256 and size here, and checks it against the Godot version Joinery tracks.
+
+[[addon]]
+name = "Terrain3D"
+kind = "terrain"
+licence = "MIT"
+source = "https://github.com/TokisanGames/Terrain3D"
+# A C++ GDExtension: clipmap terrain, sculpting and painting in the editor,
+# instancer. Binaries per platform.
+version = ""
+url = ""
+sha256 = ""
+size = 0
+
+[[addon]]
+name = "ProtonScatter"
+kind = "scatter"
+licence = "MIT"
+source = "https://github.com/HungryProton/scatter"
+# A GDScript editor add-on: rule stacks that place scenes or multimeshes.
+version = ""
+url = ""
+sha256 = ""
+size = 0
+
+[[addon]]
+name = "Spatial Gardener"
+kind = "scatter"
+licence = "MIT"
+source = "https://github.com/dreadpon/godot_spatial_gardener"
+# A GDScript editor add-on: paint foliage and props onto surfaces.
+version = ""
+url = ""
+sha256 = ""
+size = 0

@@ -26,6 +26,7 @@ from joinery import authoring
 from joinery.recipe import IMAGE_SUFFIXES, load_recipe, recipe_paths
 from joinery.tools import krita_ops
 from servers.errors import tool_errors
+from servers.paint import terrain
 
 
 def recorded_exports(project: Path, source: str) -> list[str]:
@@ -119,10 +120,11 @@ async def operate_layer(
 
 
 def register(server: MCPServer[Any], project: Path) -> None:
-    """Add the typed Krita and Inkscape operations to the joinery-paint server."""
+    """Add the typed Krita, Inkscape and terrain operations to the joinery-paint server."""
     from servers.paint import vector
 
     vector.register(server, project)
+    terrain.register(server, project)
 
     @server.tool(name="edit_image")
     @tool_errors

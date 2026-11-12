@@ -100,6 +100,9 @@ KIT_GUIDE = (
     'kit_edit changes a kit-made set ("make those rocks mossier"), and scatter places '
     "models in a saved scene, on a surface, clear of paths. Kits follow the art bible's "
     "palette, budgets and pivots themselves. "
+    "In a game with the terrain feature, make ground with terrain_new and change it "
+    "with terrain_edit (raise, lower, flatten, smooth, erode, path, paint the mask), "
+    "never by writing pixels; read res://features/terrain/GUIDE.md first. "
 )
 
 #: The game: read the brief and setup with the art direction, extend the game

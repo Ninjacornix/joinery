@@ -148,7 +148,8 @@ async def inspect_document(project: Path, tool: str, source: str) -> dict[str, A
     raise ValueError("Use the owning app's native inspection tool for this format.")
 
 
-def enabled(project: Path, tool: str) -> None:
+def require_transaction(project: Path) -> None:
+    """Refuse unless `project` is the stage of a transaction that is staging."""
     journal = project.parent / "journal.json"
     if (
         project.name != "stage"
@@ -158,6 +159,10 @@ def enabled(project: Path, tool: str) -> None:
         raise PermissionError(
             "Native authoring requires a project transaction; open it through the project gateway."
         )
+
+
+def enabled(project: Path, tool: str) -> None:
+    require_transaction(project)
     if tool not in SUPPORTED:
         raise ValueError("No native document adapter for this tool.")
     if tool not in selection_ids(

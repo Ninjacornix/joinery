@@ -28,6 +28,7 @@ FIRST_PARTY_READS = {
     "transaction_status",
     "kit_list",
     "audit_animations",
+    "terrain_info",
 }
 
 
