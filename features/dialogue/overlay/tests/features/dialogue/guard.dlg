@@ -1,0 +1,28 @@
+# The gate guard: the dialogue feature's checks play this file.
+~ start
+Guard: Halt! Who goes there? [ID:guard_halt]
+set visits += 1
+Guard: You have {{gold}} gold.
+if visits > 1
+	Guard: Back again?
+elif has_cake
+	Guard: Is that cake?
+else
+	Guard: First time here?
+- Pay ten gold [if gold >= 10] => paid
+- Offer the cake [if has_cake]
+	Guard: I love cake.
+- Ask about the castle
+	Guard: It's old.
+	do castle_asked
+	=> shrug
+- Walk away => END
+
+~ paid
+set gold -= 10
+do open_gate
+Guard: The gate is open.
+
+~ shrug
+The guard shrugs\: nothing more to say.
+=> END

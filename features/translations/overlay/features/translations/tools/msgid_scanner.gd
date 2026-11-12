@@ -14,6 +14,8 @@ extends RefCounted
 ##   or joined (`"…" % n` is a sign it should be `tr("…") % n`).
 ## In scenes it reads `text`, `tooltip_text`, `placeholder_text`,
 ## `dialog_text` and `title` of nodes whose auto-translate is not disabled.
+## In dialogue files (.dlg, when the dialogue feature is there) it reads every
+## line and choice, with its [ID:key] as the context, and every speaker name.
 ##
 ## Text that none of these reach can always be wrapped in `tr()`.
 
@@ -51,6 +53,9 @@ const SCENE_PROPERTIES: Array[String] = [
 ]
 const SCRIPT_EXTENSIONS: Array[String] = ["gd"]
 const SCENE_EXTENSIONS: Array[String] = ["tscn"]
+const DIALOGUE_EXTENSIONS: Array[String] = ["dlg"]
+## The dialogue feature's parser; dialogue files are read only when it is there.
+const DIALOGUE_PARSER := "res://features/dialogue/dialogue_parser.gd"
 ## Context separator, as in gettext's compiled catalogues.
 const EOT := "\u0004"
 
@@ -126,7 +131,7 @@ func scan_file(path: String) -> void:
 	if files.has(path):
 		return
 	var extension: String = path.get_extension().to_lower()
-	if not (extension in SCRIPT_EXTENSIONS or extension in SCENE_EXTENSIONS):
+	if not _readable(extension):
 		return
 	var text: String = FileAccess.get_file_as_string(path)
 	if text.is_empty() and FileAccess.get_open_error() != OK:
@@ -134,16 +139,23 @@ func scan_file(path: String) -> void:
 	files.append(path)
 	if extension in SCRIPT_EXTENSIONS:
 		scan_script_text(text, path)
+	elif extension in DIALOGUE_EXTENSIONS:
+		scan_dialogue_text(text, path)
 	else:
 		scan_scene_text(text, path)
+
+
+func _readable(extension: String) -> bool:
+	if extension in SCRIPT_EXTENSIONS or extension in SCENE_EXTENSIONS:
+		return true
+	return extension in DIALOGUE_EXTENSIONS and ResourceLoader.exists(DIALOGUE_PARSER)
 
 
 func _collect(dir: String, skip: PackedStringArray, into: PackedStringArray) -> void:
 	if skip.has(dir) or not DirAccess.dir_exists_absolute(dir):
 		return
 	for file: String in DirAccess.get_files_at(dir):
-		var extension: String = file.get_extension().to_lower()
-		if extension in SCRIPT_EXTENSIONS or extension in SCENE_EXTENSIONS:
+		if _readable(file.get_extension().to_lower()):
 			into.append(dir.path_join(file))
 	for sub: String in DirAccess.get_directories_at(dir):
 		if not sub.begins_with("."):
@@ -336,6 +348,22 @@ static func _is_word_start(c: String) -> bool:
 
 static func _is_word_char(c: String) -> bool:
 	return _is_word_start(c) or c.is_valid_int()
+
+
+# --- Dialogue ----------------------------------------------------------------
+
+
+## Reads one dialogue file through the dialogue feature's own parser.
+func scan_dialogue_text(source: String, ref: String) -> void:
+	var parser: GDScript = load(DIALOGUE_PARSER) as GDScript
+	if parser == null:
+		return
+	var program: Dictionary = parser.call(&"parse", source, ref)
+	for entry: Dictionary in program["texts"]:
+		var speaker: String = str(entry["speaker"])
+		if not speaker.is_empty():
+			add(speaker, ref)
+		add(str(entry["text"]), ref, "", str(entry["key"]))
 
 
 # --- Scenes ------------------------------------------------------------------

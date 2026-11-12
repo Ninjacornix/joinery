@@ -29,7 +29,7 @@ refuses a capture whose sha256 does not match its note.
   text. No image, model, font or audio file (`.png .jpg .webp .svg .glb .blend
   .wav .ogg .ttf .otf` and similar), and no picture, sound, font or mesh
   embedded in a `.tscn`/`.tres`. Overlays hold only code and text Godot reads
-  (`.gd .uid .tscn .tres .gdshader .cfg .po .pot .csv .json .txt .md`);
+  (`.gd .uid .tscn .tres .gdshader .cfg .po .pot .csv .json .txt .md .dlg`);
   anything else is refused and never copied into a game. Blueprints are silent.
 - A blueprint writes only `game/` and `tests/game/`; the core only `core/`,
   `tests/support/` and `default_bus_layout.tres`. `project.godot` is merged,

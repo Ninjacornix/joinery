@@ -97,6 +97,7 @@ SHIPPABLE_SUFFIXES = frozenset(
     {
         ".gd", ".uid", ".tscn", ".tres", ".gdshader", ".gdshaderinc",
         ".cfg", ".po", ".pot", ".csv", ".json", ".txt", ".md",
+        ".dlg",  # dialogue text (the dialogue feature)
     }
 )
 #: Resource types that carry embedded pictures, sound, fonts or meshes, so a

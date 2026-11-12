@@ -1,0 +1,25 @@
+# Conversations written as plain-text .dlg files that diff and merge like code:
+# speakers, lines, choices, conditions, variables and jumps (close in spirit to
+# Dialogue Manager and Yarn Spinner; see GUIDE.md and dialogue_parser.gd).
+#
+# - `Dialogue` autoload: start a file at a node, advance, choose, variables,
+#   events (`do open_gate`), and its state for the playtester.
+# - The dialogue box uses the core's UiStyle and follows the Accessibility page:
+#   subtitle size, text size, high contrast, reduced motion (no typing out).
+# - Lines translate through the translations feature: English is the msgid,
+#   `[ID:key]` the context; its extract tool reads .dlg files.
+# - `DialogueFileLoader` lets Godot load .dlg files as `DialogueFile` resources.
+#
+# Dialogue text is writing, not an asset; nothing here is generated.
+id = "dialogue"
+name = "Dialogue"
+summary = "Conversations in plain-text files: speakers, choices, conditions and variables, in a dialogue box that follows the accessibility settings."
+version = 1
+requires = []
+conflicts = []
+enhances = ["accessibility", "translations"]
+blueprints = ["*"]
+extra_roots = []
+
+[autoload]
+Dialogue = "res://features/dialogue/dialogue.gd"
