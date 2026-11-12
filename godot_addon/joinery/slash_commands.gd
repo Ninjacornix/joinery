@@ -40,6 +40,8 @@ signal access_requested
 signal perf_requested(target: String)
 ## "/design": check the game's design against its brief (sidebar_design.gd).
 signal design_requested
+## "/tidy": what the game never uses, removed as one reviewed change (sidebar_tidy.gd).
+signal tidy_requested
 ## "/variants [N] <request>": make the request a few ways side by side (sidebar_variants.gd).
 signal variants_requested(words: String)
 ## "/sound-pass [focus]": make the sounds the level lacks; [param focus] is the words after it.
@@ -69,6 +71,7 @@ const COMMANDS := {
 	"/access": ["Check the game's accessibility", "ui"],
 	"/design": ["Check the game design", "ui"],
 	"/perf": ["Measure how the game runs", "ui"],
+	"/tidy": ["Find what the game never uses", "ui"],
 	"/variants": ["Try a few ways side by side", "ui"],
 	"/sound-pass": ["Add the sounds the level lacks", "ui"],
 	"/setup": ["Change project apps", "ui"],
@@ -173,6 +176,8 @@ func run(entry: String) -> bool:
 			perf_requested.emit(" ".join(arguments(entry)).strip_edges())
 		elif command == "/design":
 			design_requested.emit()
+		elif command == "/tidy":
+			tidy_requested.emit()
 		elif command == "/variants":
 			variants_requested.emit(" ".join(arguments(entry)))
 		elif command == "/variant":
@@ -213,12 +218,14 @@ func request_match() -> void:
 	match_requested.emit()
 
 
-## A check from outside the sidebar (the Review tab): "access" or "perf".
+## A check from outside the sidebar (the Review tab): "access", "perf" or "tidy".
 func request_check(check: String) -> void:
 	if check == "access":
 		access_requested.emit()
 	elif check == "perf":
 		perf_requested.emit("")
+	elif check == "tidy":
+		tidy_requested.emit()
 
 
 ## The CLI check in progress ("/doctor"), or "".

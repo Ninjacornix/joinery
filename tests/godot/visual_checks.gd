@@ -60,6 +60,36 @@ static func design(suite: Variant, light: bool, width: int, chat: Control) -> vo
 	tasks.call("sync_visible")
 
 
+## /tidy: what the game never uses at a glance, every row, the removal sent to Review, and a
+## project with nothing unused.
+static func tidy(suite: Variant, light: bool, width: int, chat: Control) -> void:
+	var tasks: Node = chat.get("_tasks")
+	var fixture: GDScript = load(
+		(suite.get_script() as Script).resource_path.get_base_dir().path_join("tidy_fixture.gd")
+	)
+	var tidier: Node = tasks.get_node("Tidy")
+	tidier.set(
+		"runner", func(_args: PackedStringArray) -> Dictionary: return fixture.call("report")
+	)
+	tidier.call("open")
+	var card: Control = tasks.get("tidy_card")
+	suite._check(card != null, "The tidy card shows")
+	await suite._shot("tidy", light, width, chat)
+	card.call("_show_all")
+	var first: Control = (card.call("finding_rows") as Array)[0]
+	for button: Node in first.find_children("", "Button", true, false):
+		if (button as Button).toggle_mode:
+			(button as Button).button_pressed = true
+	await suite._shot("tidy-all", light, width, chat)
+	card.call("set_sent", ["a1", "a2", "a3", "a4", "a5", "a6", "a7"])
+	await suite._shot("tidy-sent", light, width, chat)
+	card.call("show_report", fixture.call("clean"))
+	await suite._shot("tidy-clean", light, width, chat)
+	card.free()
+	tasks.set("tidy_card", null)
+	tasks.call("sync_visible")
+
+
 ## The accessibility and performance checks: each card at a glance, the fixes as tasks.
 static func check_cards(suite: Variant, light: bool, width: int, chat: Control) -> void:
 	var tasks: Node = chat.get("_tasks")

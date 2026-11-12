@@ -244,6 +244,7 @@ func _states(light: bool, width: int) -> void:
 	await _cards.match_shots(self, light, width, chat)
 	await _cards.check_cards(self, light, width, chat)
 	await _cards.design(self, light, width, chat)
+	await _cards.tidy(self, light, width, chat)
 	await _cards.sound_pass(self, light, width, chat)
 
 	chat.append_agent_text("I widened **Door** by 20% in Blender and darkened the wood.", true)

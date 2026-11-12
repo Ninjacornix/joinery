@@ -21,12 +21,14 @@ extends VBoxContainer
 ## against the art bible, while its fixes run as tasks with cards of their own. So do the
 ## accessibility and performance checks (ADR 0049, ADR 0050), with the same card, and the
 ## sound pass (sidebar_sound_pass.gd): what the level is missing, while its sounds are made.
-## The design check has a card of its own (sidebar_design.gd), and so does a request's to-do
-## (sidebar_todo.gd): its steps and "done when" items, Go, and each item's result.
+## The design check has a card of its own (sidebar_design.gd), so does "/tidy" (sidebar_tidy.gd),
+## and so does a request's to-do (sidebar_todo.gd): its steps and "done when" items, Go, and each
+## item's result.
 
 const CARD := preload("sidebar_task_card.gd")
 const DEBUG := preload("sidebar_debug.gd")
 const DESIGN := preload("sidebar_design.gd")
+const TIDY := preload("sidebar_tidy.gd")
 const TODO := preload("sidebar_todo.gd")
 const MATCH := preload("sidebar_match.gd")
 const SOUND_PASS := preload("sidebar_sound_pass.gd")
@@ -70,6 +72,8 @@ var access_card: Control
 var perf_card: Control
 ## The design check's card (design_card.gd), while there is one.
 var design_card: Control
+## The tidy card (tidy_card.gd): what the game never uses, while there is one.
+var tidy_card: Control
 ## Requests tried several ways (sidebar_variants.gd): their ways' events go there.
 var variants: Node
 ## The sound pass card (sound_pass_card.gd), while there is one.
@@ -104,6 +108,8 @@ static func attach(sidebar: Control, content: Control, before: Control) -> VBoxC
 	MATCH.attach(sidebar, tasks, "perf")
 	# "/design": the game against its own brief.
 	DESIGN.attach(sidebar, tasks)
+	# "/tidy": what the game never uses, removed as one reviewed change.
+	TIDY.attach(sidebar, tasks)
 	tasks.variants = VARIANTS.attach(sidebar, tasks)
 	# A bare "/variant": an inherited scene of the scene open in the editor.
 	SCENE_VARIANT.attach(sidebar, tasks)
@@ -391,6 +397,7 @@ func sync_visible() -> void:
 		or is_instance_valid(access_card)
 		or is_instance_valid(perf_card)
 		or is_instance_valid(design_card)
+		or is_instance_valid(tidy_card)
 		or is_instance_valid(sound_card)
 		or is_instance_valid(todo_card)
 		or (is_instance_valid(errors_card) and errors_card.visible)

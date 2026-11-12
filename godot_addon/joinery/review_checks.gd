@@ -3,7 +3,7 @@ extends HBoxContainer
 ## The Review tab's "Game checks" row (ADR 0049, ADR 0050): how the game last scored for
 ## accessibility and performance, from the checks' saved reports, and a button each that
 ## opens its card in the sidebar to check again or fix. The fixes themselves are changes
-## like any other, with their own rows in the Review tab.
+## like any other, with their own rows in the Review tab. Tidy opens "/tidy" (ADR 0074).
 
 const UI := preload("ui_components.gd")
 ## The checks' saved reports, inside the project.
@@ -56,6 +56,16 @@ func _init() -> void:
 					_slash.call("request_check", check)
 		)
 		add_child(open)
+	# What the game never uses: no score, so it opens its card to look.
+	var tidy := UI.quiet("Tidy")
+	tidy.name = "Open_tidy"
+	tidy.tooltip_text = "Find what the game never uses (/tidy)"
+	tidy.pressed.connect(
+		func() -> void:
+			if _slash != null and _slash.has_method("request_check"):
+				_slash.call("request_check", "tidy")
+	)
+	add_child(tidy)
 	refresh()
 
 

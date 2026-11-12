@@ -395,6 +395,16 @@ func send_mixer(line: Dictionary) -> bool:
 	return true
 
 
+## "/tidy"'s Remove ({kind: "tidy_remove", ids}): the host makes the removal one change in
+## Review (bridge/tidy.py); an empty [param ids] takes every sure finding. False when not
+## connected.
+func send_tidy(ids: Array) -> bool:
+	if not is_ready():
+		return false
+	_job.send_line(JSON.stringify({"kind": "tidy_remove", "ids": ids}))
+	return true
+
+
 ## Show a task's change in the Review tab.
 func show_task_review(transaction_id: String) -> void:
 	task_review.emit(transaction_id)

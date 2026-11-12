@@ -418,6 +418,7 @@ func _build_project() -> void:
 		["Accessibility check", "/access"],
 		["Performance check", "/perf"],
 		["Design check", "/design"],
+		["Unused content", "/tidy"],
 		["Project apps", "/setup"],
 	]:
 		var button := UI.row_button(str(item[0]))
