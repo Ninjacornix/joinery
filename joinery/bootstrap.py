@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from joinery import metrics, readiness, references
+from joinery import metrics, readiness, references, team
 from joinery.catalog import ROOT, load_catalog, load_project_tools, selection_ids
 from joinery.platform_support import bash_script_argv, editor_running
 from joinery.server_install import install
@@ -351,6 +351,7 @@ def transactions(
                     for change in tx.changes[:LISTED_FILES]
                 ],
                 **({"warning": warning} if warning else {}),
+                **team.conflict_info(tx),
             }
         )
     return result

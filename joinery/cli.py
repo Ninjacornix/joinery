@@ -42,6 +42,7 @@ from joinery import (
     share,
     skills,
     sound_pass,
+    team,
     timeline,
 )
 from joinery.agents import all_agents
@@ -1296,6 +1297,7 @@ def _parser() -> argparse.ArgumentParser:
     check.add_argument("--project", type=Path, default=ROOT / "testbed")
     history.register(commands)
     timeline.register(commands)
+    team.register(commands)
     metrics.register(commands)
     idle_runs.register(commands)
     project_map.register(commands)
@@ -1312,6 +1314,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "history":
         return history.run(args)
+
+    if args.command == "team":
+        return team.run(args)
 
     if args.command == "timeline":
         return timeline.run(args)
@@ -1389,6 +1394,9 @@ def main(argv: list[str] | None = None) -> int:
                     from joinery.art_approval import status as bible_status
 
                     outcome["art_bible"] = bible_status(args.project.resolve())
+                    outcome["team_documents"] = team.pending_documents(
+                        args.project.resolve()
+                    )
             print(json.dumps(outcome))
             return 0
         except (OSError, ValueError, RuntimeError) as exc:
