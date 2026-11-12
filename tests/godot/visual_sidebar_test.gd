@@ -4,7 +4,10 @@ extends SceneTree
 ## JOINERY_CAPTURE_DIR as sidebar-<state>-<theme>-<width>.png. Each theme and width gets a
 ## fresh dock, and the request states start from a real submit.
 
-const WIDTHS: Array[int] = [480, 1000]
+## 340 is the narrowest the sidebar is docked at; 480 its usual width; 1000 a wide dock.
+const WIDTHS: Array[int] = [340, 480, 1000]
+## The width the accent and Reduce motion captures are taken at.
+const NARROW := 480
 const HEIGHT := 760
 ## Extra captures at the narrow width only: each accent, and Reduce motion on.
 const ACCENTS: Array[String] = ["brass", "blue", "green", "violet"]
@@ -52,6 +55,8 @@ var _theme: GDScript
 var _motion: GDScript
 var _todo: GDScript
 var _failed := false
+## The width being captured; below the dock's own minimum it is the shared (classic) column.
+var _width := 0
 
 
 func _initialize() -> void:
@@ -99,6 +104,9 @@ func _build(light: bool) -> Array:
 	host.add_child(ground)
 	root.add_child(host)
 	var chat: Control = load("res://addons/joinery/journeyman_dock.gd").new()
+	# 340 px is below the dock's own minimum: the narrower column it gets below the Inspector.
+	if _width < NARROW:
+		chat.min_em = chat.SHARED_MIN_EM
 	host.add_child(chat)
 	chat.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	# Stand in for the chat bridge, so a submit becomes a request in flight.
@@ -141,6 +149,7 @@ func _shared_view() -> Dictionary:
 
 func _states(light: bool, width: int) -> void:
 	root.size = Vector2i(width, HEIGHT)
+	_width = width
 	var built := _build(light)
 	var host: Control = built[0]
 	var chat: Control = built[1]
@@ -330,7 +339,7 @@ func _states(light: bool, width: int) -> void:
 	await _frames()
 	chat.set_chat_state("connected", "Codex connected")
 
-	if width == WIDTHS[0]:
+	if width == NARROW:
 		for accent: String in ACCENTS:
 			_check(_theme.set_pref("accent", accent) == OK, "Save accent " + accent)
 			await _frames(2)
@@ -367,7 +376,7 @@ func _states(light: bool, width: int) -> void:
 	(settings as ScrollContainer).scroll_vertical = 100000
 	await _shot("settings-models", light, width, chat)
 	(settings as ScrollContainer).scroll_vertical = 0
-	if width == WIDTHS[0]:
+	if width == NARROW:
 		_theme.set_pref("reduce_motion", "on")
 		await _shot("reduce-motion", light, width, chat)
 		_theme.set_pref("reduce_motion", "off")

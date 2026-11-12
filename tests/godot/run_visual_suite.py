@@ -103,6 +103,8 @@ SIDEBAR_STATES = (
     "chats-rename",
     "chat-earlier",
 )
+# The sidebar's docked widths: its narrowest, its usual one and a wide dock.
+SIDEBAR_WIDTHS = (340, 480, 1000)
 # Captured at the wide width only: the art direction and game brief documents.
 SIDEBAR_WIDE = ("art-direction", "art-board", "brief")
 # Captured at the narrow width only: each Appearance accent, and Reduce motion on.
@@ -363,7 +365,7 @@ def sidebar(capture: Path, logs: Path) -> Harness:
             f"sidebar-{state}-{theme}-{width}.png"
             for state in SIDEBAR_STATES
             for theme in THEMES
-            for width in (480, 1000)
+            for width in SIDEBAR_WIDTHS
         ]
         + [
             f"sidebar-{state}-{theme}-480.png"
