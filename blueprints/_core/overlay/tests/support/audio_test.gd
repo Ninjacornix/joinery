@@ -20,6 +20,10 @@ const SYNC_TOLERANCE := 0.003
 ## Float rounding between two readings of the music clock, in seconds; far
 ## below one sample (1 / MIX_RATE, 23 us), so it cannot hide a late change.
 const CLOCK_EPSILON := 0.000001
+## Game frames for the stinger duck to settle: Music moves it DUCK_SPEED_DB
+## (60 dB/s) by the frame delta, 1/60 s under --fixed-fps 60, so 6 frames
+## cover the 6 dB; one more for the frame that starts the stinger.
+const DUCK_FRAMES := 7
 const WALKER_SOURCE := """extends CharacterBody3D
 
 var drive: Vector3 = Vector3.ZERO
@@ -166,7 +170,9 @@ func _streams() -> Dictionary:
 		streams["main/" + layer] = _wav(_section_seconds(), hertz, true)
 		streams["fight/" + layer] = _wav(_section_seconds(), hertz * 1.5, true)
 		hertz *= 1.25
-	streams["stinger/victory"] = _wav(0.6, 880.0, false)
+	# Looping, so it sounds for as many frames as the duck check needs however
+	# long those frames take; the test stops it.
+	streams["stinger/victory"] = _wav(0.6, 880.0, true)
 	streams["stinger/checkpoint"] = _wav(0.3, 660.0, false)
 	return streams
 
@@ -242,9 +248,11 @@ func _expect_sync(where: String) -> void:
 		)
 
 
-## Waits for the music to change to `state`; the change's _watch_clock record.
-func _await_intensity(state: StringName, max_seconds: float) -> Dictionary:
-	var record: Dictionary = _watch_clock(music.intensity_changed)
+## Waits for the music to change to `state`; the change's _watch_clock record
+## (`record` when given: one started before the change was asked for).
+func _await_intensity(state: StringName, max_seconds: float, record: Dictionary = {}) -> Dictionary:
+	if record.is_empty():
+		record = _watch_clock(music.intensity_changed)
 	var frames: int = 0
 	while frames < int(max_seconds * 60.0):
 		await process_frame
@@ -357,13 +365,26 @@ func _music_bar_changes() -> void:
 	_expect_sync("start")
 	await _wait_into_bar(0.3, 0.6)
 	var bar_before: int = int(music.call(&"bar_index"))
+	var calm: Dictionary = _watch_clock(music.intensity_changed)
 	# Held, so the drivers (no enemy near: explore) leave it alone.
 	music.call(&"set_intensity", &"calm", true)
 	play.expect(music.get(&"pending_intensity") == &"calm", "calm waits for the bar")
 	play.expect(music.get(&"intensity") == &"explore", "the state does not change mid-bar")
-	await _seconds(0.2)
-	play.expect(music.get(&"intensity") == &"explore", "still explore before the bar line")
-	_expect_on_bar(await _await_intensity(&"calm", 1.5), "calm")
+	# By the audio clock, not by frames: every frame whose clock is still in
+	# the bar calm was asked in must still be explore. At process_frame the
+	# state and the clock are both as Music's last _process left them.
+	var early: float = -1.0
+	for _i: int in 240:
+		await process_frame
+		if int(music.call(&"bar_index")) != bar_before:
+			break
+		if early < 0.0 and music.get(&"intensity") != &"explore":
+			early = _into_bar()
+	play.expect(
+		early < 0.0,
+		"still explore before the bar line (%s at %.3f s)" % [music.get(&"intensity"), early]
+	)
+	_expect_on_bar(await _await_intensity(&"calm", 1.5, calm), "calm")
 	play.expect(int(music.call(&"bar_index")) != bar_before, "calm starts in a new bar")
 	await _seconds(60.0 / BPM * 2.0 + 0.2)
 	play.expect_near(_layer_db("pads"), 0.0, 0.5, "calm: pads at full")
@@ -391,20 +412,40 @@ func _music_bar_changes() -> void:
 func _music_events() -> void:
 	var events: Node = play.events
 	await _wait_into_bar(0.1, 0.2)
+	var beat: float = 60.0 / BPM
+	var stinger_player: AudioStreamPlayer = music.get_node(^"Stinger")
+	# Where the stinger starts, read as it is started (the frame it is played in).
+	var started: Array[float] = []
+	var on_stinger: Callable = func(_event: StringName) -> void:
+		started.append(stinger_player.get_playback_position())
+	music.stinger_played.connect(on_stinger)
 	var stingers: Dictionary = _watch_clock(music.stinger_played)
+	var victory: Dictionary = _watch_clock(music.intensity_changed)
 	events.level_completed.emit({"time": 1.0, "score": 0})
 	play.expect(music.get(&"pending_intensity") == &"victory", "level_completed asks for victory")
 	await play.wait_watched(stingers, 60)
-	_expect_on_line(stingers, 60.0 / BPM, "the stinger")
+	music.stinger_played.disconnect(on_stinger)
+	_expect_on_line(stingers, beat, "the stinger")
 	play.expect(
 		stingers["args"] == [&"victory"], "the victory stinger played %s" % [stingers["args"]]
 	)
-	await _seconds(0.25)
-	var stinger_player: AudioStreamPlayer = music.get_node(^"Stinger")
+	if not started.is_empty() and int(stingers["count"]) > 0:
+		# As far in as the clock is past the beat; the mixer may have run on
+		# since, never back. One sample covers the playback's whole-sample position.
+		var past_beat: float = fposmod(float(stingers["at"]), beat)
+		play.expect(
+			started[0] >= past_beat - 1.0 / MIX_RATE,
+			(
+				"the stinger starts %.3f s in, as far as the beat is past (%.3f s)"
+				% [started[0], past_beat]
+			)
+		)
+	await play.process_frames(DUCK_FRAMES)
 	play.expect(stinger_player.playing, "the stinger is sounding")
 	play.expect_near(_layer_db("pads"), -6.0, 0.6, "layers duck 6 dB under the stinger")
-	_expect_on_bar(await _await_intensity(&"victory", 1.5), "victory")
-	await _seconds(0.7)
+	_expect_on_bar(await _await_intensity(&"victory", 1.5, victory), "victory")
+	stinger_player.stop()
+	await play.process_frames(DUCK_FRAMES)
 	play.expect_near(_layer_db("pads"), 0.0, 0.6, "the duck lets go after the stinger")
 	# The drivers leave victory alone until the next level starts.
 	await _seconds(0.6)
