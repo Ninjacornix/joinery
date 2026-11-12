@@ -2,7 +2,7 @@
 
 Optional capabilities added to a project made from a blueprint: online play,
 Steam, controller support, saving, translations, accessibility, VR, dialogue,
-enemy behaviour trees, camera rigs. `joinery/blueprints.py` adds
+enemy behaviour trees, camera rigs, heightmap terrain. `joinery/blueprints.py` adds
 and removes them; `docs/adr/0024-blueprints-and-features.md` explains the
 design. Adding or removing a feature is a user action with a before/after
 review; Journeyman may suggest one, never apply it.

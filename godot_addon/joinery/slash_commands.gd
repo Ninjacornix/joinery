@@ -100,6 +100,7 @@ const FEATURE_NAMES := {
 	"online-play": "Online play",
 	"save-load": "Save and load",
 	"steam": "Steam",
+	"terrain": "Terrain",
 	"translations": "Translations",
 }
 ## Readiness re-reads while the report still says "checking", this many times at most.

@@ -49,7 +49,7 @@ BLUEPRINT_ONLINE: dict[str, tuple[str, str, str]] = {
     "puzzle-cards": (CARDS_ONLINE_TEST, "cards_host", "cards_client"),
 }
 #: Features whose one check is `tests/features/<id>/<id>_test.gd` over a running level.
-PLAYED_FEATURES = frozenset({"behaviour", "camera", "dialogue"})
+PLAYED_FEATURES = frozenset({"behaviour", "camera", "dialogue", "terrain"})
 _DETAIL_CHARS = 4000
 
 

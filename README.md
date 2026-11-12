@@ -97,7 +97,8 @@ seven starting points (blank, first-person 3D, third-person 3D, 2D platformer,
 top-down arena, memory cards, VR room) and `joinery features` what a game can
 add: controller support, save and load, online play, Steam, translations,
 accessibility, VR (OpenXR, for the 3D starting points; the game still plays on
-the desktop without a headset), dialogue, enemy behaviour trees and camera rigs. Leave
+the desktop without a headset), dialogue, enemy behaviour trees, camera rigs and
+heightmap terrain (3D). Leave
 `--blueprint` out for an empty project. The **New project** wizard in the
 Project Manager asks the same questions.
 

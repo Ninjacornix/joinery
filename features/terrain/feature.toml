@@ -1,0 +1,49 @@
+# Heightmap terrain for 3D games, in our own GDScript (MIT, see GUIDE.md):
+#
+# - `Terrain` (a Node3D): built from a heightmap (16-bit PNG, 8-bit PNG or EXR)
+#   as chunked meshes with distance LODs and HeightMapShape3D collision, a
+#   splat material of up to four layers from the project's own textures
+#   (blended by a painted mask, height and slope), and seeded scatter of the
+#   project's models by mask.
+# - The heightmap and mask are made by Godot running `terrain_bake.gd` on a
+#   recipe document of typed operations (noise, raise, lower, flatten, smooth,
+#   erode, path, paint), or painted in Krita. Joinery's terrain tools write the
+#   document, so every change is a reviewed change with a replayable recipe.
+#
+# Terrain3D, ProtonScatter and Spatial Gardener are larger alternatives. They
+# are listed below and in policy/terrain_alternatives.toml with no hash, so
+# nothing installs them; Joinery does not ship or download them.
+id = "terrain"
+name = "Terrain"
+summary = "Heightmap ground for 3D games: chunked meshes with LODs and collision, up to four painted layers, and seeded scatter of your own models."
+version = 1
+requires = []
+conflicts = []
+enhances = []
+blueprints = ["third-person-3d", "first-person-3d", "vr-room"]
+unsupported = "Terrain is 3D ground: start from a 3D blueprint (third-person, first-person or VR)."
+extra_roots = []
+
+[[external]]
+name = "Terrain3D"
+source = "https://github.com/TokisanGames/Terrain3D (MIT, a C++ GDExtension)"
+version = "TBD, pending user approval"
+install = "separate, user-approved step; pinned in policy/terrain_alternatives.toml, refused while its hash is empty"
+required = false
+licence = "MIT"
+
+[[external]]
+name = "ProtonScatter"
+source = "https://github.com/HungryProton/scatter (MIT, a GDScript addon)"
+version = "TBD, pending user approval"
+install = "separate, user-approved step; pinned in policy/terrain_alternatives.toml, refused while its hash is empty"
+required = false
+licence = "MIT"
+
+[[external]]
+name = "Spatial Gardener"
+source = "https://github.com/dreadpon/godot_spatial_gardener (MIT, a GDScript addon)"
+version = "TBD, pending user approval"
+install = "separate, user-approved step; pinned in policy/terrain_alternatives.toml, refused while its hash is empty"
+required = false
+licence = "MIT"
