@@ -166,6 +166,13 @@ EDITOR_SCREENS = (
     "tools-readiness",
     "bottom-panel",
     "focus",
+    "tour-sidebar",
+    "tour-select",
+    "tour-ask",
+    "tour-review",
+    "tour-timeline",
+    "tour-share",
+    "tour-narrow",
     "setup",
     "art-review",
 )
@@ -429,6 +436,7 @@ def editor(theme: str, capture: Path, logs: Path) -> Harness:
         shutil.copyfile(TESTS / "visual_sound.gd", check / "visual_sound.gd")
         shutil.copyfile(TESTS / "visual_review.gd", check / "visual_review.gd")
         shutil.copyfile(TESTS / "visual_share.gd", check / "visual_share.gd")
+        shutil.copyfile(TESTS / "visual_tour.gd", check / "visual_tour.gd")
         (check / "plugin.cfg").write_text(
             '[plugin]\nname="Visual check"\ndescription="Test"\nauthor="Joinery"\n'
             'version="1"\nscript="test.gd"\n'

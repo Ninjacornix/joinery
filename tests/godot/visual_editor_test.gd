@@ -80,6 +80,7 @@ func _run() -> void:
 	await _sound.mixer(self)
 	await _tools()
 	await _panels(base, dock)
+	await load(get_script().resource_path.get_base_dir().path_join("visual_tour.gd")).tour(self)
 	await _dialogs()
 	var workspace: Control = _plugin.get("_workspace")
 	workspace.call("_clear_preview")
