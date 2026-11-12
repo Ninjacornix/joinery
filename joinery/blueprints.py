@@ -16,6 +16,7 @@ feature can be removed cleanly. `joinery.toml [game]` records the choice.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import importlib
 import itertools
@@ -25,7 +26,7 @@ import re
 import secrets
 import shutil
 import tomllib
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -491,6 +492,15 @@ def _unit_dirs(base: Path) -> list[Path]:
 
 def _load(errors: list[str] | None = None) -> _Catalogue:
     """Load the catalogue. With `errors`, bad units are reported and skipped."""
+    if errors is None and _SCAN_CACHE is not None:
+        if _SCAN_CACHE["catalogue"] is None:
+            _SCAN_CACHE["catalogue"] = _load_catalogue(None)
+        cached: _Catalogue = _SCAN_CACHE["catalogue"]
+        return cached
+    return _load_catalogue(errors)
+
+
+def _load_catalogue(errors: list[str] | None) -> _Catalogue:
     catalogue = _Catalogue(None, {}, {})
 
     def attempt(load: Any, directory: Path) -> Any:
@@ -711,17 +721,46 @@ class _Unit:
         return self.kind != "feature"
 
 
+#: Overlay listings and the loaded catalogue, kept while `cached_scan()` is open.
+_SCAN_CACHE: dict[str, Any] | None = None
+
+
+@contextlib.contextmanager
+def cached_scan() -> Iterator[None]:
+    """Read each overlay folder and the catalogue once while open.
+
+    Checking every blueprint with every feature subset lists the same folders
+    thousands of times; nothing writes to the catalogue meanwhile.
+    """
+    global _SCAN_CACHE
+    if _SCAN_CACHE is not None:
+        yield
+        return
+    _SCAN_CACHE = {"overlays": {}, "catalogue": None}
+    try:
+        yield
+    finally:
+        _SCAN_CACHE = None
+
+
 def _overlay(directory: Path) -> dict[str, Path]:
-    if not directory.is_dir():
-        return {}
+    cache: dict[Path, dict[str, Path]] | None = (
+        _SCAN_CACHE["overlays"] if _SCAN_CACHE is not None else None
+    )
+    if cache is not None and directory in cache:
+        return dict(cache[directory])
     found: dict[str, Path] = {}
-    for path in sorted(directory.rglob("*")):
-        if (
-            path.is_file()
-            and not _SKIP.intersection(path.relative_to(directory).parts)
-            and path.suffix.lower() in SHIPPABLE_SUFFIXES
-        ):
-            found[path.relative_to(directory).as_posix()] = path
+    if directory.is_dir():
+        for path in sorted(directory.rglob("*")):
+            rel = path.relative_to(directory)
+            if (
+                path.is_file()
+                and not _SKIP.intersection(rel.parts)
+                and path.suffix.lower() in SHIPPABLE_SUFFIXES
+            ):
+                found[rel.as_posix()] = path
+    if cache is not None:
+        cache[directory] = dict(found)
     return found
 
 
@@ -2079,17 +2118,18 @@ def combinations(catalogue: _Catalogue | None = None) -> list[tuple[str, tuple[s
 
 def _check_combos(catalogue: _Catalogue) -> list[str]:
     problems: list[str] = []
-    for blueprint_id, subset in combinations(catalogue):
-        resolution = _resolve(catalogue, blueprint_id, subset)
-        if resolution.problems:
-            continue  # declared conflicts are refused up front, not clashes
-        try:
-            units = _units(resolution)
-        except ValueError as exc:
-            problems.append(str(exc))
-            continue
-        label = "+".join((blueprint_id, *subset))
-        problems += [f"{label}: {p}" for p in _compose(units)]
+    with cached_scan():
+        for blueprint_id, subset in combinations(catalogue):
+            resolution = _resolve(catalogue, blueprint_id, subset)
+            if resolution.problems:
+                continue  # declared conflicts are refused up front, not clashes
+            try:
+                units = _units(resolution)
+            except ValueError as exc:
+                problems.append(str(exc))
+                continue
+            label = "+".join((blueprint_id, *subset))
+            problems += [f"{label}: {p}" for p in _compose(units)]
     return problems
 
 
@@ -2125,6 +2165,7 @@ __all__ = [
     "Resolution",
     "add_feature",
     "apply",
+    "cached_scan",
     "catalogue_json",
     "check_static",
     "combinations",

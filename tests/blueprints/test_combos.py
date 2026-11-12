@@ -86,11 +86,11 @@ def test_real_matrix_resolves_statically() -> None:
     gaps = _real_catalogue_gaps()
     if gaps:
         pytest.skip("catalogue still being built: missing " + ", ".join(gaps))
-    combos = blueprints.combinations()
     clashes: list[str] = []
-    for blueprint_id, subset in combos:
-        problems = blueprints.check_static(blueprint_id, subset)
-        clashes += [p for p in problems if "conflicts with" not in p]
+    with blueprints.cached_scan():
+        for blueprint_id, subset in blueprints.combinations():
+            problems = blueprints.check_static(blueprint_id, subset)
+            clashes += [p for p in problems if "conflicts with" not in p]
     assert clashes == []
 
 
@@ -103,3 +103,13 @@ def test_real_matrix_resolves_statically() -> None:
 def test_real_combo_boots(blueprint_id: str, features: tuple[str, ...], tmp_path: Path) -> None:
     project = make_project(tmp_path, blueprint_id, features)
     boot(project, frames=120)
+
+
+def test_cached_scan_reads_the_catalogue_once_and_only_while_open() -> None:
+    assert blueprints._load() is not blueprints._load()
+    with blueprints.cached_scan():
+        first = blueprints._load()
+        with blueprints.cached_scan():
+            assert blueprints._load() is first
+        assert blueprints._load() is first
+    assert blueprints._load() is not first
