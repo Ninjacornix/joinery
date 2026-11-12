@@ -1,7 +1,7 @@
 """Look into a running game, and play it with timed input (``inspect_game``, ``drive_game``).
 
 The game is the one this agent's gateway started with Godot's ``run_project``: its
-runtime inspector (the Godot MCP's ``game_*`` tools, ADR 0029) answers on the game's own
+runtime inspector (the Godot MCP's ``game_*`` tools) answers on the game's own
 socket. Two tools sit on top of it, the same for every provider:
 
 * ``inspect_game`` only reads: the scene tree, one node's details and properties, the
