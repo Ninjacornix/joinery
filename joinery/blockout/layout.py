@@ -133,6 +133,24 @@ class Marker(_Strict):
     size: Number | None = None
 
 
+class Grown(_Strict):
+    """How a grown layout was made (ADR 0069): growing again from the same sample,
+    size and seed gives the same layout, byte for byte."""
+
+    #: The user's own sample: a path in the project, else as it was given.
+    sample: Annotated[str, Field(min_length=1, max_length=400)]
+    sample_sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
+    seed: Annotated[int, Field(ge=0, le=2**31 - 1)]
+    #: [width, height] in cells.
+    size: Annotated[list[int], Field(min_length=2, max_length=2)]
+    #: Plan units per cell.
+    cell: Number
+    #: Side of the overlapping patterns.
+    pattern: Annotated[int, Field(ge=2, le=4)] = 3
+    #: Which try at this seed gave a level whose goals the spawn reaches (1 = first).
+    tries: Annotated[int, Field(ge=1)] = 1
+
+
 class Layout(_Strict):
     """A whole level blockout."""
 
@@ -161,6 +179,8 @@ class Layout(_Strict):
     walls: list[Wall] = Field(default_factory=list, max_length=64)
     spawn: Spawn | None = None
     markers: list[Marker] = Field(default_factory=list, max_length=64)
+    #: Set when the layout was grown from the user's example (``blockout grow``).
+    grown: Grown | None = None
 
 
 class LayoutError(ValueError):
@@ -269,6 +289,8 @@ def to_toml(layout: Layout) -> str:
         lines.append(f"{key} = {_value(value)}")
     if layout.spawn is not None:
         lines += ["", "[spawn]", *_fields(layout.spawn)]
+    if layout.grown is not None:
+        lines += ["", "[grown]", *_fields(layout.grown)]
     for table in _TABLES:
         for item in getattr(layout, table):
             lines += ["", f"[[{table}]]", *_fields(item)]
