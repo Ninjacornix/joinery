@@ -1,7 +1,9 @@
 @tool
 extends RefCounted
 ## The words the Review tab and the task cards share: app names, how long ago something was,
-## and the files a change touches.
+## the files a change touches, and what making it cost.
+
+const UI := preload("ui_components.gd")
 
 ## App ids as the gateway records them -> the names people know.
 const APP_NAMES := {
@@ -65,3 +67,63 @@ static func files_text(entry: Dictionary) -> String:
 	if lines.is_empty():
 		lines.append("No file list for this change.")
 	return "\n".join(lines)
+
+
+## What making a change cost, from the `cost` of a `joinery transactions list` row ({total_ms,
+## tokens, rounds}, or null when it was not measured): "2 min · 18k tokens · 1 round". Tokens
+## are left out when the agent did not report them, never shown as 0. "" when there is nothing.
+static func cost_text(cost: Variant) -> String:
+	if not cost is Dictionary:
+		return ""
+	var parts: Array[String] = []
+	var ms: Variant = (cost as Dictionary).get("total_ms")
+	if (ms is int or ms is float) and float(ms) > 0.0:
+		parts.append(duration_text(float(ms) / 1000.0))
+	var tokens: Variant = (cost as Dictionary).get("tokens")
+	if (tokens is int or tokens is float) and float(tokens) > 0.0:
+		parts.append(tokens_text(int(tokens)) + " tokens")
+	var rounds: Variant = (cost as Dictionary).get("rounds")
+	if (rounds is int or rounds is float) and int(rounds) > 0:
+		parts.append("%d round%s" % [int(rounds), "" if int(rounds) == 1 else "s"])
+	return " · ".join(parts)
+
+
+## [param title] (a decided change's summary) with what making it cost quietly under it
+## ("2 min · 18k tokens · 1 round"), or [param title] alone when it was not measured.
+static func with_cost(title: Label, entry: Dictionary) -> Control:
+	var text := cost_text(entry.get("cost"))
+	if text.is_empty():
+		return title
+	var column := VBoxContainer.new()
+	column.theme_type_variation = "JoineryFlush"
+	column.size_flags_horizontal = title.size_flags_horizontal
+	column.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	column.add_child(title)
+	var cost := UI.label(text, "JoineryNumeric")
+	cost.name = "Cost"
+	cost.tooltip_text = "What making this change took: time, tokens and agent rounds"
+	cost.mouse_filter = Control.MOUSE_FILTER_PASS
+	column.add_child(cost)
+	return column
+
+
+## "40 s", "2 min", "1 h 5 min" for [param seconds].
+static func duration_text(seconds: float) -> String:
+	if seconds < 60.0:
+		return "%d s" % maxi(1, roundi(seconds))
+	var minutes := roundi(seconds / 60.0)
+	if minutes < 60:
+		return "%d min" % minutes
+	var rest := minutes % 60
+	return "%d h" % (minutes / 60) + (" %d min" % rest if rest > 0 else "")
+
+
+## "800", "1.5k", "18k", "1.2M" for a token [param count].
+static func tokens_text(count: int) -> String:
+	if count < 1000:
+		return str(count)
+	if count < 10000:
+		return ("%.1fk" % (count / 1000.0)).replace(".0k", "k")
+	if count < 1000000:
+		return "%dk" % roundi(count / 1000.0)
+	return ("%.1fM" % (count / 1000000.0)).replace(".0M", "M")

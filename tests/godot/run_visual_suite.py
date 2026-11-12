@@ -124,6 +124,7 @@ EDITOR_SCREENS = (
     "review-error",
     "focus-review",
     "review-list",
+    "review-decided",
     "review-task",
     "review-variants",
     "review-list-empty",

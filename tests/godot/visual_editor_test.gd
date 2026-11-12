@@ -410,6 +410,13 @@ func _approvals() -> void:
 			"decided": 0.0 if state == "review" else now - ago,
 			"revertible": id != "old",
 			"tools": tools,
+			# What it cost: tokens reported for most, not by the agent that added the post.
+			"cost":
+			(
+				null
+				if state != "accepted"
+				else {"total_ms": 125000, "tokens": null if id == "old" else 18200, "rounds": 1}
+			),
 			"file_count": 2,
 			"files":
 			[
@@ -442,6 +449,17 @@ func _approvals() -> void:
 	var bottom: Control = dock.get_parent() as Control if dock != null else tab
 	await get_tree().create_timer(0.3).timeout
 	await _shot("review-list", [bottom])
+	# Decided, scrolled into view: each change with what making it cost under its summary.
+	var decided: Control = tab.get("_decided_body")
+	var scroller := decided.get_parent() as Control
+	while scroller != null and not scroller is ScrollContainer:
+		scroller = scroller.get_parent() as Control
+	if scroller != null:
+		(scroller as ScrollContainer).scroll_vertical = int(decided.position.y + 100000)
+	await get_tree().create_timer(0.2).timeout
+	await _shot("review-decided", [bottom])
+	if scroller != null:
+		(scroller as ScrollContainer).scroll_vertical = 0
 	# A parallel task's change, opened from its row: the same full review.
 	var cache := OS.get_cache_dir().path_join("joinery-visual")
 	var task := {

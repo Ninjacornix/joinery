@@ -771,7 +771,7 @@ func _decided_row(entry: Dictionary, now: float) -> VBoxContainer:
 	title.mouse_filter = Control.MOUSE_FILTER_PASS
 	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	line.add_child(title)
+	line.add_child(WORDS.with_cost(title, entry))
 	var decided := float(entry.get("decided", 0.0))
 	var when := relative_time(decided if decided > 0.0 else float(entry.get("created", 0.0)), now)
 	var words := str(outcome[0]) + (" · " + when if not when.is_empty() else "")

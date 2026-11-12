@@ -119,11 +119,16 @@ func _check_wording() -> void:
 
 
 func _listing(now: float) -> Dictionary:
+	var measured := _tx("a1", "accepted", "Darken the door wood", now - 7500, now - 7300, true)
+	measured["cost"] = {"total_ms": 125000, "tokens": 18200, "rounds": 1}
+	var untold := _tx("a2", "accepted", "Add a crate", now - 900000, now - 899000, false)
+	# An agent that doesn't report tokens: time and rounds only, never "0 tokens".
+	untold["cost"] = {"total_ms": 40000, "tokens": null, "rounds": 3}
 	return {
 		"transactions":
 		[
-			_tx("a1", "accepted", "Darken the door wood", now - 7500, now - 7300, true),
-			_tx("a2", "accepted", "Add a crate", now - 900000, now - 899000, false),
+			measured,
+			untold,
 			_tx("r1", "rejected", "Make the floor blue", now - 4000, now - 3600, true),
 			_tx("v1", "reverted", "Widen the door", now - 200, now - 100, true),
 			_tx("p1", "review", "Add online play", now - 600, 0.0, true, ["joinery"]),
@@ -219,6 +224,17 @@ func _check_rows(tab: TAB) -> void:
 		_check(_find(decided[2], "Revert") != null, "Revert offered while it still works")
 		_check(_find(decided[3], "Revert") == null, "No Revert once its data is gone")
 		_check(_find(decided[3], "TooOld") != null, "Too old to revert says so")
+		var cost := _find(decided[2], "Cost") as Label
+		_check(
+			cost != null and cost.text == "2 min · 18k tokens · 1 round",
+			"A measured change says what it cost: %s" % (cost.text if cost != null else "none")
+		)
+		var untold := _find(decided[3], "Cost") as Label
+		_check(
+			untold != null and untold.text == "40 s · 3 rounds",
+			"Tokens left out when not reported: %s" % (untold.text if untold != null else "none")
+		)
+		_check(_find(decided[1], "Cost") == null, "An unmeasured change shows no cost")
 		for row: Node in [decided[0], decided[1]]:
 			_check(_find(row, "Revert") == null, "Nothing to revert on a discarded or reverted row")
 	_check(tab._bible_row.visible, "The art bible row shows")
