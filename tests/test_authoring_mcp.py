@@ -63,6 +63,10 @@ FAMILIES = {
         "operate_layer",
         # A typed Inkscape operation (servers/paint/vector.py).
         "edit_vector_element",
+        # Terrain operations, baked in Godot (servers/paint/terrain.py).
+        "terrain_new",
+        "terrain_edit",
+        "terrain_info",
     },
     "joinery-sound": {
         "inspect_document",
@@ -126,6 +130,7 @@ def test_discovery_exposes_only_real_family_capabilities(
                 "audit_animations",
                 "inspect_track",
                 "list_graph",
+                "terrain_info",
             }
             for name in readers & set(tools):
                 assert tools[name].annotations.read_only_hint is True
