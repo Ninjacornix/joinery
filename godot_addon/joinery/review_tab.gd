@@ -36,6 +36,7 @@ const COMMAND_SCRIPT := preload("command_job.gd")
 const SLASH := preload("slash_commands.gd")
 const WORDS := preload("review_words.gd")
 const QUEUE := preload("review_queue.gd")
+const TEAM := preload("review_team.gd")
 const EMPTY_WAITING := "Nothing waits for your review."
 const EMPTY_DECIDED := "No decisions yet."
 const TOO_OLD := "Too old to revert"
@@ -394,7 +395,7 @@ func waiting_count() -> int:
 	var count := _pending().size()
 	if str(_bible().get("state", "")) == "needs_approval":
 		count += 1
-	return count
+	return count + TEAM.documents(_listing).size()
 
 
 ## The tab title for [param count] things waiting: "Review" or "Review 2".
@@ -418,26 +419,13 @@ func revert_finished(transaction_id: String, ok: bool, message := "") -> void:
 ## "Blender · 2 min ago": the apps that made a change and when, from [param entry].
 static func meta_text(entry: Dictionary, now: float) -> String:
 	var parts: Array[String] = []
-	var apps := app_names(entry.get("tools", []))
+	var apps := WORDS.app_names(entry.get("tools", []))
 	if not apps.is_empty():
 		parts.append(", ".join(apps))
 	var when := relative_time(float(entry.get("created", 0.0)), now)
 	if not when.is_empty():
 		parts.append(when)
 	return " · ".join(parts)
-
-
-## Display names for recorded app ids, without repeats.
-static func app_names(tools: Variant) -> Array[String]:
-	var names: Array[String] = []
-	if not tools is Array:
-		return names
-	for tool: Variant in tools:
-		var id := str(tool)
-		var app := str(APP_NAMES.get(id, id.replace("-", " ").capitalize()))
-		if not app.is_empty() and not names.has(app):
-			names.append(app)
-	return names
 
 
 ## "just now", "5 min ago", "3 h ago", "yesterday", "4 days ago", then the date ("12 Oct").
@@ -607,8 +595,15 @@ func _render() -> void:
 		child.queue_free()
 	for entry: Dictionary in pending:
 		_waiting_body.add_child(_pending_row(entry, now))
+	for row: Control in TEAM.document_rows(_listing, cli_enabled, refresh):
+		_waiting_body.add_child(row)
 	_render_bible()
-	_waiting_empty.visible = pending.is_empty() and _loaded and not _bible_waiting_now()
+	_waiting_empty.visible = (
+		pending.is_empty()
+		and _loaded
+		and not _bible_waiting_now()
+		and _waiting_body.get_child_count() == 0
+	)
 	for child: Node in _decided_body.get_children():
 		_decided_body.remove_child(child)
 		child.queue_free()
@@ -664,7 +659,7 @@ func _render_bible() -> void:
 			_bible_open.theme_type_variation = "JoineryQuietButton"
 			_bible_open.text = "Open"
 		"needs_approval":
-			_bible_status.text = "Needs your approval before new art or audio"
+			_bible_status.text = TEAM.bible_waiting_text(_bible())
 			_bible_dot.set("state", "attention")
 			_bible_open.theme_type_variation = "JoinerySecondaryButton"
 			_bible_open.text = "Review"
@@ -734,6 +729,7 @@ func _pending_row(entry: Dictionary, now: float) -> VBoxContainer:
 		accept.tooltip_text = "Keep this change"
 		accept.accessibility_name = "Accept " + summary
 		accept.pressed.connect(_decide.bind(id, true, live))
+		TEAM.label_decision(entry, accept, discard)
 		var ordered := (
 			[accept, discard] if DisplayServer.get_swap_cancel_ok() else [discard, accept]
 		)
@@ -820,7 +816,9 @@ func _add_error(box: VBoxContainer, id: String) -> void:
 
 
 ## The files a change touches, one per line ("+ art/models/hammer.glb"), under its row.
-func _files(entry: Dictionary) -> Label:
+func _files(entry: Dictionary) -> Control:
+	if not TEAM.facts(entry).is_empty():
+		return TEAM.conflict_view(entry)
 	var label := UI.label(WORDS.files_text(entry), "JoineryCaption", true)
 	label.name = "Files"
 	return label

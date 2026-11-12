@@ -27,6 +27,19 @@ const APP_NAMES := {
 }
 
 
+## Display names for recorded app ids, without repeats.
+static func app_names(tools: Variant) -> Array[String]:
+	var names: Array[String] = []
+	if not tools is Array:
+		return names
+	for tool: Variant in tools:
+		var id := str(tool)
+		var app := str(APP_NAMES.get(id, id.replace("-", " ").capitalize()))
+		if not app.is_empty() and not names.has(app):
+			names.append(app)
+	return names
+
+
 ## "just now", "5 min ago", "3 h ago", "yesterday", "4 days ago", then the date ("12 Oct").
 static func relative_time(stamp: float, now: float) -> String:
 	if stamp <= 0.0:
