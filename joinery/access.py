@@ -32,7 +32,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from joinery import blueprints, check_runs
+from joinery import access_xag, blueprints, check_runs
 from joinery.bible_rules import (
     CVD_MATRICES,
     _lab,
@@ -1002,9 +1002,11 @@ def audit(
         "pages": [p.get("id") for p in probe.get("pages", []) if isinstance(p, dict)],
         "controls": len(_controls(probe)),
         "flashes_measured": bool(drawn.probe.get("luma")),
+        "long_text_measured": bool((probe.get("long_text") or {}).get("ran")),
         "runs": {
             "headless": run.report.get("out", ""),
             "window": drawn.report.get("out", ""),
         },
     }
+    report.facts["xag"] = access_xag.coverage(report.model_dump())
     return report

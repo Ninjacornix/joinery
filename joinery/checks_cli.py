@@ -15,7 +15,7 @@ import argparse
 import json
 from pathlib import Path
 
-from joinery import access, checks_core, perf
+from joinery import access, access_xag, checks_core, perf
 
 SHOWN = 8
 
@@ -65,6 +65,8 @@ def main(args: argparse.Namespace) -> int:
     if args.area:
         report.findings = [f for f in report.findings if f.area in args.area]
         report.areas = [a for a in report.areas if a.id in args.area]
+        if report.kind == "access":
+            report.facts["xag"] = access_xag.coverage(report.model_dump())
     checks_core.save(project, report)
     planned = (
         checks_core.plan(project, report, areas=args.area, labels=names)

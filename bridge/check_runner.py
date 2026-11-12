@@ -33,7 +33,7 @@ from bridge.crew import WORKING, Crew, ScriptedCall, Task
 from bridge.instructions import CHECK_PROMPT
 from bridge.models import Selection
 from bridge.protocol import Done, Message, MessageDelta, Prompt
-from joinery import access, checks_core, perf
+from joinery import access, access_xag, checks_core, perf
 from joinery.roles import spec
 from joinery.routing import routing_settings
 
@@ -89,6 +89,19 @@ def for_agent(report: checks_core.Report, limit: int = 25) -> dict[str, Any]:
         facts["measured"] = {
             k: v for k, v in measured.items() if k not in {"spikes", "hot"}
         }
+    xag = facts.get("xag")
+    if isinstance(xag, dict):
+        # The guidelines with findings; the card shows the whole coverage.
+        facts["xag"] = {
+            "version": xag.get("version"),
+            "checked": xag.get("checked"),
+            "total": xag.get("total"),
+            "failing": [
+                {k: g.get(k) for k in ("id", "name", "findings")}
+                for g in xag.get("guidelines", [])
+                if g.get("status") == "fails"
+            ],
+        }
     data["facts"] = facts
     data["findings"] = data["findings"][:limit]
     data["note"] = (
@@ -143,6 +156,8 @@ class Checks:
         areas = [str(a) for a in params.get("areas") or []]
         if areas:
             report.findings = [f for f in report.findings if f.area in areas]
+            if kind == "access":
+                report.facts["xag"] = access_xag.coverage(report.model_dump())
         return for_agent(report)
 
     def handle(self, data: dict[str, Any]) -> bool:
