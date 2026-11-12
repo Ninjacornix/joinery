@@ -194,7 +194,7 @@ func set_sent(ids: Array) -> void:
 		% [count, "" if count == 1 else "s", "s" if count == 1 else ""]
 	)
 	title_label.tooltip_text = title_label.text
-	_settle("done", "Nothing is deleted until you accept")
+	_settle("done", "Not deleted yet")
 	_step.tooltip_text = "Accept the removal in Review to delete them; Discard keeps everything."
 
 

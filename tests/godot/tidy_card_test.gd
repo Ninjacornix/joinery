@@ -154,7 +154,7 @@ func _run() -> void:
 		"And says where: " + (card.get("title_label") as Label).text
 	)
 	_check(
-		card.call("step_text") == "Nothing is deleted until you accept",
+		card.call("step_text") == "Not deleted yet",
 		"Nothing is deleted yet: " + card.call("step_text")
 	)
 	_check((card.call("finding_rows") as Array).size() == 2, "Only the maybe-used rows stay")
