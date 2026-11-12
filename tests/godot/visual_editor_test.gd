@@ -313,6 +313,7 @@ func _glance_reviews(
 	)
 	panel.call("show_glance", {"checks": {"ran": ["references", "Godot import", "tests"]}})
 	await _shot("review-text", [panel, dock])
+	await _review.done_when(self, panel, dock)
 	dock.hide_edit_review()
 	await _frames()
 	var room_before := cache.path_join("room-before.png")

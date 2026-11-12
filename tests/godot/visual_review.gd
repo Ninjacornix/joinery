@@ -30,6 +30,33 @@ static func narrow(suite: Variant, panel: Control, dock: Control) -> void:
 	await suite._frames()
 
 
+## A change made from a to-do (ADR 0060): what "done" meant, checked, under what changed.
+## The text review on screen gets the done-when results the host sends with it.
+static func done_when(suite: Variant, panel: Control, dock: Control) -> void:
+	var results := [
+		{
+			"id": "d1",
+			"text": "The player can reach the vault",
+			"status": "pass",
+			"evidence": "The bot reached Vault at 0:42, seed 4242.",
+		},
+		{
+			"id": "d2",
+			"text": "The gate opens when the lever is pulled",
+			"status": "fail",
+			"evidence": "res://tests/test_gate.gd isn't in the change.",
+		},
+		{
+			"id": "d3",
+			"text": "No errors in 60 s of play",
+			"status": "inconclusive",
+			"evidence": "The game ran only 0:41 of the 60 s asked for.",
+		},
+	]
+	panel.call("show_glance", {"done_when": results})
+	await suite._shot("review-done-when", [panel, dock])
+
+
 ## A level built from the user's sketch: the sketch and the plan side by side (ADR 0043). The
 ## suite copies a fixture sketch and the plan Joinery draws for it into the project.
 static func blockout(suite: Variant, dock: Control, panel: Control) -> void:

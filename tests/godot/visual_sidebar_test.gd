@@ -50,12 +50,14 @@ None. One player.
 var _checks: GDScript
 var _theme: GDScript
 var _motion: GDScript
+var _todo: GDScript
 var _failed := false
 
 
 func _initialize() -> void:
 	_checks = load(get_script().resource_path.get_base_dir().path_join("ui_checks.gd"))
 	_theme = load("res://addons/joinery/ui_theme.gd")
+	_todo = load(get_script().resource_path.get_base_dir().path_join("visual_todo.gd"))
 	# Windowed runs animate; captures must show end states.
 	_motion = load("res://addons/joinery/ui_motion.gd")
 	_motion.set_enabled(false)
@@ -227,6 +229,7 @@ func _states(light: bool, width: int) -> void:
 		queue.call("remove", queue.call("first"))
 	await _parallel(light, width, chat)
 	await _playtest(light, width, chat)
+	await _todo.shots(self, light, width, chat)
 	await _match(light, width, chat)
 	await _check_cards(light, width, chat)
 	await _design(light, width, chat)
