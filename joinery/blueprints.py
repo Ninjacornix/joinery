@@ -122,14 +122,17 @@ ENGINE_KEYS = frozenset(
 CORE_ROOTS = ("core/", "tests/support/", "default_bus_layout.tres")
 BLUEPRINT_ROOTS = ("game/", "tests/game/")
 EXTRA_ROOTS = frozenset({"locale"})
-#: The standard action vocabulary (contract C3), plus the core's `pause` and `report_bug`.
+#: The standard action vocabulary (contract C3), plus the core's `pause`.
 ACTIONS = frozenset(
     {
         "move_left", "move_right", "move_up", "move_down", "move_forward",
         "move_back", "look_left", "look_right", "look_up", "look_down", "jump",
-        "interact", "attack", "dash", "sprint", "crouch", "restart", "pause", "report_bug",
+        "interact", "attack", "dash", "sprint", "crouch", "restart", "pause",
     }
 )
+#: Actions only the game core declares, outside the vocabulary features bind
+#: (the controller feature leaves them to the keyboard): Report a bug (F8).
+CORE_ACTIONS = frozenset({"report_bug"})
 GODOT_VERSION = "4.7"
 DEFAULT_DEADZONE = 0.2
 PAD_BUTTONS = {
@@ -1885,7 +1888,9 @@ def _check_inputs(unit_id: str, merges: Iterable[ProjectMerge], errors: list[str
                     f"{unit_id}: input {action} would replace Godot's built-in "
                     "ui_* bindings; leave ui_* actions alone"
                 )
-            elif action not in ACTIONS:
+            elif action not in ACTIONS and not (
+                unit_id == CORE_DIR_NAME and action in CORE_ACTIONS
+            ):
                 errors.append(f"{unit_id}: input {action} is not in the standard action vocabulary")
 
 

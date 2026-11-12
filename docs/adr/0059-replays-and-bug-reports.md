@@ -67,8 +67,9 @@ shipped game had no way to say what went wrong beyond an email.
    what differed, and says the user can record it again if the change is meant to alter
    it.
 5. **Bug reports from players.** The core's `BugReports` autoload adds "Report a bug" to
-   the pause menu and the `report_bug` action (F8, part of the core's action
-   vocabulary, never pressed by the playtest bot). It pauses, asks "What went wrong?" and
+   the pause menu and the `report_bug` action (F8; a core-only action outside the
+   vocabulary features bind, so the controller feature leaves it to the keyboard; never
+   pressed by the playtest bot). It pauses, asks "What went wrong?" and
    on Save writes `user://joinery_reports/<id>/`: `report.json` (note, time, game and
    Joinery versions, build, OS, seed, scene, frame, the seconds looked back on),
    `replay.replay` (the session up to the page opening, from its start so it replays

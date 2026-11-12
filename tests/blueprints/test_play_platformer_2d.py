@@ -51,7 +51,7 @@ def test_blueprint_is_in_the_catalogue() -> None:
     assert described["hooks"]["level_scene"] == "res://game/level.tscn"
     assert described["hooks"]["player_scene"] == "res://game/player/player.tscn"
     assert {"move_left", "move_right", "move_down", "jump", "restart"} <= set(described["input"])
-    assert set(described["input"]) <= blueprints.ACTIONS
+    assert set(described["input"]) <= blueprints.ACTIONS | blueprints.CORE_ACTIONS
     assert described["brief"]["verbs"], "the brief has player verbs"
 
 

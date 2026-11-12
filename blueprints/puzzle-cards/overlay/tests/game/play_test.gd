@@ -322,8 +322,11 @@ func _check_pause(level: Control) -> void:
 	h.expect(paused, "pause pauses the tree")
 	h.expect(bool(menus.call(&"is_open")), "pause opens the pause menu")
 	h.expect(h.focused_text() == "Resume", "Resume has focus (got '%s')" % h.focused_text())
-	await _click(level, 13)
-	h.expect(not _up(_card(level, 13)), "cards cannot be flipped while paused")
+	# The first card, in the corner: the pause menu's panel covers the middle of the board,
+	# and how far down depends on the features' entries.
+	var was_up: bool = _up(_card(level, 0))
+	await _click(level, 0)
+	h.expect(_up(_card(level, 0)) == was_up, "cards cannot be flipped while paused")
 	var elapsed: float = float(level.get(&"elapsed"))
 	await h.physics_frames(20)
 	h.expect_near(float(level.get(&"elapsed")), elapsed, 0.0001, "the clock stops while paused")
