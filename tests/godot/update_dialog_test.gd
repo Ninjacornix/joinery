@@ -12,6 +12,9 @@ const DIALOG := preload("res://addons/joinery/update_dialog.gd")
 const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
 ## Answers `update --check`, `--install --progress` (two progress lines, then ready) and the
 ## small commands, like the real CLI's --json output. NONE makes the check find nothing.
+## It runs from a file, not `python -c`: Godot on Windows quotes an argument with spaces but
+## doesn't escape the double quotes inside it (OS_Windows::_quote_command_line_argument), so
+## a program passed with -c reaches Python with its string quotes stripped.
 const FAKE := """
 import json, os, sys
 a = sys.argv[1:]
@@ -72,7 +75,11 @@ func _run() -> void:
 	box.bg_color = UI_THEME.color(backdrop, "surface_sunken")
 	backdrop.add_theme_stylebox_override("panel", box)
 	var dialog: DIALOG = DIALOG.new()
-	dialog.cli_prefix = PackedStringArray([OS.get_environment("JOINERY_TEST_PYTHON"), "-c", FAKE])
+	var fake := OS.get_user_data_dir().path_join("fake_joinery_update.py")
+	var script := FileAccess.open(fake, FileAccess.WRITE)
+	script.store_string(FAKE)
+	script.close()
+	dialog.cli_prefix = PackedStringArray([OS.get_environment("JOINERY_TEST_PYTHON"), fake])
 	dialog.label_changed.connect(func(text: String) -> void: _labels.append(text))
 	root.add_child(dialog)
 	await process_frame

@@ -307,7 +307,10 @@ func _run(kind: String, args: Array) -> void:
 		_job.call("cancel")
 	var prefix := cli_prefix
 	if prefix.is_empty() and not engine_home.is_empty():
-		prefix = PackedStringArray(["uv", "run", "--frozen", "--quiet", "--project", engine_home])
+		# No trailing separator: on Windows Godot quotes "C:\Program Files\Joinery\" and the
+		# last backslash would escape the closing quote.
+		var home := engine_home.rstrip("/\\")
+		prefix = PackedStringArray(["uv", "run", "--frozen", "--quiet", "--project", home])
 		prefix.append("joinery")
 	_streamed = PackedStringArray()
 	_job = COMMAND.joinery(prefix, args)
