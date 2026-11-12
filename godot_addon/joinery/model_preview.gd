@@ -28,7 +28,7 @@ var _bounds := AABB()
 var _radius := 0.5
 var _world: WorldEnvironment
 var _press_at := Vector2.INF
-var _highlighted := ""
+var _highlighted := "\n"
 
 
 func _init() -> void:
@@ -145,23 +145,29 @@ func pick_at(point: Vector2) -> Dictionary:
 	return PICK_SCRIPT.pick(model, camera.project_ray_origin(at), camera.project_ray_normal(at))
 
 
-## Tint the surfaces that use [param material] (a Blender name), or clear the tint with "".
-func highlight(material: String) -> void:
-	if model == null or material == _highlighted:
+## Tint the surfaces that use [param material] (a Blender name), or with [param object] every
+## surface of that object; "" for both clears the tint.
+func highlight(material: String, object := "") -> void:
+	var key := material + "\n" + object
+	if model == null or key == _highlighted:
 		return
-	_highlighted = material
+	_highlighted = key
 	var meshes: Array[Node] = model.find_children("*", "MeshInstance3D", true, false)
 	for node: Node in meshes:
 		var instance := node as MeshInstance3D
 		if instance.mesh == null:
 			continue
+		var whole := (
+			not object.is_empty() and PICK_SCRIPT.source_name(instance, instance.name) == object
+		)
 		for surface: int in instance.mesh.get_surface_count():
 			instance.set_surface_override_material(surface, null)
 			var original := instance.get_active_material(surface)
 			var name := PICK_SCRIPT.source_name(
 				original, original.resource_name if original != null else ""
 			)
-			if material.is_empty() or original == null or name != material:
+			var hit := whole or (not material.is_empty() and name == material)
+			if original == null or not hit:
 				continue
 			var tinted := original.duplicate() as Material
 			tinted.next_pass = _tint()
