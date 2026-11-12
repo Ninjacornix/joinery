@@ -50,6 +50,9 @@ const ATTACHMENT_ROW := preload("sidebar_attachments.gd")
 const EDITOR_VIEW := preload("editor_view.gd")
 
 var chips: HFlowContainer
+## Holds [member chips] without passing their width up: a long name ends in an ellipsis inside
+## the gutter instead of widening the sidebar.
+var chip_area: Control
 var attachments: ATTACHMENT_ROW
 var prompt: TextEdit
 var options: MenuButton
@@ -89,9 +92,15 @@ func _init() -> void:
 	attachments = ATTACHMENT_ROW.new()
 	attachments.changed.connect(_sync_send)
 	body.add_child(attachments)
+	chip_area = Control.new()
+	chip_area.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	chip_area.hide()
+	chip_area.resized.connect(_fit_chips)
+	body.add_child(chip_area)
 	chips = HFlowContainer.new()
 	chips.hide()
-	body.add_child(chips)
+	chips.minimum_size_changed.connect(_fit_chips)
+	chip_area.add_child(chips)
 	prompt = INPUT_SCRIPT.new()
 	prompt.accessibility_name = "Message to Journeyman"
 	prompt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -497,3 +506,19 @@ func _remove_target(id: String) -> void:
 
 func _sync_chips() -> void:
 	chips.visible = not _targets.is_empty()
+	chip_area.visible = chips.visible
+	_fit_chips()
+
+
+## Every chip fits the composer's width; the area takes the wrapped rows' height.
+func _fit_chips() -> void:
+	var width := chip_area.size.x
+	if width <= 0.0:
+		return
+	for child: Node in chips.get_children():
+		var chip := child as UI.Chip
+		if chip != null and not is_equal_approx(chip.max_width, width):
+			chip.max_width = width
+	chips.position = Vector2.ZERO
+	chips.size = Vector2(width, 0.0)
+	chip_area.custom_minimum_size.y = chips.get_combined_minimum_size().y

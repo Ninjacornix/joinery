@@ -3,7 +3,8 @@ extends SceneTree
 ## the dock's edges. The header's last icon glyph, the readiness line and "Check again", the
 ## user's bubble, the reply, the review row, a check card, the footer and "Show review", and
 ## the composer share the same left and right edge; the transcript's scrollbar sits in the
-## gutter, and the header row starts SPACE.1 under the top edge. Settings' reviewer Model field
+## gutter, and the header row starts SPACE.1 under the top edge. Chips with long names end in an
+## ellipsis inside the gutter instead of widening the sidebar, and Settings' reviewer Model field
 ## shows "Same as Journeyman" uncut.
 
 const WIDTHS: Array[int] = [340, 480, 1000]
@@ -173,8 +174,50 @@ func _measure(width: int) -> void:
 	_on(footer.get("_text"), "left", left, "Waiting for your review", width)
 	_on(footer.get("_show"), "right", right, "Show review", width)
 	_both(chat.get("_composer"), left, right, "The composer", width)
+	await _long_chips(chat, width, right)
 	await _model_field(chat, width)
 	host.free()
+	await _frames(2)
+
+
+## Long target names: every chip ends inside the gutter in an ellipsis; the dock keeps its width.
+func _long_chips(chat: Control, width: int, right: float) -> void:
+	var composer: Control = chat.get("_composer")
+	var targets: Array[Dictionary] = [
+		{
+			"id": "gate",
+			"label": "Hinge",
+			"kind": "Object",
+			"resource": "res://levels/courtyard.tscn",
+			"crumbs": ["courtyard", "ExtremelyLongNodeNameForTheWroughtIronGateHingeAndLatch"],
+		},
+		{
+			"id": "albedo",
+			"label": "Albedo",
+			"kind": "Image",
+			"resource": "res://art/textures/a_very_long_texture_name_for_the_gate_albedo.png",
+		},
+	]
+	composer.call("set_targets", targets)
+	await _frames(6)
+	var dock := chat.get_global_rect()
+	_check(absf(dock.size.x - width) <= 1.0, "Long chips keep the dock at %d px" % width)
+	var chips: Node = composer.get("chips")
+	_check(chips.get_child_count() == 2, "Both chips show (%d px)" % width)
+	for node: Node in chips.get_children():
+		var chip := node as Control
+		var end := chip.get_global_rect().end.x
+		_measured += 1
+		_check(
+			end <= right + 1.0, "A long chip ends at %.0f, past %.0f (%d px)" % [end, right, width]
+		)
+		var label: Label = chip.get("label")
+		_check(
+			label.text_overrun_behavior == TextServer.OVERRUN_TRIM_ELLIPSIS,
+			"A long name ends in an ellipsis (%d px)" % width
+		)
+	var none: Array[Dictionary] = []
+	composer.call("set_targets", none)
 	await _frames(2)
 
 

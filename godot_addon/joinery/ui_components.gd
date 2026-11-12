@@ -75,17 +75,41 @@ class Section:
 		toggled.emit(value)
 
 
-## A compact tag: optional icon, a label that ellipsizes past 16em, optional remove button.
-## Removing animates the chip out, then emits [signal removed] and frees it.
+## A compact tag: optional icon, a label that ellipsizes past 16em (or past
+## [member max_width]), optional remove button. Removing animates the chip out, then emits
+## [signal removed] and frees it.
 class Chip:
 	extends PanelContainer
 	signal removed
 	var label: Label
 	var remove: Button
+	## The widest the whole chip may be, so it fits the row it sits in; 0 leaves only the 16em
+	## cap on its name. A longer name ends in an ellipsis; the tooltip has the full name.
+	var max_width := 0.0:
+		set(value):
+			max_width = value
+			fit()
 
 	## Animate out, then emit removed and free the chip.
 	func dismiss() -> void:
 		UI_MOTION.exit(self, null, func() -> void: removed.emit(), true)
+
+	## Size the name to the text, up to 16em and [member max_width].
+	func fit() -> void:
+		if label == null:
+			return
+		var font := label.get_theme_font("font")
+		var font_size := label.get_theme_font_size("font_size")
+		var width := font.get_string_size(label.text, 0, -1, font_size).x
+		var cap := 16.0 * font_size
+		if max_width > 0.0:
+			# Icon, gaps, × and the chip's own padding: everything but the name.
+			var chrome := get_combined_minimum_size().x - label.get_combined_minimum_size().x
+			cap = minf(cap, maxf(2.0 * font_size, max_width - chrome))
+		label.custom_minimum_size.x = minf(width, cap)
+		label.text_overrun_behavior = (
+			TextServer.OVERRUN_TRIM_ELLIPSIS if width > cap else TextServer.OVERRUN_NO_TRIMMING
+		)
 
 
 ## A small state dot: "ready" (success), "working" (accent), "attention" (danger) or "off"
@@ -367,19 +391,7 @@ static func chip(text: String, icon_name := "", removable := false) -> Chip:
 	result.label = label(text)
 	result.label.tooltip_text = text
 	result.label.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	_on_theme(
-		result.label,
-		func() -> void:
-			var font := result.label.get_theme_font("font")
-			var size := result.label.get_theme_font_size("font_size")
-			var cap := 16.0 * size
-			var width := font.get_string_size(result.label.text, 0, -1, size).x
-			result.label.custom_minimum_size.x = minf(width, cap)
-			# Names over 16em end in an ellipsis; the tooltip has the full name.
-			result.label.text_overrun_behavior = (
-				TextServer.OVERRUN_TRIM_ELLIPSIS if width > cap else TextServer.OVERRUN_NO_TRIMMING
-			)
-	)
+	_on_theme(result.label, result.fit)
 	row.add_child(result.label)
 	if removable:
 		result.remove = icon_button("close", "Remove")
