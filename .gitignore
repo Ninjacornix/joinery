@@ -15,3 +15,6 @@ godot_patches/godot-src/
 
 # Local Godot build for GUI work, not part of the repo
 .tools/
+
+# Helper agents' scratch copies of the repo
+.claude/worktrees/
