@@ -19,6 +19,7 @@ from joinery import (
     metrics,
     references,
     scene_variants,
+    script_scope,
     sound_kit,
     staged_assets,
     submission,
@@ -596,6 +597,16 @@ class ProjectGateway:
         if custom is None:
             validate_arguments(arguments)
         readonly = read_only(server, tool)
+        language, code = script_scope.raw_script(server, tool, arguments)
+        if language:
+            # Raw code is the logged fallback; it may reach only its document.
+            self._call_attrs[metrics.SCOPE_LANGUAGE] = language
+            issues = script_scope.check(language, code)
+            if issues:
+                self._call_attrs[metrics.SCOPE_REFUSED] = ",".join(
+                    sorted({issue.rule for issue in issues})
+                )
+                raise ValueError(script_scope.refusal(language, issues))
         if view and not readonly:
             raise ValueError(
                 "This agent only reads: call one of the project tools' read-only tools."

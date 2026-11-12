@@ -51,6 +51,16 @@ SEND_BACKS = "joinery.review.send_backs"
 CONTINUATIONS = "joinery.continuations"
 USAGE_REPORTED = "joinery.usage.reported"
 PRECHECKS = "joinery.prechecks"
+#: A raw script's language, and the scope rules it was refused for (ADR 0078).
+SCOPE_LANGUAGE = "joinery.scope.language"
+SCOPE_REFUSED = "joinery.scope.refused"
+#: The check after a staged script write: its backend, seconds, the new errors and
+#: warnings, and how many writes of that file in a row have added errors.
+WRITE_CHECK = "joinery.write_check.backend"
+WRITE_CHECK_SECONDS = "joinery.write_check.seconds"
+WRITE_CHECK_ERRORS = "joinery.write_check.new_errors"
+WRITE_CHECK_WARNINGS = "joinery.write_check.new_warnings"
+WRITE_CHECK_STREAK = "joinery.write_check.streak"
 #: Model routing (ADR 0061): which model ran a turn ("light" or "main"), and how a
 #: review was routed ("skip", "light" or "main") for a change of which risk.
 MODEL_TIER = "joinery.model.tier"
