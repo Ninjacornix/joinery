@@ -120,6 +120,15 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
+    async def find_recipe(
+        request: Annotated[str, Field(min_length=1, max_length=400)],
+        limit: Annotated[int, Field(ge=1, le=5)] = 3,
+    ) -> dict[str, Any]:
+        """Before making a new asset: find this project's accepted recipes closest to the request (by what they made, their notes, operations and parameters), so you can start from one and change its parameters. Returns each recipe's file, op log script, outputs, operations and parameters. Changes nothing."""
+        return await rpc(socket, "find_recipe", {"request": request, "limit": limit})
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True))
+    @tool_errors
     async def view_editor() -> CallToolResult:
         """See the editor's current 3D or 2D viewport exactly as the user sees it, with the camera position. Use it when the user asks you to look at something. The screenshot is context only, never an asset."""
         data = await rpc(socket, "editor_view", {})

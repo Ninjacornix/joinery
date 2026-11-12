@@ -486,8 +486,19 @@ class FileTransaction:
             raise
         self._discard(self.stage)
         self._add_to_timeline(changes, reverted=False)
+        self._index_recipes()
         self._housekeep()
         return changes
+
+    def _index_recipes(self) -> None:
+        """Index the project's recipes with this change's summary (joinery.skills)
+        before retention can remove its journal. Bookkeeping: never fails a decision."""
+        from joinery import skills  # Late: skills reads recipes, not transactions.
+
+        try:
+            skills.refresh(self.project)
+        except (OSError, ValueError):
+            pass
 
     def _add_to_timeline(self, changes: list[dict[str, str]], reverted: bool) -> None:
         """Commit exactly this change's files to the project's git timeline.

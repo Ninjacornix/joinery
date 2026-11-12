@@ -38,6 +38,7 @@ from joinery import (
     replays,
     setup_imports,
     share,
+    skills,
     sound_pass,
     timeline,
 )
@@ -1236,6 +1237,7 @@ def _parser() -> argparse.ArgumentParser:
     timeline.register(commands)
     metrics.register(commands)
     project_map.register(commands)
+    skills.register(commands)
     chats.register(commands)
     parts = _parts()
     if parts is not None:
@@ -1257,6 +1259,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "map":
         return project_map.run(args)
+
+    if args.command == "skills":
+        return skills.run(args)
 
     if args.command == "chats":
         return chats.run(args)

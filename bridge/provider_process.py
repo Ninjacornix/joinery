@@ -37,6 +37,7 @@ INSTRUCTIONS = (
     "Document operators automatically export, import and record provenance; precheck runs the same checks early without submitting; submit_for_review runs the final checks and opens the review. "
     "Avoid repeating those checks after every call. If the user asks to place an asset in their scene, create the scene instance too. "
     "Long tool results arrive as summaries with a details ref: read more with details only when you need it. "
+    "Before making a new asset, find_recipe shows this project's closest accepted recipe to start from. "
     "To change part of a file, send find/replace patch pairs rather than the whole file. "
     "Never generate assets or fetch assets. Operate actual tools. A Rule Zero STOP halts the turn. "
     + GAME_GUIDE

@@ -207,6 +207,7 @@ REGISTRY_TOOLS: tuple[str, ...] = (
     "inspect_editor",
     "view_editor",
     "details",
+    "find_recipe",
     "inspect_in_parallel",
     "submit_for_review",
     "precheck",

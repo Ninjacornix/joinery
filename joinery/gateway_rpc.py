@@ -15,7 +15,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal
 
-from joinery import compact, design
+from joinery import compact, design, skills
 from joinery.blockout import stage as blockout_stage
 from joinery.debugging import diagnosis_from
 from joinery.gateway import ProjectGateway
@@ -338,6 +338,14 @@ class GatewayRPC:
                     str(params.get("ref", "")),
                     str(params.get("path", "") or ""),
                     int(params.get("offset", 0) or 0),
+                )
+            elif method == "find_recipe":
+                if self.role and not registry_allowed(self.role, method):
+                    raise ValueError(refusal(self.role))
+                data = skills.find(
+                    self.gateway.project,
+                    str(params.get("request", "")),
+                    int(params.get("limit", 3) or 3),
                 )
             elif method == "editor_view":
                 # Read-only, so specialists may look too.
