@@ -92,6 +92,29 @@ code. Custom games made from the blank blueprint have no play tests at all.
    words go to the transcript and each `Fix:` line becomes an "Ask Journeyman to fix" offer;
    both only fill the message box. The header counts the playtester among agents working.
 
+7. **Coverage, still no model** (2026-11-12). The bot maps the level as it plays
+   (`bot_cover.gd`): a grid on the ground plane (2 m cells in 3D, 64 px in 2D, at most 4096
+   cells, a bigger level gets bigger cells) whose cells are navigable when the player could
+   stand there and get there from where it started. In 3D a downward ray finds a floor no
+   more than 6 m above the player with room above it, joined to its neighbours by a step of
+   up to 1.6 m or a jump over one missing cell; top-down a cell is empty of what the player
+   collides with and joined to the start; side-on it is empty with ground within three cells
+   below, joined in any direction. Every cell the player stands in counts too, and a level
+   mapped again (a restart) keeps what was found and visited. With no goal to head for (half
+   the time when it re-picks), the bot walks to the nearest cell it hasn't stood in by a
+   breadth-first search over the grid, steering cell by cell, and gives a cell up for 30 s
+   when 6 s don't get it there. The report's `coverage` has the share of the navigable cells
+   reached, the grid, and the five biggest unreached areas with their centres in world units;
+   a run of a minute or more that reached under 60 % gets a `note`. The bot draws the map as
+   `coverage.png` in the run's folder (what `playtest` returns to agents, beside the
+   screenshots), and the playtest card draws the same grid in the theme's colours under the
+   counts, "Explored 34% of the level", the unreached cells in the danger colour and the start
+   ringed. `--reach "key room"` (and `reach` on the tool) names places to head for first, matched
+   against node names without articles or spaces; the report's `reach` says for each whether
+   a node by that name exists, whether the player got inside its meshes or box shapes or near
+   its origin, and when. The done-when checks use it (ADR 0060). All of it is seeded: the
+   same seed gives the same grid and the same route.
+
 ## Consequences
 
 - Every blueprint gets a real playtest in CI: a 20 s seeded run each in stock Godot must find
@@ -106,3 +129,6 @@ code. Custom games made from the blank blueprint have no play tests at all.
 - Softlock detection is by time (15 s by default, `--softlock`): a slow puzzle that takes
   longer without any visible change reads as stuck.
 - A playtest costs one provider session for the write-up; the run itself costs nothing.
+- Coverage is an estimate: the grid comes from physics probes, so a floor behind a locked
+  door counts as unreached (true, for a bot that cannot open it), and a ledge reached only
+  by a long jump may never join the map until the player stands on it.

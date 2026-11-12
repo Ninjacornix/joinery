@@ -8,6 +8,11 @@ extends RefCounted
 ## Styles: "3d" (camera-relative move_forward/back/left/right), "topdown" (move_up/down/
 ## left/right), "platformer" (move_left/right and jump), "ui" (no player: click buttons)
 ## and "generic" (no known movement actions: random presses of every action plus clicks).
+##
+## With nothing to head for it explores: it walks toward the nearest part of the level the
+## player hasn't been to yet (bot_cover.gd), so a run sees as much of the level as it can.
+## Places named with --reach come first: it heads for the nodes whose names hold those words
+## and records whether, and when, the player got there.
 
 ## Groups a blueprint puts its goals in; the bot heads for these.
 const GOAL_GROUPS: Array[StringName] = [
@@ -31,6 +36,10 @@ const LOOKS: Array[StringName] = [&"look_left", &"look_right", &"look_up", &"loo
 ## How near counts as reaching a goal.
 const REACH_3D := 1.6
 const REACH_2D := 48.0
+## Frames after the player appears before the level is mapped (it may still be loading).
+const MAP_AFTER := 30
+## Frames between looks for the nodes a --reach word names.
+const REACH_LOOK_EVERY := 60
 
 var tree: SceneTree
 var rng: RandomNumberGenerator
@@ -42,6 +51,12 @@ var used: Dictionary = {}
 var goals_reached: int = 0
 ## The game gave the bot something to play with: a player, a button, an action of its own.
 var interactive: bool = false
+## The coverage grid (bot_cover.gd), set by the bot.
+var cover: RefCounted
+## Places to reach (--reach), as plain lower-case words; and what became of each:
+## {target, found, reached, t, closest, node}.
+var reach: PackedStringArray = PackedStringArray()
+var reach_results: Array[Dictionary] = []
 
 var _player: Node = null
 var _held: Dictionary = {}
@@ -54,6 +69,9 @@ var _skip_until: Dictionary = {}
 var _last_at: Vector3 = Vector3.ZERO
 var _still: int = 0
 var _others: Array[StringName] = []
+var _map_at: int = -1
+var _reach_nodes: Dictionary = {}
+var _reach_looked: int = -REACH_LOOK_EVERY
 
 
 func _init(scene_tree: SceneTree, generator: RandomNumberGenerator) -> void:
@@ -89,6 +107,8 @@ func follow(player: Node) -> void:
 	if player != null:
 		_last_at = _where(player)
 	interactive = player != null or not _others.is_empty()
+	# Mapped a little later, once the level around the new player has loaded.
+	_map_at = -2 if player != null and style in ["3d", "topdown", "platformer"] else -1
 
 
 ## Whether a movement action is held right now.
@@ -106,6 +126,8 @@ func step(frame: int) -> void:
 			_release(action)
 			_releases.erase(action)
 	if _player != null and is_instance_valid(_player) and _player.is_inside_tree():
+		_map(frame)
+		_check_reach(frame)
 		_check_stuck(frame)
 		_check_target(frame)
 	if frame >= _segment_end:
@@ -157,14 +179,31 @@ func _new_segment(frame: int) -> void:
 		tap(_others[rng.randi_range(0, _others.size() - 1)], frame, rng.randi_range(3, 30))
 
 
-## Holds the movement keys toward the current goal, or a random direction.
+## Holds the movement keys toward a place to reach, the current goal, the nearest part of
+## the level not seen yet, or a random direction.
 func _walk(frame: int) -> void:
 	var direction := Vector2.ZERO
-	if _target == null or rng.randf() < 0.3:
-		_target = _pick_target(frame) if rng.randf() < 0.7 else null
+	var place := _reach_target()
+	if place != null and rng.randf() < 0.85:
+		_target = place
 		_target_since = frame
+	elif _target == null or rng.randf() < 0.3:
+		# Half the time a goal, else (with a map) the nearest part of the level not seen yet.
+		var mapping := cover != null and bool(cover.get(&"built"))
+		_target = _pick_target(frame) if rng.randf() < (0.5 if mapping else 0.7) else null
+		_target_since = frame
+	var mapped := cover != null and bool(cover.get(&"built"))
 	if _target != null:
-		direction = _toward(_target)
+		var aim: Vector3 = (
+			cover.call(&"route", _where(_player), _where(_target)) if mapped else _where(_target)
+		)
+		direction = _toward_point(aim)
+	elif mapped:
+		var aim: Variant = cover.call(&"explore", _where(_player), frame, rng)
+		if aim is Vector3:
+			direction = _toward_point(aim)
+			# Following the map: steer again soon, cell by cell.
+			_segment_end = mini(_segment_end, frame + rng.randi_range(20, 45))
 	if direction == Vector2.ZERO:
 		direction = Vector2.from_angle(rng.randf() * TAU)
 	# x: right is positive; y: forward/up is positive.
@@ -184,9 +223,9 @@ func _walk(frame: int) -> void:
 		_hold(back)
 
 
-## Direction to [param node] in input terms (x right, y forward/up), unit length or zero.
-func _toward(node: Node) -> Vector2:
-	var delta := _where(node) - _where(_player)
+## Direction to [param point] in input terms (x right, y forward/up), unit length or zero.
+func _toward_point(point: Vector3) -> Vector2:
+	var delta := point - _where(_player)
 	if style == "3d":
 		var camera := tree.root.get_viewport().get_camera_3d()
 		var basis := camera.global_basis if camera != null else Basis.IDENTITY
@@ -195,6 +234,150 @@ func _toward(node: Node) -> Vector2:
 		var flat := Vector3(delta.x, 0.0, delta.z)
 		return Vector2(flat.dot(right), flat.dot(forward)).normalized()
 	return Vector2(delta.x, -delta.y).normalized()
+
+
+## Map the level once the player has been there a moment, and mark where it stands.
+func _map(frame: int) -> void:
+	if cover == null:
+		return
+	if _map_at == -2:
+		_map_at = frame + MAP_AFTER
+	# On its feet: a player still falling would map from the wrong height.
+	var standing := (
+		style == "topdown"
+		or not _player.has_method(&"is_on_floor")
+		or bool(_player.call(&"is_on_floor"))
+		or frame >= _map_at + MAP_AFTER * 4
+	)
+	if _map_at >= 0 and frame >= _map_at and standing:
+		_map_at = -1
+		cover.call(&"build", _player, style)
+	cover.call(&"visit", _where(_player), frame)
+
+
+## The nearest node a --reach word names that the player hasn't reached yet, or null.
+func _reach_target() -> Node:
+	var best: Node = null
+	var best_distance := INF
+	for entry: Dictionary in reach_results:
+		if bool(entry["reached"]):
+			continue
+		for node: Node in _reach_nodes.get(str(entry["target"]), []):
+			if not is_instance_valid(node) or not node.is_inside_tree():
+				continue
+			var distance := _where(node).distance_to(_where(_player))
+			if distance < best_distance:
+				best_distance = distance
+				best = node
+	return best
+
+
+## Look for the places to reach now and then (levels load and change), and record when the
+## player gets to one: inside its bounds, or near its origin.
+func _check_reach(frame: int) -> void:
+	if reach.is_empty():
+		return
+	if reach_results.is_empty():
+		for word: String in reach:
+			reach_results.append(
+				{
+					"target": word,
+					"found": false,
+					"reached": false,
+					"t": null,
+					"closest": null,
+					"node": ""
+				}
+			)
+	if frame - _reach_looked >= REACH_LOOK_EVERY:
+		_reach_looked = frame
+		_find_reach_nodes()
+	var at := _where(_player)
+	var fps := Engine.physics_ticks_per_second
+	for entry: Dictionary in reach_results:
+		if bool(entry["reached"]):
+			continue
+		for node: Node in _reach_nodes.get(str(entry["target"]), []):
+			if not is_instance_valid(node) or not node.is_inside_tree():
+				continue
+			var distance := _flat_distance(_where(node), at)
+			if entry["closest"] == null or distance < float(entry["closest"]):
+				entry["closest"] = snappedf(distance, 0.01)
+			if (
+				_inside(node, at)
+				or distance <= (REACH_3D * 1.25 if _player is Node3D else REACH_2D * 1.5)
+			):
+				entry["reached"] = true
+				entry["t"] = snappedf(frame / float(fps), 0.01)
+				entry["node"] = String(node.name)
+				entry["closest"] = 0.0
+				if _target == node:
+					_target = null
+				break
+
+
+func _find_reach_nodes() -> void:
+	_reach_nodes.clear()
+	var scene := tree.current_scene
+	if scene == null:
+		return
+	var nodes: Array[Node] = scene.find_children("*", "Node", true, false)
+	for entry: Dictionary in reach_results:
+		var word := str(entry["target"])
+		var found: Array[Node] = []
+		for node: Node in nodes:
+			if node == _player or not (node is Node3D or node is Node2D):
+				continue
+			if _plain(String(node.name)).contains(word):
+				found.append(node)
+		_reach_nodes[word] = found
+		if not found.is_empty():
+			entry["found"] = true
+			if str(entry["node"]).is_empty():
+				entry["node"] = String(found[0].name)
+
+
+## The player stands within [param node]'s shapes or meshes (a room, a zone, a door).
+func _inside(node: Node, at: Vector3) -> bool:
+	if node is Node3D:
+		var parts: Array[Node] = [node]
+		parts.append_array(node.find_children("*", "Node3D", true, false))
+		for part: Node in parts:
+			var box := AABB()
+			if part is VisualInstance3D:
+				box = (part as Node3D).global_transform * (part as VisualInstance3D).get_aabb()
+			elif part is CollisionShape3D and (part as CollisionShape3D).shape is BoxShape3D:
+				var size := ((part as CollisionShape3D).shape as BoxShape3D).size
+				box = (part as Node3D).global_transform * AABB(-size / 2.0, size)
+			else:
+				continue
+			if box.grow(0.5).has_point(at) or (box.grow(0.5).has_point(at + Vector3.DOWN)):
+				return true
+		return false
+	var parts2: Array[Node] = [node]
+	parts2.append_array(node.find_children("*", "Node2D", true, false))
+	var flat := Vector2(at.x, at.y)
+	for part: Node in parts2:
+		if part is CollisionShape2D and (part as CollisionShape2D).shape != null:
+			var shape := part as CollisionShape2D
+			var local := shape.shape.get_rect().grow(8.0)
+			if local.has_point(shape.global_transform.affine_inverse() * flat):
+				return true
+	return false
+
+
+static func _plain(text: String) -> String:
+	var kept := ""
+	for character: String in text.to_lower():
+		if character.is_valid_identifier() or character.is_valid_int():
+			kept += character
+	return kept.replace("_", "")
+
+
+func _flat_distance(a: Vector3, b: Vector3) -> float:
+	if _player is Node3D:
+		return Vector2(a.x, a.z).distance_to(Vector2(b.x, b.z))
+	return Vector2(a.x, a.y).distance_to(Vector2(b.x, b.y))
 
 
 func _pick_target(frame: int) -> Node:

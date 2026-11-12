@@ -328,3 +328,108 @@ def test_cli_refuses_a_scene_outside_the_project(tmp_path: Path) -> None:
 def test_run_refuses_a_folder_that_is_not_a_game(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="not a Godot project"):
         playtest.run(playtest.Options(project=tmp_path))
+
+
+#: A coverage grid as the bot writes it: "#" visited, "." never reached, " " not floor.
+GRID = [
+    "##..  ",
+    "##..  ",
+    "      ",
+    ".   ..",
+]
+
+
+def _coverage(**extra: Any) -> dict[str, Any]:
+    data: dict[str, Any] = {
+        "mode": "3d",
+        "cell": 2.0,
+        "origin": [-4.0, -10.0],
+        "cols": 6,
+        "rows": 4,
+        "start": [0, 0],
+        "navigable": 11,
+        "visited": 4,
+        "percent": 36.4,
+        "grid": GRID,
+    }
+    data.update(extra)
+    return data
+
+
+def test_coverage_names_the_biggest_unreached_areas_and_where_they_are() -> None:
+    report = playtest_report.build(_bot(coverage=_coverage()), "", 0, options=OPTIONS)
+    coverage = report["coverage"]
+    assert coverage["percent"] == 36.4
+    assert coverage["visited"] == 4 and coverage["navigable"] == 11
+    # Biggest first; centres in world units on the ground plane (cells are 2 units).
+    assert [area["cells"] for area in coverage["unreached"]] == [4, 2, 1]
+    assert coverage["unreached"][0]["at"] == [2.0, -8.0]
+    assert coverage["unreached"][2]["at"] == [-3.0, -3.0]
+
+
+def test_a_long_run_that_saw_little_of_the_level_gets_a_note() -> None:
+    report = playtest_report.build(_bot(coverage=_coverage()), "", 0, options=OPTIONS)
+    notes = [item for item in report["items"] if item["kind"] == "coverage"]
+    assert len(notes) == 1 and notes[0]["severity"] == "note"
+    assert "36.4% of the level" in notes[0]["detail"]
+    assert "around (2, -8)" in notes[0]["detail"]
+    # A short run, or a well explored level, says nothing.
+    short = playtest_report.build(
+        _bot(coverage=_coverage(), seconds_played=20.0), "", 0, options=OPTIONS
+    )
+    assert not [item for item in short["items"] if item["kind"] == "coverage"]
+    seen = playtest_report.build(
+        _bot(coverage=_coverage(percent=80.0)), "", 0, options=OPTIONS
+    )
+    assert not [item for item in seen["items"] if item["kind"] == "coverage"]
+
+
+def test_no_grid_means_no_coverage() -> None:
+    report = playtest_report.build(_bot(), "", 0, options=OPTIONS)
+    assert report["coverage"] == {}
+    assert "coverage" not in playtest.for_agent(report)
+
+
+def test_reach_places_reach_the_bot_as_plain_words(tmp_path: Path) -> None:
+    assert playtest.reach_words(["Key room", "key_room", "the LEVER!", ""]) == [
+        "keyroom",
+        "lever",
+    ]
+    options = playtest.Options(project=tmp_path, seed=3, reach=["Key room"])
+    assert "--reach=keyroom" in playtest._bot_args(options, tmp_path / "out")
+    assert not any(
+        a.startswith("--reach")
+        for a in playtest._bot_args(playtest.Options(project=tmp_path), tmp_path)
+    )
+
+
+def test_the_agent_gets_coverage_and_reach() -> None:
+    reach = [
+        {
+            "target": "keyroom",
+            "found": True,
+            "reached": True,
+            "t": 42.5,
+            "closest": 0.0,
+        },
+        {
+            "target": "vault",
+            "found": False,
+            "reached": False,
+            "t": None,
+            "closest": None,
+        },
+    ]
+    report = playtest_report.build(
+        _bot(coverage=_coverage(), reach=reach), "", 0, options=OPTIONS
+    )
+    data = playtest.for_agent(report)
+    assert data["coverage"]["percent"] == 36.4
+    assert data["coverage"]["unreached"][0]["cells"] == 4
+    assert data["reach"] == reach
+    assert playtest.reach_line(reach[0]) == "reached at 0:42"
+    assert playtest.reach_line(reach[1]) == "nothing in the game is called that"
+    assert (
+        playtest.reach_line({"found": True, "reached": False, "closest": 3.25})
+        == "not reached (closest 3.25)"
+    )

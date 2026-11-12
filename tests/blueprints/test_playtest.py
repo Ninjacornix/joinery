@@ -81,7 +81,9 @@ def test_a_save_on_the_result_screen_never_loads_a_stuck_level(tmp_path: Path) -
     The game refuses that save (the level is over), so Continue can never bring back
     a defeated player with no result panel.
     """
-    features = sorted({*blueprints.describe("top-down")["default_features"], "save-load"})
+    features = sorted(
+        {*blueprints.describe("top-down")["default_features"], "save-load"}
+    )
     project = make_project(tmp_path, "top-down", features)
     report = _play(project, 40, seed=7)
     assert report["status"] == "played", report
@@ -125,6 +127,72 @@ def test_a_game_that_does_not_start_is_critical(tmp_path: Path) -> None:
     assert report["status"] == "played"
     assert report["items"][0]["kind"] == "boot"
     assert report["items"][0]["severity"] == "critical"
+
+
+def _png_size(path: Path) -> tuple[int, int]:
+    data = path.read_bytes()
+    assert data[:8] == b"\x89PNG\r\n\x1a\n", path
+    return int.from_bytes(data[16:20], "big"), int.from_bytes(data[20:24], "big")
+
+
+@needs_godot
+@pytest.mark.parametrize(
+    ("blueprint", "least"), [("top-down", 20.0), ("third-person-3d", 30.0)]
+)
+def test_the_bot_explores_unvisited_cells_and_maps_what_it_missed(
+    tmp_path: Path, blueprint: str, least: float
+) -> None:
+    """A seeded minute of play maps the level's floor, walks toward the parts it hasn't
+    seen, and reports its share with the rest marked on a top-down map, the same on every
+    run of the seed."""
+    features = blueprints.describe(blueprint)["default_features"]
+    project = make_project(tmp_path, blueprint, features)
+    report = _play(project, 60, seed=7)
+    coverage = report["coverage"]
+    grid = coverage["grid"]
+    visited = sum(line.count("#") for line in grid)
+    open_cells = visited + sum(line.count(".") for line in grid)
+    assert coverage["visited"] == visited and coverage["navigable"] == open_cells
+    # The map is the level's floor: walls, pillars and the void are not on it.
+    assert open_cells >= 60 and any(" " in line for line in grid), coverage
+    assert coverage["percent"] >= least, coverage
+    assert coverage["percent"] == round(100 * visited / open_cells, 1)
+    assert coverage["mode"] == ("3d" if "3d" in blueprint else "topdown")
+    # The unreached areas, biggest first, each with where it is.
+    sizes = [area["cells"] for area in coverage["unreached"]]
+    assert sizes == sorted(sizes, reverse=True) and sizes, coverage
+    width, height = _png_size(Path(coverage["map"]))
+    assert width >= coverage["cols"] * 3 and height >= coverage["rows"] * 3
+    assert Path(coverage["map"]).is_relative_to(project / ".joinery" / "playtests")
+    again = _play(project, 60, seed=7)
+    assert again["coverage"]["grid"] == grid
+
+
+@needs_godot
+def test_the_bot_heads_for_places_named_to_reach(tmp_path: Path) -> None:
+    """--reach names places by their nodes ("the arena", "pen floor"); the bot heads there
+    first and says when it got there, and that nothing is called a name that isn't there."""
+    project = make_project(
+        tmp_path,
+        "third-person-3d",
+        blueprints.describe("third-person-3d")["default_features"],
+    )
+    report = _play(
+        project, 40, seed=7, reach=["the arena", "Pen floor", "secret vault"]
+    )
+    places = {place["target"]: place for place in report["reach"]}
+    assert places["arena"]["reached"] is True, places
+    assert places["penfloor"]["reached"] is True, places
+    assert places["penfloor"]["node"] == "PenFloor"
+    assert 0 < float(places["penfloor"]["t"]) < 40
+    assert places["secretvault"] == {
+        "target": "secretvault",
+        "found": False,
+        "reached": False,
+        "t": None,
+        "closest": None,
+        "node": "",
+    }
 
 
 @SLOW

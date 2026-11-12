@@ -123,7 +123,7 @@ def split_followups(text: str) -> tuple[str, list[str]]:
 
 
 def tool_params(params: dict[str, Any], default_minutes: float) -> dict[str, Any]:
-    """``playtest``'s arguments, checked: {minutes, seed, focus}."""
+    """``playtest``'s arguments, checked: {minutes, seed, focus, reach}."""
     minutes = params.get("minutes")
     if minutes is None:
         minutes = default_minutes
@@ -139,7 +139,19 @@ def tool_params(params: dict[str, Any], default_minutes: float) -> dict[str, Any
     focus = params.get("focus") or ""
     if not isinstance(focus, str) or len(focus) > 200:
         raise ValueError("focus is a short phrase (up to 200 characters).")
-    return {"minutes": float(minutes), "seed": seed, "focus": focus.strip()}
+    reach = params.get("reach") or []
+    if (
+        not isinstance(reach, list)
+        or len(reach) > 8
+        or not all(isinstance(r, str) and 0 < len(r.strip()) <= 60 for r in reach)
+    ):
+        raise ValueError("reach is up to 8 short place names (up to 60 characters).")
+    return {
+        "minutes": float(minutes),
+        "seed": seed,
+        "focus": focus.strip(),
+        "reach": [r.strip() for r in reach],
+    }
 
 
 class Playtester:
@@ -222,6 +234,7 @@ class Playtester:
                     seed=checked["seed"],
                     focus=checked["focus"],
                     screenshots=True,
+                    reach=list(checked.get("reach", [])),
                 ),
                 progress,
             )

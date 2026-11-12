@@ -167,13 +167,24 @@ def test_gameplay_changes_are_code_and_scenes() -> None:
 
 
 def test_tool_arguments_are_checked() -> None:
-    assert tool_params({}, 2.0) == {"minutes": 2.0, "seed": 0, "focus": ""}
-    assert tool_params({"minutes": 1, "seed": 7, "focus": " lever "}, 2.0) == {
+    assert tool_params({}, 2.0) == {"minutes": 2.0, "seed": 0, "focus": "", "reach": []}
+    assert tool_params(
+        {"minutes": 1, "seed": 7, "focus": " lever ", "reach": [" key room "]}, 2.0
+    ) == {
         "minutes": 1.0,
         "seed": 7,
         "focus": "lever",
+        "reach": ["key room"],
     }
-    for bad in ({"minutes": 60}, {"minutes": True}, {"seed": -1}, {"focus": "x" * 300}):
+    for bad in (
+        {"minutes": 60},
+        {"minutes": True},
+        {"seed": -1},
+        {"focus": "x" * 300},
+        {"reach": "key room"},
+        {"reach": ["x"] * 9},
+        {"reach": [""]},
+    ):
         with pytest.raises(ValueError):
             tool_params(bad, 2.0)
 
@@ -349,7 +360,7 @@ def test_the_tool_returns_the_report_and_screenshots(
         assert isinstance(text, TextContent) and isinstance(image, ImageContent)
         assert json.loads(text.text)["summary"].startswith("Played")
         assert base64.b64decode(image.data) == PNG
-        assert asked == [{"minutes": 0.5, "seed": 4, "focus": ""}]
+        assert asked == [{"minutes": 0.5, "seed": 4, "focus": "", "reach": []}]
 
     asyncio.run(go())
 

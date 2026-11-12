@@ -7,6 +7,11 @@ the game runs at a fixed 60 physics frames a second, so ``--seed`` replays a run
 never writes inside the game: the bot's report, screenshots, the game's ``user://`` and its
 settings all live in ``.joinery/playtests/<id>/``, which Godot never imports.
 
+The bot maps the level as it plays and explores toward the parts it hasn't been to; the
+report says what share of the navigable area it reached and marks the rest on a top-down
+map (``coverage.png`` in the run's folder). ``--reach`` names places to head for first
+(nodes whose names hold the words), and the report says whether, and when, it got there.
+
 Screenshots need rendering, so they come from a second, windowed replay of the same seed
 that saves a picture at each notable moment the headless run found. It runs in the
 Joinery editor binary with ``JOINERY_BACKGROUND=1`` where there is one, so the window never
@@ -44,6 +49,8 @@ MAX_SECONDS = 1800.0
 #: Real seconds with no heartbeat from the bot before the game counts as frozen.
 FREEZE_SECONDS = 45.0
 SHOTS_LIMIT = 8
+#: Words dropped from a place to reach: node names don't carry them.
+_ARTICLES = frozenset({"the", "a", "an"})
 
 Progress = Callable[[float, float], None]
 
@@ -67,6 +74,8 @@ class Options:
     probe: str = ""
     #: Record each rendered frame's luminance (flash measurement; windowed runs only).
     luma: bool = False
+    #: Places to reach first: words naming nodes ("key room" finds KeyRoom).
+    reach: list[str] = field(default_factory=list)
 
     def public(self) -> dict[str, Any]:
         data = asdict(self)
@@ -183,6 +192,9 @@ def _bot_args(
     ]
     if words:
         args.append("--focus=" + ",".join(words[:8]).lower())
+    places = reach_words(options.reach)
+    if places:
+        args.append("--reach=" + ",".join(places))
     if shots:
         args.append("--shots=" + ",".join(str(f) for f in shots))
     if options.route is not None:
@@ -192,6 +204,21 @@ def _bot_args(
     if options.luma:
         args.append("--luma")
     return args
+
+
+def reach_words(places: list[str]) -> list[str]:
+    """Places to reach as the bot matches them against node names: "the key room" is
+    "keyroom" (lower case, letters and digits, no articles)."""
+    words: list[str] = []
+    for place in places:
+        kept = [
+            "".join(c for c in part if c.isalnum())
+            for part in place.lower().replace("_", " ").replace("-", " ").split()
+        ]
+        word = "".join(p for p in kept if p not in _ARTICLES)[:40]
+        if word and word not in words:
+            words.append(word)
+    return words[:8]
 
 
 def _ensure_imported(godot: Path, project: Path, env: dict[str, str]) -> None:
@@ -309,6 +336,8 @@ def run(
     )
     report["engine"] = godot.name
     report["out"] = str(out)
+    if report.get("coverage") and (out / "coverage.png").is_file():
+        report["coverage"]["map"] = str(out / "coverage.png")
     if options.screenshots and bot is not None and not (stop and stop.is_set()):
         _screenshots(report, options, out, project)
     (out / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -372,6 +401,7 @@ def replay_shots(
         scene=options.scene,
         focus=options.focus,
         softlock=options.softlock,
+        reach=list(options.reach),
     )
     command = [
         str(binary),
@@ -438,12 +468,32 @@ def for_agent(report: dict[str, Any], limit: int = 25) -> dict[str, Any]:
     data["goals"] = report.get("goals", {})
     data["checks"] = report.get("checks", {})
     data["perf"] = report.get("perf", {})
+    coverage = report.get("coverage") or {}
+    if coverage:
+        data["coverage"] = {
+            key: coverage.get(key)
+            for key in ("percent", "visited", "navigable", "cell", "unreached", "map")
+        }
+    if report.get("reach"):
+        data["reach"] = report["reach"]
     data["screenshots"] = report.get("screenshots", [])
     data["note"] = (
         "Timings and deaths come from a bot pressing keys with some aim, not a person; "
         "treat balance as a hint. Rerun with the same seed to reproduce."
     )
     return data
+
+
+def reach_line(place: dict[str, Any]) -> str:
+    """'reached at 0:42', 'not reached (closest 3.2)', 'nothing in the game is called that'."""
+    if place.get("reached"):
+        return f"reached at {playtest_report.stamp(float(place.get('t') or 0))}"
+    if not place.get("found"):
+        return "nothing in the game is called that"
+    closest = place.get("closest")
+    return "not reached" + (
+        f" (closest {float(closest):g})" if closest is not None else ""
+    )
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
@@ -472,6 +522,12 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         type=Path,
         help="only walk a blockout's routes (JSON from joinery.blockout.route)",
     )
+    parser.add_argument(
+        "--reach",
+        action="append",
+        default=[],
+        help="a place to head for first (a node's name); repeat for more",
+    )
     parser.add_argument("--json", action="store_true")
 
 
@@ -495,6 +551,7 @@ def main(args: argparse.Namespace) -> int:
         softlock=float(args.softlock),
         screenshots=bool(args.screenshots),
         route=args.route,
+        reach=[str(r) for r in args.reach],
     )
 
     def show(t: float, total: float) -> None:
@@ -522,5 +579,13 @@ def main(args: argparse.Namespace) -> int:
         )
         where = f" ({item['where']})" if item["where"] else ""
         print(f"- [{item['severity']}] {item['title']}{when}: {item['detail']}{where}")
+    coverage = report.get("coverage") or {}
+    if coverage:
+        print(
+            f"Explored {coverage['percent']:g}% of the level"
+            + (f"; map: {coverage['map']}" if coverage.get("map") else "")
+        )
+    for place in report.get("reach", []):
+        print(f"- {place['target']}: {reach_line(place)}")
     print(f"Report: {report['out']}/report.json")
     return 0

@@ -175,17 +175,22 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
         minutes: Annotated[float | None, Field(ge=0.25, le=10)] = None,
         seed: Annotated[int | None, Field(ge=0)] = None,
         focus: Annotated[str, Field(max_length=200)] = "",
+        reach: Annotated[list[str], Field(max_length=8)] | None = None,
     ) -> CallToolResult:
-        """Play the game headless in stock Godot with a bot that uses the game's own controls, for `minutes` of game time (default from the project), and report what went wrong: script errors, crashes, freezes, softlocks, falls out of the world, frame hitches, broken save/load and text that doesn't fit, plus balance notes from timings and deaths. Each item has a severity and repro steps with the seed; pass the same seed to replay a run exactly. focus: words naming what to aim for. Changes nothing. Screenshots are context only, never assets."""
+        """Play the game headless in stock Godot with a bot that uses the game's own controls, for `minutes` of game time (default from the project), and report what went wrong: script errors, crashes, freezes, softlocks, falls out of the world, frame hitches, broken save/load and text that doesn't fit, plus balance notes from timings and deaths. The bot explores toward the parts of the level it hasn't seen: coverage says what share of the floor it reached and where the biggest unreached areas are, and a map marks them. Each item has a severity and repro steps with the seed; pass the same seed to replay a run exactly. focus: words naming what to aim for. reach: places to head for first, named like their nodes ('key room' finds KeyRoom); reach in the result says whether and when each was reached. Changes nothing. Screenshots and the map are context only, never assets."""
         data = await rpc(
             socket,
             "playtest",
-            {"minutes": minutes, "seed": seed, "focus": focus},
+            {"minutes": minutes, "seed": seed, "focus": focus, "reach": reach or []},
         )
         result = CallToolResult(
             content=[TextContent(type="text", text=json.dumps(data))]
         )
-        for shot in [str(p) for p in data.get("screenshots", [])][:3]:
+        pictures = [str(p) for p in data.get("screenshots", [])][:3]
+        picture = str((data.get("coverage") or {}).get("map") or "")
+        if picture:
+            pictures.append(picture)
+        for shot in pictures:
             try:
                 media, encoded = chat_attachments.encoded(Path(shot))
             except (OSError, ValueError):

@@ -4,7 +4,8 @@ extends SceneTree
 ## Run (joinery/playtest.py does): godot --headless --path <game> --fixed-fps 60
 ##   --script <this file> -- --playtest-out=<dir> --seed=<n> --seconds=<n>
 ##   [--scene=res://…] [--softlock=<seconds>] [--focus=word,word] [--shots=f,f,…]
-##   [--route=<file>] [--probe=perf|access] [--luma] --settings-path=<file>
+##   [--route=<file>] [--probe=perf|access] [--luma] [--reach=word,word]
+##   --settings-path=<file>
 ##
 ## It loads the game's main scene (or --scene), starts the level the way the game core's
 ## own tests do, and plays it through the input map (bot_drive.gd) while bot_watch.gd and
@@ -16,11 +17,16 @@ extends SceneTree
 ## seed). With --route it only walks the player along a blockout's routes (bot_route.gd)
 ## and reports which targets it reached. With --probe it also measures the game for
 ## `joinery perf` or `joinery access` (bot_probe.gd), its numbers under "probe" in bot.json.
+## It maps the level as it plays (bot_cover.gd) and explores toward the parts it hasn't seen,
+## reporting the share it reached under "coverage" and a map of it as <out>/coverage.png.
+## With --reach it heads for the nodes those words name first, results under "reach".
 ##
 ## The bot never writes inside the project: everything goes to --playtest-out, and the
 ## game's user:// is wherever the caller's HOME points.
 
-const SCRIPTS := ["bot_logger.gd", "bot_watch.gd", "bot_drive.gd", "bot_route.gd", "bot_probe.gd"]
+const SCRIPTS := [
+	"bot_logger.gd", "bot_watch.gd", "bot_drive.gd", "bot_route.gd", "bot_probe.gd", "bot_cover.gd"
+]
 const SAVE_SLOT := 2
 const SHOT_WIDTH := 480
 const LIMIT_EVENTS := 300
@@ -32,6 +38,8 @@ var scene_path: String = ""
 var softlock_seconds: float = 15.0
 var shots: Dictionary = {}
 var focus: PackedStringArray = PackedStringArray()
+## Places to reach (--reach): words naming nodes.
+var reach: PackedStringArray = PackedStringArray()
 ## A blockout's routes to walk (--route), and the walker once it runs.
 var route: Dictionary = {}
 var walker: RefCounted
@@ -45,6 +53,7 @@ var rng: RandomNumberGenerator = RandomNumberGenerator.new()
 var logger: Object
 var watch: RefCounted
 var drive: RefCounted
+var cover: RefCounted
 var game: Node
 var events_node: Node
 var menus: Node
@@ -82,6 +91,9 @@ func _initialize() -> void:
 	watch = (load(base.path_join(SCRIPTS[1])) as GDScript).new(fps, softlock_seconds)
 	drive = (load(base.path_join(SCRIPTS[2])) as GDScript).new(self, rng)
 	drive.set(&"focus", focus)
+	drive.set(&"reach", reach)
+	cover = (load(base.path_join(SCRIPTS[5])) as GDScript).new(self)
+	drive.set(&"cover", cover)
 	if not route.is_empty():
 		walker = (load(base.path_join(SCRIPTS[3])) as GDScript).new(self, route, fps)
 	process_frame.connect(func() -> void: watch.call(&"tick_process"))
@@ -632,6 +644,8 @@ func _finish() -> void:
 	_finished = true
 	drive.call(&"release_all")
 	_moment("end", frame)
+	if not out_dir.is_empty() and shots.is_empty():
+		cover.call(&"save_map", out_dir.path_join("coverage.png"))
 	_write(true)
 	print("PLAYTEST " + JSON.stringify({"t": frame / fps, "frame": frame, "done": true}))
 	quit(0)
@@ -661,6 +675,8 @@ func _write(done: bool) -> void:
 		"checks": checks,
 		"moments": moments,
 		"route": walker.get(&"results") if walker != null else [],
+		"coverage": cover.call(&"summary"),
+		"reach": drive.get(&"reach_results"),
 		"perf": watch.call(&"summary"),
 		"probe": probe.call(&"result") if probe != null and done else {},
 		"log": logger.call(&"entries"),
@@ -687,6 +703,8 @@ func _parse_args() -> void:
 			softlock_seconds = maxf(value.to_float(), 2.0)
 		elif arg.begins_with("--focus="):
 			focus = value.to_lower().split(",", false)
+		elif arg.begins_with("--reach="):
+			reach = value.to_lower().split(",", false)
 		elif arg.begins_with("--route="):
 			var parsed: Variant = JSON.parse_string(FileAccess.get_file_as_string(value))
 			route = parsed if parsed is Dictionary else {}

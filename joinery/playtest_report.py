@@ -57,6 +57,7 @@ _KIND_SEVERITY = {
     "warning": "low",
     "text": "low",
     "balance": "note",
+    "coverage": "note",
 }
 
 _TITLES = {
@@ -77,6 +78,7 @@ _TITLES = {
     "warning": "Warning",
     "text": "Text doesn't fit",
     "balance": "Balance",
+    "coverage": "Parts of the level unreached",
 }
 
 
@@ -285,6 +287,90 @@ def balance_notes(bot: dict[str, Any]) -> list[dict[str, Any]]:
     return [{"kind": "balance", **note} for note in notes]
 
 
+def coverage_summary(raw: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:
+    """The bot's coverage grid with the unreached areas found in it.
+
+    ``unreached`` lists the biggest groups of navigable cells nobody stood in (up to five),
+    each with its size in cells and its centre in world units on the ground plane (x, z in
+    3D; x, y in 2D), so an agent can say where they are. ``map`` names the picture, which
+    ``joinery.playtest`` fills in with the run's folder.
+    """
+    grid = raw.get("grid")
+    if not isinstance(grid, list) or not grid:
+        return {}
+    rows = [str(line) for line in grid]
+    cell = float(raw.get("cell", 1) or 1)
+    origin = raw.get("origin") or [0, 0]
+    seen: set[tuple[int, int]] = set()
+    groups: list[list[tuple[int, int]]] = []
+    for y, line in enumerate(rows):
+        for x, mark in enumerate(line):
+            if mark != "." or (x, y) in seen:
+                continue
+            group: list[tuple[int, int]] = []
+            stack = [(x, y)]
+            seen.add((x, y))
+            while stack:
+                cx, cy = stack.pop()
+                group.append((cx, cy))
+                for nx, ny in ((cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)):
+                    if (
+                        0 <= ny < len(rows)
+                        and 0 <= nx < len(rows[ny])
+                        and rows[ny][nx] == "."
+                        and (nx, ny) not in seen
+                    ):
+                        seen.add((nx, ny))
+                        stack.append((nx, ny))
+            groups.append(group)
+    groups.sort(key=lambda g: (-len(g), min(g)))
+    unreached = []
+    for group in groups[:5]:
+        mx = sum(x for x, _ in group) / len(group)
+        my = sum(y for _, y in group) / len(group)
+        unreached.append(
+            {
+                "cells": len(group),
+                "at": [
+                    round(float(origin[0]) + (mx + 0.5) * cell, 1),
+                    round(float(origin[1]) + (my + 0.5) * cell, 1),
+                ],
+            }
+        )
+    return {
+        "mode": str(raw.get("mode", "")),
+        "cell": cell,
+        "origin": origin,
+        "cols": int(raw.get("cols", 0) or 0),
+        "rows": int(raw.get("rows", 0) or 0),
+        "start": raw.get("start", [-1, -1]),
+        "navigable": int(raw.get("navigable", 0) or 0),
+        "visited": int(raw.get("visited", 0) or 0),
+        "percent": float(raw.get("percent", 0) or 0),
+        "grid": rows,
+        "unreached": unreached,
+        "map": "",
+    }
+
+
+def coverage_note(coverage: dict[str, Any], played: float) -> dict[str, Any] | None:
+    """A note when a run of a minute or more left much of the level unseen."""
+    if not coverage or played < 60 or coverage["percent"] >= 60:
+        return None
+    where = ""
+    if coverage["unreached"]:
+        x, y = coverage["unreached"][0]["at"]
+        where = f"; the biggest unreached area is around ({x:g}, {y:g})"
+    return {
+        "kind": "coverage",
+        "detail": (
+            f"In {stamp(played)} the bot reached {coverage['percent']:g}% of the level's "
+            f"floor{where}. Those places may be hard to find or get to; the map marks them."
+        ),
+        "t": None,
+    }
+
+
 def build(
     bot: dict[str, Any] | None,
     output: str,
@@ -357,8 +443,12 @@ def build(
     for extra in (_hitches(perf, fps), _memory(perf.get("samples", []), fps)):
         if extra is not None:
             raw.append(extra)
+    coverage = coverage_summary((bot or {}).get("coverage") or {}, options)
     if bot is not None and status == "played" and not bot.get("route"):
         raw.extend(balance_notes(bot))
+        note = coverage_note(coverage, played)
+        if note is not None:
+            raw.append(note)
     items = [_item(index, entry, options) for index, entry in enumerate(raw)]
     items.sort(key=lambda item: (SEVERITIES.index(item["severity"]), item["t"] or 0))
     counts = {severity: 0 for severity in SEVERITIES}
@@ -397,6 +487,8 @@ def build(
         },
         "moments": (bot or {}).get("moments", []),
         "route": (bot or {}).get("route", []) or [],
+        "coverage": coverage,
+        "reach": [r for r in (bot or {}).get("reach", []) or [] if isinstance(r, dict)],
         "screenshots": [],
     }
 
