@@ -48,11 +48,10 @@ static func deal(seed_value: int, pair_count: int) -> PackedInt32Array:
 
 
 ## A fresh seed for an unseeded game, kept in the save so the deal can be
-## rebuilt.
+## rebuilt. It comes from the global generator, which the game core seeds for
+## the session, so a recorded play deals the same cards when replayed.
 static func random_seed() -> int:
-	var rng: RandomNumberGenerator = RandomNumberGenerator.new()
-	rng.randomize()
-	return rng.randi() & 0x7fffffff
+	return randi() & 0x7fffffff
 
 
 static func symbol(index: int) -> String:

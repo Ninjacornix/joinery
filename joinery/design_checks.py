@@ -34,7 +34,7 @@ Check = Callable[[Project], list[Finding]]
 _IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _BACKTICK = re.compile(r"`([^`]+)`")
 #: Input actions no verb needs to read: menus and pause are the core's.
-_CORE_ACTIONS = ("ui_", "pause")
+_CORE_ACTIONS = ("ui_", "pause", "report_bug")
 #: Actions that run the session rather than play the game; showing them is optional.
 _SESSION_ACTIONS = (
     "restart",

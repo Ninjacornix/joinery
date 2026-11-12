@@ -43,6 +43,7 @@ from pydantic import (
     field_validator,
 )
 
+from joinery import __version__
 from joinery.catalog import ROOT
 from joinery.godot_config import (
     KEYS,
@@ -112,6 +113,7 @@ ENGINE_KEYS = frozenset(
         "application/run/main_scene",
         "application/config/features",
         "game/blueprint",
+        "game/joinery_version",
         "game/hooks/level_scene",
         "game/hooks/player_scene",
         "game/hooks/spawnable_scenes",
@@ -120,12 +122,12 @@ ENGINE_KEYS = frozenset(
 CORE_ROOTS = ("core/", "tests/support/", "default_bus_layout.tres")
 BLUEPRINT_ROOTS = ("game/", "tests/game/")
 EXTRA_ROOTS = frozenset({"locale"})
-#: The standard action vocabulary (contract C3), plus the core's `pause`.
+#: The standard action vocabulary (contract C3), plus the core's `pause` and `report_bug`.
 ACTIONS = frozenset(
     {
         "move_left", "move_right", "move_up", "move_down", "move_forward",
         "move_back", "look_left", "look_right", "look_up", "look_down", "jump",
-        "interact", "attack", "dash", "sprint", "crouch", "restart", "pause",
+        "interact", "attack", "dash", "sprint", "crouch", "restart", "pause", "report_bug",
     }
 )
 GODOT_VERSION = "4.7"
@@ -1158,6 +1160,8 @@ def _engine_settings(resolution: Resolution) -> dict[str, str]:
     settings = {
         "application/run/main_scene": to_variant(blueprint.main_scene),
         "game/blueprint": to_variant(blueprint.id),
+        # Replays and bug reports say which Joinery made the game (ADR 0059).
+        "game/joinery_version": to_variant(__version__),
     }
     if blueprint.hooks.level_scene:
         settings["game/hooks/level_scene"] = to_variant(blueprint.hooks.level_scene)

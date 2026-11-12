@@ -46,6 +46,7 @@ Language = "res://features/translations/language.gd"
 [adapters.blank.append]
 "internationalization/locale/translations_pot_files" = [
 	"res://core/menus.gd",
+	"res://core/replays/bug_reports.gd",
 	"res://core/ui/settings_pages.gd",
 	"res://core/ui/ui_style.gd",
 	"res://features/translations/language.gd",
@@ -56,6 +57,7 @@ Language = "res://features/translations/language.gd"
 [adapters.first-person-3d.append]
 "internationalization/locale/translations_pot_files" = [
 	"res://core/menus.gd",
+	"res://core/replays/bug_reports.gd",
 	"res://core/ui/settings_pages.gd",
 	"res://core/ui/ui_style.gd",
 	"res://features/translations/language.gd",
@@ -68,6 +70,7 @@ Language = "res://features/translations/language.gd"
 [adapters.platformer-2d.append]
 "internationalization/locale/translations_pot_files" = [
 	"res://core/menus.gd",
+	"res://core/replays/bug_reports.gd",
 	"res://core/ui/settings_pages.gd",
 	"res://core/ui/ui_style.gd",
 	"res://features/translations/language.gd",
@@ -80,6 +83,7 @@ Language = "res://features/translations/language.gd"
 [adapters.puzzle-cards.append]
 "internationalization/locale/translations_pot_files" = [
 	"res://core/menus.gd",
+	"res://core/replays/bug_reports.gd",
 	"res://core/ui/settings_pages.gd",
 	"res://core/ui/ui_style.gd",
 	"res://features/translations/language.gd",
@@ -94,6 +98,7 @@ Language = "res://features/translations/language.gd"
 [adapters.third-person-3d.append]
 "internationalization/locale/translations_pot_files" = [
 	"res://core/menus.gd",
+	"res://core/replays/bug_reports.gd",
 	"res://core/ui/settings_pages.gd",
 	"res://core/ui/ui_style.gd",
 	"res://features/translations/language.gd",
@@ -108,6 +113,7 @@ Language = "res://features/translations/language.gd"
 [adapters.top-down.append]
 "internationalization/locale/translations_pot_files" = [
 	"res://core/menus.gd",
+	"res://core/replays/bug_reports.gd",
 	"res://core/ui/settings_pages.gd",
 	"res://core/ui/ui_style.gd",
 	"res://features/translations/language.gd",
@@ -119,6 +125,7 @@ Language = "res://features/translations/language.gd"
 [adapters.vr-room.append]
 "internationalization/locale/translations_pot_files" = [
 	"res://core/menus.gd",
+	"res://core/replays/bug_reports.gd",
 	"res://core/ui/settings_pages.gd",
 	"res://core/ui/ui_style.gd",
 	"res://features/translations/language.gd",

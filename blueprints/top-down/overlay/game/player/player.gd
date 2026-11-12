@@ -46,7 +46,8 @@ var _dash_cooldown_left: float = 0.0
 var _dash_direction: Vector2 = Vector2.RIGHT
 var _invulnerable_left: float = 0.0
 var _shake: float = 0.0
-var _rng: RandomNumberGenerator = RandomNumberGenerator.new()
+# Seeded from the session, so a replay shakes the same way.
+var _rng: RandomNumberGenerator = Replays.rng("player_shake")
 
 @onready var pivot: Node2D = $Pivot
 @onready var body: Polygon2D = $Body

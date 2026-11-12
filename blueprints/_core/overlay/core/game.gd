@@ -83,6 +83,7 @@ func quit_to_menu() -> void:
 func take_autostart() -> bool:
 	var value: bool = autostart
 	autostart = false
+	Replays.note_autostart(value)
 	return value
 
 

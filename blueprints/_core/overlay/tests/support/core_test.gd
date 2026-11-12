@@ -54,7 +54,8 @@ func _menus_by_keyboard() -> void:
 	play.expect(ids == ["start", "settings", "quit"], "core main entries %s" % [ids])
 	ids = _ids(menus.entries(&"pause"))
 	play.expect(
-		ids == ["resume", "restart", "settings", "main_menu"], "core pause entries %s" % [ids]
+		ids == ["resume", "restart", "settings", "report_bug", "main_menu"],
+		"core pause entries %s" % [ids]
 	)
 	var calls: Array[int] = [0]
 	menus.add_entry(&"main", &"extra", "Extra", func() -> void: calls[0] += 1, 50)

@@ -18,12 +18,14 @@ from tests.blueprints.godot_run import boot, make_project, needs_godot, run_godo
 CORE = blueprints.BLUEPRINTS_DIR / blueprints.CORE_DIR_NAME
 OVERLAY = CORE / "overlay"
 AUTOLOADS = {
+    "Replays": "res://core/replays/replays.gd",
     "Settings": "res://core/settings.gd",
     "GameEvents": "res://core/game_events.gd",
     "Menus": "res://core/menus.gd",
     "Game": "res://core/game.gd",
     "Music": "res://core/audio/music.gd",
     "UiSounds": "res://core/audio/ui_sounds.gd",
+    "BugReports": "res://core/replays/bug_reports.gd",
 }
 CORE_TEST = "res://tests/support/core_test.gd"
 GODOT_UID = re.compile(r"^uid://[a-y0-8]+$")
@@ -119,6 +121,7 @@ def test_core_unit_declares_autoloads_and_pause() -> None:
     assert core.kind == "core"
     assert list(core.merge.autoload.items()) == list(AUTOLOADS.items())
     assert core.merge.input["pause"].keys == ["Escape", "P"]
+    assert core.merge.input["report_bug"].keys == ["F8"]
     for path in AUTOLOADS.values():
         assert (OVERLAY / path.removeprefix("res://")).is_file(), path
 

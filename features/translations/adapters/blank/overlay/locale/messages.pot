@@ -52,6 +52,26 @@ msgstr ""
 msgid "Accessibility"
 msgstr ""
 
+#: res://core/replays/bug_reports.gd
+msgid "Report a bug"
+msgstr ""
+
+#: res://core/replays/bug_reports.gd
+msgid "What went wrong? The report stays on this computer."
+msgstr ""
+
+#: res://core/replays/bug_reports.gd
+msgid "Save report"
+msgstr ""
+
+#: res://core/replays/bug_reports.gd
+msgid "Bug report saved"
+msgstr ""
+
+#: res://core/replays/bug_reports.gd
+msgid "The bug report could not be saved"
+msgstr ""
+
 #: res://core/ui/settings_pages.gd
 msgid "Full screen"
 msgstr ""
