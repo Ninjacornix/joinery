@@ -61,21 +61,160 @@ jobs:
   native:
     needs: version
     uses: ./.github/workflows/native.yml
-  publish:
-    needs: [version, checks, native]
+  signing:
+    # Platform signing turns on by itself once the accounts are added as secrets
+    # (docs/signing.md). Secrets can't be read in a job's `if`, so this job turns
+    # their presence into outputs; no value is printed. Tags only.
+    needs: version
     if: github.event_name == 'push' && github.ref_type == 'tag'
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 5
+    outputs:
+      macos: ${{ steps.accounts.outputs.macos }}
+      windows: ${{ steps.accounts.outputs.windows }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - name: Which signing accounts exist
+        id: accounts
+        env:
+          APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_SIGNING_ENDPOINT: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          AZURE_SIGNING_ACCOUNT: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          AZURE_CERT_PROFILE: ${{ secrets.AZURE_CERT_PROFILE }}
+          WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: python3 release/platform_sign.py accounts
+  macos-sign:
+    needs: [version, checks, native, signing]
+    if: needs.signing.outputs.macos == 'true'
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: joinery-desktop-macos-arm64
+          path: out/release
+      - name: Sign with Developer ID, notarize and staple
+        env:
+          APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
+          APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: python3 release/platform_sign.py macos "out/release/Joinery-$VERSION-macos-arm64.zip"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joinery-signed-macos-arm64
+          path: out/release/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+  windows-sign:
+    needs: [version, checks, native, signing]
+    if: needs.signing.outputs.windows != 'none'
+    runs-on: windows-2025
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: joinery-desktop-windows-x86_64
+          path: out/release
+      - name: Unpack the editor executables
+        shell: pwsh
+        run: |
+          python -c "import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall('out/unpacked')" "out/release/Joinery-$env:VERSION-windows-x86_64.zip"
+          Get-ChildItem out\unpacked\joinery\bin -Filter 'godot*.exe' | ForEach-Object { $_.FullName } | Set-Content out\to-sign.txt
+          Get-Content out\to-sign.txt
+      - name: Sign with Azure Trusted Signing
+        if: needs.signing.outputs.windows == 'azure'
+        uses: azure/trusted-signing-action@c7ab2a863ab5f9a846ddb8265964877ef296ee82 # v2.0.0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_SIGNING_ENDPOINT }}
+          signing-account-name: ${{ secrets.AZURE_SIGNING_ACCOUNT }}
+          certificate-profile-name: ${{ secrets.AZURE_CERT_PROFILE }}
+          files-folder: ${{ github.workspace }}\out\unpacked\joinery\bin
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+      - name: Sign with a code signing certificate
+        if: needs.signing.outputs.windows == 'signtool'
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PFX: ${{ secrets.WINDOWS_CERT_PFX }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'joinery-signing.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX))
+          try {
+            $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe |
+              Where-Object { $_.FullName -match '\\x64\\' } | Sort-Object FullName -Descending | Select-Object -First 1
+            $files = Get-Content out\to-sign.txt
+            & $signtool.FullName sign /f $pfx /p $env:WINDOWS_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 $files
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          } finally { Remove-Item -Force $pfx }
+      - name: Check the signatures and put the executables back
+        shell: pwsh
+        run: |
+          foreach ($file in Get-Content out\to-sign.txt) {
+            $signature = Get-AuthenticodeSignature $file
+            if ($signature.Status -ne 'Valid') { throw "$file is not validly signed: $($signature.Status)" }
+          }
+          python release/platform_sign.py windows "out/release/Joinery-$env:VERSION-windows-x86_64.zip" --signed-by out/unpacked
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: joinery-signed-windows-x86_64
+          path: out/release/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+  publish:
+    needs: [version, checks, native, signing, macos-sign, windows-sign]
+    # Platform signing is skipped without its accounts; a skipped job is fine, a failed one is not.
+    if: >-
+      !cancelled() && github.event_name == 'push' && github.ref_type == 'tag'
+      && needs.checks.result == 'success' && needs.native.result == 'success'
+      && needs.signing.result == 'success'
+      && needs.macos-sign.result != 'failure' && needs.windows-sign.result != 'failure'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
     permissions:
       contents: write
+      # Keyless Sigstore signing and GitHub build attestations use the job's OIDC identity.
+      id-token: write
+      attestations: write
     env:
       VERSION: ${{ needs.version.outputs.version }}
       PRERELEASE: ${{ needs.version.outputs.prerelease }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: astral-sh/setup-uv@d0cc045d04ccac9d8b7881df0226f9e82c39688e # v6.8.0
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           pattern: joinery-desktop-*
+          merge-multiple: true
+          path: out/release
+      - name: Use the platform-signed archives where they were made
+        if: needs.macos-sign.result == 'success' || needs.windows-sign.result == 'success'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: joinery-signed-*
           merge-multiple: true
           path: out/release
       - name: Verify complete candidate set and archive digests
@@ -87,12 +226,32 @@ jobs:
           test "$(find . -maxdepth 1 -name '*.sha256' | wc -l)" -eq 3
           test "$(find . -maxdepth 1 -type f | wc -l)" -eq 6
           sha256sum --check ./*.sha256
+      - name: Sign every archive with Sigstore
+        # sigstore-python, pinned in uv.lock, signs with this job's GitHub identity
+        # (release.yml at this tag) and writes <archive>.sigstore.json beside each;
+        # joinery verify then checks them exactly as the updater will.
+        run: |
+          uv sync --frozen --python 3.12
+          uv run --frozen sigstore sign out/release/Joinery-*.zip out/release/Joinery-*.tar.gz
+          for archive in out/release/Joinery-*.zip out/release/Joinery-*.tar.gz; do
+            uv run --frozen joinery verify "$archive"
+          done
+          test "$(find out/release -maxdepth 1 -name '*.sigstore.json' | wc -l)" -eq 3
+      - name: Attest the build provenance on GitHub
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            out/release/Joinery-*.zip
+            out/release/Joinery-*.tar.gz
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
+          MACOS_SIGNED: ${{ needs.macos-sign.result == 'success' }}
+          WINDOWS_SIGNING: ${{ needs.windows-sign.result == 'success' && needs.signing.outputs.windows || 'none' }}
         run: |
           cp "docs/releases/$VERSION.md" "$RUNNER_TEMP/release-notes.md"
+          python3 release/platform_sign.py notes --macos "$MACOS_SIGNED" --windows "$WINDOWS_SIGNING" >> "$RUNNER_TEMP/release-notes.md"
           printf '\nBuild logs and native screenshots: %s/%s/actions/runs/%s\n' "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID" >> "$RUNNER_TEMP/release-notes.md"
           flags=()
           if [ "$PRERELEASE" = true ]; then
