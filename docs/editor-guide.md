@@ -640,8 +640,8 @@ scene, so it joins the timeline when you save it. Switch it all off with
   Godot's export templates; if they aren't on your computer the page says how
   big they are and offers **Download and build**. Nothing downloads otherwise.
 - **Store media.** **Make media** plays a seeded run of the game and keeps 4
-  to 8 screenshots of different moments, records a 30-second trailer with
-  Godot's Movie Maker (a title card and an end card with the game's name;
+  to 8 screenshots of different moments at 1920 × 1080 (Steam's minimum),
+  records a 30-second 1920 × 1080 trailer with Godot's Movie Maker (a title card and an end card with the game's name;
   the game's own sound only if all of it is tool-made, never added music) and
   composes a 630 × 500 cover in Krita. Everything is in `share/media/`;
   **Remake** plays a new seed. It needs Docker for ffmpeg and Krita.

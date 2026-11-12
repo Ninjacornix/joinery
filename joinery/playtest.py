@@ -177,7 +177,11 @@ def _env(out: Path, extra: dict[str, str]) -> dict[str, str]:
 
 
 def _bot_args(
-    options: Options, out: Path, *, shots: list[int] | None = None
+    options: Options,
+    out: Path,
+    *,
+    shots: list[int] | None = None,
+    shot_width: int | None = None,
 ) -> list[str]:
     args = [
         f"--playtest-out={out}",
@@ -205,6 +209,8 @@ def _bot_args(
         args.append("--reach=" + ",".join(places))
     if shots:
         args.append("--shots=" + ",".join(str(f) for f in shots))
+        if shot_width is not None:
+            args.append(f"--shot-width={shot_width}")
     if options.route is not None:
         args.append(f"--route={options.route}")
     if options.probe:
@@ -403,8 +409,13 @@ def replay_shots(
     shots_dir: Path,
     window: tuple[Path, dict[str, str]],
     resolution: str = "960x540",
+    full_size: bool = False,
 ) -> dict[int, Path]:
-    """Replay `options.seed` in a window and save a picture at each frame (60 a second)."""
+    """Replay `options.seed` in a window and save a picture at each frame (60 a second).
+
+    The pictures are the bot's small report size unless `full_size`, which keeps each
+    frame as the window rendered it (store screenshots).
+    """
     binary, extra = window
     project = options.project.resolve()
     shots_dir.mkdir(parents=True, exist_ok=True)
@@ -431,7 +442,9 @@ def replay_shots(
         "--script",
         str(BOT),
         "--",
-        *_bot_args(replay, shots_dir, shots=frames),
+        *_bot_args(
+            replay, shots_dir, shots=frames, shot_width=0 if full_size else None
+        ),
     ]
     env = _env(shots_dir, {**options.extra_env, **extra})
     _play(command, env, replay.seconds * 6 + 120, None, replay.seconds, None)

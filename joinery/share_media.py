@@ -5,11 +5,13 @@ seeded playtester bot (ADR 0038):
 
 * **Screenshots** (4 to 8): a headless run finds the notable moments; a
   windowed replay of the same seed (``JOINERY_BACKGROUND=1``, never takes
-  focus) saves 1280x720 frames at those moments and at even steps; the worker's
-  ffmpeg shrinks each to a small grey grid, and the most different frames are
-  kept.
+  focus) saves full 1920x1080 frames at those moments and at even steps (Steam
+  asks for store screenshots of at least 1920x1080); the worker's ffmpeg shrinks
+  each to a small grey grid, and the most different frames are kept. A frame
+  smaller than that (a window the screen cut down) is kept as it is, never
+  enlarged, and the result says so.
 * **Trailer** (20 to 40 s): Godot's Movie Maker records a seeded bot run at a
-  fixed 30 fps; ffmpeg in the offline creative worker adds a title card and an
+  fixed 30 fps and 1920x1080; ffmpeg in the offline creative worker adds a title card and an
   end card with the game's name and encodes WebM, MP4 and a small Ogg Theora
   preview for the editor. The game's own sound is kept only when every audio
   file in the project is tool-made (``joinery.lock``); otherwise it is silent.
@@ -50,7 +52,11 @@ COVER_SCRIPT = RECIPES / "cover.py"
 POLICY = ROOT / "policy" / "share.toml"
 KINDS = ("screenshots", "trailer", "cover")
 SHOT_SECONDS = 40.0
-SHOT_RESOLUTION = "1280x720"
+#: Store screenshots and the trailer: Steam asks for at least 1920x1080.
+STORE_SIZE = (1920, 1080)
+SHOT_RESOLUTION = f"{STORE_SIZE[0]}x{STORE_SIZE[1]}"
+#: The editor's small trailer preview.
+PREVIEW_SIZE = (640, 360)
 MIN_SHOTS = 4
 MAX_SHOTS = 8
 #: A thumbnail this close (mean grey difference, 0-255) to a kept one is the same view.
@@ -103,6 +109,31 @@ async def _worker(project: Path, script: str, timeout: int = 1200) -> str:
     if not got.ok:
         raise MediaError("The creative worker failed: " + output.strip()[-400:])
     return output
+
+
+def png_size(path: Path) -> tuple[int, int]:
+    """A PNG's width and height from its header; (0, 0) when it isn't one."""
+    try:
+        with path.open("rb") as f:
+            head = f.read(24)
+    except OSError:
+        return 0, 0
+    if len(head) < 24 or head[:8] != b"\x89PNG\r\n\x1a\n" or head[12:16] != b"IHDR":
+        return 0, 0
+    return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
+
+
+def store_size_note(sizes: list[tuple[int, int]]) -> str:
+    """Empty when every screenshot is at least STORE_SIZE; else what to do about it."""
+    small = [s for s in sizes if s[0] < STORE_SIZE[0] or s[1] < STORE_SIZE[1]]
+    if not small:
+        return ""
+    width, height = min(small)
+    return (
+        f"The screenshots are {width}×{height}; Steam asks for at least "
+        f"{STORE_SIZE[0]}×{STORE_SIZE[1]}. Make them again on a screen that fits a "
+        f"{STORE_SIZE[0]}×{STORE_SIZE[1]} window (Remake, or --only screenshots)."
+    )
 
 
 def _recipe(project: Path) -> dict[str, Any]:
@@ -229,6 +260,7 @@ async def screenshots(project: Path, seed: int, say: Progress) -> dict[str, Any]
         project / WORK / "shots",
         _window(),
         SHOT_RESOLUTION,
+        full_size=True,
     )
     taken = {f: p for f, p in taken.items() if p.is_file()}
     say("Choosing varied moments")
@@ -247,14 +279,21 @@ async def screenshots(project: Path, seed: int, say: Progress) -> dict[str, Any]
         kept.append(target.relative_to(project).as_posix())
     # The cover shows the most detailed view: more of the game, less wall.
     busiest = max(chosen, key=lambda f: detail(thumbs[f]))
-    return {
+    sizes = [png_size(project / path) for path in kept]
+    result: dict[str, Any] = {
         "seed": seed,
         "seconds": SHOT_SECONDS,
         "candidates": frames,
         "frames": chosen,
         "files": kept,
+        "size": list(min(sizes)),
         "cover_from": kept[chosen.index(busiest)],
     }
+    note = store_size_note(sizes)
+    if note:
+        result["warning"] = note
+        say(note)
+    return result
 
 
 # --- Trailer --------------------------------------------------------------------------
@@ -274,23 +313,25 @@ def game_audio(project: Path) -> tuple[bool, str]:
 def filter_graph(game_seconds: float, audio: bool, font: str) -> str:
     """The ffmpeg graph: title card, the game, end card; split into three encodes."""
     g = f"{game_seconds:g}"
+    width, height = STORE_SIZE
+    small_w, small_h = PREVIEW_SIZE
     card = (
         "drawtext=fontfile={font}:textfile=/work/{text}:fontcolor=white:fontsize={size}"
         ":x=(w-text_w)/2:y=(h-text_h)/2"
     )
     parts = [
         (
-            f"[1:v]{card.format(font=font, text=(WORK / 'title.txt').as_posix(), size=72)},"
+            f"[1:v]{card.format(font=font, text=(WORK / 'title.txt').as_posix(), size=108)},"
             f"fade=t=in:st=0:d=0.6,fade=t=out:st={TITLE_SECONDS - 0.6:g}:d=0.6,"
             "format=yuv420p,setsar=1[t]"
         ),
         (
-            f"[0:v]trim=start=1:duration={g},setpts=PTS-STARTPTS,scale=1280:720,"
+            f"[0:v]trim=start=1:duration={g},setpts=PTS-STARTPTS,scale={width}:{height},"
             f"fps={TRAILER_FPS},format=yuv420p,setsar=1,fade=t=in:st=0:d=0.5,"
             f"fade=t=out:st={game_seconds - 0.5:g}:d=0.5[g]"
         ),
         (
-            f"[2:v]{card.format(font=font, text=(WORK / 'end.txt').as_posix(), size=60)},"
+            f"[2:v]{card.format(font=font, text=(WORK / 'end.txt').as_posix(), size=90)},"
             "fade=t=in:st=0:d=0.5,format=yuv420p,setsar=1[e]"
         ),
     ]
@@ -309,7 +350,7 @@ def filter_graph(game_seconds: float, audio: bool, font: str) -> str:
     else:
         parts.append("[t][g][e]concat=n=3:v=1:a=0[v]")
     parts.append("[v]split=3[v1][v2][v3s]")
-    parts.append("[v3s]scale=640:360[v3]")
+    parts.append(f"[v3s]scale={small_w}:{small_h}[v3]")
     return ";".join(parts)
 
 
@@ -321,7 +362,7 @@ def encode_argv(game_seconds: float, audio: bool, font: str) -> list[str]:
             "-f",
             "lavfi",
             "-i",
-            f"color=c=0x111317:s=1280x720:r={TRAILER_FPS}:d={seconds:g}",
+            f"color=c=0x111317:s={SHOT_RESOLUTION}:r={TRAILER_FPS}:d={seconds:g}",
         ]
     if audio:
         for seconds in (TITLE_SECONDS, END_SECONDS):
@@ -368,7 +409,7 @@ async def trailer(project: Path, seed: int, say: Progress) -> dict[str, Any]:
     say("Recording a seeded run with Movie Maker")
     command = [
         str(binary), "--path", str(project), "--write-movie", str(movie),
-        "--fixed-fps", str(TRAILER_FPS), "--resolution", "1280x720", "--disable-vsync",
+        "--fixed-fps", str(TRAILER_FPS), "--resolution", SHOT_RESOLUTION, "--disable-vsync",
         "--script", str(playtest.BOT), "--", *playtest._bot_args(options, run_dir),
     ]  # fmt: skip
     env = playtest._env(run_dir, extra)
@@ -384,6 +425,7 @@ async def trailer(project: Path, seed: int, say: Progress) -> dict[str, Any]:
     if not movie.is_file() or movie.stat().st_size < 1024:
         raise MediaError("Movie Maker recorded nothing. Does the game start?")
     frames = _avi_frames(movie)
+    recorded = _avi_size(movie)
     game_seconds = min(TRAILER_GAME_SECONDS, frames / TRAILER_FPS - 1)
     if game_seconds < 12:
         raise MediaError("The recorded run was too short for a trailer.")
@@ -399,9 +441,11 @@ async def trailer(project: Path, seed: int, say: Progress) -> dict[str, Any]:
         project, _pin_check("ffmpeg", tools["ffmpeg"]) + " && " + _quote(argv)
     )
     movie.unlink(missing_ok=True)
-    return {
+    result: dict[str, Any] = {
         "seed": seed,
         "fps": TRAILER_FPS,
+        "size": list(STORE_SIZE),
+        "recorded_size": list(recorded),
         "seconds": round(TITLE_SECONDS + game_seconds + END_SECONDS, 2),
         "audio": audio,
         "sound": sound,
@@ -410,16 +454,39 @@ async def trailer(project: Path, seed: int, say: Progress) -> dict[str, Any]:
         "files": [(MEDIA / n).as_posix() for n in ("trailer.webm", "trailer.mp4")],
         "preview": (MEDIA / "trailer.ogv").as_posix(),
     }
+    if recorded[0] < STORE_SIZE[0] or recorded[1] < STORE_SIZE[1]:
+        result["warning"] = (
+            f"The run was recorded at {recorded[0]}×{recorded[1]} and enlarged to "
+            f"{STORE_SIZE[0]}×{STORE_SIZE[1]}, so it looks soft. Make it again on a "
+            f"screen that fits a {STORE_SIZE[0]}×{STORE_SIZE[1]} window."
+        )
+        say(result["warning"])
+    return result
+
+
+def _avi_header(path: Path) -> tuple[bytes, int]:
+    with path.open("rb") as f:
+        head = f.read(128)
+    return head, head.find(b"avih")
 
 
 def _avi_frames(path: Path) -> int:
     """Frames in a Movie Maker AVI (its main header's total-frames field)."""
-    with path.open("rb") as f:
-        head = f.read(64)
-    at = head.find(b"avih")
+    head, at = _avi_header(path)
     if at < 0:
         return 0
     return int.from_bytes(head[at + 24 : at + 28], "little")
+
+
+def _avi_size(path: Path) -> tuple[int, int]:
+    """Width and height of a Movie Maker AVI (its main header's last fields)."""
+    head, at = _avi_header(path)
+    if at < 0 or len(head) < at + 48:
+        return 0, 0
+    return (
+        int.from_bytes(head[at + 40 : at + 44], "little"),
+        int.from_bytes(head[at + 44 : at + 48], "little"),
+    )
 
 
 # --- Cover ------------------------------------------------------------------------------

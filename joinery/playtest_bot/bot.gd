@@ -4,6 +4,7 @@ extends SceneTree
 ## Run (joinery/playtest.py does): godot --headless --path <game> --fixed-fps 60
 ##   --script <this file> -- --playtest-out=<dir> --seed=<n> --seconds=<n>
 ##   [--scene=res://…] [--softlock=<seconds>] [--focus=word,word] [--shots=f,f,…]
+##   [--shot-width=<px>]
 ##   [--route=<file>] [--probe=perf|access] [--luma] [--reach=word,word]
 ##   --settings-path=<file>
 ##
@@ -14,8 +15,10 @@ extends SceneTree
 ## menus in every language. Every second it prints a `PLAYTEST {…}` line, and it writes
 ## <out>/bot.json every few seconds and at the end, so a crash still leaves what it saw.
 ## With --shots it saves a picture at those frames instead (a windowed replay of the same
-## seed). With --route it only walks the player along a blockout's routes (bot_route.gd)
-## and reports which targets it reached. With --probe it also measures the game for
+## seed), SHOT_WIDTH wide unless --shot-width says otherwise (0 keeps the full
+## frame, for store screenshots). With --route it only walks the player along a
+## blockout's routes (bot_route.gd) and reports which targets it reached. With
+## --probe it also measures the game for
 ## `joinery perf` or `joinery access` (bot_probe.gd), its numbers under "probe" in bot.json.
 ## It maps the level as it plays (bot_cover.gd) and explores toward the parts it hasn't seen,
 ## reporting the share it reached under "coverage" and a map of it as <out>/coverage.png.
@@ -40,6 +43,8 @@ var seconds: float = 60.0
 var scene_path: String = ""
 var softlock_seconds: float = 15.0
 var shots: Dictionary = {}
+## Width of a saved picture in pixels; 0 keeps the frame as rendered.
+var shot_width: int = SHOT_WIDTH
 var focus: PackedStringArray = PackedStringArray()
 ## Places to reach (--reach): words naming nodes.
 var reach: PackedStringArray = PackedStringArray()
@@ -660,8 +665,9 @@ func _shot(name: String) -> void:
 	var image := root.get_texture().get_image()
 	if image == null or image.is_empty():
 		return
-	var height := int(image.get_height() * SHOT_WIDTH / float(maxi(image.get_width(), 1)))
-	image.resize(SHOT_WIDTH, maxi(height, 1), Image.INTERPOLATE_BILINEAR)
+	if shot_width > 0 and image.get_width() != shot_width:
+		var height := int(image.get_height() * shot_width / float(maxi(image.get_width(), 1)))
+		image.resize(shot_width, maxi(height, 1), Image.INTERPOLATE_BILINEAR)
 	image.save_png(out_dir.path_join(name))
 
 
@@ -756,6 +762,8 @@ func _parse_args() -> void:
 			probe_kind = value
 		elif arg == "--luma":
 			luma = true
+		elif arg.begins_with("--shot-width="):
+			shot_width = maxi(value.to_int(), 0)
 		elif arg.begins_with("--shots="):
 			for part: String in value.split(",", false):
 				shots[part.to_int()] = "shot_%06d.png" % part.to_int()

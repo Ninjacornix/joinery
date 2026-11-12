@@ -511,6 +511,14 @@ func _render_steam() -> void:
 				UI.label("%s: %s" % [entry.get("label", ""), problem], "JoineryCaption", true)
 			)
 			_steam_problems.add_child(row)
+	# Steam asks for store screenshots of at least 1920 × 1080.
+	var small_shots := str(steam.get("screenshots_warning", ""))
+	if ready and not small_shots.is_empty():
+		var shots_row := HBoxContainer.new()
+		shots_row.theme_type_variation = "JoineryRowTight"
+		shots_row.add_child(UI.status_icon("warning"))
+		shots_row.add_child(UI.label("Screenshots: " + small_shots, "JoineryCaption", true))
+		_steam_problems.add_child(shots_row)
 	_steam_problems.visible = _steam_problems.get_child_count() > 0
 
 

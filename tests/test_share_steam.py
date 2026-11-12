@@ -40,7 +40,9 @@ def png(path: Path, width: int, height: int, rgba: tuple[int, int, int, int]) ->
     )
 
 
-def project_with_shots(root: Path, name: str = TITLE) -> Path:
+def project_with_shots(
+    root: Path, name: str = TITLE, size: tuple[int, int] = (1280, 720)
+) -> Path:
     project = root / "harbour"
     project.mkdir()
     (project / "project.godot").write_text(
@@ -49,7 +51,7 @@ def project_with_shots(root: Path, name: str = TITLE) -> Path:
     files = []
     for index in range(1, 5):
         shot = project / f"share/media/screenshots/shot-{index:02d}.png"
-        png(shot, 1280, 720, (40 + index * 10, 60, 80, 255))
+        png(shot, size[0], size[1], (40 + index * 10, 60, 80, 255))
         files.append(shot.relative_to(project).as_posix())
     recipe = {
         "version": 1,
@@ -208,6 +210,14 @@ def test_an_opaque_logo_a_tiny_title_and_soft_art_are_reported(tmp_path: Path) -
     assert any("A shorter name" in p for p in results["small"]["problems"])
     assert results["library_hero"]["status"] == "warning"
     assert "enlarged 3.0×" in results["library_hero"]["problems"][0]
+    assert "at least 1920×1080" in results["library_hero"]["problems"][0]
+    # 1920x1080 store screenshots fill the 3840 px hero at exactly 2x: not soft.
+    sharp = {
+        r["id"]: r
+        for r in share_steam.check(tmp_path, policy, items, {"library_hero": 2.0})
+    }
+    assert sharp["library_hero"]["facts"]["upscaled"] == 2.0
+    assert not any("enlarged" in p for p in sharp["library_hero"]["problems"])
 
 
 def test_png_alpha_corners_reads_filtered_rows(tmp_path: Path) -> None:
@@ -258,9 +268,37 @@ def test_make_records_a_replayable_recipe_and_status_lists_the_set(
     assert "media/steam/*.png" in (project / "share/.gitignore").read_text()
     assert not (project / "share/.work/steam").exists()
 
+    assert "1280×720" in entry["screenshots"]["warning"]
     listed = share.status(project)["steam"]
     assert listed["ready"] and len(listed["images"]) == 7
+    assert "at least 1920×1080" in listed["screenshots_warning"]
     assert all(i["path"] and i["status"] in {"ok", "warning"} for i in listed["images"])
+
+
+def test_1920x1080_screenshots_make_a_set_with_no_soft_warning(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = project_with_shots(tmp_path, size=(1920, 1080))
+
+    async def worker(where: Path, script: str, timeout: int = 1200) -> str:
+        items = share_steam.plan(
+            share_steam.load_policy(),
+            [f"share/media/screenshots/shot-0{i}.png" for i in range(1, 5)],
+            "share/media/screenshots/shot-03.png",
+            TITLE,
+            "DejaVu Sans",
+        )
+        _render(where, items, plate=20)
+        for item in items:
+            (where / item["kra"]).write_bytes(b"kra")
+        return ""
+
+    monkeypatch.setattr(share_steam, "_worker", worker)
+    entry = asyncio.run(share_steam.make(project))
+    statuses = {c["id"]: c["status"] for c in entry["checks"]}
+    assert set(statuses.values()) == {"ok"}, entry["checks"]
+    assert entry["screenshots"] == {"size": [1920, 1080], "warning": ""}
+    assert share.status(project)["steam"]["screenshots_warning"] == ""
 
 
 def test_steam_art_needs_screenshots_first(tmp_path: Path) -> None:

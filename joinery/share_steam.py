@@ -45,13 +45,15 @@ from joinery.share_media import (
     _recipe,
     _worker,
     pins,
+    store_size_note,
 )
 
 POLICY = ROOT / "policy" / "steam_art.toml"
 STEAM = MEDIA / "steam"
 SCRIPT = RECIPES / "steam_art.py"
 PLATES = WORK / "steam"
-#: A source upscaled more than this is soft on Steam; the check says so.
+#: A source upscaled more than this is soft on Steam; the check says so. The
+#: 1920x1080 store screenshots fill the 3840 px library hero at exactly 2x.
 UPSCALE_WARN = 2.0
 #: Share of the image height one line of title may take, per asset.
 TITLE_HEIGHT = {
@@ -540,7 +542,8 @@ def check(
         if scale > UPSCALE_WARN:
             notes.append(
                 f"The screenshot is enlarged {scale:.1f}×, so it looks soft; "
-                "larger screenshots would be sharper."
+                "store screenshots of at least 1920×1080 would be sharper "
+                "(make them again: Remake, or --only screenshots)."
             )
         status = "failed" if problems else ("warning" if notes else "ok")
         results.append(
@@ -618,7 +621,12 @@ async def make(project: Path, progress: Progress | None = None) -> dict[str, Any
     )
     say("Checking sizes, safe areas and the title")
     checks = check(project, policy, items, scales)
+    sizes = [_shot_size(project / s) for s in shots]
     entry: dict[str, Any] = {
+        "screenshots": {
+            "size": list(min(sizes)) if sizes else [],
+            "warning": store_size_note(sizes),
+        },
         "policy": {
             "checked": policy.checked,
             "note": policy.note,
@@ -676,9 +684,15 @@ def listing(project: Path) -> dict[str, Any]:
             }
         )
     shots = recipe.get("screenshots", {})
+    shots = shots if isinstance(shots, dict) else {}
+    files = [project / str(s) for s in shots.get("files", [])]
     return {
         "note": policy.note,
         "checked": policy.checked,
-        "ready": bool(isinstance(shots, dict) and shots.get("files")),
+        "ready": bool(shots.get("files")),
         "images": images,
+        # Steam asks for store screenshots of at least 1920x1080.
+        "screenshots_warning": store_size_note(
+            [_shot_size(f) for f in files if f.is_file()]
+        ),
     }

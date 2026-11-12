@@ -122,7 +122,7 @@ the offline worker, the way the itch.io cover is made:
    the safe area, at least the policy's height where Steam shows the image
    smallest, and in WCAG contrast with the art behind it (measured on Krita's
    composite before the title goes on). A screenshot enlarged more than 2× is a
-   warning: the 1280×720 screenshots make a soft 3840 px hero. A failed check
+   warning (store screenshots below 1920×1080 make a soft 3840 px hero). A failed check
    fails the command; the Share tab names each problem under the set.
 4. **Recipes as for the cover**: `share/recipes/steam_art.py` is the Krita
    script, `share/media/steam/*.kra` the native sources, and `media.json`
@@ -130,3 +130,23 @@ the offline worker, the way the itch.io cover is made:
    `steam_art`. The rendered PNGs are ignored by git. Like all store media they
    have no `joinery.lock` entry. Nothing is uploaded: the user takes the files
    to Steamworks.
+
+## Addendum: store media at 1920×1080 (2026-11-12)
+
+Steam asks for store screenshots of at least 1920×1080, and the library hero
+(3840×1240) is a crop of one: the 1280×720 screenshots were enlarged 3× for it.
+`joinery share media` now captures at 1920×1080:
+
+- **Screenshots**: the windowed replay runs at 1920×1080 and the bot keeps each
+  frame as rendered (`--shot-width=0`; its own report pictures stay 480 px
+  wide). A window the screen cuts down is never enlarged to make up the size:
+  the result records the real size and a warning, and the Share tab's Steam
+  group repeats it until the screenshots are made again.
+- **Trailer**: Movie Maker records at 1920×1080 and the WebM and MP4 are
+  encoded at 1920×1080 with the title cards scaled to match; the editor's Ogg
+  preview stays 640×360. A recording that came out smaller is reported as soft.
+- **Steam art**: 1920×1080 screenshots fill the hero at exactly 2×, inside the
+  soft-image limit, so a set made from them passes with no warning. The
+  warning now says what to do: make the screenshots again at 1920×1080.
+- **itch.io** is unchanged: the cover is still cropped to 630×500 from the most
+  detailed screenshot, and the screenshots themselves are the same files.

@@ -399,6 +399,111 @@ def test_encode_argv_has_three_outputs_and_no_audio_when_silent() -> None:
     assert 20 <= share_media.TITLE_SECONDS + 26 + share_media.END_SECONDS <= 40
 
 
+def test_store_media_is_1920x1080_and_the_preview_stays_small() -> None:
+    assert share_media.STORE_SIZE == (1920, 1080)
+    assert share_media.SHOT_RESOLUTION == "1920x1080"
+    argv = share_media.encode_argv(26.0, False, "/fonts/f.ttf")
+    graph = argv[argv.index("-filter_complex") + 1]
+    assert "scale=1920:1080" in graph and "scale=640:360[v3]" in graph
+    assert "scale=1280" not in graph
+    cards = [a for a in argv if a.startswith("color=")]
+    assert len(cards) == 2 and all("s=1920x1080" in c for c in cards)
+
+
+def test_small_screenshots_are_said_never_enlarged(tmp_path: Path) -> None:
+    assert share_media.store_size_note([(1920, 1080), (2560, 1440)]) == ""
+    note = share_media.store_size_note([(1920, 1080), (1280, 720)])
+    assert "1280×720" in note and "at least 1920×1080" in note
+    shot = tmp_path / "shot.png"
+    shot.write_bytes(
+        b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+        + (1920).to_bytes(4, "big")
+        + (1080).to_bytes(4, "big")
+        + b"\x08\x06\x00\x00\x00"
+    )
+    assert share_media.png_size(shot) == (1920, 1080)
+    assert share_media.png_size(tmp_path / "missing.png") == (0, 0)
+
+
+def test_the_trailer_recording_size_is_read_from_its_header(tmp_path: Path) -> None:
+    fields = [33333, 0, 0, 0, 900, 0, 1, 0, 1920, 1080]
+    header = b"".join(v.to_bytes(4, "little") for v in fields)
+    movie = tmp_path / "trailer.avi"
+    movie.write_bytes(
+        b"RIFF\x00\x00\x00\x00AVI LIST\x00\x00\x00\x00hdrlavih"
+        + (56).to_bytes(4, "little")
+        + header
+        + bytes(16)
+    )
+    assert share_media._avi_frames(movie) == 900
+    assert share_media._avi_size(movie) == (1920, 1080)
+
+
+def test_store_screenshots_are_replayed_at_full_size(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project = tmp_path / "game"
+    project.mkdir()
+    seen: dict[str, Any] = {}
+
+    def fake_run(options: playtest.Options) -> dict[str, Any]:
+        return {"played_seconds": 40.0, "moments": []}
+
+    def fake_shots(
+        options: playtest.Options,
+        frames: list[int],
+        out: Path,
+        window: Any,
+        resolution: str = "",
+        full_size: bool = False,
+    ) -> dict[int, Path]:
+        seen.update(resolution=resolution, full_size=full_size)
+        out.mkdir(parents=True, exist_ok=True)
+        found = {}
+        for frame in frames:
+            path = out / f"shot_{frame:06d}.png"
+            path.write_bytes(
+                b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+                + (1280).to_bytes(4, "big")
+                + (720).to_bytes(4, "big")
+                + b"\x08\x06\x00\x00\x00"
+            )
+            found[frame] = path
+        return found
+
+    async def fake_thumbs(where: Path, shots: dict[int, Path]) -> dict[int, bytes]:
+        width, height = share_media.THUMB
+        return {
+            f: bytes(
+                ((x * 7 + y * 13 + i * 50) % 256)
+                for y in range(height)
+                for x in range(width)
+            )
+            for i, f in enumerate(shots)
+        }
+
+    monkeypatch.setattr(playtest, "run", fake_run)
+    monkeypatch.setattr(playtest, "replay_shots", fake_shots)
+    monkeypatch.setattr(share_media, "_window", lambda: (Path("/bin/godot"), {}))
+    monkeypatch.setattr(share_media, "_thumbnails", fake_thumbs)
+    said: list[str] = []
+    import asyncio
+
+    got = asyncio.run(share_media.screenshots(project, 5, said.append))
+    assert seen == {"resolution": "1920x1080", "full_size": True}
+    # A window the screen cut down is kept as it is and named, not enlarged.
+    assert got["size"] == [1280, 720]
+    assert "at least 1920×1080" in got["warning"] and got["warning"] in said
+
+
+def test_bot_keeps_full_frames_only_when_asked(tmp_path: Path) -> None:
+    options = playtest.Options(project=tmp_path)
+    small = playtest._bot_args(options, tmp_path / "out", shots=[60])
+    assert not any(a.startswith("--shot-width") for a in small)
+    full = playtest._bot_args(options, tmp_path / "out", shots=[60], shot_width=0)
+    assert "--shot-width=0" in full
+
+
 def test_cover_script_escapes_the_title() -> None:
     script = share_media.cover_script(
         "share/.work/cover-source.png", "Moss & <Rain>", "DejaVu Sans"
