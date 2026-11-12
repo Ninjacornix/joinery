@@ -1,0 +1,17 @@
+[gd_resource type="Resource" script_class="BehaviourTree" format=3 uid="uid://b1owc4k6mvuu4"]
+
+[ext_resource type="Script" uid="uid://c0yyi3egmr7im" path="res://features/behaviour/behaviour_tree.gd" id="1_tree"]
+
+[resource]
+script = ExtResource("1_tree")
+source = "# Guard: hits when close, chases what it sees, otherwise patrols.
+selector
+	sequence
+		condition target_near
+		cooldown 1.2
+			action attack
+	sequence
+		condition sees_target
+		action chase
+	action patrol
+"

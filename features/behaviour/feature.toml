@@ -1,0 +1,23 @@
+# Enemy behaviour trees, in our own small GDScript runtime (MIT, see GUIDE.md):
+# sequence, selector, invert, cooldown, wait, conditions and actions, and a
+# blackboard. Trees are .tres files whose `source` is a few indented lines of
+# text, so they diff well and an agent edits them like code.
+#
+# - `BehaviourAgent`: a node added under an enemy (CharacterBody2D/3D or any
+#   Node2D/3D) that runs a tree: built-in patrol, chase, flee, attack, wander,
+#   idle, and conditions for sight, range, health and chance; anything else
+#   calls the enemy's own `bt_<name>()`.
+# - Ready trees in `features/behaviour/trees/`: guard, chaser, coward, wanderer.
+# - The playtester reads each agent's running branch, statuses and blackboard.
+#
+# Alternatives the user may install instead (not shipped, not needed): Beehave
+# (MIT, GDScript addon) and LimboAI (MIT, C++ GDExtension/module).
+id = "behaviour"
+name = "Enemy behaviour"
+summary = "Behaviour trees for enemies in 2D and 3D: patrol, chase, flee, attack and wander, written as short text the agent edits."
+version = 1
+requires = []
+conflicts = []
+enhances = []
+blueprints = ["*"]
+extra_roots = []

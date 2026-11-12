@@ -1,0 +1,23 @@
+[gd_resource type="Resource" script_class="BehaviourTree" format=3 uid="uid://r6w3sokjpgx"]
+
+[ext_resource type="Script" uid="uid://c0yyi3egmr7im" path="res://features/behaviour/behaviour_tree.gd" id="1_tree"]
+
+[resource]
+script = ExtResource("1_tree")
+source = "# Coward: fights when healthy, runs when hurt, wanders when alone.
+selector
+	sequence
+		condition health_below 0.5
+		condition sees_target
+		action flee
+	sequence
+		condition target_near
+		cooldown 1.5
+			action attack
+	sequence
+		condition sees_target
+		action chase
+	sequence
+		action wander
+		wait 1.0
+"

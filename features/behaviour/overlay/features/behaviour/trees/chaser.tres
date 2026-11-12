@@ -1,0 +1,15 @@
+[gd_resource type="Resource" script_class="BehaviourTree" format=3 uid="uid://dcxpffvy3e2ax"]
+
+[ext_resource type="Script" uid="uid://c0yyi3egmr7im" path="res://features/behaviour/behaviour_tree.gd" id="1_tree"]
+
+[resource]
+script = ExtResource("1_tree")
+source = "# Chaser: always after the nearest player, hits when it reaches them.
+selector
+	sequence
+		condition target_near
+		cooldown 1.0
+			action attack
+	action chase
+	action wander
+"

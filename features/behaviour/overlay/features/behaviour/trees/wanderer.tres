@@ -1,0 +1,11 @@
+[gd_resource type="Resource" script_class="BehaviourTree" format=3 uid="uid://cd2tm12t1xwpn"]
+
+[ext_resource type="Script" uid="uid://c0yyi3egmr7im" path="res://features/behaviour/behaviour_tree.gd" id="1_tree"]
+
+[resource]
+script = ExtResource("1_tree")
+source = "# Wanderer: roams around home and pauses; never attacks.
+sequence
+	action wander
+	wait 1.5
+"
