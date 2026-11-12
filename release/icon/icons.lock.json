@@ -1,0 +1,32 @@
+{
+  "origin": "tool-created",
+  "recipe": {
+    "script": "release/icon/build_icons.py",
+    "tool": "rsvg-convert 2.60.0",
+    "sources": {
+      "joinery.svg": "c943ce321c7e200fa0dac6cf365cd018a524b750fcd31d12c5fa21cd3729193c",
+      "joinery-small.svg": "8d2dba434f5019f2ccaca5bcb3760a36cdc6c85ebb93248568bd283e7631c374",
+      "joinery-mono.svg": "80dc483fedeb99069b9db7b1fd34def32d11d72f5e1298bf4ea46073ee0e1d9e"
+    }
+  },
+  "outputs": {
+    "dist/joinery-128.png": "3e61650f2eb2665ff1b7c8d74515d669eeddb3768ba4b1a6b483092d0f2f25db",
+    "dist/joinery-16.png": "8c65fa9634a58c0fd2c8a3054f43c3f244daa9ed8ce38b5d1e0c7a743aa23e9f",
+    "dist/joinery-256.png": "f3a6575b3d0da6733235010cf97a7cec0a87849a594ba6e4dbd3b40daf515aca",
+    "dist/joinery-32.png": "26d88e436aa7c4be34f84a0130f8cb27025ce5704d089325df76964cf198e657",
+    "dist/joinery-48.png": "f82d58bf97a5e0fd25e872487adfcb69abd2ce4f5c42acc75087734a002d87c6",
+    "dist/joinery-512.png": "00aad37964c97045dc2b31f7543dbac7ddd70f55efec45e4e78351ffad295057",
+    "dist/joinery-64.png": "37f00b081ac0dd985382178342f34358cc38c8050fb3b8029a8917ed523412cc",
+    "dist/joinery-mono-16.png": "a57e9bab1a2f0012dc80917beee0825ee4fe4f5d20a4ca290e31cb4f068d7ce3",
+    "dist/joinery-mono-32.png": "29a3a59b450ee997f14a71b9cb0969e5ac91bbb51905bc78995c257bae524f67",
+    "dist/joinery-mono-64.png": "256df34bef2ffcb836318a76da8072d37624d207352ac8a9fe68361ba23cd38c",
+    "dist/joinery.desktop": "79f613c10b6826c2b8149385fd577bb411445608367cd08ffda1a4138c913b62",
+    "dist/joinery.icns": "8050021cef36fe06268ae3715b53d398e21a4a24c26e2f42a5895d983404f45d",
+    "dist/joinery.ico": "874faf8e76dc3a276b7e42c1fda371418e6cb9771544ec376ec35bc10bfe7426",
+    "godot-src/editor/icons/JoineryLogo.svg": "52c936ef78daf2d83074073fc6ca88fc760e5e6f12d6e19272d1fc10a63e5832",
+    "godot-src/main/app_icon_editor.png": "f3a6575b3d0da6733235010cf97a7cec0a87849a594ba6e4dbd3b40daf515aca",
+    "godot-src/main/app_icon_editor_macos.png": "b53a93b3532ee1d87d104ec4d4523b9e33c088db8f69af9e5ff6de002171491a",
+    "godot-src/main/splash_editor.png": "b5c6620676302dda1aa1c78ccfd4c313e6c0f6262e5f16967707ca23d1ce828d",
+    "godot-src/platform/windows/godot.ico": "874faf8e76dc3a276b7e42c1fda371418e6cb9771544ec376ec35bc10bfe7426"
+  }
+}

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Joinery app icon: a through dovetail. The brass tail board sits in the
+       socket of the pin board below it, with a thin shadow line between them.
+       Hand-written geometry; every raster is made from this file by
+       release/icon/build_icons.py. -->
+  <rect width="1024" height="1024" rx="228" fill="#202123"/>
+  <!-- Tail board: a rail with one tail flaring 1:2.9 below it. -->
+  <path fill="#e6b66b" d="M212 240H812V440H612L682 640H342L412 440H212Z"/>
+  <!-- Pin board: the socket is the tail offset outward by 36 units. -->
+  <path fill="#b07d36" d="M212 476H361.2L291.2 676H732.8L662.8 476H812V784H212Z"/>
+</svg>

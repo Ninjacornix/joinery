@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="182 192 660 660">
+  <!-- Monochrome Joinery mark for menu bars and trays (a template image: one
+       colour on transparency). The same dovetail as joinery.svg, with the joint
+       gap widened to 56 units so it survives at 16 px. -->
+  <path fill="#000" d="M212 240H812V440H612L682 640H342L412 440H212Z"/>
+  <path fill="#000" d="M212 496H333.06L263.07 696H760.93L690.94 496H812V804H212Z"/>
+</svg>

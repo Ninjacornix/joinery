@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
+  <!-- The Joinery icon redrawn for 16 and 32 px: the same dovetail as
+       joinery.svg, on a 16-unit pixel grid so the rail, the boards and the
+       one-pixel joint line land on whole pixels. -->
+  <rect width="16" height="16" rx="3.5" fill="#202123"/>
+  <path fill="#e6b66b" d="M2 3H14V6H10L11 9H5L6 6H2Z"/>
+  <path fill="#b07d36" d="M2 7H4.67L3.67 10H12.33L11.33 7H14V13H2Z"/>
+</svg>

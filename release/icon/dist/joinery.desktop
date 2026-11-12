@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Joinery
+GenericName=Game editor
+Comment=Make games by directing the tools that make them
+Exec=Joinery %f
+Icon=joinery
+Terminal=false
+Type=Application
+Categories=Development;IDE;Graphics;
+StartupWMClass=Godot
