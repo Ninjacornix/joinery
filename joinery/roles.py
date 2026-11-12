@@ -68,7 +68,7 @@ READ_ONLY_ROLES: frozenset[str] = frozenset(
 
 #: joinery-registry tools every read-only role may call.
 REGISTRY_READS = frozenset(
-    {"discover_tools", "tool_schema", "inspect_editor", "view_editor"}
+    {"discover_tools", "tool_schema", "inspect_editor", "view_editor", "details"}
 )
 #: Tools that only one role reports through.
 REVIEW_REPORT = "report_review"
@@ -206,6 +206,7 @@ REGISTRY_TOOLS: tuple[str, ...] = (
     "edit_scene",
     "inspect_editor",
     "view_editor",
+    "details",
     "inspect_in_parallel",
     "submit_for_review",
     "precheck",

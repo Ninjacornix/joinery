@@ -53,6 +53,18 @@ class Godot(ToolModule):
         ),
     )
 
+    mcp_notes = (
+        (
+            "write_file",
+            (
+                "Joinery: to change part of a file the project has, pass patch: "
+                "[{find, replace}, …] instead of content (each find copied exactly from the "
+                "file and found once in it). Joinery applies the pairs to the staged file "
+                "and writes the result; send content only for a new file."
+            ),
+        ),
+    )
+
     def replay_argv(self, script: str) -> list[str]:
         return ["godot", "--headless", "--script", script]
 

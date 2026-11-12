@@ -100,9 +100,23 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
-    async def inspect_editor() -> dict[str, Any]:
-        """Read the current project's live editor scene, node identities, selection and unsaved scene context. Use these identities for edit_scene. Saved-file MCP tools and game_* runtime tools are different targets."""
-        return await rpc(socket, "editor_context", {})
+    async def inspect_editor(
+        node: Annotated[str, Field(max_length=300)] = "",
+    ) -> dict[str, Any]:
+        """Read the current project's live editor scene as an outline (one line per node: path, type, position, script), node identities, selection and unsaved scene context. Use these identities for edit_scene. node: a node's id, path or name to get its properties. Saved-file MCP tools and game_* runtime tools are different targets."""
+        return await rpc(socket, "editor_context", {"node": node} if node else {})
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True))
+    @tool_errors
+    async def details(
+        ref: Annotated[str, Field(max_length=20)],
+        path: Annotated[str, Field(max_length=300)] = "",
+        offset: Annotated[int, Field(ge=0)] = 0,
+    ) -> dict[str, Any]:
+        """Read more of a long tool result that came back as a summary (it has details.ref). path: one part of it, keys and list indexes joined by '/' ('content/0/text', 'problems/12'). offset: the line to start from (next_offset of the last page). Ask only for what you need."""
+        return await rpc(
+            socket, "details", {"ref": ref, "path": path, "offset": offset}
+        )
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
@@ -340,6 +354,10 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
             {"server": server, "tool": tool, "arguments": arguments},
         )
         result = CallToolResult.model_validate(data)
+        if "details" in data:
+            result.content.append(
+                TextContent(type="text", text="Joinery: " + json.dumps(data["details"]))
+            )
         if "joinery" in data:
             result.content.append(
                 TextContent(type="text", text="Joinery: " + str(data["joinery"]))

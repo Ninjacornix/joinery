@@ -17,6 +17,7 @@ from bridge.protocol import Prompt
 from joinery.agents import get
 from joinery.catalog import ROOT
 from joinery.chat_attachments import listed
+from joinery.compact import editor_outline
 from joinery.connection import status
 from joinery.provider_support import WINDOWS_BOUNDARY_REASON, require_supported
 from joinery.wiring import _command_str
@@ -34,6 +35,8 @@ INSTRUCTIONS = (
     "Use focused tool searches, cache discovered schemas within the session, and write compact native scripts. "
     "Document operators automatically export, import and record provenance; precheck runs the same checks early without submitting; submit_for_review runs the final checks and opens the review. "
     "Avoid repeating those checks after every call. If the user asks to place an asset in their scene, create the scene instance too. "
+    "Long tool results arrive as summaries with a details ref: read more with details only when you need it. "
+    "To change part of a file, send find/replace patch pairs rather than the whole file. "
     "Never generate assets or fetch assets. Operate actual tools. A Rule Zero STOP halts the turn. "
     + GAME_GUIDE
 )
@@ -57,10 +60,10 @@ def _json(value: object) -> str:
 
 
 def project_map(prompt: Prompt) -> str:
-    """The editor context without its per-turn keys: the same bytes while the scene
-    on screen is unchanged."""
+    """The editor context without its per-turn keys, its node list as an outline
+    (ADR 0063): the same bytes while the scene on screen is unchanged."""
     stable = {k: v for k, v in prompt.editor_context.items() if k not in TURN_KEYS}
-    return "Editor context:\n" + _json(stable) + "\n\n"
+    return "Editor context:\n" + _json(editor_outline(stable)) + "\n\n"
 
 
 def turn_part(prompt: Prompt, images_inline: bool = False) -> str:

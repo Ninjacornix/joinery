@@ -15,7 +15,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal
 
-from joinery import design
+from joinery import compact, design
 from joinery.blockout import stage as blockout_stage
 from joinery.debugging import diagnosis_from
 from joinery.gateway import ProjectGateway
@@ -24,6 +24,26 @@ from joinery.peer_review import notes_from
 from joinery.platform_support import private_directory
 from joinery.read_access import read_only
 from joinery.roles import READ_ONLY_ROLES, refusal, registry_allowed, spec
+
+#: Methods whose answer reaches the agent as a summary with a details reference when
+#: it is long (joinery.compact). The editor context has its own outline; schemas,
+#: reports and details pages are short or must stay whole.
+COMPACTED = frozenset(
+    {
+        "inventory",
+        "call",
+        "submit",
+        "precheck",
+        "delegate",
+        "reproduce",
+        "blockout",
+        "playtest",
+        "access_check",
+        "perf_check",
+        "sound_audit",
+        "task_status",
+    }
+)
 
 
 def search_tools(data: dict[str, Any], query: str) -> dict[str, Any]:
@@ -302,7 +322,23 @@ class GatewayRPC:
                         "next": "Call submit_for_review when the change is complete.",
                     }
             elif method == "editor_context":
-                data = {"editor": self.gateway.editor_context}
+                node = str(params.get("node", "") or "")
+                data = (
+                    compact.editor_nodes(self.gateway.editor_context, node)
+                    if node
+                    else {
+                        "editor": compact.editor_outline(
+                            self.gateway.editor_context, compact.INSPECT_NODES
+                        )
+                    }
+                )
+            elif method == "details":
+                data = compact.details(
+                    self.gateway.project,
+                    str(params.get("ref", "")),
+                    str(params.get("path", "") or ""),
+                    int(params.get("offset", 0) or 0),
+                )
             elif method == "editor_view":
                 # Read-only, so specialists may look too.
                 if self.gateway.view_editor is None:
@@ -465,6 +501,12 @@ class GatewayRPC:
                 raise ValueError(
                     "The model interface supports inventory, schema, call, submit, propose_todo, blockout, playtest, the checks and sound_audit; no approval methods."
                 )
+            project = getattr(self.gateway, "project", None)
+            if method in COMPACTED and isinstance(project, Path):
+                try:
+                    data = compact.compact(project, str(method), data)
+                except OSError:
+                    pass  # Nowhere to keep the full result: the agent gets it whole.
             response = {"ok": True, "result": data}
         except PolicyStop as exc:
             first = not self.stop_reason

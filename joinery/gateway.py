@@ -48,6 +48,7 @@ from joinery.review import Render, plan, render
 from joinery.server_install import configured
 from joinery.stage_watch import StageWatch
 from joinery.submission import is_reference
+from joinery.text_patch import apply_patch
 from joinery.timing import TurnTiming
 from joinery.transactions import (
     DIRECTORY,
@@ -477,6 +478,27 @@ class ProjectGateway:
             raise ValueError(CHANGE_FOLDERS)
         return godot_relative(arguments) if server == "godot" else arguments
 
+    def _patched(self, arguments: dict[str, Any]) -> dict[str, Any]:
+        """A Godot ``write_file`` given ``patch`` pairs: the staged file with them
+        applied, sent on as ``content`` (joinery.text_patch)."""
+        tx = self.transaction
+        assert tx is not None
+        if "content" in arguments:
+            raise ValueError("Give write_file either content or patch, not both.")
+        relative = str(arguments.get("filePath", "")).removeprefix("res://")
+        stage = tx.stage.resolve()
+        target = (stage / relative).resolve()
+        if not relative or not target.is_relative_to(stage) or not target.is_file():
+            raise ValueError(
+                "patch changes a file the project already has; write a new file with content."
+            )
+        content = apply_patch(target.read_text(encoding="utf-8"), arguments["patch"])
+        validate_arguments(content)
+        return {
+            **{k: v for k, v in arguments.items() if k != "patch"},
+            "content": content,
+        }
+
     def _view(self, server: str) -> MCPConnection | None:
         """A read-only connection on this gateway's stage; None for an app whose
         worker can't mount it read-only (its reads use the staged connection)."""
@@ -603,6 +625,8 @@ class ProjectGateway:
                 staged = MCPConnection(spec, self.project)
                 self.staged[server] = staged
             connection = staged
+            if server == "godot" and tool == "write_file" and "patch" in arguments:
+                arguments = self._patched(arguments)
             arguments = _map_paths(arguments, self.project, self.transaction.stage)
             if not readonly and self.claims.contended():
                 self._watch_stage()
