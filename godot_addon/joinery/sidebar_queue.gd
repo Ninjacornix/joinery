@@ -116,7 +116,7 @@ func resume() -> void:
 static func waits(entry: String) -> bool:
 	if not entry.begins_with("/"):
 		return true
-	var known := SLASH.COMMANDS.has(entry.split(" ")[0].to_lower())
+	var known := SLASH.all_commands().has(entry.split(" ")[0].to_lower())
 	return known and not SLASH.is_local(entry)
 
 

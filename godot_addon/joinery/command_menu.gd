@@ -2,9 +2,9 @@
 extends PanelContainer
 ## Slash command menu: a popover above the composer that grows from it at 0.95 scale and
 ## shrinks back into it. Rows show the command in a column as wide as the longest one and a
-## short description; the highlighted row has the accent tint. Everyday commands show first;
-## troubleshooting commands appear when the typed text starts one, or under a
-## "Troubleshooting" divider when opened from /help.
+## short description; the highlighted row has the accent tint. Everyday commands show first,
+## then the project's own under "This project"; troubleshooting commands appear when the typed
+## text starts one, or under a "Troubleshooting" divider when opened from /help.
 
 signal chosen(command: String)
 
@@ -50,17 +50,17 @@ func _notification(what: int) -> void:
 func open_for(text: String, help := false, local_only := false) -> bool:
 	var typed := text.to_lower()
 	var everyday: Array[String] = []
+	var own: Array[String] = []
 	var fixes: Array[String] = []
-	for command: String in SLASH.COMMANDS:
+	for command: String in SLASH.all_commands():
 		if local_only and not SLASH.is_local(command):
 			continue
 		var fix := SLASH.TROUBLESHOOTING.has(command)
-		if help:
-			(fixes if fix else everyday).append(command)
-		elif command.begins_with(typed) and (not fix or typed.length() > 1):
-			(fixes if fix else everyday).append(command)
+		var group := fixes if fix else (own if SLASH.project.has(command) else everyday)
+		if help or (command.begins_with(typed) and (not fix or typed.length() > 1)):
+			group.append(command)
 	var opening := not visible or _closing
-	_build(everyday, fixes)
+	_build(everyday, fixes, own)
 	if matches.is_empty():
 		close()
 		return false
@@ -104,7 +104,7 @@ func place() -> void:
 	global_position = Vector2(rect.position.x, maxf(gap, rect.position.y - height - gap))
 
 
-func _build(everyday: Array[String], fixes: Array[String]) -> void:
+func _build(everyday: Array[String], fixes: Array[String], own: Array[String] = []) -> void:
 	for child: Node in _list.get_children():
 		_list.remove_child(child)
 		child.queue_free()
@@ -112,13 +112,17 @@ func _build(everyday: Array[String], fixes: Array[String]) -> void:
 	matches.clear()
 	for command: String in everyday:
 		_add_row(command)
-	if not fixes.is_empty():
-		if not everyday.is_empty():
+	# The project's own commands (.joinery/commands), then troubleshooting, each under a divider.
+	for group: Array in [["This project", own], ["Troubleshooting", fixes]]:
+		var commands: Array = group[1]
+		if commands.is_empty():
+			continue
+		if not matches.is_empty():
 			var divider := MarginContainer.new()
 			divider.theme_type_variation = "JoineryInset"
-			divider.add_child(UI.label("Troubleshooting", "JoinerySection"))
+			divider.add_child(UI.label(str(group[0]), "JoinerySection"))
 			_list.add_child(divider)
-		for command: String in fixes:
+		for command: String in commands:
 			_add_row(command)
 	_style_rows()
 	_select(0)
@@ -127,7 +131,7 @@ func _build(everyday: Array[String], fixes: Array[String]) -> void:
 func _add_row(command: String) -> void:
 	var row := PanelContainer.new()
 	row.mouse_filter = Control.MOUSE_FILTER_STOP
-	row.accessibility_name = command + ", " + str(SLASH.COMMANDS[command][0])
+	row.accessibility_name = command + ", " + str(SLASH.all_commands()[command][0])
 	var box := HBoxContainer.new()
 	box.theme_type_variation = "JoineryRow"
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -136,7 +140,7 @@ func _add_row(command: String) -> void:
 	name.set_meta("command_column", true)
 	box.add_child(name)
 	# In a narrow sidebar the description wraps under itself rather than ending in "…".
-	var description := UI.label(str(SLASH.COMMANDS[command][0]), "JoineryCaption", true)
+	var description := UI.label(str(SLASH.all_commands()[command][0]), "JoineryCaption", true)
 	box.add_child(description)
 	var index := matches.size()
 	row.gui_input.connect(_on_row_input.bind(index))

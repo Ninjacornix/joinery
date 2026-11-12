@@ -372,7 +372,7 @@ func _on_prompt_input(event: InputEvent) -> void:
 				_command_popup.close()
 				return
 			var typed := _prompt.text.strip_edges()
-			var exact := SLASH_SCRIPT.COMMANDS.has(typed.split(" ")[0].to_lower())
+			var exact := SLASH_SCRIPT.all_commands().has(typed.split(" ")[0].to_lower())
 			_on_submit(typed if exact else _command_popup.current())
 		KEY_ESCAPE:
 			_command_popup.close()

@@ -21,10 +21,12 @@ extends ScrollContainer
 ## ([method add_plan]) is a card that changes nothing until the user presses Apply.
 ## Messages queued while Journeyman works wait in [member queue] (sidebar_queue.gd), after
 ## the last turn, and stay at the end as the conversation grows.
+## A reply's right-click menu has "Remember this" (chat_remember.gd).
 
 signal example_chosen(text: String)
 signal retry_requested(card: Control)
 signal revert_requested(transaction_id: String)
+signal remember_requested(text: String)
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
@@ -33,6 +35,7 @@ const STYLE := preload("sidebar_style.gd")
 const CARD := preload("sidebar_change_card.gd")
 const QUEUE := preload("sidebar_queue.gd")
 const INDICATOR := preload("activity_indicator.gd")
+const REMEMBER := preload("chat_remember.gd")
 const EXAMPLES := [
 	"Make the selected model taller", "Add a footstep sound", "Repaint this texture warmer"
 ]
@@ -198,6 +201,7 @@ func add_message(who: String, text: String) -> void:
 	inset.add_child(column)
 	var label := RichTextLabel.new()
 	_configure_text(label)
+	REMEMBER.offer(label, remember_requested)
 	label.accessibility_name = who + " message"
 	column.add_child(label)
 	var summary := UI.quiet("")

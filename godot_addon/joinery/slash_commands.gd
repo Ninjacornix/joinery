@@ -52,6 +52,11 @@ signal scene_variant_requested
 signal tour_requested
 ## "/idle [now|clear]": the runs waiting for when you're away (sidebar_idle.gd).
 signal idle_requested(action: String)
+## "/remember <text>": a line for JOURNEYMAN.md, as a reviewed change (sidebar_memory.gd).
+signal remember_requested(text: String)
+## A project's own command ("/new-enemy name=Bat"): its form or its request
+## (sidebar_commands.gd). [param words] are the words after it.
+signal project_command_requested(command: String, words: PackedStringArray)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 const REPLAY_RECORD := preload("replay_record.gd")
@@ -80,6 +85,7 @@ const COMMANDS := {
 	"/help": ["List commands", "ui"],
 	"/tour": ["Show the first-project tour", "ui"],
 	"/idle": ["Runs waiting till you're away", "ui"],
+	"/remember": ["Remember a rule for this project", "ui"],
 	"/tools": ["Check what your apps need", "cli"],
 	"/doctor": ["Check installed apps", "cli"],
 	"/check": ["Check assets follow the rules", "cli"],
@@ -111,6 +117,9 @@ const READINESS_POLLS := 10
 const READINESS_WAIT := 2.0
 const BRIEF_PATH := "res://design/brief.md"
 
+## The project's own commands (.joinery/commands/*.toml, read by sidebar_commands.gd):
+## {"/new-enemy": [description, "project"]}. Shown after the sidebar's own.
+static var project := {}
 ## Running jobs by slot: {slot: [job, callback]}. One job per slot.
 var _jobs: Dictionary = {}
 var _running := ""
@@ -129,13 +138,23 @@ func _exit_tree() -> void:
 ## The command [param entry] names, completing a unique prefix ("/doc" -> "/doctor"), or "".
 static func resolve(entry: String) -> String:
 	var command := entry.strip_edges().split(" ")[0].to_lower()
-	if COMMANDS.has(command):
+	var known := all_commands()
+	if known.has(command):
 		return command
 	var found: Array[String] = []
-	for candidate: String in COMMANDS:
+	for candidate: String in known:
 		if candidate.begins_with(command):
 			found.append(candidate)
 	return found[0] if found.size() == 1 else ""
+
+
+## The sidebar's own commands, then the project's ("/new-enemy").
+static func all_commands() -> Dictionary:
+	var merged := COMMANDS.duplicate()
+	for command: String in project:
+		if not merged.has(command):
+			merged[command] = project[command]
+	return merged
 
 
 ## The words after the command ("/feature add controller" -> ["add", "controller"]).
@@ -163,8 +182,10 @@ func run(entry: String) -> bool:
 	if command.is_empty():
 		return false
 	# A bare "/variant" runs here (sidebar_scene_variant.gd); with words it is a request.
-	if COMMANDS[command][1] in ["ui", "debug"] or command == "/variant":
-		if command == "/debug":
+	if all_commands()[command][1] in ["ui", "debug", "project"] or command == "/variant":
+		if not COMMANDS.has(command):
+			project_command_requested.emit(command, arguments(entry))
+		elif command == "/debug":
 			debug_requested.emit(" ".join(arguments(entry)))
 		elif command == "/playtest":
 			playtest_requested.emit(" ".join(arguments(entry)))
@@ -186,6 +207,8 @@ func run(entry: String) -> bool:
 			tour_requested.emit()
 		elif command == "/idle":
 			idle_requested.emit(" ".join(arguments(entry)).strip_edges().to_lower())
+		elif command == "/remember":
+			remember_requested.emit(" ".join(arguments(entry)).strip_edges())
 		elif command == "/sound-pass":
 			sound_pass_requested.emit(" ".join(arguments(entry)))
 		elif command == "/record":
@@ -664,6 +687,7 @@ static func is_prompt(entry: String) -> bool:
 	return found.size() > 1 and found[1] == "prompt"
 
 
+## A project command opens its form at once too: its request queues like any other.
 static func is_local(command: String) -> bool:
-	var entry: Array = COMMANDS.get(command.split(" ")[0].to_lower(), [])
-	return entry.size() > 1 and entry[1] == "ui"
+	var entry: Array = all_commands().get(command.split(" ")[0].to_lower(), [])
+	return entry.size() > 1 and entry[1] in ["ui", "project"]

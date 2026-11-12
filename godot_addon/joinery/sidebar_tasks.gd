@@ -33,6 +33,8 @@ const TODO := preload("sidebar_todo.gd")
 const MATCH := preload("sidebar_match.gd")
 const SOUND_PASS := preload("sidebar_sound_pass.gd")
 const IDLE := preload("sidebar_idle.gd")
+const MEMORY := preload("sidebar_memory.gd")
+const COMMANDS := preload("sidebar_commands.gd")
 const PLAYTEST_CARD := preload("playtest_card.gd")
 const VARIANTS := preload("sidebar_variants.gd")
 const SCENE_VARIANT := preload("sidebar_scene_variant.gd")
@@ -74,6 +76,8 @@ var perf_card: Control
 var design_card: Control
 ## The tidy card (tidy_card.gd): what the game never uses, while there is one.
 var tidy_card: Control
+## A project command's form (command_card.gd), while there is one.
+var command_card: Control
 ## Requests tried several ways (sidebar_variants.gd): their ways' events go there.
 var variants: Node
 ## The sound pass card (sound_pass_card.gd), while there is one.
@@ -117,6 +121,10 @@ static func attach(sidebar: Control, content: Control, before: Control) -> VBoxC
 	SOUND_PASS.attach(sidebar, tasks)
 	# "/idle": the runs waiting for when you're away.
 	IDLE.attach(sidebar, tasks)
+	# "/remember" and Remember this: a line for JOURNEYMAN.md, through Review.
+	MEMORY.attach(sidebar, tasks)
+	# The project's own commands (.joinery/commands): slash entries with a small form.
+	COMMANDS.attach(sidebar, tasks)
 	# A request's to-do: its steps, Go, and what "done" means, checked.
 	tasks.todo = TODO.attach(sidebar, tasks)
 	if tasks.bridge != null:
@@ -398,6 +406,7 @@ func sync_visible() -> void:
 		or is_instance_valid(perf_card)
 		or is_instance_valid(design_card)
 		or is_instance_valid(tidy_card)
+		or is_instance_valid(command_card)
 		or is_instance_valid(sound_card)
 		or is_instance_valid(todo_card)
 		or (is_instance_valid(errors_card) and errors_card.visible)

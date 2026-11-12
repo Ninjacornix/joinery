@@ -405,6 +405,15 @@ func send_tidy(ids: Array) -> bool:
 	return true
 
 
+## "/remember <text>" ({kind: "remember", text}): the host adds the line to JOURNEYMAN.md as one
+## change in Review (bridge/remember.py). False when not connected.
+func send_remember(text: String) -> bool:
+	if not is_ready():
+		return false
+	_job.send_line(JSON.stringify({"kind": "remember", "text": text}))
+	return true
+
+
 ## Show a task's change in the Review tab.
 func show_task_review(transaction_id: String) -> void:
 	task_review.emit(transaction_id)
