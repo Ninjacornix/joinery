@@ -30,6 +30,7 @@ const DESIGN := preload("sidebar_design.gd")
 const TODO := preload("sidebar_todo.gd")
 const MATCH := preload("sidebar_match.gd")
 const SOUND_PASS := preload("sidebar_sound_pass.gd")
+const IDLE := preload("sidebar_idle.gd")
 const PLAYTEST_CARD := preload("playtest_card.gd")
 const VARIANTS := preload("sidebar_variants.gd")
 const SCENE_VARIANT := preload("sidebar_scene_variant.gd")
@@ -101,6 +102,8 @@ static func attach(sidebar: Control, content: Control, before: Control) -> VBoxC
 	SCENE_VARIANT.attach(sidebar, tasks)
 	# "/sound-pass": the sounds the level lacks.
 	SOUND_PASS.attach(sidebar, tasks)
+	# "/idle": the runs waiting for when you're away.
+	IDLE.attach(sidebar, tasks)
 	# A request's to-do: its steps, Go, and what "done" means, checked.
 	tasks.todo = TODO.attach(sidebar, tasks)
 	if tasks.bridge != null:

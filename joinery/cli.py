@@ -28,6 +28,7 @@ from joinery import (
     godotsteam,
     history,
     hook,
+    idle_runs,
     kit_share_cli,
     kits_cli,
     match_cli,
@@ -73,7 +74,7 @@ from joinery.installer import (
 from joinery.lockfile import check_assets
 from joinery.locking import write_lock
 from joinery.policy import load_denylist, normalise
-from joinery.project import create_project
+from joinery.project import create_project, mark_tour_pending
 from joinery.puzzle import command as puzzle_command
 from joinery.recipe import rebuild_all, recipe_paths, record
 from joinery.runner import pick
@@ -188,6 +189,9 @@ def _setup(
     started = _timeline_begin(project, fresh)
     if started:
         print(started)
+    if fresh:
+        # The editor shows the first-project tour once, on its first open.
+        mark_tour_pending(project)
     return 0
 
 
@@ -282,6 +286,7 @@ def _new(
     started = _timeline_begin(path, fresh=True)
     if started:
         print(started)
+    mark_tour_pending(path)
     print(f"Created {path} with: {', '.join(selection.tools)}")
     print("Open it with: " + shlex.join(["joinery", "launch", "--project", str(path)]))
     return 0
@@ -330,6 +335,8 @@ def _game_apply(args: argparse.Namespace) -> int:
     started = _timeline_begin(args.project, fresh)
     if started:
         emit({"step": "timeline", "state": "done", "message": started})
+    if fresh:
+        mark_tour_pending(args.project)
     emit({"step": "finished", "state": "done", "message": "Your game is ready."})
     return 0
 
@@ -1290,6 +1297,7 @@ def _parser() -> argparse.ArgumentParser:
     history.register(commands)
     timeline.register(commands)
     metrics.register(commands)
+    idle_runs.register(commands)
     project_map.register(commands)
     skills.register(commands)
     chats.register(commands)
@@ -1310,6 +1318,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "metrics":
         return metrics.run(args)
+
+    if args.command == "idle":
+        return idle_runs.run(args)
 
     if args.command == "map":
         return project_map.run(args)

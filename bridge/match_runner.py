@@ -47,6 +47,8 @@ class MatchRun:
         self.emit = emit
         self.measure = measure
         self.prompt = prompt
+        #: The prompt this run's tasks start from.
+        self._prompt = prompt
         self.state = "idle"
         self.rows: list[dict[str, Any]] = []
         self.job: asyncio.Task[None] | None = None
@@ -55,7 +57,14 @@ class MatchRun:
     def busy(self) -> bool:
         return self.job is not None and not self.job.done()
 
-    def start(self, areas: list[str], findings: list[str]) -> None:
+    def start(
+        self,
+        areas: list[str],
+        findings: list[str],
+        prompt: Callable[[], Prompt] | None = None,
+    ) -> None:
+        """Start the run; ``prompt`` gives its tasks another model choice (a run that
+        waited for idle uses the light model, ADR 0072)."""
         if self.busy():
             raise ValueError("Journeyman is already making the project match.")
         unknown = set(areas) - set(match.AREAS)
@@ -63,6 +72,7 @@ class MatchRun:
             raise ValueError("Unknown area: " + ", ".join(sorted(unknown)) + ".")
         self.rows = []
         self._tasks = {}
+        self._prompt = prompt or self.prompt
         self.job = asyncio.create_task(self._run(areas, findings))
 
     async def stop(self) -> None:
@@ -134,7 +144,7 @@ class MatchRun:
                             ScriptedCall(s.server, s.tool, s.arguments, s.label)
                             for s in fix.steps
                         ],
-                        prompt=self.prompt(),
+                        prompt=self._prompt(),
                         targets=fix.targets,
                         facts=fix.facts,
                     )

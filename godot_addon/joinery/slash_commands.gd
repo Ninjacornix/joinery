@@ -46,6 +46,10 @@ signal variants_requested(words: String)
 signal sound_pass_requested(focus: String)
 ## A bare "/variant": a variant of the scene open in the editor (sidebar_scene_variant.gd).
 signal scene_variant_requested
+## "/tour": the first-project tour again (tour.gd).
+signal tour_requested
+## "/idle [now|clear]": the runs waiting for when you're away (sidebar_idle.gd).
+signal idle_requested(action: String)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 const REPLAY_RECORD := preload("replay_record.gd")
@@ -71,6 +75,8 @@ const COMMANDS := {
 	"/focus": ["Toggle focus mode", "ui"],
 	"/toolbar": ["Show or hide viewport tools", "ui"],
 	"/help": ["List commands", "ui"],
+	"/tour": ["Show the first-project tour", "ui"],
+	"/idle": ["Runs waiting till you're away", "ui"],
 	"/tools": ["Check what your apps need", "cli"],
 	"/doctor": ["Check installed apps", "cli"],
 	"/check": ["Check assets follow the rules", "cli"],
@@ -170,6 +176,10 @@ func run(entry: String) -> bool:
 			variants_requested.emit(" ".join(arguments(entry)))
 		elif command == "/variant":
 			scene_variant_requested.emit()
+		elif command == "/tour":
+			tour_requested.emit()
+		elif command == "/idle":
+			idle_requested.emit(" ".join(arguments(entry)).strip_edges().to_lower())
 		elif command == "/sound-pass":
 			sound_pass_requested.emit(" ".join(arguments(entry)))
 		elif command == "/record":

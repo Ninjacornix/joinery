@@ -333,6 +333,15 @@ func send_sound_pass(focus: String, scene := "", stop := false) -> bool:
 	return true
 
 
+## "/idle [now|clear]": the runs waiting for when you're away (bridge/idle_queue.py). The
+## host answers with a notice. False when not connected.
+func send_idle(action: String) -> bool:
+	if not is_ready():
+		return false
+	_job.send_line(JSON.stringify({"kind": "idle", "action": action}))
+	return true
+
+
 ## True while an agent is connected and takes requests.
 func is_ready() -> bool:
 	return _job != null and _connected

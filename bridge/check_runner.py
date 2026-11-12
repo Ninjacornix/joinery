@@ -284,13 +284,21 @@ class CheckRun:
         self.rows: list[dict[str, Any]] = []
         self.job: asyncio.Task[None] | None = None
         self._tasks: dict[str, Task] = {}
+        #: The prompt this fix's tasks start from.
+        self._prompt: Callable[[], Prompt] = owner.prompt
 
     def busy(self) -> bool:
         return self.job is not None and not self.job.done()
 
     def start(
-        self, areas: list[str], findings: list[str], options: dict[str, Any]
+        self,
+        areas: list[str],
+        findings: list[str],
+        options: dict[str, Any],
+        prompt: Callable[[], Prompt] | None = None,
     ) -> None:
+        """Start the fix; ``prompt`` gives its tasks another model choice (a run that
+        waited for idle uses the light model, ADR 0072)."""
         if self.busy():
             raise ValueError(
                 f"Journeyman is already fixing what the {ROLES[self.kind]} check found."
@@ -300,6 +308,7 @@ class CheckRun:
             raise ValueError("Unknown area: " + ", ".join(sorted(unknown)) + ".")
         self.rows = []
         self._tasks = {}
+        self._prompt = prompt or self.owner.prompt
         self.job = asyncio.create_task(self._run(areas, findings, options))
 
     async def stop(self) -> None:
@@ -391,7 +400,7 @@ class CheckRun:
                     ScriptedCall(s.server, s.tool, s.arguments, s.label)
                     for s in task.steps
                 ],
-                prompt=self.owner.prompt(),
+                prompt=self._prompt(),
                 targets=task.targets,
                 facts=task.facts,
             )
@@ -407,7 +416,7 @@ class CheckRun:
             task.title,
             request,
             origin="user",
-            prompt=self.owner.prompt(),
+            prompt=self._prompt(),
             targets=task.targets,
         )
 

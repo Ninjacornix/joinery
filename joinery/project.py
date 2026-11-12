@@ -13,6 +13,19 @@ from joinery.wiring import write_agent_wiring
 
 TEMPLATE = ROOT / "templates" / "project"
 ASSET_DIRS = ("art", "audio", "recipes")
+#: Tells the editor addon to show the first-project tour on the first open (tour.gd),
+#: which removes it. In .joinery/, so it is never part of the game.
+TOUR_PENDING = ".joinery/tour-pending"
+
+
+def mark_tour_pending(path: Path) -> None:
+    """A new project: the editor shows the first-project tour once. Never fails."""
+    try:
+        marker = path / TOUR_PENDING
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text("")
+    except OSError:
+        pass
 
 
 def create_project(

@@ -22,6 +22,7 @@ from bridge.check_runner import Checks
 from bridge.crew import Crew
 from bridge.designer import Designer
 from bridge.host import Bridge
+from bridge.idle_queue import IdleQueue
 from bridge.instructions import expand_command
 from bridge.match_runner import MatchRun
 from bridge.models import Selection
@@ -41,6 +42,7 @@ from joinery import (
     chats,
     complex_models,
     done_when,
+    idle_runs,
     playtest,
 )
 from joinery.art_approval import approve, review
@@ -50,11 +52,16 @@ from joinery.debugging import debug_request
 from joinery.editor_ops import validate_edit
 from joinery.gateway import ProjectGateway
 from joinery.gateway_rpc import GatewayRPC
+from joinery.routing import routing_settings
 from joinery.timing import TurnTiming
 from joinery.turn import TurnController
 
 #: The open chat's recorder while a host serves; it sees every event the sidebar does.
 _recorder: ChatRecorder | None = None
+#: Messages the editor sends by itself: they don't mean the user is at the keyboard.
+QUIET_KINDS = frozenset({"editor_result", "editor_view_result", "models_request"})
+#: Fixes and checks that may wait until the user is away (ADR 0072).
+UNHURRIED = frozenset({"match_fix", "check_fix", "design_start"})
 
 
 def emit(event: dict[str, Any]) -> None:
@@ -201,6 +208,7 @@ async def _serve(
     specialists: Specialists | None = None
     crew: Crew | None = None
     step_run: StepRun | None = None
+    idle: IdleQueue | None = None
     variants: Variants | None = None
     playtester: Playtester | None = None
     designer: Designer | None = None
@@ -714,6 +722,56 @@ async def _serve(
         )
         rpc_server.checks = checks.tool
 
+        def idle_dispatch(job: idle_runs.Job, model: str) -> None:
+            """A run that waited for idle starts, on ``model`` when one is set."""
+            assert matcher is not None and checks is not None
+            assert designer is not None
+
+            def prompt() -> Prompt:
+                made = task_prompt()
+                if not model:
+                    return made
+                return made.model_copy(update={"selection": Selection(model=model)})
+
+            areas = [str(a) for a in job.data.get("areas") or []]
+            findings = [str(f) for f in job.data.get("findings") or []]
+            if job.kind == "match":
+                matcher.start(areas, findings, prompt)
+            elif job.kind in {"access", "perf"}:
+                checks.runs[job.kind].start(
+                    areas,
+                    findings,
+                    {"target": str(job.data.get("target", "") or "")},
+                    prompt,
+                )
+            else:
+                designer.start(
+                    deep=bool(job.data.get("deep", True)), origin="idle", model=model
+                )
+
+        def idle_busy() -> bool:
+            """Anything at work: the chat's own request, a task, a fix or a check."""
+            return (
+                (active is not None and not active.done())
+                or bool(crew is not None and crew.working())
+                or bool(matcher is not None and matcher.busy())
+                or bool(
+                    checks is not None and any(r.busy() for r in checks.runs.values())
+                )
+                or bool(designer is not None and designer.busy())
+            )
+
+        idle = IdleQueue(
+            project,
+            emit,
+            idle_dispatch,
+            idle_busy,
+            lambda: routing_settings(project).light_model(agent_id),
+        )
+        idle.start()
+        if idle_runs.queued(project):
+            emit(idle.event())
+
         async def variants_action(data: dict[str, Any]) -> None:
             """Pick, Mix or Discard all on a variant strip. A refusal goes back to
             that strip, which puts its ways back as they were."""
@@ -777,12 +835,15 @@ async def _serve(
             }
         )
         emit(game_suggestions(project))
-        assert crew is not None
+        assert crew is not None and idle is not None
         while line := await reader.readline():
             try:
                 data = json.loads(line)
                 if not isinstance(data, dict):
                     raise TypeError("Invalid chat message.")
+                if data.get("kind") not in QUIET_KINDS:
+                    # The user did something: runs waiting for idle wait longer.
+                    idle.touch()
                 owned = crew.owner(str(data.get("transaction_id", "")))
                 assert variants is not None
                 if data.get("kind") == "decision" and owned is not None:
@@ -931,6 +992,35 @@ async def _serve(
                         origin="user",
                         prompt=task_prompt(data),
                     )
+                elif data.get("kind") == "idle":
+                    # /idle, /idle now, /idle clear (ADR 0072).
+                    action = str(data.get("action", "") or "")
+                    if action == "now":
+                        started = idle.run_now()
+                        text = (
+                            f"Started {started} waiting run{'s' if started != 1 else ''}."
+                            if started
+                            else "Nothing is waiting for when you're away."
+                        )
+                    elif action == "clear":
+                        dropped = idle.clear()
+                        text = f"Dropped {dropped} waiting run{'s' if dropped != 1 else ''}."
+                    else:
+                        text = idle.status()
+                    emit({"kind": "notice", "level": "info", "text": text})
+                elif data.get("kind") in UNHURRIED and idle_runs.wanted(project, data):
+                    # A Fix or Check that waits until the user is away.
+                    kind = str(data.get("kind"))
+                    waits = (
+                        "match"
+                        if kind == "match_fix"
+                        else "design"
+                        if kind == "design_start"
+                        else str(data.get("check", ""))
+                    )
+                    idle.queue(waits, data)
+                    # The run's card settles: nothing runs now.
+                    emit(idle_runs.settled(waits))
                 elif data.get("kind") == "match_fix":
                     assert matcher is not None
                     matcher.start(
@@ -1004,6 +1094,8 @@ async def _serve(
         )
         return 1
     finally:
+        if idle is not None:
+            await idle.close()
         if matcher is not None:
             await matcher.stop()
         if checks is not None:

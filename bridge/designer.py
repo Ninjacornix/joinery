@@ -28,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from bridge.instructions import DESIGN_PROMPT
+from bridge.models import Selection
 from bridge.playtester import PlaytestAgent, PlaytestEndpoint
 from bridge.protocol import Done, Prompt
 from joinery import design
@@ -147,6 +148,8 @@ class Designer:
         self.current: Run | None = None
         #: Accepted changes since the last automatic check.
         self.accepted = 0
+        #: The model the current run's agent pass uses ("" for the chat's).
+        self._model = ""
 
     def busy(self) -> bool:
         return self.current is not None and self.current.state in {
@@ -154,11 +157,13 @@ class Designer:
             "reading",
         }
 
-    def start(self, deep: bool = True, origin: str = "user") -> Run:
-        """Check now; ``deep`` adds the designer agent's pass after Joinery's checks."""
+    def start(self, deep: bool = True, origin: str = "user", model: str = "") -> Run:
+        """Check now; ``deep`` adds the designer agent's pass after Joinery's checks,
+        on ``model`` when one is named (a run that waited for idle, ADR 0072)."""
         if self.busy():
             raise ValueError(BUSY)
         run = Run(id=uuid.uuid4().hex[:12], origin=origin, deep=deep)
+        self._model = model
         self.current = run
         self.emit(run.event())
         run.job = asyncio.ensure_future(self._run(run))
@@ -220,6 +225,7 @@ class Designer:
                 text=parts["text"],
                 rules=parts["rules"],
                 project_dir=str(self.project),
+                selection=Selection(model=self._model),
             )
             async for event in child.send(prompt):
                 if isinstance(event, Done):
