@@ -94,3 +94,39 @@ written down.
   butler themselves and point `JOINERY_BUTLER` at it.
 - Joinery never uploads anything on its own: every network use in this
   feature is an explicit user action.
+
+## Addendum: Steam store and library art (2026-11-12)
+
+`joinery share steam-art` (and the Share tab's **Steam art** group) composes
+every image Steam asks for from the game's own store screenshots, in Krita in
+the offline worker, the way the itch.io cover is made:
+
+- **Store**: header capsule, small capsule, main capsule, vertical capsule.
+- **Library**: library capsule, hero (art only: Steam allows no text on it)
+  and logo (the title alone, on transparency, with a thin dark edge so it reads
+  on any hero).
+
+1. **Sizes and rules live in `policy/steam_art.toml`**, read from Valve's public
+   Steamworks pages (store assets, library assets, graphical asset rules) on
+   the date it records, with "Verify against Steamworks before upload": the
+   partner site behind login is the authority and Valve changes these. Where
+   the pages give no number (a capsule's safe margin, the smallest size an
+   image is shown at, the smallest readable title, the logo's height) the value
+   is Joinery's own and marked `assumed`.
+2. **The only text is the game's name.** It is set in the pinned worker font,
+   on one line or split at a space when two lines make it clearly larger, inside
+   the safe area; a shade under it keeps it readable. No quotes, awards, scores
+   or calls to action, as Steam's rules require; nothing is generated.
+3. **Every image is checked after Krita renders it**: its exact size, a
+   transparent background for the logo, no text on the hero, the title inside
+   the safe area, at least the policy's height where Steam shows the image
+   smallest, and in WCAG contrast with the art behind it (measured on Krita's
+   composite before the title goes on). A screenshot enlarged more than 2× is a
+   warning: the 1280×720 screenshots make a soft 3840 px hero. A failed check
+   fails the command; the Share tab names each problem under the set.
+4. **Recipes as for the cover**: `share/recipes/steam_art.py` is the Krita
+   script, `share/media/steam/*.kra` the native sources, and `media.json`
+   records the plan, the policy date, each check and the output hashes under
+   `steam_art`. The rendered PNGs are ignored by git. Like all store media they
+   have no `joinery.lock` entry. Nothing is uploaded: the user takes the files
+   to Steamworks.
