@@ -7,7 +7,9 @@ import contextlib
 import hashlib
 import json
 import os
+import shutil
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -15,15 +17,27 @@ from joinery import tools
 from joinery.catalog import load_catalog, load_project_tools, selection_ids
 from joinery.locking import write_lock
 from joinery.mcp_runtime import validate_arguments
-from joinery.recipe import Recipe, load_recipe, recipe_paths, record, store_preimage
+from joinery.recipe import (
+    HISTORY_DIR,
+    PREIMAGE_DIR,
+    Recipe,
+    load_recipe,
+    recipe_paths,
+    recipe_text,
+    record,
+    store_preimage,
+)
 from joinery.runner import Result, SandboxRunner
 from joinery.tools import (
     blender,
     blender_anim,
+    blender_batch,
     blender_export,
     inkscape,
     material_maker,
 )
+from joinery.tools.base import ToolModule
+from joinery.transactions import copy_file
 from joinery.worker_identity import docker_owner_args
 
 IMAGE = "joinery-creative-worker"
@@ -169,31 +183,14 @@ async def edit_document(
     as recipe sources. For Blender, `keep_macro_shape_keys` keeps MPFB2's
     body-shape macros as morph targets; None keeps the model's recorded choice.
     """
-    enabled(project, tool)
-    module = tools.get(tool)
-    if not module.script_ext:
-        raise ValueError("Use edit_graph or edit_vector for this application.")
-    validate_arguments({"code": code})
-    # Agents name files the way Godot shows them (res://art/models/x.glb, as a
-    # part's resource reads); the recipe and every check use project paths.
-    source = source.removeprefix("res://")
-    exports = [output.removeprefix("res://") for output in exports]
-    target = confined(project, source)
-    if target.suffix != module.suffix or Path(source).parts[0] not in {"art", "audio"}:
-        raise ValueError("Use the owning tool's native format under art/ or audio/.")
-    module.check_destinations(source, exports)
-    for output in exports:
-        confined(project, output)
-        if Path(output).parts[0] not in {"art", "audio"}:
-            raise ValueError("Exports belong under art/ or audio/.")
+    module, source, exports, target = _checked_document(
+        project, tool, source, exports, (code,)
+    )
     textures: tuple[str, ...] = ()
     if tool == "blender":
         # Texture files are regenerated on every edit; clear the old set so an
         # image removed from the model does not leave a stale file behind.
-        folder = confined(project, texture_dir(source))
-        textures = tuple(
-            p.relative_to(project).as_posix() for p in sorted(folder.glob("*.png"))
-        )
+        textures = _textures(project, source)
     _refuse_dropping_audio_edits(project, source, (source, *exports))
     _replacements(project, (source, *exports, *textures))
     identifier = uuid.uuid4().hex
@@ -257,6 +254,254 @@ async def edit_document(
     if tool == "blender":
         recorded.update(_export_facts(project, exports, result.output))
     return recorded
+
+
+def _checked_document(
+    project: Path, tool: str, source: str, exports: list[str], codes: tuple[str, ...]
+) -> tuple[ToolModule, str, list[str], Path]:
+    """The checks every document edit passes before its app starts.
+
+    Returns the tool module, the source and exports as project paths, and the
+    source's path.
+    """
+    enabled(project, tool)
+    module = tools.get(tool)
+    if not module.script_ext:
+        raise ValueError("Use edit_graph or edit_vector for this application.")
+    for code in codes:
+        validate_arguments({"code": code})
+    # Agents name files the way Godot shows them (res://art/models/x.glb, as a
+    # part's resource reads); the recipe and every check use project paths.
+    source = source.removeprefix("res://")
+    exports = [output.removeprefix("res://") for output in exports]
+    target = confined(project, source)
+    if target.suffix != module.suffix or Path(source).parts[0] not in {"art", "audio"}:
+        raise ValueError("Use the owning tool's native format under art/ or audio/.")
+    module.check_destinations(source, exports)
+    for output in exports:
+        confined(project, output)
+        if Path(output).parts[0] not in {"art", "audio"}:
+            raise ValueError("Exports belong under art/ or audio/.")
+    return module, source, exports, target
+
+
+def _textures(project: Path, source: str) -> tuple[str, ...]:
+    """The texture files a Blender source's last edit wrote."""
+    folder = confined(project, texture_dir(source))
+    return tuple(
+        p.relative_to(project).as_posix() for p in sorted(folder.glob("*.png"))
+    )
+
+
+@dataclass(frozen=True)
+class DocumentStep:
+    """One edit of a batch: its operation code, its recipe note, and files it reads."""
+
+    code: str
+    note: str
+    inputs: tuple[str, ...] = ()
+
+
+@dataclass
+class StepsOutcome:
+    """What a batch of edits did: a result per finished step, and the failure."""
+
+    #: As edit_document returns for each step, in order.
+    results: list[dict[str, Any]] = field(default_factory=list)
+    #: The step that failed (0-based), or None when every step finished.
+    failed: int | None = None
+    error: str = ""
+    #: Wall-clock seconds of the one Blender run.
+    seconds: float = 0.0
+
+
+#: A batch runs inside one gateway call, which waits at most 900 s.
+BATCH_TIMEOUT = 840
+
+
+async def edit_document_steps(
+    project: Path,
+    source: str,
+    steps: list[DocumentStep],
+    exports: list[str],
+    *,
+    keep_macro_shape_keys: bool | None = None,
+) -> StepsOutcome:
+    """Apply several Blender edits to one document in one Blender process.
+
+    Every step gets the recipe script, preimage, note and recorded fingerprints
+    it would get from its own edit_document call, in order: the earlier steps'
+    recipes go to recipes/history (where the next edit would move them) and the
+    last finished step's recipe is the current one, so `joinery rebuild`
+    replays the same thing either way. A failing step stops the batch; its
+    files are put back as the step before left them, and nothing after it runs.
+    """
+    if not steps:
+        raise ValueError("A batch has at least one step.")
+    tool = "blender"
+    module, source, exports, target = _checked_document(
+        project, tool, source, exports, tuple(step.code for step in steps)
+    )
+    if not isinstance(module, blender.Blender):
+        raise TypeError("Batched edits run in Blender.")
+    textures = _textures(project, source)
+    _refuse_dropping_audio_edits(project, source, (source, *exports))
+    _replacements(project, (source, *exports, *textures))
+    for step in steps:
+        for extra in step.inputs:
+            if not confined(project, extra).is_file():
+                raise ValueError(f"{extra} is not a file in this project.")
+    recipe_dir = project / "recipes"
+    recipe_dir.mkdir(exist_ok=True)
+    base = store_preimage(project, target) if target.is_file() else ""
+    for output in [source, *exports]:
+        confined(project, output).parent.mkdir(parents=True, exist_ok=True)
+    keep = keep_macro_shape_keys
+    if keep is None:
+        keep = _recorded_keep(project, source)
+    batch = uuid.uuid4().hex
+    ids = [uuid.uuid4().hex for _ in steps]
+    scripts = [f"recipes/{identifier}{module.script_ext}" for identifier in ids]
+    marks = [blender_batch.placeholder(batch, index) for index in range(len(steps))]
+    scratch = f"recipes/.batch-{batch}"
+    plan = {
+        "source": source,
+        "base": base,
+        "exports": exports,
+        "textures": texture_dir(source),
+        "preimages": PREIMAGE_DIR,
+        "scratch": scratch,
+        "steps": [
+            {
+                "script": script,
+                "placeholder": mark,
+                "text": module.script(
+                    source,
+                    base if index == 0 else mark,
+                    step.code,
+                    exports,
+                    keep_macro_shape_keys=keep,
+                ),
+            }
+            for index, (step, script, mark) in enumerate(
+                zip(steps, scripts, marks, strict=True)
+            )
+        ],
+    }
+    folder = project / scratch
+    folder.mkdir(parents=True)
+    try:
+        (folder / "plan.json").write_text(json.dumps(plan))
+        (folder / "driver.py").write_text(blender_batch.DRIVER)
+        try:
+            ran = await run_offline(
+                [
+                    "blender",
+                    "--background",
+                    "--factory-startup",
+                    "--python",
+                    f"{scratch}/driver.py",
+                    "--",
+                    f"{scratch}/plan.json",
+                ],
+                project,
+                BATCH_TIMEOUT,
+            )
+        except BaseException:
+            _undo_step(project, source, exports, scratch, 0, base)
+            for script in scripts:
+                (project / script).unlink(missing_ok=True)
+            raise
+        progress = blender_batch.read_progress(ran.stdout)
+        finished = 0
+        while finished in progress.done:
+            finished += 1
+        outcome = StepsOutcome(seconds=ran.seconds)
+        if finished < len(steps):
+            outcome.failed = finished
+            outcome.error = progress.error or (
+                "Blender stopped without saying why: " + ran.output[-1500:]
+            )
+            if finished in progress.bases:
+                _undo_step(
+                    project,
+                    source,
+                    exports,
+                    scratch,
+                    finished,
+                    progress.bases[finished],
+                )
+            for script in scripts[finished:]:
+                (project / script).unlink(missing_ok=True)
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+    if finished:
+        # Godot imports portable GLB exports, never the .blend beside them.
+        (target.parent / ".gdignore").write_text("")
+    history = project / HISTORY_DIR
+    for index in range(finished):
+        done = progress.done[index]
+        step = steps[index]
+        step_base = progress.bases.get(index, "")
+        recipe = Recipe(
+            tool=tool,
+            script=scripts[index],
+            outputs=(source, *exports, *done["textures"]),
+            sources=tuple(
+                dict.fromkeys(((step_base,) if step_base else ()) + step.inputs)
+            ),
+            note=step.note,
+        )
+        output = progress.output.get(index, "")
+        if index < finished - 1:
+            # The next step's edit would move this recipe to history.
+            history.mkdir(parents=True, exist_ok=True)
+            path = history / (ids[index] + ".toml")
+            path.write_text(
+                recipe_text(recipe.model_copy(update={"expect": done["expect"]}))
+            )
+            result: dict[str, Any] = {
+                "source": source,
+                "outputs": list(recipe.outputs),
+                "recipe": path.relative_to(project).as_posix(),
+                "status": "staged",
+                "requires_review": True,
+            }
+            result.update(_export_facts(project, [], output))
+        else:
+            result = await _record(project, recipe, recipe_dir / (ids[index] + ".toml"))
+            result.update(_export_facts(project, exports, output))
+        outcome.results.append(result)
+    return outcome
+
+
+def _undo_step(
+    project: Path,
+    source: str,
+    exports: list[str],
+    scratch: str,
+    index: int,
+    base: str,
+) -> None:
+    """Put back what a failed batch step replaced: its document, exports and textures."""
+    backup = project / scratch / str(index)
+    if not backup.is_dir():
+        return
+    if base:
+        copy_file(project / base, project / source)
+    else:
+        (project / source).unlink(missing_ok=True)
+    for number, export in enumerate(exports):
+        saved = backup / f"export-{number}"
+        if saved.is_file():
+            copy_file(saved, project / export)
+        else:
+            (project / export).unlink(missing_ok=True)
+    folder = confined(project, texture_dir(source))
+    for png in folder.glob("*.png"):
+        png.unlink()
+    for png in sorted((backup / "textures").glob("*.png")):
+        copy_file(png, folder / png.name)
 
 
 def _recorded_keep(project: Path, source: str) -> bool:
