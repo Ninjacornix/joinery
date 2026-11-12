@@ -85,9 +85,19 @@ class NodeOperation(BaseModel):
     signal_name: str = ""
     method_name: str = ""
     receiver: str = ""
+    #: instantiate_scene only: the node the new instance replaces. The instance
+    #: takes its parent, place in the tree and transform; the node is removed.
+    replace: str = ""
+    #: With replace: scale the instance evenly to the replaced node's size and
+    #: stand it where that node stood (its bounds' bottom centre).
+    fit_size: bool = False
 
     @model_validator(mode="after")
     def required_fields(self) -> NodeOperation:
+        if (self.replace or self.fit_size) and self.operation != "instantiate_scene":
+            raise ValueError("Only instantiate_scene replaces a node.")
+        if self.fit_size and not self.replace:
+            raise ValueError("fit_size needs replace: the node whose size to keep.")
         if (
             self.operation not in {"create_node", "instantiate_scene"}
             and not self.target
@@ -163,7 +173,7 @@ def validate_edit(
                 "Transform edits must refer to an object selected for this prompt."
             )
         if isinstance(operation, NodeOperation):
-            for identity in (operation.parent, operation.receiver):
+            for identity in (operation.parent, operation.receiver, operation.replace):
                 if identity and identity not in targets:
                     raise ValueError(
                         "Referenced nodes must be in the current editor context."
@@ -180,6 +190,9 @@ SCENE_TOOL = {
         "GDScript and connect/disconnect persistent signals. Targets use stable current editor identities. "
         "Vector properties use numeric arrays. Resources use {resource_type: ClassName, properties: {...}} or "
         "{resource_path: res://existing.tres}. Plain greyboxes are scene scaffolding; finished assets use the owning creative app. "
+        "instantiate_scene places a model or scene by its res:// path, including one made earlier in this same change "
+        "(it is reviewed together with the model). To swap a placeholder for it, pass replace with the placeholder's identity "
+        "(it keeps the placeholder's parent and transform) and fit_size true to keep the placeholder's size. "
         "Use this tool for requested live scene changes instead of manual steps. The user then accepts "
         "or rejects the preview in the Review panel below the viewport. Do not claim a preview is accepted or saved."
     ),

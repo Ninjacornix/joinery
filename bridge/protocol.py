@@ -160,6 +160,10 @@ class EditorAction(_Msg):
     targets: tuple[str, ...]
     #: The parallel task making this live edit ("" for the chat's own request).
     owner: str = ""
+    #: Files the edit loads that only the turn's staged change has: project path
+    #: (res://…) to the stage's loadable copy (absolute), so a model made in this
+    #: change is placed in the same change (ADR 0054).
+    staged: dict[str, str] = Field(default_factory=dict)
 
 
 AgentEvent = (

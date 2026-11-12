@@ -179,6 +179,16 @@ async def _stream(
                     event.request_id, {"success": False, "message": str(exc)}
                 )
                 continue
+            try:
+                # A model made in this change is loaded from its stage (ADR 0054).
+                staged = await gateway.staged_files(dict(event.payload))
+            except ValueError as exc:
+                controller.record_live_edit(scene, False)
+                bridge.editor_result(
+                    event.request_id, {"success": False, "message": str(exc)}
+                )
+                continue
+            event = event.model_copy(update={"staged": staged})
             controller.expect_live(event.request_id, scene, event.payload)
         if isinstance(event, Done):
             ok = event.ok

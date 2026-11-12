@@ -734,7 +734,7 @@ func _preview_scene_edit(event: Dictionary) -> Dictionary:
 	var payload: Dictionary = event.get("payload", {})
 	var identities: Variant = JSON.parse_string(str(expected.get("selection_instances", "{}")))
 	for op: Dictionary in payload.get("operations", []):
-		for field: String in ["target", "parent", "receiver"]:
+		for field: String in ["target", "parent", "receiver", "replace"]:
 			var target := str(op.get(field, ""))
 			if target.is_empty():
 				continue
@@ -752,7 +752,7 @@ func _preview_scene_edit(event: Dictionary) -> Dictionary:
 		scene.name = "Scene"
 		EditorInterface.get_editor_viewport_3d(0).add_child(scene)
 	var result: Dictionary = _edits.preview(
-		scene, payload, _edits.context(scene), event.get("targets", [])
+		scene, payload, _edits.context(scene), event.get("targets", []), event.get("staged", {})
 	)
 	if not result["success"]:
 		if empty:

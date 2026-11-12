@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from mcp.types import CallToolResult, TextContent
 
-from joinery import metrics, references, sound_kit, submission
+from joinery import metrics, references, sound_kit, staged_assets, submission
 from joinery import parts as part_targets
 from joinery import tools as tool_modules
 from joinery.art_approval import approved, review
@@ -130,7 +130,9 @@ TEXT_SUFFIXES = frozenset(
     {".gd", ".tscn", ".tres", ".json", ".toml", ".gdshader", ".md"}
 )
 LIVE_SCENE = (
-    "This scene is on screen or has unsaved edits; change it live with edit_scene."
+    "This scene is on screen or has unsaved edits; change it live with edit_scene. "
+    "edit_scene's instantiate_scene places a model made in this change too (pass "
+    "replace to swap a placeholder), and it is reviewed with the model as one change."
 )
 #: A task tried to stage the scene on screen while it can't change it live.
 LANE_LIVE_SCENE = (
@@ -602,6 +604,10 @@ class ProjectGateway:
             arguments = _map_paths(arguments, self.project, self.transaction.stage)
             if not readonly and self.claims.contended():
                 self._watch_stage()
+            if server == "godot" and not readonly:
+                # The stage starts without Godot's import cache: a staged scene
+                # that instances a model (new in this change or not) needs it.
+                await self._import_for(staged_assets.loaded_paths(arguments, bare=True))
         if server == "godot" and tool == "run_project":
             self._prepare_runtime()
         definition = connection.tools.get(tool)
@@ -661,27 +667,7 @@ class ProjectGateway:
         ):
             # Subsequent saved-scene operations can immediately reference the
             # new portable resources; import must precede their first load.
-            self.progress("Importing the result into Godot…")
-            with self.span("import"):
-                imported = await run_offline(
-                    ["godot", "--headless", "--path", "/work", "--editor", "--import"],
-                    self.transaction.stage,
-                    180,
-                )
-            if (
-                not imported.ok
-                or "SCRIPT ERROR:" in imported.output
-                or "Parse Error:" in imported.output
-            ):
-                raise ValueError(
-                    "The native export could not be imported into Godot: "
-                    + imported.output[-2000:]
-                )
-            # The review's own import check is skipped while nothing changed since.
-            self._imported = (
-                self.transaction.id,
-                inventory(self.transaction.stage, include_dirs=True),
-            )
+            await self.import_stage(self.transaction)
         if custom is not None and self.transaction is not None and not result.is_error:
             root = self.transaction.stage
             after = inventory(root)
@@ -1056,6 +1042,84 @@ class ProjectGateway:
         if self._imported is None or self._imported[0] != tx.id:
             return False
         return self._imported[1] == inventory(tx.stage, include_dirs=True)
+
+    async def import_stage(self, tx: FileTransaction) -> None:
+        """Import the stage in Godot (offline worker), so its files can be loaded.
+
+        The stage starts without Godot's import cache, so a model or texture the
+        change made, or one the project had, loads in the stage only after this.
+        """
+        self.progress("Importing the result into Godot…")
+        with self.span("import"):
+            imported = await run_offline(
+                ["godot", "--headless", "--path", "/work", "--editor", "--import"],
+                tx.stage,
+                180,
+            )
+        if (
+            not imported.ok
+            or "SCRIPT ERROR:" in imported.output
+            or "Parse Error:" in imported.output
+        ):
+            raise ValueError(
+                "The native export could not be imported into Godot: "
+                + imported.output[-2000:]
+            )
+        # The review's own import check is skipped while nothing changed since.
+        self._imported = (tx.id, inventory(tx.stage, include_dirs=True))
+
+    async def _import_for(self, paths: list[str]) -> None:
+        """Import the stage when one of ``paths`` has no current import there."""
+        tx = self.transaction
+        if tx is None or tx.state != "staging":
+            return
+        if staged_assets.needs_import(tx.stage, paths):
+            await self.import_stage(tx)
+
+    async def staged_files(self, payload: dict[str, Any]) -> dict[str, str]:
+        """The files a live scene edit loads that only this turn's change has.
+
+        Returns each one's project path (``res://art/tv.glb``) with the stage's
+        own loadable copy (its imported scene, as an absolute path), importing
+        the stage first when needed. The editor loads that copy and keeps the
+        project path in the scene, so a model made in this change is placed in
+        the same change and shows in its review. Raises, in words the agent can
+        act on, when a named file exists nowhere or can't be imported.
+        """
+        tx = self.transaction
+        paths = staged_assets.loaded_paths(payload)
+        if not paths:
+            return {}
+        missing = [
+            path
+            for path in paths
+            if not (self.project / path).is_file()
+            and (tx is None or not (tx.stage / path).is_file())
+        ]
+        if missing:
+            raise ValueError(staged_assets.MISSING.format(path="res://" + missing[0]))
+        if tx is None or tx.state != "staging":
+            return {}
+        made = staged_assets.staged_only(self.project, tx.stage, paths)
+        if not made:
+            return {}
+        async with self._call_lock:
+            if staged_assets.needs_import(tx.stage, made):
+                try:
+                    await self.import_stage(tx)
+                except ValueError:
+                    raise ValueError(
+                        staged_assets.NOT_IMPORTED.format(path="res://" + made[0])
+                    ) from None
+        found: dict[str, str] = {}
+        for path in made:
+            loadable = staged_assets.imported_file(tx.stage, path)
+            if loadable is None:
+                raise ValueError(
+                    staged_assets.NOT_IMPORTED.format(path="res://" + path)
+                )
+            found["res://" + path] = loadable.resolve().as_posix()
+        return found
 
     async def decide(self, identifier: str, accept: bool) -> dict[str, Any]:
         tx = self.transaction

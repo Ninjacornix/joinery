@@ -428,6 +428,7 @@ func _existing_scene(plugin: EditorPlugin, box: Dictionary) -> void:
 	_check(scene.get_node("Existing") == target, "Rename undo restores its original name")
 	_native_families(plugin, scene, target, id)
 	_instanced_scene(plugin, scene)
+	await _staged_model(plugin, scene)
 	_combined_accept_conflict(plugin, target, move, id)
 	var stale := _event(plugin, box)
 	plugin._scene_revision += 1
@@ -505,6 +506,132 @@ func _instanced_scene(plugin: EditorPlugin, scene: Node3D) -> void:
 	)
 	reopened.free()
 	_history(plugin).undo()
+
+
+func _box_part(owner: Node, parent: Node, size: Vector3, height: float) -> void:
+	var part := MeshInstance3D.new()
+	var mesh := BoxMesh.new()
+	mesh.size = size
+	part.mesh = mesh
+	part.position.y = height
+	parent.add_child(part)
+	part.owner = owner
+
+
+## A model made earlier in the same change exists only in that change's stage until the user
+## accepts: the editor gets the stage's imported copy and places it under the project path,
+## replacing a placeholder in its place and at its size, in one review with the model.
+func _staged_model(plugin: EditorPlugin, scene: Node3D) -> void:
+	var model := Node3D.new()
+	model.name = "crt_tv"
+	_box_part(model, model, Vector3(0.5, 0.4, 0.4), 0.2)
+	var packed := PackedScene.new()
+	_check(packed.pack(model) == OK, "Pack the model as Godot imports it")
+	model.free()
+	var stage := "res://.joinery/transactions/0123456789abcdef0123456789abcdef/stage"
+	var imported := stage.path_join(".godot/imported")
+	DirAccess.make_dir_recursive_absolute(imported)
+	var copy := imported.path_join("crt_tv.glb-00112233445566778899aabbccddeeff.scn")
+	# Written as Godot's import in the offline worker writes it: a file the editor never saved.
+	var scratch := OS.get_cache_dir().path_join("joinery-staged-model.scn")
+	_check(ResourceSaver.save(packed, scratch) == OK, "Write the imported model")
+	_check(
+		DirAccess.copy_absolute(scratch, ProjectSettings.globalize_path(copy)) == OK,
+		"Put the imported model in the stage"
+	)
+	var path := "res://art/models/crt_tv.glb"
+	_check(not FileAccess.file_exists(path), "The model isn't in the project yet")
+	var placeholder := Node3D.new()
+	placeholder.name = "TV"
+	scene.add_child(placeholder)
+	placeholder.owner = scene
+	placeholder.position = Vector3(1, 0, -2)
+	placeholder.rotation_degrees = Vector3(0, 30, 0)
+	_box_part(scene, placeholder, Vector3(1, 0.6, 0.8), 0.3)
+	_box_part(scene, placeholder, Vector3(0.6, 0.2, 0.6), 0.7)
+	var index := placeholder.get_index()
+	var id := scene.scene_file_path + "::TV"
+	var edit := {
+		"summary": "Replace the placeholder TV with the CRT model",
+		"operations":
+		[{"operation": "instantiate_scene", "resource_path": path, "replace": id, "fit_size": true}]
+	}
+	var refused: Dictionary = plugin._preview_scene_edit(_event(plugin, edit, [id]))
+	_check(not refused["success"], "A file nobody made can't be placed")
+	_check(
+		str(refused.get("message", "")).contains("doesn't exist"),
+		"Missing file is said plainly: " + str(refused.get("message", ""))
+	)
+	_check(placeholder.is_inside_tree(), "A refused edit leaves the placeholder")
+	var staged := {path: ProjectSettings.globalize_path(copy)}
+	var event := _event(plugin, edit, [id])
+	event["staged"] = staged
+	var result: Dictionary = plugin._preview_scene_edit(event)
+	_check(result["success"], "Place a model made in the same change: " + str(result))
+	var placed := scene.get_node_or_null("TV") as Node3D
+	_check(placed != null and placed != placeholder, "The model takes the placeholder's name")
+	if placed == null or placed == placeholder:
+		plugin._reject_scene_edit()
+		return
+	_check(not placeholder.is_inside_tree(), "The placeholder is replaced, not left beside it")
+	_check(placed.scene_file_path == path, "The scene keeps the project path")
+	_check(placed.get_index() == index, "The model takes the placeholder's place in the tree")
+	_check(placed.position.is_equal_approx(Vector3(1, 0, -2)), "The model stands where it stood")
+	_check(
+		is_equal_approx(placed.rotation_degrees.y, 30.0), "The model keeps the placeholder's turn"
+	)
+	_check(placed.scale.is_equal_approx(Vector3(2, 2, 2)), "Fitted to the placeholder's size")
+	plugin._reject_scene_edit()
+	_check(placeholder.get_parent() == scene, "Reject puts the placeholder back")
+	_check(placeholder.get_index() == index, "Reject keeps the placeholder's place")
+	_check(
+		not is_instance_valid(placed) or not placed.is_inside_tree(),
+		"Reject removes the placed model"
+	)
+	result = plugin._preview_scene_edit(_event(plugin, edit, [id]).merged({"staged": staged}))
+	_check(result["success"], "Place it again")
+	# Accepting the change moves the model into the project; the editor then imports it.
+	var document := GLTFDocument.new()
+	var state := GLTFState.new()
+	var source := Node3D.new()
+	_box_part(source, source, Vector3(0.5, 0.4, 0.4), 0.2)
+	_check(document.append_from_scene(source, state) == OK, "Export the model fixture")
+	source.free()
+	DirAccess.make_dir_recursive_absolute("res://art/models")
+	_check(document.write_to_filesystem(state, path) == OK, "The accepted model lands")
+	# Opening a created model in the Tools view is _accepted_model_preview's check; here the
+	# decision only carries the file, so this check stays on the scene.
+	var change := {"path": "art/models/crt_tv.glb", "change": "modified"}
+	var filesystem := EditorInterface.get_resource_filesystem()
+	var imported_paths: Array[String] = []
+	var listener := func(paths: PackedStringArray) -> void: imported_paths.append_array(paths)
+	filesystem.resources_reimported.connect(listener)
+	plugin._file_review = {"transaction_id": "placed", "changes": [change]}
+	plugin._file_accept_live_id = plugin._edits.transaction_id
+	await plugin._on_file_decision(
+		{"transaction_id": "placed", "accepted": true, "changes": [change]}
+	)
+	var deadline := Time.get_ticks_msec() + 15000
+	while (
+		(not imported_paths.has(path) or filesystem.is_scanning() or filesystem.is_importing())
+		and Time.get_ticks_msec() < deadline
+	):
+		await get_tree().process_frame
+	filesystem.resources_reimported.disconnect(listener)
+	_check(imported_paths.has(path), "The editor imports the accepted model")
+	_check(not plugin._edits.pending(), "One Accept takes the model and its placement")
+	placed = scene.get_node_or_null("TV") as Node3D
+	_check(placed != null and placed.scene_file_path == path, "The placed model stays after Accept")
+	_check(not placeholder.is_inside_tree(), "The placeholder stays replaced after Accept")
+	var saved := PackedScene.new()
+	_check(saved.pack(scene) == OK, "The scene with the placed model serializes")
+	var reopened := saved.instantiate()
+	var again := reopened.get_node_or_null("TV")
+	_check(again != null and again.scene_file_path == path, "The saved scene points at the model")
+	reopened.free()
+	_check(_history(plugin).undo(), "Placement supports undo")
+	_check(placeholder.get_parent() == scene, "Undo brings the placeholder back")
+	EditorInterface.set_main_screen_editor("3D")
 
 
 func _combined_accept_conflict(

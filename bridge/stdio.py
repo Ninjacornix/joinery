@@ -240,18 +240,22 @@ async def _serve(
         future: asyncio.Future[dict[str, Any]] = (
             asyncio.get_running_loop().create_future()
         )
-        editor_calls[request_id] = future
-        emit(
-            EditorAction(
-                request_id=request_id,
-                payload=edit.model_dump(mode="json"),
-                context=context,
-                targets=tuple(known),
-                owner=owner,
-            ).model_dump()
-        )
         ok = False
         try:
+            payload = edit.model_dump(mode="json")
+            # A model made in this change is loaded from its stage (ADR 0054).
+            staged = await lane.staged_files(payload)
+            editor_calls[request_id] = future
+            emit(
+                EditorAction(
+                    request_id=request_id,
+                    payload=payload,
+                    context=context,
+                    targets=tuple(known),
+                    owner=owner,
+                    staged=staged,
+                ).model_dump()
+            )
             result = await asyncio.wait_for(future, 30)
             ok = bool(result.get("success"))
             return result

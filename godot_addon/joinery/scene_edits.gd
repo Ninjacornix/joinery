@@ -32,7 +32,11 @@ func pending() -> bool:
 
 
 # gdlint: disable=max-returns
-func preview(scene: Node, payload: Dictionary, expected: Dictionary, targets: Array) -> Dictionary:
+## [param staged] maps a res:// path only the change's stage has to the stage's own loadable
+## copy, so a model made in the same change can be placed (ADR 0054).
+func preview(
+	scene: Node, payload: Dictionary, expected: Dictionary, targets: Array, staged: Dictionary = {}
+) -> Dictionary:
 	if pending():
 		return _error("Accept or reject the current preview first.")
 	if scene == null:
@@ -43,7 +47,7 @@ func preview(scene: Node, payload: Dictionary, expected: Dictionary, targets: Ar
 	if not ops is Array or ops.is_empty() or ops.size() > 32:
 		return _error("The scene edit has no valid operations.")
 	_generic_plans.clear()
-	_generic.begin(scene)
+	_generic.begin(scene, staged)
 	var planned: Array[Dictionary] = []
 	var used: Array[Node] = []
 	for value: Variant in ops:
@@ -99,6 +103,9 @@ func preview(scene: Node, payload: Dictionary, expected: Dictionary, targets: Ar
 				var result: Dictionary = _generic.plan(op, targets)
 				if not result["success"]:
 					return _error(str(result["message"]))
+				# A replacement removes the old node first, then places the new one.
+				for removal: Dictionary in result.get("before", []):
+					_generic_plans.append(removal)
 				_generic_plans.append(result["plan"])
 	var batch: Dictionary = _generic.validate_batch(_generic_plans)
 	if not batch["success"]:

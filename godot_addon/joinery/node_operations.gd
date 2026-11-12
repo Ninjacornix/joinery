@@ -5,12 +5,25 @@ extends RefCounted
 var scene: Node
 var allocated: Array[Node] = []
 var reserved: Dictionary = {}
+## Files only the turn's staged change has: res:// path -> the stage's loadable copy.
+var staged: Dictionary = {}
 
 
-func begin(root: Node) -> void:
+func begin(root: Node, staged_files: Dictionary = {}) -> void:
 	discard_unattached()
 	scene = root
 	reserved.clear()
+	staged = {}
+	var changes := ProjectSettings.globalize_path("res://.joinery/transactions").simplify_path()
+	for path: Variant in staged_files:
+		var file := str(staged_files[path]).simplify_path()
+		# Only a copy inside one of this project's own change folders is ever loaded.
+		if (
+			str(path).begins_with("res://")
+			and file.begins_with(changes + "/")
+			and not file.contains("/../")
+		):
+			staged[str(path)] = file
 
 
 # gdlint: disable=max-returns
@@ -30,6 +43,20 @@ func plan(op: Dictionary, targets: Array) -> Dictionary:
 		return _error("This operation cannot remove or move the scene root.")
 	if action == "reparent_node" and (parent == target or target.is_ancestor_of(parent)):
 		return _error("A node cannot be moved inside itself or its descendants.")
+	var replaced: Node = null
+	var removal := {}
+	if action == "instantiate_scene" and not str(op.get("replace", "")).is_empty():
+		replaced = _target(str(op.get("replace", "")), targets)
+		if replaced == null:
+			return _error("The object to replace no longer exists in this scene.")
+		if replaced == scene:
+			return _error("The scene root can't be replaced; replace one of its objects.")
+		var removed := plan({"operation": "delete_node", "target": op["replace"]}, targets)
+		if not removed["success"]:
+			return removed
+		removal = removed["plan"]
+		if str(op.get("parent", "")).is_empty():
+			parent = replaced.get_parent()
 	var entry := {"action": action, "node": target, "op": op, "scene": scene}
 	if target != null:
 		entry["parent_before"] = target.get_parent()
@@ -49,12 +76,15 @@ func plan(op: Dictionary, targets: Array) -> Dictionary:
 			node = ClassDB.instantiate(type) as Node
 		elif action == "instantiate_scene":
 			var path := str(op.get("resource_path", ""))
-			if not path.begins_with("res://") or not ResourceLoader.exists(path):
-				return _error("The imported scene resource must exist in this project first.")
-			var packed: PackedScene = load(path)
+			var packed := _scene(path)
 			if packed == null:
-				return _error("This resource cannot be instantiated as a scene.")
+				return _error(_missing(path))
 			node = packed.instantiate()
+			if node == null:
+				return _error(path + " has no scene to place. Export it again, then place it.")
+			# A model made in this change loads from its stage copy; the scene keeps the
+			# project path, where the file is once the change is accepted.
+			node.scene_file_path = path
 		else:
 			if str(op.get("parent", "")).is_empty():
 				parent = target.get_parent()
@@ -63,12 +93,16 @@ func plan(op: Dictionary, targets: Array) -> Dictionary:
 		entry["node"] = node
 		entry["parent_after"] = parent
 		var base := str(op.get("name", ""))
+		if base.is_empty() and replaced != null:
+			base = str(replaced.name)
+		elif base.is_empty() and action == "instantiate_scene":
+			base = str(node.name)
 		if base.is_empty():
 			base = str(target.name) + "Copy" if target != null else node.get_class()
 		var name := base
 		var suffix := 2
 		while (
-			parent.has_node(NodePath(name))
+			(parent.has_node(NodePath(name)) and parent.get_node(NodePath(name)) != replaced)
 			or reserved.has(str(parent.get_instance_id()) + "/" + name)
 		):
 			name = base + str(suffix)
@@ -76,6 +110,9 @@ func plan(op: Dictionary, targets: Array) -> Dictionary:
 		reserved[str(parent.get_instance_id()) + "/" + name] = true
 		node.name = name
 		entry["name_after"] = name
+		if replaced != null:
+			entry["index_after"] = replaced.get_index()
+			_place(node, replaced, bool(op.get("fit_size", false)))
 	elif action == "reparent_node":
 		if parent.has_node(NodePath(str(target.name))):
 			return _error("The destination already has a child with this name.")
@@ -133,6 +170,8 @@ func plan(op: Dictionary, targets: Array) -> Dictionary:
 		after[key] = decoded["value"]
 	entry["properties_before"] = before
 	entry["properties_after"] = after
+	if not removal.is_empty():
+		return {"success": true, "plan": entry, "before": [removal]}
 	return {"success": true, "plan": entry}
 
 
@@ -168,6 +207,9 @@ func apply_group(plans: Array[Dictionary]) -> void:
 			"create_node", "duplicate_node", "instantiate_scene":
 				var parent: Node = entry["parent_after"]
 				parent.add_child(node, true)
+				if entry.has("index_after"):
+					var index := mini(int(entry["index_after"]), parent.get_child_count() - 1)
+					parent.move_child(node, index)
 				node.owner = owner_scene
 				for child: Node in node.find_children("*", "", true, false):
 					if child.owner == null:
@@ -369,9 +411,9 @@ func _resource(encoded: Variant) -> Dictionary:
 	var resource: Resource
 	if not str(encoded.get("resource_path", "")).is_empty():
 		var path := str(encoded["resource_path"])
-		if not path.begins_with("res://") or not ResourceLoader.exists(path):
-			return _error("Use an existing project resource path.")
-		resource = load(path)
+		resource = _load(path, "")
+		if resource == null:
+			return _error(_missing(path))
 		if resource == null or resource is Script:
 			return _error("Scripts must go through source validation.")
 		if not encoded.get("properties", {}).is_empty():
@@ -391,6 +433,72 @@ func _resource(encoded: Variant) -> Dictionary:
 			return decoded
 		resource.set(key, decoded["value"])
 	return {"success": true, "value": resource}
+
+
+## The resource at [param path]: the project's, or the stage copy of one made in this change.
+func _load(path: String, type: String) -> Resource:
+	if staged.has(path):
+		return ResourceLoader.load(staged[path], type, ResourceLoader.CACHE_MODE_IGNORE)
+	if not path.begins_with("res://") or not ResourceLoader.exists(path):
+		return null
+	return ResourceLoader.load(path, type)
+
+
+func _scene(path: String) -> PackedScene:
+	return _load(path, "PackedScene") as PackedScene
+
+
+func _missing(path: String) -> String:
+	if staged.has(path):
+		return (
+			"Godot couldn't open " + path + ", so it wasn't placed. Export it again, then place it."
+		)
+	return path + " doesn't exist. Make or export it first, then place it."
+
+
+## Stand [param node] where [param replaced] stands: its transform, and with [param fit] its
+## size too (an even scale to its bounds, bottom centres aligned).
+func _place(node: Node, replaced: Node, fit: bool) -> void:
+	if node is Node2D and replaced is Node2D:
+		node.transform = replaced.transform
+		return
+	if not (node is Node3D and replaced is Node3D):
+		return
+	var place: Transform3D = replaced.transform
+	if fit:
+		var want := _bounds(replaced)
+		var have := _bounds(node)
+		var ratio := INF
+		for axis: int in 3:
+			if want.size[axis] > 0.0001 and have.size[axis] > 0.0001:
+				ratio = minf(ratio, want.size[axis] / have.size[axis])
+		if is_finite(ratio) and ratio > 0.0:
+			var foot := Vector3(want.get_center().x, want.position.y, want.get_center().z)
+			var own := Vector3(have.get_center().x, have.position.y, have.get_center().z)
+			var fitted := Transform3D(Basis.from_scale(Vector3.ONE * ratio), foot - own * ratio)
+			place = place * fitted
+	node.transform = place
+
+
+## The bounds of [param root]'s meshes in its own space (its own transform not applied).
+func _bounds(root: Node) -> AABB:
+	var found := AABB()
+	var first := true
+	var stack: Array = [[root, Transform3D.IDENTITY]]
+	while not stack.is_empty():
+		var item: Array = stack.pop_back()
+		var node: Node = item[0]
+		var space: Transform3D = item[1]
+		if node is VisualInstance3D:
+			var box: AABB = space * (node as VisualInstance3D).get_aabb()
+			found = box if first else found.merge(box)
+			first = false
+		for child: Node in node.get_children():
+			var local := Transform3D.IDENTITY
+			if child is Node3D:
+				local = (child as Node3D).transform
+			stack.append([child, space * local])
+	return found
 
 
 func _error(message: String) -> Dictionary:
