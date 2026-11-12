@@ -12,20 +12,18 @@ and model; tests run fake agents through the same turn instead.
 
 from __future__ import annotations
 
-import asyncio
-import contextlib
-import json
-import os
 import shutil
 import statistics
-import sys
 import tomllib
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from joinery import metrics
+from joinery import headless, metrics
+
+#: The agent and model every run uses, so runs compare.
+Pin = headless.Pin
 
 ROOT = Path(__file__).resolve().parent.parent
 SUITE = ROOT / "evals/benchmark.toml"
@@ -42,15 +40,6 @@ class Case:
     seed: dict[str, str] = field(default_factory=dict)
     #: Project paths a good change is expected to touch (for the reader, not scored).
     expect: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class Pin:
-    """The agent and model every run uses, so runs compare."""
-
-    agent: str
-    model: str = ""
-    effort: str = ""
 
 
 @dataclass(frozen=True)
@@ -238,24 +227,15 @@ def render(report: dict[str, Any]) -> str:
 
 
 def chat_command(project: Path, pin: Pin) -> list[str]:
-    """The chat host the editor runs, for ``project`` with the pinned agent."""
-    return [
-        sys.executable,
-        "-c",
-        "import sys; from joinery.cli import main; sys.exit(main(sys.argv[1:]))",
-        "chat",
-        "--project",
-        str(project),
-        "--agent",
-        pin.agent,
-        "--addon-protocol",
-        "2",
-    ]
+    """The chat host the editor runs, for ``project`` with the pinned agent. A
+    benchmark accepts each change, so nothing is kept waiting for review."""
+    return headless.chat_command(project, pin, keep_reviews=False)
 
 
 class LiveDriver:
     """Runs one request through the real chat host (``joinery chat``) with the pinned
-    agent and model, accepting the change it puts in review.
+    agent and model, accepting the change it puts in review (``joinery.headless``,
+    the driver ``joinery run`` uses, without the accept).
 
     There is no editor in a benchmark run: a live scene edit is answered as
     failed, so the agent stages saved files instead. This spends the agent's
@@ -273,79 +253,9 @@ class LiveDriver:
     async def __call__(self, project: Path, case: Case, pin: Pin) -> None:
         if not pin.agent:
             raise ValueError("Pin an agent (--agent) for a live run.")
-        process = await asyncio.create_subprocess_exec(
-            *self.command(project, pin),
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-            env={**os.environ, "PYTHONPATH": str(ROOT)},
-            limit=4_000_000,
+        await headless.drive(
+            self.command(project, pin),
+            [headless.prompt_message(case.request, pin)],
+            accept=True,
+            timeout=self.timeout,
         )
-        try:
-            async with asyncio.timeout(self.timeout):
-                await self._drive(process, case, pin)
-        finally:
-            if process.stdin is not None:
-                with contextlib.suppress(OSError):
-                    process.stdin.close()
-            with contextlib.suppress(ProcessLookupError):
-                process.terminate()
-            await process.wait()
-
-    async def _drive(
-        self, process: asyncio.subprocess.Process, case: Case, pin: Pin
-    ) -> None:
-        assert process.stdin is not None and process.stdout is not None
-        stdin, stdout = process.stdin, process.stdout
-
-        async def send(message: dict[str, Any]) -> None:
-            stdin.write((json.dumps(message) + "\n").encode())
-            await stdin.drain()
-
-        prompted = False
-        deciding = ""
-        while line := await stdout.readline():
-            try:
-                event = json.loads(line)
-            except ValueError:
-                continue
-            kind = event.get("kind") if isinstance(event, dict) else None
-            if kind == "connection" and event.get("state") == "error":
-                raise RuntimeError(
-                    str(event.get("message", "The agent didn't connect."))
-                )
-            if (
-                kind == "connection"
-                and event.get("state") == "connected"
-                and not prompted
-            ):
-                prompted = True
-                selection = {"mode": "auto", "model": pin.model, "effort": pin.effort}
-                await send(
-                    {"kind": "prompt", "text": case.request, "selection": selection}
-                )
-            elif kind == "editor_action":
-                await send(
-                    {
-                        "kind": "editor_result",
-                        "request_id": event.get("request_id", ""),
-                        "result": {
-                            "success": False,
-                            "message": "No editor is open in this run; stage saved files.",
-                        },
-                    }
-                )
-            elif kind == "file_preview":
-                deciding = str(event.get("transaction_id", ""))
-            elif kind == "timing":
-                # The turn is over: accept its change so its record is complete.
-                if deciding:
-                    await send(
-                        {"kind": "decision", "transaction_id": deciding, "accept": True}
-                    )
-                    deciding = ""
-                    continue
-                return
-            elif kind == "file_decision":
-                return
-        raise RuntimeError("The chat host closed before the request finished.")

@@ -60,7 +60,9 @@ from joinery.turn import TurnController
 #: The open chat's recorder while a host serves; it sees every event the sidebar does.
 _recorder: ChatRecorder | None = None
 #: Messages the editor sends by itself: they don't mean the user is at the keyboard.
-QUIET_KINDS = frozenset({"editor_result", "editor_view_result", "models_request"})
+QUIET_KINDS = frozenset(
+    {"editor_result", "editor_view_result", "models_request", "when_quiet"}
+)
 #: Fixes and checks that may wait until the user is away (ADR 0072).
 UNHURRIED = frozenset({"match_fix", "check_fix", "design_start"})
 
@@ -192,17 +194,25 @@ async def input_reader(stream: BinaryIO) -> tuple[asyncio.StreamReader, InputTra
     return reader, transport
 
 
-async def serve(project: Path, agent_id: str, profile_id: str = "") -> int:
+async def serve(
+    project: Path, agent_id: str, profile_id: str = "", keep_reviews: bool = False
+) -> int:
+    """``keep_reviews``: a headless run (``joinery run``, ADR 0077) keeps the changes
+    still waiting for review when it closes, for the user to decide later."""
     global _recorder
     recorder = _recorder = ChatRecorder(project, agent_id, profile_id)
     try:
-        return await _serve(project, agent_id, profile_id, recorder)
+        return await _serve(project, agent_id, profile_id, recorder, keep_reviews)
     finally:
         _recorder = None
 
 
 async def _serve(
-    project: Path, agent_id: str, profile_id: str, recorder: ChatRecorder
+    project: Path,
+    agent_id: str,
+    profile_id: str,
+    recorder: ChatRecorder,
+    keep_reviews: bool = False,
 ) -> int:
     bridge: Bridge | None = None
     active: asyncio.Task[None] | None = None
@@ -231,6 +241,7 @@ async def _serve(
             }
         )
         return 1
+    gateway.keep_reviews = keep_reviews
     editor_calls: dict[str, asyncio.Future[dict[str, Any]]] = {}
     gateway.progress = lambda text: emit({"kind": "progress", "text": text})
     controller = TurnController(gateway, emit, agent_id)
@@ -864,6 +875,17 @@ async def _serve(
         if fixer.book.listed():
             fixer.publish()
         assert crew is not None and idle is not None
+        quiet_waits: set[asyncio.Future[None]] = set()
+
+        async def say_quiet() -> None:
+            """``quiet`` once nothing is at work, seen twice a moment apart so a run
+            between two of its steps isn't missed (``joinery run``, ADR 0077)."""
+            calm = 0
+            while calm < 2:
+                await asyncio.sleep(0.25)
+                calm = 0 if idle_busy() else calm + 1
+            emit({"kind": "quiet"})
+
         while line := await reader.readline():
             try:
                 data = json.loads(line)
@@ -1067,6 +1089,11 @@ async def _serve(
                     # /remember and Remember this: one line added to JOURNEYMAN.md
                     # as a reviewed change (bridge/remember.py, ADR 0077).
                     await remember.start(crew, project, data, task_prompt())
+                elif data.get("kind") == "when_quiet":
+                    # A headless run asks to hear when nothing is at work any more.
+                    listener = asyncio.ensure_future(say_quiet())
+                    quiet_waits.add(listener)
+                    listener.add_done_callback(quiet_waits.discard)
                 elif data.get("kind") == "variant_make":
                     # A bare /variant on the scene open in the editor: a reviewed
                     # inherited scene, no agent needed (bridge/scene_variant.py).
@@ -1186,5 +1213,7 @@ async def _serve(
         transport.close()
 
 
-def run(project: Path, agent_id: str, profile_id: str = "") -> int:
-    return asyncio.run(serve(project.resolve(), agent_id, profile_id))
+def run(
+    project: Path, agent_id: str, profile_id: str = "", keep_reviews: bool = False
+) -> int:
+    return asyncio.run(serve(project.resolve(), agent_id, profile_id, keep_reviews))

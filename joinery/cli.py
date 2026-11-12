@@ -27,6 +27,7 @@ from joinery import (
     design_cli,
     game_setup,
     godotsteam,
+    headless,
     history,
     hook,
     idle_runs,
@@ -1294,6 +1295,11 @@ def _parser() -> argparse.ArgumentParser:
     chat.add_argument("--agent", choices=[a.id for a in all_agents()], required=True)
     chat.add_argument("--profile", default="")
     chat.add_argument("--addon-protocol", type=int, default=0)
+    chat.add_argument(
+        "--keep-reviews",
+        action="store_true",
+        help="keep changes waiting for review when the chat closes (joinery run)",
+    )
     mcp_cmd = commands.add_parser(
         "mcp", help="install and inspect real project MCP connections"
     )
@@ -1318,6 +1324,7 @@ def _parser() -> argparse.ArgumentParser:
     idle_runs.register(commands)
     project_map.register(commands)
     memory.register(commands)
+    headless.register(commands)
     skills.register(commands)
     chats.register(commands)
     parts = _parts()
@@ -1346,6 +1353,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "memory":
         return memory.run(args)
+
+    if args.command == "run":
+        return headless.run(args)
 
     if args.command == "map":
         return project_map.run(args)
@@ -1474,7 +1484,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
             )
             return 1
-        return run(args.project, args.agent, args.profile)
+        return run(args.project, args.agent, args.profile, args.keep_reviews)
 
     if args.command == "connect":
         try:
