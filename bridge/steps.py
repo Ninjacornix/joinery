@@ -124,30 +124,56 @@ class StepRun:
     async def _wait(
         self, started: list[tuple[int, Task]], decided: bool, numbers: list[int]
     ) -> None:
+        tasks = [task for _, task in started]
+        mine = {task.id for task in tasks}
+        changed = asyncio.Event()
         asked = False
-        while True:
-            tasks = [task for _, task in started]
-            if any(t.state in FAILED for t in tasks) or (
-                decided and any(t.state == "discarded" for t in tasks)
+
+        def ask() -> None:
+            # Said the moment the last step reaches review, not at the next look: the
+            # user may decide them all before then, and the line would never show.
+            nonlocal asked
+            if (
+                decided
+                and not asked
+                and not any(t.state in FAILED or t.state == "discarded" for t in tasks)
+                and not all(t.state in FINAL for t in tasks)
+                and not any(t.state in {WORKING, QUEUED} for t in tasks)
             ):
-                # One failed: the steps not started yet stop, the ones at work finish.
-                for task in tasks:
-                    if task.state == QUEUED:
-                        with contextlib.suppress(ValueError):
-                            await self.crew.stop(task.id)
-                if not any(t.state == WORKING for t in tasks):
+                asked = True
+                self.progress(
+                    f"Review {done_when.step_words(numbers)} to go on with the rest…"
+                )
+
+        def observe(task: Task) -> None:
+            if task.id in mine:
+                ask()
+                changed.set()
+
+        self.crew.observers.append(observe)
+        try:
+            while True:
+                changed.clear()
+                if any(t.state in FAILED for t in tasks) or (
+                    decided and any(t.state == "discarded" for t in tasks)
+                ):
+                    # One failed: the steps not started yet stop, the ones at work finish.
+                    for task in tasks:
+                        if task.state == QUEUED:
+                            with contextlib.suppress(ValueError):
+                                await self.crew.stop(task.id)
+                    if not any(t.state == WORKING for t in tasks):
+                        return
+                elif decided:
+                    if all(t.state in FINAL for t in tasks):
+                        return
+                    ask()
+                elif all(t.state == IN_REVIEW or t.state in FINAL for t in tasks):
                     return
-            elif decided:
-                if all(t.state in FINAL for t in tasks):
-                    return
-                if not asked and not any(t.state in {WORKING, QUEUED} for t in tasks):
-                    asked = True
-                    self.progress(
-                        f"Review {done_when.step_words(numbers)} to go on with the rest…"
-                    )
-            elif all(t.state == IN_REVIEW or t.state in FINAL for t in tasks):
-                return
-            await asyncio.sleep(self.poll)
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(changed.wait(), self.poll)
+        finally:
+            self.crew.observers.remove(observe)
 
     async def _stop(self, started: list[tuple[int, Task]]) -> None:
         for _, task in started:
