@@ -24,6 +24,8 @@ trap 'rm -rf "${tmp}"' EXIT
 
 mm_under=$(printf '%s' "${MATERIALMAKER_VERSION}" | tr '.' '_')
 godot_name="Godot_v${GODOT_VERSION}-${GODOT_CHANNEL}_linux.x86_64"
+# Must match audacity.Dockerfile's download location.
+debian_audacity="https://deb.debian.org/debian/pool/main/a/audacity"
 
 # One "name url" pair per line. Keep names in step with the Dockerfile.
 # MPFB2 publishes no release assets, so its tagged source archive is used;
@@ -34,6 +36,8 @@ blender https://download.blender.org/release/Blender${BLENDER_SERIES}/blender-${
 mpfb2 https://github.com/makehumancommunity/mpfb2/archive/refs/tags/v${MPFB2_VERSION}.tar.gz
 materialmaker https://github.com/RodZill4/material-maker/releases/download/${MATERIALMAKER_VERSION}/material_maker_${mm_under}_linux.tar.gz
 surge https://github.com/surge-synthesizer/releases-xt/releases/download/${SURGE_VERSION}/surge-xt-linux-x64-${SURGE_VERSION}.deb
+audacity ${debian_audacity}/audacity_${AUDACITY_DEB_VERSION}_amd64.deb
+audacitydata ${debian_audacity}/audacity-data_${AUDACITY_DEB_VERSION}_all.deb
 godotmcp https://github.com/tugcantopaloglu/godot-mcp/archive/${GODOT_MCP_REF}.tar.gz"
 
 # Start from the existing hashes so fetching one artifact keeps the rest.
