@@ -10,6 +10,8 @@ light and saves workspace-parts-<theme>.png, and asset_workspace_test.gd's and
 kits_panel_test.gd's states as workspace-assets-<theme>-<state>.png, for a visual check
 (the Kits panel shows a preview Blender draws in the worker). asset_workspace_test.gd also
 saves a model page with many materials, wide and narrow (-model.png, -model-narrow.png).
+character_parts_test.gd checks the MPFB2 character fixture (body regions, shape keys, a
+region picked in review) and saves character-<theme>-asset.png and -review.png.
 """
 
 from __future__ import annotations
@@ -77,6 +79,30 @@ def make_project(directory: Path) -> Path:
     cached = parts.cache_path(project, digest)
     cached.parent.mkdir(parents=True)
     cached.write_text(json.dumps({"sha256": digest, "inspection": inspection}))
+    # The MPFB2 character (character_parts_test.gd): its GLB and Blender's inspection. The
+    # .blend is not kept (see build_character.py); a stand-in keys the cached report.
+    shutil.copyfile(FIXTURE / "character.glb", models / "character.glb")
+    (sources / "character.blend").write_bytes(b"character fixture source\n")
+    (project / "recipes/character.py").write_text(
+        (FIXTURE / "character_model.py").read_text()
+    )
+    (project / "recipes/character.toml").write_text(
+        'version = 1\ntool = "blender"\nscript = "recipes/character.py"\n'
+        'outputs = ["art/sources/character.blend", "art/models/character.glb"]\n'
+        'sources = []\nnote = "Character fixture"\n'
+    )
+    (models / "character.glb.import").write_text(GLB_IMPORT)
+    digest = parts._sha256(sources / "character.blend")
+    parts.cache_path(project, digest).write_text(
+        json.dumps(
+            {
+                "sha256": digest,
+                "inspection": json.loads(
+                    (FIXTURE / "character_parts.json").read_text()
+                ),
+            }
+        )
+    )
     tests = project / "tests"
     tests.mkdir()
     for name in (
@@ -84,6 +110,7 @@ def make_project(directory: Path) -> Path:
         "workspace_test.gd",
         "asset_workspace_test.gd",
         "kits_panel_test.gd",
+        "character_parts_test.gd",
     ):
         shutil.copyfile(ROOT / "tests/godot" / name, tests / name)
     return project
@@ -143,22 +170,25 @@ def main() -> int:
         report = Path(directory) / "index.json"
         report.write_text(json.dumps(index(project)))
         env["JOINERY_PARTS_INDEX"] = str(report)
-        print(
-            godot(
-                args.godot,
-                project,
-                ["--headless", "--script", "res://tests/workspace_test.gd"],
-                env,
+        for test in ("workspace_test.gd", "character_parts_test.gd"):
+            print(
+                godot(
+                    args.godot,
+                    project,
+                    ["--headless", "--script", f"res://tests/{test}"],
+                    env,
+                )
+                .strip()
+                .splitlines()[-1]
             )
-            .strip()
-            .splitlines()[-1]
-        )
         if args.capture:
             args.capture.mkdir(parents=True, exist_ok=True)
             env["JOINERY_TEST_PYTHON"] = sys.executable
             drawn = {
                 "make": asyncio.run(
-                    kit_preview.preview(project, "hut", {"windows": 4, "roof": "hip"}, seed=3)
+                    kit_preview.preview(
+                        project, "hut", {"windows": 4, "roof": "hip"}, seed=3
+                    )
                 ),
                 "edit": asyncio.run(
                     kit_preview.preview(project, "rock", {"moss": 0.4}, seed=11)
@@ -191,6 +221,16 @@ def main() -> int:
                     env,
                 )
                 print("saved", f"{prefix}-*.png")
+                # A character: a region picked on the asset page and in review.
+                character = args.capture.resolve() / f"character-{theme}"
+                env["JOINERY_CHARACTER_CAPTURE"] = str(character)
+                godot(
+                    args.godot,
+                    project,
+                    ["--script", "res://tests/character_parts_test.gd"],
+                    env,
+                )
+                print("saved", f"{character}-asset.png", f"{character}-review.png")
     print("parts tests: PASS")
     return 0
 

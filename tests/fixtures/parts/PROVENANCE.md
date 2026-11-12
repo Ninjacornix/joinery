@@ -25,3 +25,25 @@ Rebuild with `uv run python tests/fixtures/parts/build.py`. Outputs:
 
 Blender saves can differ byte for byte between runs, so the hashes change on a
 rebuild. The tests check names, roles and picks, never these bytes.
+
+# Character fixture: provenance
+
+origin: tool-created (Blender 5.2.1 with MPFB2 and Rigify in the offline
+`joinery-creative-worker`, no network)
+
+- `character_model.py`: the operation code. MPFB2 builds its default human from its own
+  base mesh (no download, no generative model), adds its Rigify meta-rig with MPFB2's
+  weights, Rigify generates the rig, and two shape keys (`smile`, `viseme_aa`) are made by
+  moving the mouth's vertices a few millimetres.
+- `build_character.py`: wraps that code in Joinery's own Blender recipe script (the GLB
+  export bakes MPFB2's body-shape keys and writes `joinery_name`, `joinery_role` and
+  `joinery_regions` extras) and records Blender's part inspection as
+  `character_parts.json` (Rigify's `WGT-` control shapes left out). The .blend is not
+  kept; the widget tests read only the GLB and the inspection.
+
+Rebuild with `uv run python tests/fixtures/parts/build_character.py`.
+
+| File | Made by |
+|---|---|
+| `character.glb` | Blender glTF exporter (export_extras on) |
+| `character_parts.json` | Blender part inspection (`joinery.tools.blender.INSPECT_BLEND`) |

@@ -1,0 +1,1455 @@
+{
+ "objects": [
+  {
+   "name": "Hero",
+   "type": "MESH",
+   "parent": "HeroRig",
+   "position": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rotation": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "vertices": 19158,
+   "modifiers": [
+    {
+     "name": "Armature",
+     "type": "ARMATURE"
+    },
+    {
+     "name": "Armature PV",
+     "type": "ARMATURE"
+    },
+    {
+     "name": "Hide helpers",
+     "type": "MASK"
+    }
+   ],
+   "role": "basemesh",
+   "vertex_groups": 361,
+   "shape_keys": [
+    "Basis",
+    "$md-$as-$fe-$yn",
+    "$md-$as-$ma-$yn",
+    "$md-$ca-$fe-$yn",
+    "$md-$ca-$ma-$yn",
+    "$md-$af-$fe-$yn",
+    "$md-$af-$ma-$yn",
+    "$md-universal-$fe-$yn-$av$mu-$av$wg",
+    "$md-universal-$ma-$yn-$av$mu-$av$wg",
+    "smile",
+    "viseme_aa"
+   ],
+   "shape_key_values": {
+    "$md-$as-$fe-$yn": 0.165,
+    "$md-$as-$ma-$yn": 0.165,
+    "$md-$ca-$fe-$yn": 0.165,
+    "$md-$ca-$ma-$yn": 0.165,
+    "$md-$af-$fe-$yn": 0.165,
+    "$md-$af-$ma-$yn": 0.165,
+    "$md-universal-$fe-$yn-$av$mu-$av$wg": 0.5,
+    "$md-universal-$ma-$yn-$av$mu-$av$wg": 0.5,
+    "smile": 1.0,
+    "viseme_aa": 1.0
+   },
+   "regions": {
+    "head": {
+     "bones": [
+      "DEF-brow.B.L",
+      "DEF-brow.B.L.001",
+      "DEF-brow.B.L.002",
+      "DEF-brow.B.L.003",
+      "DEF-brow.B.L.004",
+      "DEF-brow.B.R",
+      "DEF-brow.B.R.001",
+      "DEF-brow.B.R.002",
+      "DEF-brow.B.R.003",
+      "DEF-brow.B.R.004",
+      "DEF-brow.T.L",
+      "DEF-brow.T.L.001",
+      "DEF-brow.T.L.002",
+      "DEF-brow.T.L.003",
+      "DEF-brow.T.R",
+      "DEF-brow.T.R.001",
+      "DEF-brow.T.R.002",
+      "DEF-brow.T.R.003",
+      "DEF-cheek.B.L",
+      "DEF-cheek.B.L.001",
+      "DEF-cheek.B.R",
+      "DEF-cheek.B.R.001",
+      "DEF-cheek.T.L",
+      "DEF-cheek.T.L.001",
+      "DEF-cheek.T.R",
+      "DEF-cheek.T.R.001",
+      "DEF-chin",
+      "DEF-chin.001",
+      "DEF-chin.L",
+      "DEF-chin.R",
+      "DEF-ear.L",
+      "DEF-ear.L.001",
+      "DEF-ear.L.002",
+      "DEF-ear.L.003",
+      "DEF-ear.L.004",
+      "DEF-ear.R",
+      "DEF-ear.R.001",
+      "DEF-ear.R.002",
+      "DEF-ear.R.003",
+      "DEF-ear.R.004",
+      "DEF-eye.L",
+      "DEF-eye.R",
+      "DEF-eye_master.L",
+      "DEF-eye_master.R",
+      "DEF-forehead.L",
+      "DEF-forehead.L.001",
+      "DEF-forehead.L.002",
+      "DEF-forehead.R",
+      "DEF-forehead.R.001",
+      "DEF-forehead.R.002",
+      "DEF-jaw",
+      "DEF-jaw.L",
+      "DEF-jaw.L.001",
+      "DEF-jaw.R",
+      "DEF-jaw.R.001",
+      "DEF-jaw_master",
+      "DEF-lid.B.L",
+      "DEF-lid.B.L.001",
+      "DEF-lid.B.L.002",
+      "DEF-lid.B.L.003",
+      "DEF-lid.B.R",
+      "DEF-lid.B.R.001",
+      "DEF-lid.B.R.002",
+      "DEF-lid.B.R.003",
+      "DEF-lid.T.L",
+      "DEF-lid.T.L.001",
+      "DEF-lid.T.L.002",
+      "DEF-lid.T.L.003",
+      "DEF-lid.T.R",
+      "DEF-lid.T.R.001",
+      "DEF-lid.T.R.002",
+      "DEF-lid.T.R.003",
+      "DEF-lip.B.L",
+      "DEF-lip.B.L.001",
+      "DEF-lip.B.R",
+      "DEF-lip.B.R.001",
+      "DEF-lip.T.L",
+      "DEF-lip.T.L.001",
+      "DEF-lip.T.R",
+      "DEF-lip.T.R.001",
+      "DEF-nose",
+      "DEF-nose.001",
+      "DEF-nose.002",
+      "DEF-nose.003",
+      "DEF-nose.004",
+      "DEF-nose.L",
+      "DEF-nose.L.001",
+      "DEF-nose.R",
+      "DEF-nose.R.001",
+      "DEF-spine.006",
+      "DEF-teeth.B",
+      "DEF-teeth.T",
+      "DEF-temple.L",
+      "DEF-temple.R",
+      "DEF-tongue",
+      "DEF-tongue.001",
+      "DEF-tongue.002"
+     ],
+     "vertices": 5208
+    },
+    "neck": {
+     "bones": [
+      "DEF-spine.004",
+      "DEF-spine.005"
+     ],
+     "vertices": 794
+    },
+    "shoulders": {
+     "bones": [
+      "DEF-shoulder-helper.L",
+      "DEF-shoulder-helper.R",
+      "DEF-shoulder.L",
+      "DEF-shoulder.R"
+     ],
+     "vertices": 530
+    },
+    "torso": {
+     "bones": [
+      "DEF-breast.L",
+      "DEF-breast.R",
+      "DEF-spine.001",
+      "DEF-spine.002",
+      "DEF-spine.003"
+     ],
+     "vertices": 1464
+    },
+    "arms": {
+     "bones": [
+      "DEF-elbow-helper.L",
+      "DEF-elbow-helper.R",
+      "DEF-forearm.L",
+      "DEF-forearm.L.001",
+      "DEF-forearm.R",
+      "DEF-forearm.R.001",
+      "DEF-upper_arm.L",
+      "DEF-upper_arm.L.001",
+      "DEF-upper_arm.R",
+      "DEF-upper_arm.R.001"
+     ],
+     "vertices": 1408
+    },
+    "hands": {
+     "bones": [
+      "DEF-f_index.01.L",
+      "DEF-f_index.01.R",
+      "DEF-f_index.02.L",
+      "DEF-f_index.02.R",
+      "DEF-f_index.03.L",
+      "DEF-f_index.03.R",
+      "DEF-f_middle.01.L",
+      "DEF-f_middle.01.R",
+      "DEF-f_middle.02.L",
+      "DEF-f_middle.02.R",
+      "DEF-f_middle.03.L",
+      "DEF-f_middle.03.R",
+      "DEF-f_pinky.01.L",
+      "DEF-f_pinky.01.R",
+      "DEF-f_pinky.02.L",
+      "DEF-f_pinky.02.R",
+      "DEF-f_pinky.03.L",
+      "DEF-f_pinky.03.R",
+      "DEF-f_ring.01.L",
+      "DEF-f_ring.01.R",
+      "DEF-f_ring.02.L",
+      "DEF-f_ring.02.R",
+      "DEF-f_ring.03.L",
+      "DEF-f_ring.03.R",
+      "DEF-hand.L",
+      "DEF-hand.R",
+      "DEF-palm.01.L",
+      "DEF-palm.01.R",
+      "DEF-palm.02.L",
+      "DEF-palm.02.R",
+      "DEF-palm.03.L",
+      "DEF-palm.03.R",
+      "DEF-palm.04.L",
+      "DEF-palm.04.R",
+      "DEF-thumb.01.L",
+      "DEF-thumb.01.R",
+      "DEF-thumb.02.L",
+      "DEF-thumb.02.R",
+      "DEF-thumb.03.L",
+      "DEF-thumb.03.R"
+     ],
+     "vertices": 3566
+    },
+    "hips": {
+     "bones": [
+      "DEF-pelvis-helper.L",
+      "DEF-pelvis-helper.R",
+      "DEF-pelvis-helper.front.L",
+      "DEF-pelvis-helper.front.R",
+      "DEF-pelvis.L",
+      "DEF-pelvis.R",
+      "DEF-spine"
+     ],
+     "vertices": 961
+    },
+    "legs": {
+     "bones": [
+      "DEF-knee-helper.L",
+      "DEF-knee-helper.R",
+      "DEF-shin.L",
+      "DEF-shin.L.001",
+      "DEF-shin.R",
+      "DEF-shin.R.001",
+      "DEF-thigh.L",
+      "DEF-thigh.L.001",
+      "DEF-thigh.R",
+      "DEF-thigh.R.001"
+     ],
+     "vertices": 2343
+    },
+    "feet": {
+     "bones": [
+      "DEF-foot.L",
+      "DEF-foot.R",
+      "DEF-toe.L",
+      "DEF-toe.R",
+      "DEF-toe1-1.L",
+      "DEF-toe1-1.R",
+      "DEF-toe1-2.L",
+      "DEF-toe1-2.R",
+      "DEF-toe2-1.L",
+      "DEF-toe2-1.R",
+      "DEF-toe2-2.L",
+      "DEF-toe2-2.R",
+      "DEF-toe2-3.L",
+      "DEF-toe2-3.R",
+      "DEF-toe3-1.L",
+      "DEF-toe3-1.R",
+      "DEF-toe3-2.L",
+      "DEF-toe3-2.R",
+      "DEF-toe3-3.L",
+      "DEF-toe3-3.R",
+      "DEF-toe4-1.L",
+      "DEF-toe4-1.R",
+      "DEF-toe4-2.L",
+      "DEF-toe4-2.R",
+      "DEF-toe4-3.L",
+      "DEF-toe4-3.R",
+      "DEF-toe5-1.L",
+      "DEF-toe5-1.R",
+      "DEF-toe5-2.L",
+      "DEF-toe5-2.R",
+      "DEF-toe5-3.L",
+      "DEF-toe5-3.R"
+     ],
+     "vertices": 2868
+    }
+   },
+   "shape_key_regions": {
+    "$md-$as-$fe-$yn": [
+     "head",
+     "hands",
+     "feet",
+     "legs"
+    ],
+    "$md-$as-$ma-$yn": [
+     "head",
+     "hands",
+     "feet",
+     "legs"
+    ],
+    "$md-$ca-$fe-$yn": [
+     "head",
+     "hands",
+     "feet",
+     "legs"
+    ],
+    "$md-$ca-$ma-$yn": [
+     "head",
+     "hands",
+     "feet",
+     "legs"
+    ],
+    "$md-$af-$fe-$yn": [
+     "head",
+     "hands",
+     "feet",
+     "legs"
+    ],
+    "$md-$af-$ma-$yn": [
+     "head",
+     "hands",
+     "feet",
+     "legs"
+    ],
+    "$md-universal-$fe-$yn-$av$mu-$av$wg": [],
+    "$md-universal-$ma-$yn-$av$mu-$av$wg": [],
+    "smile": [
+     "head"
+    ],
+    "viseme_aa": [
+     "head"
+    ]
+   },
+   "mpfb_macros": {
+    "gender": 0.5,
+    "age": 0.5,
+    "muscle": 0.5,
+    "weight": 0.5,
+    "proportions": 0.5,
+    "height": 0.5,
+    "cupsize": 0.5,
+    "firmness": 0.5,
+    "asian": 0.33,
+    "caucasian": 0.33,
+    "african": 0.33
+   },
+   "slots": []
+  },
+  {
+   "name": "HeroRig",
+   "type": "ARMATURE",
+   "parent": null,
+   "position": [
+    0.0,
+    0.0,
+    0.0
+   ],
+   "scale": [
+    1.0,
+    1.0,
+    1.0
+   ],
+   "rotation": [
+    0.0,
+    -0.0,
+    0.0
+   ],
+   "vertices": 0,
+   "modifiers": [],
+   "role": "skeleton",
+   "bone_count": 1090,
+   "deform_bone_count": 209,
+   "bones": [
+    {
+     "name": "DEF-elbow-helper.L",
+     "parent": null,
+     "deform": true
+    },
+    {
+     "name": "DEF-elbow-helper.R",
+     "parent": null,
+     "deform": true
+    },
+    {
+     "name": "DEF-knee-helper.L",
+     "parent": null,
+     "deform": true
+    },
+    {
+     "name": "DEF-knee-helper.R",
+     "parent": null,
+     "deform": true
+    },
+    {
+     "name": "DEF-breast.L",
+     "parent": "ORG-breast.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-breast.R",
+     "parent": "ORG-breast.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-spine",
+     "parent": "root",
+     "deform": true
+    },
+    {
+     "name": "DEF-spine.001",
+     "parent": "DEF-spine",
+     "deform": true
+    },
+    {
+     "name": "DEF-spine.002",
+     "parent": "DEF-spine.001",
+     "deform": true
+    },
+    {
+     "name": "DEF-spine.003",
+     "parent": "DEF-spine.002",
+     "deform": true
+    },
+    {
+     "name": "DEF-spine.004",
+     "parent": "DEF-spine.003",
+     "deform": true
+    },
+    {
+     "name": "DEF-spine.005",
+     "parent": "DEF-spine.004",
+     "deform": true
+    },
+    {
+     "name": "DEF-spine.006",
+     "parent": "DEF-spine.005",
+     "deform": true
+    },
+    {
+     "name": "DEF-pelvis-helper.L",
+     "parent": "ORG-spine",
+     "deform": true
+    },
+    {
+     "name": "DEF-pelvis-helper.front.L",
+     "parent": "DEF-pelvis-helper.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-pelvis-helper.R",
+     "parent": "ORG-spine",
+     "deform": true
+    },
+    {
+     "name": "DEF-pelvis-helper.front.R",
+     "parent": "DEF-pelvis-helper.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-pelvis.L",
+     "parent": "ORG-pelvis.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-pelvis.R",
+     "parent": "ORG-pelvis.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe1-1.L",
+     "parent": "ORG-toe.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe1-2.L",
+     "parent": "DEF-toe1-1.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe2-1.L",
+     "parent": "ORG-toe.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe2-2.L",
+     "parent": "DEF-toe2-1.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe2-3.L",
+     "parent": "DEF-toe2-2.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe3-1.L",
+     "parent": "ORG-toe.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe3-2.L",
+     "parent": "DEF-toe3-1.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe3-3.L",
+     "parent": "DEF-toe3-2.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe4-1.L",
+     "parent": "ORG-toe.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe4-2.L",
+     "parent": "DEF-toe4-1.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe4-3.L",
+     "parent": "DEF-toe4-2.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe5-1.L",
+     "parent": "ORG-toe.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe5-2.L",
+     "parent": "DEF-toe5-1.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe5-3.L",
+     "parent": "DEF-toe5-2.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe1-1.R",
+     "parent": "ORG-toe.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe1-2.R",
+     "parent": "DEF-toe1-1.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe2-1.R",
+     "parent": "ORG-toe.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe2-2.R",
+     "parent": "DEF-toe2-1.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe2-3.R",
+     "parent": "DEF-toe2-2.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe3-1.R",
+     "parent": "ORG-toe.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe3-2.R",
+     "parent": "DEF-toe3-1.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe3-3.R",
+     "parent": "DEF-toe3-2.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe4-1.R",
+     "parent": "ORG-toe.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe4-2.R",
+     "parent": "DEF-toe4-1.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe4-3.R",
+     "parent": "DEF-toe4-2.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe5-1.R",
+     "parent": "ORG-toe.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe5-2.R",
+     "parent": "DEF-toe5-1.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe5-3.R",
+     "parent": "DEF-toe5-2.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-thigh.L",
+     "parent": "ORG-spine",
+     "deform": true
+    },
+    {
+     "name": "DEF-thigh.L.001",
+     "parent": "DEF-thigh.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-shin.L",
+     "parent": "DEF-thigh.L.001",
+     "deform": true
+    },
+    {
+     "name": "DEF-shin.L.001",
+     "parent": "DEF-shin.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-foot.L",
+     "parent": "DEF-shin.L.001",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe.L",
+     "parent": "DEF-foot.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-thigh.R",
+     "parent": "ORG-spine",
+     "deform": true
+    },
+    {
+     "name": "DEF-thigh.R.001",
+     "parent": "DEF-thigh.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-shin.R",
+     "parent": "DEF-thigh.R.001",
+     "deform": true
+    },
+    {
+     "name": "DEF-shin.R.001",
+     "parent": "DEF-shin.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-foot.R",
+     "parent": "DEF-shin.R.001",
+     "deform": true
+    },
+    {
+     "name": "DEF-toe.R",
+     "parent": "DEF-foot.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-ear.L",
+     "parent": "ORG-ear.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-ear.L.001",
+     "parent": "ORG-ear.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-ear.L.002",
+     "parent": "ORG-ear.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-ear.L.003",
+     "parent": "DEF-ear.L.002",
+     "deform": true
+    },
+    {
+     "name": "DEF-ear.L.004",
+     "parent": "ORG-ear.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-ear.R",
+     "parent": "ORG-ear.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-ear.R.001",
+     "parent": "ORG-ear.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-ear.R.002",
+     "parent": "ORG-ear.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-ear.R.003",
+     "parent": "DEF-ear.R.002",
+     "deform": true
+    },
+    {
+     "name": "DEF-ear.R.004",
+     "parent": "ORG-ear.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-nose.002",
+     "parent": "ORG-nose_master",
+     "deform": true
+    },
+    {
+     "name": "DEF-nose.003",
+     "parent": "DEF-nose.002",
+     "deform": true
+    },
+    {
+     "name": "DEF-nose.L.001",
+     "parent": "ORG-nose_master",
+     "deform": true
+    },
+    {
+     "name": "DEF-nose.R.001",
+     "parent": "ORG-nose_master",
+     "deform": true
+    },
+    {
+     "name": "DEF-teeth.T",
+     "parent": "ORG-teeth.T",
+     "deform": true
+    },
+    {
+     "name": "DEF-eye_master.L",
+     "parent": "ORG-eye.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-lid.B.L",
+     "parent": "ORG-eye.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-lid.B.L.001",
+     "parent": "DEF-lid.B.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-lid.B.L.002",
+     "parent": "DEF-lid.B.L.001",
+     "deform": true
+    },
+    {
+     "name": "DEF-lid.B.L.003",
+     "parent": "DEF-lid.B.L.002",
+     "deform": true
+    },
+    {
+     "name": "DEF-lid.T.L",
+     "parent": "ORG-eye.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-lid.T.L.001",
+     "parent": "DEF-lid.T.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-lid.T.L.002",
+     "parent": "DEF-lid.T.L.001",
+     "deform": true
+    },
+    {
+     "name": "DEF-lid.T.L.003",
+     "parent": "DEF-lid.T.L.002",
+     "deform": true
+    },
+    {
+     "name": "DEF-eye.L",
+     "parent": "MCH-eye.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-eye_iris.L",
+     "parent": "DEF-eye.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-eye_master.R",
+     "parent": "ORG-eye.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-lid.B.R",
+     "parent": "ORG-eye.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-lid.B.R.001",
+     "parent": "DEF-lid.B.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-lid.B.R.002",
+     "parent": "DEF-lid.B.R.001",
+     "deform": true
+    },
+    {
+     "name": "DEF-lid.B.R.003",
+     "parent": "DEF-lid.B.R.002",
+     "deform": true
+    },
+    {
+     "name": "DEF-lid.T.R",
+     "parent": "ORG-eye.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-lid.T.R.001",
+     "parent": "DEF-lid.T.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-lid.T.R.002",
+     "parent": "DEF-lid.T.R.001",
+     "deform": true
+    },
+    {
+     "name": "DEF-lid.T.R.003",
+     "parent": "DEF-lid.T.R.002",
+     "deform": true
+    },
+    {
+     "name": "DEF-eye.R",
+     "parent": "MCH-eye.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-eye_iris.R",
+     "parent": "DEF-eye.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-teeth.B",
+     "parent": "ORG-teeth.B",
+     "deform": true
+    },
+    {
+     "name": "DEF-tongue",
+     "parent": "ORG-jaw_master",
+     "deform": true
+    },
+    {
+     "name": "DEF-tongue.001",
+     "parent": "DEF-tongue",
+     "deform": true
+    },
+    {
+     "name": "DEF-tongue.002",
+     "parent": "DEF-tongue.001",
+     "deform": true
+    },
+    {
+     "name": "DEF-jaw_master",
+     "parent": "ORG-jaw_master",
+     "deform": true
+    },
+    {
+     "name": "DEF-chin",
+     "parent": "ORG-jaw_master",
+     "deform": true
+    },
+    {
+     "name": "DEF-chin.001",
+     "parent": "DEF-chin",
+     "deform": true
+    },
+    {
+     "name": "DEF-jaw",
+     "parent": "ORG-jaw_master",
+     "deform": true
+    },
+    {
+     "name": "DEF-jaw.L",
+     "parent": "ORG-jaw_master",
+     "deform": true
+    },
+    {
+     "name": "DEF-jaw.L.001",
+     "parent": "DEF-jaw.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-chin.L",
+     "parent": "DEF-jaw.L.001",
+     "deform": true
+    },
+    {
+     "name": "DEF-jaw.R",
+     "parent": "ORG-jaw_master",
+     "deform": true
+    },
+    {
+     "name": "DEF-jaw.R.001",
+     "parent": "DEF-jaw.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-chin.R",
+     "parent": "DEF-jaw.R.001",
+     "deform": true
+    },
+    {
+     "name": "DEF-lip.T.L",
+     "parent": "MCH-jaw_master_top",
+     "deform": true
+    },
+    {
+     "name": "DEF-lip.T.L.001",
+     "parent": "DEF-lip.T.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-lip.T.R",
+     "parent": "MCH-jaw_master_top",
+     "deform": true
+    },
+    {
+     "name": "DEF-lip.T.R.001",
+     "parent": "DEF-lip.T.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-lip.B.L",
+     "parent": "MCH-jaw_master_bottom",
+     "deform": true
+    },
+    {
+     "name": "DEF-lip.B.L.001",
+     "parent": "DEF-lip.B.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-lip.B.R",
+     "parent": "MCH-jaw_master_bottom",
+     "deform": true
+    },
+    {
+     "name": "DEF-lip.B.R.001",
+     "parent": "DEF-lip.B.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-brow.B.L",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-brow.B.L.001",
+     "parent": "DEF-brow.B.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-brow.B.L.002",
+     "parent": "DEF-brow.B.L.001",
+     "deform": true
+    },
+    {
+     "name": "DEF-brow.B.L.003",
+     "parent": "DEF-brow.B.L.002",
+     "deform": true
+    },
+    {
+     "name": "DEF-brow.B.L.004",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-nose.L",
+     "parent": "DEF-brow.B.L.004",
+     "deform": true
+    },
+    {
+     "name": "DEF-brow.B.R",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-brow.B.R.001",
+     "parent": "DEF-brow.B.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-brow.B.R.002",
+     "parent": "DEF-brow.B.R.001",
+     "deform": true
+    },
+    {
+     "name": "DEF-brow.B.R.003",
+     "parent": "DEF-brow.B.R.002",
+     "deform": true
+    },
+    {
+     "name": "DEF-brow.B.R.004",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-nose.R",
+     "parent": "DEF-brow.B.R.004",
+     "deform": true
+    },
+    {
+     "name": "DEF-brow.T.L",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-brow.T.L.001",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-brow.T.L.002",
+     "parent": "DEF-brow.T.L.001",
+     "deform": true
+    },
+    {
+     "name": "DEF-brow.T.L.003",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-brow.T.R",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-brow.T.R.001",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-brow.T.R.002",
+     "parent": "DEF-brow.T.R.001",
+     "deform": true
+    },
+    {
+     "name": "DEF-brow.T.R.003",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-cheek.B.L",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-cheek.B.L.001",
+     "parent": "DEF-cheek.B.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-cheek.B.R",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-cheek.B.R.001",
+     "parent": "DEF-cheek.B.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-cheek.T.L",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-cheek.T.L.001",
+     "parent": "DEF-cheek.T.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-cheek.T.R",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-cheek.T.R.001",
+     "parent": "DEF-cheek.T.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-forehead.L",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-forehead.L.001",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-forehead.L.002",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-forehead.R",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-forehead.R.001",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-forehead.R.002",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-nose",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-nose.001",
+     "parent": "DEF-nose",
+     "deform": true
+    },
+    {
+     "name": "DEF-nose.004",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-temple.L",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-temple.R",
+     "parent": "ORG-face",
+     "deform": true
+    },
+    {
+     "name": "DEF-shoulder-helper.L",
+     "parent": "ORG-shoulder.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-shoulder.L",
+     "parent": "ORG-shoulder.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-upper_arm.L",
+     "parent": "ORG-shoulder.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-upper_arm.L.001",
+     "parent": "DEF-upper_arm.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-forearm.L",
+     "parent": "DEF-upper_arm.L.001",
+     "deform": true
+    },
+    {
+     "name": "DEF-forearm.L.001",
+     "parent": "DEF-forearm.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-hand.L",
+     "parent": "DEF-forearm.L.001",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_index.01.L",
+     "parent": "ORG-palm.01.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_index.02.L",
+     "parent": "DEF-f_index.01.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_index.03.L",
+     "parent": "DEF-f_index.02.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-thumb.01.L",
+     "parent": "ORG-palm.01.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-thumb.02.L",
+     "parent": "DEF-thumb.01.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-thumb.03.L",
+     "parent": "DEF-thumb.02.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-palm.01.L",
+     "parent": "ORG-palm.01.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_middle.01.L",
+     "parent": "ORG-palm.02.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_middle.02.L",
+     "parent": "DEF-f_middle.01.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_middle.03.L",
+     "parent": "DEF-f_middle.02.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-palm.02.L",
+     "parent": "ORG-palm.02.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_ring.01.L",
+     "parent": "ORG-palm.03.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_ring.02.L",
+     "parent": "DEF-f_ring.01.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_ring.03.L",
+     "parent": "DEF-f_ring.02.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-palm.03.L",
+     "parent": "ORG-palm.03.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_pinky.01.L",
+     "parent": "ORG-palm.04.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_pinky.02.L",
+     "parent": "DEF-f_pinky.01.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_pinky.03.L",
+     "parent": "DEF-f_pinky.02.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-palm.04.L",
+     "parent": "ORG-palm.04.L",
+     "deform": true
+    },
+    {
+     "name": "DEF-shoulder-helper.R",
+     "parent": "ORG-shoulder.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-shoulder.R",
+     "parent": "ORG-shoulder.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-upper_arm.R",
+     "parent": "ORG-shoulder.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-upper_arm.R.001",
+     "parent": "DEF-upper_arm.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-forearm.R",
+     "parent": "DEF-upper_arm.R.001",
+     "deform": true
+    },
+    {
+     "name": "DEF-forearm.R.001",
+     "parent": "DEF-forearm.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-hand.R",
+     "parent": "DEF-forearm.R.001",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_index.01.R",
+     "parent": "ORG-palm.01.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_index.02.R",
+     "parent": "DEF-f_index.01.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_index.03.R",
+     "parent": "DEF-f_index.02.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-thumb.01.R",
+     "parent": "ORG-palm.01.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-thumb.02.R",
+     "parent": "DEF-thumb.01.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-thumb.03.R",
+     "parent": "DEF-thumb.02.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-palm.01.R",
+     "parent": "ORG-palm.01.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_middle.01.R",
+     "parent": "ORG-palm.02.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_middle.02.R",
+     "parent": "DEF-f_middle.01.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_middle.03.R",
+     "parent": "DEF-f_middle.02.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-palm.02.R",
+     "parent": "ORG-palm.02.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_ring.01.R",
+     "parent": "ORG-palm.03.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_ring.02.R",
+     "parent": "DEF-f_ring.01.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_ring.03.R",
+     "parent": "DEF-f_ring.02.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-palm.03.R",
+     "parent": "ORG-palm.03.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_pinky.01.R",
+     "parent": "ORG-palm.04.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_pinky.02.R",
+     "parent": "DEF-f_pinky.01.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-f_pinky.03.R",
+     "parent": "DEF-f_pinky.02.R",
+     "deform": true
+    },
+    {
+     "name": "DEF-palm.04.R",
+     "parent": "ORG-palm.04.R",
+     "deform": true
+    }
+   ]
+  }
+ ],
+ "materials": [],
+ "images": [],
+ "actions": []
+}
