@@ -135,8 +135,8 @@ func _add_row(command: String) -> void:
 	var name := UI.label(command)
 	name.set_meta("command_column", true)
 	box.add_child(name)
-	var description := UI.label(str(SLASH.COMMANDS[command][0]), "JoineryCaption")
-	description.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# In a narrow sidebar the description wraps under itself rather than ending in "…".
+	var description := UI.label(str(SLASH.COMMANDS[command][0]), "JoineryCaption", true)
 	box.add_child(description)
 	var index := matches.size()
 	row.gui_input.connect(_on_row_input.bind(index))

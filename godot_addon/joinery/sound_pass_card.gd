@@ -251,10 +251,9 @@ func _row(label_text: String) -> Dictionary:
 	row.mouse_filter = Control.MOUSE_FILTER_PASS
 	var dot := UI.status_dot("off")
 	row.add_child(dot)
-	var label := UI.label(label_text)
-	label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# A narrow sidebar wraps the kind of sound onto a second line; the count and state stay.
+	var label := UI.label(label_text, "", true)
 	label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	row.add_child(label)
 	var count := UI.label("", "JoineryNumeric")
 	count.size_flags_vertical = Control.SIZE_SHRINK_CENTER

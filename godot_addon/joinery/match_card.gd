@@ -100,7 +100,7 @@ var _areas: VBoxContainer
 var _area_rows: Dictionary = {}
 var _findings: VBoxContainer
 var _more: Button
-var _foot: HBoxContainer
+var _foot: HFlowContainer
 var _needs: Label
 var _kept: Label
 var _run: Array = []
@@ -185,8 +185,14 @@ func _init(card_kind := "match") -> void:
 	_more.pressed.connect(_show_all)
 	_more.hide()
 	column.add_child(_more)
-	_foot = HBoxContainer.new()
-	_foot.theme_type_variation = "JoineryRow"
+	# Fix all and its two counts on one line; in a narrow sidebar the counts flow onto the next.
+	_foot = HFlowContainer.new()
+	STYLE.on_theme_overrides(
+		_foot,
+		func() -> void:
+			_foot.add_theme_constant_override("h_separation", UI_THEME.space(_foot, 2))
+			_foot.add_theme_constant_override("v_separation", UI_THEME.space(_foot, 1))
+	)
 	_foot.hide()
 	column.add_child(_foot)
 	fix_all = UI.primary("Fix all")
