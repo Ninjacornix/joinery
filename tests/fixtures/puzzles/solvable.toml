@@ -1,0 +1,50 @@
+# Hand-made levels that can be won; each is checked by the tests.
+version = 1
+
+[[levels]]
+name = "first_push"
+map = '''
+#######
+#@ $ .#
+#######
+'''
+
+[[levels]]
+name = "key_and_door"
+map = '''
+#########
+#@ a#  >#
+#   A   #
+#########
+'''
+
+[[levels]]
+name = "hold_the_switch"
+map = '''
+########
+#@ $ _ #
+#      #
+####=###
+#  >   #
+########
+'''
+
+[[levels]]
+name = "two_boxes"
+move_limit = 40
+map = '''
+########
+#  .   #
+# $##$ #
+#@  .  #
+########
+'''
+
+[[levels]]
+name = "kept_key"
+keys = "kept"
+map = '''
+###########
+#@b B  B >#
+###########
+'''

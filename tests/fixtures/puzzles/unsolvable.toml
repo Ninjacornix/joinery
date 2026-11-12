@@ -1,0 +1,54 @@
+# Hand-made levels that can't be won, each for a different reason.
+version = 1
+
+[[levels]]
+name = "box_in_corner"
+map = '''
+#####
+#$  #
+# @.#
+#####
+'''
+
+[[levels]]
+name = "too_few_boxes"
+map = '''
+#######
+#@ $..#
+#######
+'''
+
+[[levels]]
+name = "walled_exit"
+map = '''
+#######
+#@  # >#
+#######
+'''
+
+[[levels]]
+name = "one_key_two_doors"
+map = '''
+###########
+#@a A  A >#
+###########
+'''
+
+[[levels]]
+name = "switch_needs_a_box"
+map = '''
+#######
+#@  _ #
+###=###
+#  >  #
+#######
+'''
+
+[[levels]]
+name = "too_tight"
+move_limit = 2
+map = '''
+#######
+#@ $ .#
+#######
+'''
