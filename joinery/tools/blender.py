@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 import re
 from pathlib import Path
@@ -210,14 +211,59 @@ print('JOINERY_DOCUMENT:' + json.dumps({
 }))
 """
 
-# Writes each image that has pixels as its own PNG. The .blend keeps its packed
-# copy, so a recipe still replays from the .blend alone.
+
+def recreated_images(before: list[str], after: list[str]) -> dict[str, list[str]]:
+    """Images an edit made again under a name the model already had.
+
+    Blender gives a new image whose name is taken a numbered suffix, so code
+    that bakes or loads ``wood_albedo`` a second time makes ``wood_albedo.001``
+    beside the original, and the texture export would write both. Returns
+    ``{original: [copies, oldest first]}`` for every image in `before` that the
+    edit made again. Runs inside Blender too (`SETTLE_IMAGES`).
+    """
+    import re
+
+    existing = set(before)
+    found: dict[str, list[str]] = {}
+    for name in after:
+        match = re.fullmatch(r"(.+)\.(\d{3,})", name)
+        if name not in existing and match and match.group(1) in existing:
+            found.setdefault(match.group(1), []).append(name)
+    return {
+        original: sorted(copies, key=lambda n: int(n.rsplit(".", 1)[1]))
+        for original, copies in found.items()
+    }
+
+
+# An image the edit made again replaces the one it repeats: the newest copy
+# takes over every use of the original (and of older copies) and its name, so
+# a second bake or load overwrites the same image and the same texture file.
+SETTLE_IMAGES = (
+    inspect.getsource(recreated_images)
+    + """
+def _joinery_settle_images(before):
+    names = [i.name for i in bpy.data.images]
+    for original, copies in recreated_images(before, names).items():
+        keep = bpy.data.images[copies[-1]]
+        for name in [original, *copies[:-1]]:
+            old = bpy.data.images[name]
+            old.user_remap(keep)
+            bpy.data.images.remove(old)
+        keep.name = original
+"""
+)
+
+# Writes each image the saved model keeps as its own PNG. The .blend keeps its
+# packed copy, so a recipe still replays from the .blend alone. An image nothing
+# uses is not saved in the .blend, so it gets no file either.
 EXPORT_TEXTURES = """
 def _joinery_export_textures(directory):
     os.makedirs(directory, exist_ok=True)
     used = set()
     for image in sorted(bpy.data.images, key=lambda i: i.name):
         if image.type != 'IMAGE' or image.size[0] == 0 or image.size[1] == 0:
+            continue
+        if image.users == 0:
             continue
         name = bpy.path.clean_name(image.name) or 'texture'
         while name in used:
@@ -931,7 +977,10 @@ class Blender(ToolModule):
             "bpy.context.scene.unit_settings.system = 'METRIC'",
             "bpy.context.scene.unit_settings.scale_length = 1.0",
             *extension_lines(code),
+            "_joinery_images_before = [i.name for i in bpy.data.images]",
             code,
+            SETTLE_IMAGES,
+            "_joinery_settle_images(_joinery_images_before)",
         ]
         lines += [
             "assert all(all(math.isfinite(x) for row in o.matrix_world for x in row) for o in bpy.data.objects), 'Nonfinite object transform'",

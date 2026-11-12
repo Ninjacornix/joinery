@@ -4,6 +4,7 @@ official MCP's window-only tools are never offered or allowed."""
 from __future__ import annotations
 
 import asyncio
+import inspect
 from pathlib import Path
 from typing import Any
 
@@ -18,9 +19,12 @@ from joinery.mcp_runtime import Readiness, ServerSpec
 from joinery.tools.base import WorkerExec
 from joinery.tools.blender import (
     BAKE_FOR_EXPORT,
+    EXPORT_TEXTURES,
     MPFB_HINT,
     MPFB_HUMAN,
     PACK_CHANGED_IMAGES,
+    SETTLE_IMAGES,
+    recreated_images,
 )
 
 BLENDER = tools.get("blender")
@@ -70,6 +74,39 @@ def test_export_applies_modifiers_after_the_save_keeping_shape_keys() -> None:
     assert "m.type != 'ARMATURE'" in BAKE_FOR_EXPORT
     no_export = BLENDER.script("art/sources/crate.blend", "", "pass", [])
     assert "_joinery_bake_for_export()" not in no_export
+
+
+def test_an_image_made_again_is_found_with_its_copies_oldest_first() -> None:
+    before = ["trim_albedo", "glass_albedo", "skin.001", "Render Result"]
+    after = [
+        *before,
+        "trim_albedo.002",
+        "trim_albedo.001",
+        "glass_albedo.001",
+        "new_map",
+        "skin.002",
+    ]
+    assert recreated_images(before, after) == {
+        "trim_albedo": ["trim_albedo.001", "trim_albedo.002"],
+        "glass_albedo": ["glass_albedo.001"],
+    }
+    # A suffixed name the model already had is its own image, not a copy.
+    assert recreated_images(["a", "a.001"], ["a", "a.001"]) == {}
+
+
+def test_a_rebaked_image_replaces_the_original_before_the_save() -> None:
+    script = _script("bpy.data.images.new('trim_albedo', 8, 8)")
+    snapshot = script.index("_joinery_images_before = [")
+    code = script.index("bpy.data.images.new('trim_albedo', 8, 8)")
+    settle = script.index("_joinery_settle_images(_joinery_images_before)")
+    assert snapshot < code < settle < script.index(PACK_CHANGED_IMAGES)
+    assert settle < script.index("bpy.ops.wm.save_as_mainfile(")
+    assert "user_remap" in SETTLE_IMAGES and "keep.name = original" in SETTLE_IMAGES
+    # An image nothing uses is dropped from the saved .blend; no file for it.
+    assert "image.users == 0" in EXPORT_TEXTURES
+    compile(script, "recipe.py", "exec")
+    # Blender runs the very same naming logic.
+    assert SETTLE_IMAGES.startswith(inspect.getsource(recreated_images))
 
 
 @pytest.mark.parametrize(

@@ -40,6 +40,26 @@ print('JOINERY_ALBEDO', packed.source, bool(packed.packed_file), packed.pixels[0
 """
 
 
+# A second bake as agent code often writes it: a new image under the same name,
+# on a new texture node, while the old node and image stay in the material.
+_REBAKE = """
+image = bpy.data.images.new('FixtureAlbedo', 8, 8)
+image.pixels.foreach_set([0.5] * (8 * 8 * 4))
+material = bpy.data.materials['FixtureMat']
+texture = material.node_tree.nodes.new('ShaderNodeTexImage')
+texture.image = image
+material.node_tree.links.new(texture.outputs['Color'], material.node_tree.nodes['Principled BSDF'].inputs['Base Color'])
+"""
+
+
+async def _image_names(stage: Path) -> list[str]:
+    code = "import bpy\nprint('JOINERY_IMAGES', ','.join(sorted(i.name for i in bpy.data.images)))"
+    got = await run_offline(["blender", "--background", "art/sources/fixture.blend", "--python-expr", code], stage, readonly=True)
+    line = next((line for line in got.stdout.splitlines() if line.startswith("JOINERY_IMAGES")), "")
+    assert line, got.stdout[-800:] + got.stderr[-800:]
+    return line.split(maxsplit=1)[1].split(",") if " " in line else []
+
+
 async def _albedo(stage: Path) -> tuple[float, float]:
     """The albedo's first channel in the .blend and in the PNG, to two places."""
     got = await run_offline(["blender", "--background", "art/sources/fixture.blend", "--python-expr", _READ_ALBEDO], stage, readonly=True)
@@ -168,6 +188,14 @@ async def main(app: str) -> None:
             got = await edit_document(tx.stage, app, "art/sources/fixture.blend", 'bpy.data.objects["Fixture"].location.x += 0.25', ["art/models/fixture.glb"])
             # An edit that leaves the texture alone keeps it.
             assert await _albedo(tx.stage) == (0.75, 0.75)
+            # Baking the same map again makes a new image under a taken name
+            # (Blender calls it FixtureAlbedo.001). It replaces the original:
+            # one image in the .blend, one PNG, never a _001 file.
+            got = await edit_document(tx.stage, app, "art/sources/fixture.blend", _REBAKE, ["art/models/fixture.glb"])
+            assert await _albedo(tx.stage) == (0.5, 0.5)
+            names = sorted(p.name for p in (tx.stage / "art/textures/fixture").glob("*.png"))
+            assert names == ["FixtureAlbedo.png"], names
+            assert await _image_names(tx.stage) == ["FixtureAlbedo"]
             assert (tx.stage / "recipes/history" / Path(first).name).is_file()
             native = await inspect_document(tx.stage, app, "art/sources/fixture.blend")
             assert native["objects"][0]["position"][2] == 0.5
