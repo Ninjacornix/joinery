@@ -9,7 +9,9 @@ extends PanelContainer
 ##
 ## The same card shows the accessibility and performance checks (ADR 0049, ADR 0050) with
 ## [member kind] "access" or "perf": their own headline, the finding's own words on each
-## row, and for performance the target machine to judge against.
+## row, and for performance the target machine to judge against. The accessibility card also
+## files its findings by Xbox Accessibility Guideline, with which guidelines Joinery checks
+## (access_guidelines.gd, ADR 0067).
 
 signal fix_requested(areas: Array)
 signal recheck_requested
@@ -24,6 +26,7 @@ const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
 const INDICATOR := preload("activity_indicator.gd")
+const GUIDELINES := preload("access_guidelines.gd")
 ## Severity -> status dot state.
 const DOTS := {"high": "attention", "medium": "working", "low": "off"}
 ## Findings shown before "Show all".
@@ -91,6 +94,8 @@ var title_label: Label
 var close: Button
 var stop: Button
 var fix_all: Button
+## Accessibility only: the findings by Xbox Accessibility Guideline.
+var guidelines: Control
 var _dots: Control
 var _status: TextureRect
 var _step: Label
@@ -185,6 +190,9 @@ func _init(card_kind := "match") -> void:
 	_more.pressed.connect(_show_all)
 	_more.hide()
 	column.add_child(_more)
+	if kind == "access":
+		guidelines = GUIDELINES.new()
+		column.add_child(guidelines)
 	# Fix all and its two counts on one line; in a narrow sidebar the counts flow onto the next.
 	_foot = HFlowContainer.new()
 	STYLE.on_theme_overrides(
@@ -248,6 +256,8 @@ func show_audit(data: Dictionary) -> void:
 	_review.visible = _ready_count() > 0
 	_fill_areas(data.get("areas", []), before)
 	_fill_findings(findings)
+	if guidelines != null:
+		guidelines.call("show_xag", (data.get("facts", {}) as Dictionary).get("xag", {}), findings)
 	fix_all.text = "Fix %d %s" % [fixable, "thing" if fixable == 1 else "things"]
 	fix_all.visible = fixable > 0
 	var needs := findings.size() - fixable
@@ -296,6 +306,10 @@ func apply_run(event: Dictionary) -> void:
 			_again.visible = true
 			_findings.visible = _findings.get_child_count() > 0
 			_areas.visible = not _area_rows.is_empty()
+			if guidelines != null:
+				guidelines.visible = not (
+					((audit.get("facts", {}) as Dictionary).get("xag", {}) as Dictionary).is_empty()
+				)
 			for id: String in _area_rows:
 				_show_fix(_area_rows[id]["fix"] as Button, false)
 			UI_MOTION.pulse(self)
@@ -617,6 +631,8 @@ func _quiet_details() -> void:
 	_areas.hide()
 	_findings.hide()
 	_more.hide()
+	if guidelines != null:
+		guidelines.hide()
 	_again.hide()
 	stop.show()
 	close.hide()

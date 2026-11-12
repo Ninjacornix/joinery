@@ -102,6 +102,33 @@ func _run() -> void:
 	_check(fix_all.text == "Fix 7 things", "Fix all names how many: " + fix_all.text)
 	_check(card.get("_needs").text == "1 need you", "What Joinery can't fix is counted")
 
+	# The same findings by Xbox Accessibility Guideline, with what Joinery checks.
+	var guide: Control = card.get("guidelines")
+	_check(guide != null and guide.visible, "The guidelines show under the findings")
+	_check(guide.call("coverage_text") == "9 of 23 checked", guide.call("coverage_text"))
+	var listed: PackedStringArray = guide.call("row_words")
+	_check(listed[0] == "101 Text display · 1 problem", "Failing first: %s" % listed)
+	_check(listed[1] == "102 Contrast · 2 problems", "%s" % listed)
+	_check(
+		listed.has("107 Input · passes") and listed.has("118 Photosensitivity · not measured"),
+		"%s" % listed
+	)
+	_check(
+		(guide.call("left_text") as String).begins_with("A person judges the other 14: 105 Audio"),
+		guide.call("left_text")
+	)
+	guide.call("set_open", true)
+	var opener := _button(guide, "102 Contrast")
+	_check(opener != null, "A failing guideline opens")
+	opener.button_pressed = true
+	var shown := PackedStringArray()
+	for label: Node in guide.find_children("", "Label", true, false):
+		if (label as Label).is_visible_in_tree():
+			shown.append((label as Label).text)
+	_check(
+		shown.has('main.tscn: "Score: 12" (#777777 on #888888) has contrast 1.3:1.'), "%s" % shown
+	)
+
 	# A feature-only area: its Fix opens the feature's plan; nothing goes to the host.
 	(card.call("area_fix", "captions") as Button).pressed.emit()
 	_check(_features == ["accessibility"], "Captions' Fix opens the Accessibility plan")

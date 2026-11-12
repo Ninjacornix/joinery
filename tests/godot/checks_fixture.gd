@@ -105,8 +105,69 @@ static func access(fixed := false) -> Dictionary:
 		"summary": "",
 		"findings": findings,
 		"errors": [],
-		"facts": {"controls": 14, "pages": ["pause", "settings", "accessibility"]},
+		"facts":
+		{"controls": 14, "pages": ["pause", "settings", "accessibility"], "xag": xag(findings)},
 	}
+
+
+## The findings by Xbox Accessibility Guideline, as joinery/access_xag.py files them.
+static func xag(findings: Array) -> Dictionary:
+	var names := {
+		"101": "Text display",
+		"102": "Contrast",
+		"103": "Additional channels for visual and audio cues",
+		"104": "Subtitles and captions",
+		"105": "Audio accessibility",
+		"106": "Screen narration",
+		"107": "Input",
+		"108": "Game difficulty options",
+		"109": "Objective clarity",
+		"110": "Haptic feedback",
+		"111": "Audio descriptions",
+		"112": "UI navigation",
+		"113": "UI focus handling",
+		"114": "UI context",
+		"115": "Error messages and destructive actions",
+		"116": "Time limits",
+		"117": "Visual distractions and motion settings",
+		"118": "Photosensitivity",
+		"119": "Speech-to-text and text-to-speech",
+		"120": "Communication experiences",
+		"121": "Accessible feature documentation",
+		"122": "Accessible customer support",
+		"123": "Mental health best practices",
+	}
+	var by_area := {
+		"text": "101", "contrast": "102", "colour": "103", "captions": "104", "menus": "106"
+	}
+	var measured := ["101", "102", "103", "104", "106", "107"]
+	var checked := measured + ["108", "117", "118"]
+	var rows: Array = []
+	for id: String in names:
+		var filed: Array = []
+		for item: Dictionary in findings:
+			if by_area.get(str(item["area"]), "") == id:
+				filed.append(item["id"])
+		var status := "not_checked"
+		if not filed.is_empty():
+			status = "fails"
+		elif id in measured:
+			status = "passes"
+		elif id in checked:
+			status = "not_run"
+		(
+			rows
+			. append(
+				{
+					"id": id,
+					"name": names[id],
+					"checks": ["what Joinery measures"] if id in checked else [],
+					"status": status,
+					"findings": filed,
+				}
+			)
+		)
+	return {"version": "3.2", "checked": checked.size(), "total": 23, "guidelines": rows}
 
 
 static func perf(fixed := false, target := "steam-deck") -> Dictionary:
