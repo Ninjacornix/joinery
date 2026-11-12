@@ -136,12 +136,16 @@ def test_a_model_names_the_glb_each_side_exports_for_live_3d(
         (root / "recipes/crate.toml").write_text(recipe)
         (root / "art/models").mkdir(parents=True, exist_ok=True)
         (root / "art/models/crate.glb").write_bytes(body)
-    media, _renders = review.plan(tx, [{"path": "art/crate.blend", "change": "modified"}])
+    media, _renders = review.plan(
+        tx, [{"path": "art/crate.blend", "change": "modified"}]
+    )
     (item,) = media
     assert item["before_model"] == str(tx.original / "art/models/crate.glb")
     assert item["after_model"] == str(tx.stage / "art/models/crate.glb")
     (tx.original / "art/models/crate.glb").unlink()
-    media, _renders = review.plan(tx, [{"path": "art/crate.blend", "change": "modified"}])
+    media, _renders = review.plan(
+        tx, [{"path": "art/crate.blend", "change": "modified"}]
+    )
     assert "before_model" not in media[0], "A side without the file has no live model"
 
 
@@ -149,5 +153,45 @@ def test_a_model_without_an_exported_glb_keeps_its_renders_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     _gateway, tx = staged(tmp_path, monkeypatch)
-    media, _renders = review.plan(tx, [{"path": "art/crate.blend", "change": "modified"}])
+    media, _renders = review.plan(
+        tx, [{"path": "art/crate.blend", "change": "modified"}]
+    )
     assert not {"before_model", "after_model"} & media[0].keys()
+
+
+def test_an_unchanged_side_is_never_rendered_again(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Renders are kept by the document's bytes and the script: a second review of
+    the same before (a send-back, a second round) takes it from the cache."""
+    _gateway, tx = staged(tmp_path, monkeypatch)
+    drawn: list[str] = []
+
+    async def render(root: Path, _relative: str, name: str, _script: str) -> Path:
+        drawn.append("after" if root == tx.stage else "before")
+        output = root / ".joinery/previews" / name
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_bytes(b"png of " + (root / "art/crate.blend").read_bytes())
+        output.with_name(output.stem + review.BACK_SUFFIX).write_bytes(b"back")
+        return output
+
+    monkeypatch.setattr(review, "_render", render)
+    changes = [{"path": "art/crate.blend", "change": "modified"}]
+
+    def once() -> dict[str, Any]:
+        media, renders = review.plan(tx, changes)
+        asyncio.run(review.render(renders))
+        return media[0]
+
+    first = once()
+    assert sorted(drawn) == ["after", "before"]
+    drawn.clear()
+    (tx.stage / "art/crate.blend").write_bytes(b"after, fixed")
+    second = once()
+    # Only the side that changed was drawn; the before came from the cache.
+    assert drawn == ["after"]
+    assert Path(second["before"]).read_bytes() == b"png of before"
+    assert Path(second["before_back"]).read_bytes() == b"back"
+    assert Path(second["after"]).read_bytes() == b"png of after, fixed"
+    assert first["before"] == second["before"]
+    assert list((tmp_path / review.CACHE_DIR).glob("*.png"))

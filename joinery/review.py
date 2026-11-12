@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -255,10 +256,22 @@ class Render:
     script: str
     #: The side may have nothing to show (an action new in this change).
     optional: bool = False
+    #: Where finished renders are kept by what they show (the project's
+    #: ``.joinery/render_cache``); None renders every time.
+    cache: Path | None = None
 
     @property
     def output(self) -> Path:
         return self.root / ".joinery/previews" / self.name
+
+    def key(self) -> str:
+        """What this render shows: the document's bytes and the script that draws
+        it. The same key draws the same picture, so it is never drawn twice."""
+        digest = hashlib.sha256(RENDER_VERSION.encode())
+        with (self.root / self.relative).open("rb") as source:
+            digest.update(hashlib.file_digest(source, "sha256").digest())
+        digest.update(self.script.encode())
+        return digest.hexdigest()[:40]
 
     @property
     def meta(self) -> Path:
@@ -367,6 +380,8 @@ def plan(
                 item[side] = str(path)
         media.append(item)
     for job in renders:
+        project = getattr(tx, "project", None)
+        job.cache = project / CACHE_DIR if isinstance(project, Path) else None
         # A file left by an earlier review would show before this render is done.
         job.output.unlink(missing_ok=True)
         job.back.unlink(missing_ok=True)
@@ -375,14 +390,83 @@ def plan(
     return media, renders
 
 
+#: Finished review renders, by what they show (``Render.key``).
+CACHE_DIR = ".joinery/render_cache"
+#: Renders kept; the least recently used go first.
+CACHE_KEEP = 200
+#: Part of every key: a change to how renders are drawn draws them all again.
+RENDER_VERSION = "1"
+
+
+def _cached_files(job: Render, key: str) -> list[tuple[Path, Path]]:
+    """(cache file, review file) for the picture, its far side and its clip facts."""
+    assert job.cache is not None
+    return [
+        (job.cache / (key + ".png"), job.output),
+        (job.cache / (key + BACK_SUFFIX), job.back),
+        (job.cache / (key + ".json"), job.meta),
+    ]
+
+
+def _from_cache(job: Render) -> Path | None:
+    """The finished picture for ``job`` from the cache, copied into place."""
+    if job.cache is None:
+        return None
+    try:
+        key = job.key()
+        files = _cached_files(job, key)
+        if not files[0][0].is_file():
+            return None
+        job.output.parent.mkdir(parents=True, exist_ok=True)
+        for kept, shown in files:
+            if kept.is_file():
+                shutil.copyfile(kept, shown)
+                kept.touch()
+    except OSError:
+        return None
+    return job.output
+
+
+def _to_cache(job: Render) -> None:
+    if job.cache is None or not job.output.is_file():
+        return
+    try:
+        key = job.key()
+        job.cache.mkdir(parents=True, exist_ok=True)
+        for kept, shown in reversed(_cached_files(job, key)):
+            # The picture last: a key with a picture is complete.
+            if shown.is_file():
+                shutil.copyfile(shown, kept.with_name(kept.name + ".part"))
+                kept.with_name(kept.name + ".part").replace(kept)
+        pictures = sorted(
+            job.cache.glob("*.png"), key=lambda p: p.stat().st_mtime, reverse=True
+        )
+        for old in pictures[CACHE_KEEP * 2 :]:
+            old.unlink(missing_ok=True)
+            old.with_suffix(".json").unlink(missing_ok=True)
+    except OSError:
+        pass  # A cache that can't be written only costs a render next time.
+
+
+async def _render_job(job: Render) -> Path:
+    cached = await asyncio.to_thread(_from_cache, job)
+    if cached is not None:
+        return cached
+    output = await _render(job.root, job.relative, job.name, job.script)
+    await asyncio.to_thread(_to_cache, job)
+    return output
+
+
 async def render(renders: list[Render], *, strict: bool = False) -> None:
     """Run every render at once, each in its own offline Blender.
 
+    A render whose document and script were drawn before is taken from the
+    cache instead (``Render.key``): an unchanged side is never drawn again.
     A render that fails marks its item with ``error`` (the review still stands)
     and drops that side; with ``strict`` the first failure is raised instead.
     """
     done = await asyncio.gather(
-        *(_render(job.root, job.relative, job.name, job.script) for job in renders),
+        *(_render_job(job) for job in renders),
         return_exceptions=True,
     )
     for job, result in zip(renders, done, strict=True):
