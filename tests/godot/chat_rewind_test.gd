@@ -47,6 +47,30 @@ static func entries() -> Array:
 	]
 
 
+## A one-line request's bubble hugs it: SPACE.3 on every side, as tall as the menu button
+## (CONTROL_H.xs, not the icon button's md square), and the text's centre on the glyph's.
+func _hugs(card: Control, menu: MenuButton) -> void:
+	await process_frame
+	await process_frame
+	var theme: GDScript = load("res://addons/joinery/ui_theme.gd")
+	var bubble: Control = card.get("_bubble")
+	var label: RichTextLabel = card.get("text_label")
+	var pad := float(theme.space(bubble, 3))
+	var side := float(theme.control_h(menu, "xs"))
+	var outer := bubble.get_global_rect()
+	var text := label.get_global_rect()
+	var button := menu.get_global_rect()
+	_check(button.size.y == side, "The menu is CONTROL_H.xs tall: %s" % button.size.y)
+	_check(text.position.x - outer.position.x == pad, "SPACE.3 left of the text: %s" % text)
+	_check(button.position.y - outer.position.y == pad, "SPACE.3 over the row: %s" % button)
+	_check(outer.end.y - button.end.y == pad, "SPACE.3 under it: %s / %s" % [outer, button])
+	_check(outer.end.x - button.end.x == pad, "SPACE.3 right of the menu: %s" % button)
+	_check(
+		absf(text.get_center().y - button.get_center().y) <= 1.0,
+		"The line and the glyph share a centre: %s / %s" % [text, button]
+	)
+
+
 static func save(folder: String, chat_id: String, title: String, lines: Array) -> void:
 	DirAccess.make_dir_recursive_absolute(folder)
 	var head := {
@@ -124,6 +148,7 @@ func _run() -> void:
 		second.get("text_label").get_parent() == menu.get_parent(),
 		"The menu sits beside the request text, not over it"
 	)
+	await _hugs(cards[0], rewinder.menu_of(cards[0]))
 	_check(rewinder.turn_of(second) == 1, "The second request is turn 1")
 	_check(rewinder.turn_of(cards[2]) == 2, "The third is turn 2")
 

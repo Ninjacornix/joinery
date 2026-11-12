@@ -20,6 +20,7 @@ extends RefCounted
 const UI := preload("ui_components.gd")
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
+const STYLE := preload("sidebar_style.gd")
 const STORE := preload("chat_store.gd")
 const SLASH := preload("slash_commands.gd")
 const EDIT := 0
@@ -54,6 +55,9 @@ func offer(card: Control) -> void:
 	var row := HBoxContainer.new()
 	row.theme_type_variation = "JoineryRowTight"
 	content.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# A one-line request is a little shorter than the button: it sits in the row's middle, so
+	# the glyph and the line share a centre and the bubble stays one line tall.
+	content.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(content)
 	var button := MenuButton.new()
 	button.theme_type_variation = "JoineryIconButton"
@@ -63,11 +67,24 @@ func offer(card: Control) -> void:
 	button.accessibility_name = "Rewind or branch from this message"
 	button.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 	UI.bind_icon(button, "menu")
-	UI._on_theme(
+	STYLE.on_theme_overrides(
 		button,
 		func() -> void:
 			var side := float(UI_THEME.control_h(button, "xs"))
 			button.custom_minimum_size = Vector2(side, side)
+			# The icon button's padding centres a glyph in a CONTROL_H.md square, which would
+			# hold the button (and the bubble) at md whatever its minimum says. Here the glyph
+			# is centred in the xs square instead.
+			for state: String in [
+				"normal", "hover", "pressed", "hover_pressed", "disabled", "focus"
+			]:
+				button.remove_theme_stylebox_override(state)
+				var source := button.get_theme_stylebox(state, button.theme_type_variation)
+				if source == null:
+					continue
+				var box := source.duplicate() as StyleBox
+				box.set_content_margin_all(0.0)
+				button.add_theme_stylebox_override(state, box)
 	)
 	button.modulate.a = 0.0
 	row.add_child(button)
