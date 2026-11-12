@@ -69,6 +69,7 @@ APPROVED_TOOLS = (
     "task_status",
     "playtest",
     "blockout",
+    "make_variant",
     "access_check",
     "perf_check",
     "sound_audit",

@@ -238,6 +238,7 @@ REGISTRY_TOOLS: tuple[str, ...] = (
     "access_check",
     "perf_check",
     "blockout",
+    "make_variant",
     "sound_audit",
     "report_review",
     "report_design",

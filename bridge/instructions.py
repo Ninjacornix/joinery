@@ -172,12 +172,50 @@ BLOCKOUT_REQUEST = (
 )
 
 
+#: Scene variants: Godot inherited scenes (ADR 0066).
+SCENE_VARIANT_GUIDE = (
+    "When the user wants a version of an existing scene (a red goblin, a bigger "
+    "crate, a harder level) or types /variant, call make_variant(base, path?, "
+    "overrides?) instead of copying the scene: it stages a Godot inherited scene that "
+    "keeps only what differs, so later changes to the base reach it. Set what differs "
+    "as overrides; add nodes or change resources on the staged variant afterwards. "
+)
+
+#: Old saves keep loading (ADR 0066).
+SAVES_GUIDE = (
+    "Players' saves must keep loading. When your change renames, moves or changes "
+    "what a saveable node's save_state returns (or a SaveGame.register'd provider, or "
+    "the level a save points at), raise save/data_version in project.godot by one and "
+    "add a step for the old version in res://game/save_migrations.gd (extends "
+    "RefCounted; func migrations() -> Dictionary returns {old_version: Callable}, each "
+    "step takes the decoded save {nodes, extra, options, level, ...} and returns it in "
+    "the new shape) in the same change. Joinery loads the saves the playtester kept "
+    "(tests/saves/) in the changed game and sends the change back naming the save and "
+    "what was lost. "
+)
+
+#: The request ``/variant [words]`` stands for; ``{words}`` is what the user added.
+SCENE_VARIANT_REQUEST = (
+    "Make a variant of the scene open in the editor with make_variant (a Godot "
+    "inherited scene, beside it unless I name a path), setting only what I ask to "
+    "differ, then submit_for_review. {words}"
+)
+
+#: Sidebar commands that stand for a request: command -> its request.
+_COMMAND_REQUESTS = {
+    "/blockout": BLOCKOUT_REQUEST,
+    "/variant": SCENE_VARIANT_REQUEST,
+}
+
+
 def expand_command(text: str) -> str:
-    """``/blockout [words]`` as the request it stands for; any other text as it is."""
+    """``/blockout [words]`` or ``/variant [words]`` as the request it stands for; any
+    other text as it is."""
     stripped = text.strip()
-    if stripped != "/blockout" and not stripped.startswith("/blockout "):
-        return text
-    return BLOCKOUT_REQUEST.format(words=stripped[len("/blockout") :].strip()).strip()
+    for command, request in _COMMAND_REQUESTS.items():
+        if stripped == command or stripped.startswith(command + " "):
+            return request.format(words=stripped[len(command) :].strip()).strip()
+    return text
 
 
 #: When to offer a few ways side by side, and how to start them.
@@ -333,6 +371,8 @@ DESIGN_PROMPT = RolePrompt(
 REVIEW_GUIDE = (
     TASK_GUIDE
     + BLOCKOUT_GUIDE
+    + SCENE_VARIANT_GUIDE
+    + SAVES_GUIDE
     + VARIANT_GUIDE
     + TODO_GUIDE
     + PLAYTEST_GUIDE

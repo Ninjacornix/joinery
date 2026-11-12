@@ -15,7 +15,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal
 
-from joinery import compact, design, live_game, skills
+from joinery import compact, design, live_game, scene_variants, skills
 from joinery.blockout import stage as blockout_stage
 from joinery.debugging import diagnosis_from
 from joinery.gateway import ProjectGateway
@@ -519,6 +519,12 @@ class GatewayRPC:
                         "Specialists cannot build blockouts; the main thread does."
                     )
                 data = await blockout_stage.tool(self.gateway, params)
+            elif method == "make_variant":
+                if self.inspection_only:
+                    raise ValueError(
+                        "Specialists cannot make variants; the main thread does."
+                    )
+                data = await scene_variants.tool(self.gateway, params)
             elif method == "playtest":
                 if self.playtest is None:
                     raise ValueError("Playtests are not available here.")
@@ -539,7 +545,7 @@ class GatewayRPC:
                 data = self.task_status(str(params.get("id", "")))
             else:
                 raise ValueError(
-                    "The model interface supports inventory, schema, call, submit, propose_todo, blockout, playtest, the checks, sound_audit and the running game's inspect_game and drive_game; no approval methods."
+                    "The model interface supports inventory, schema, call, submit, propose_todo, blockout, make_variant, playtest, the checks, sound_audit and the running game's inspect_game and drive_game; no approval methods."
                 )
             project = getattr(self.gateway, "project", None)
             if method in COMPACTED and isinstance(project, Path):

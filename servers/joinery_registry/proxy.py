@@ -83,6 +83,14 @@ def _with_picture(data: dict[str, Any], path: str) -> CallToolResult:
     return result
 
 
+class VariantOverrideArgument(BaseModel):
+    """One property a scene variant sets on a node of its base."""
+
+    node: Annotated[str, Field(max_length=200)] = "."
+    property: Annotated[str, Field(min_length=1, max_length=120)]
+    value: str | float | bool
+
+
 #: The server's instructions: the same bytes for every agent of a role.
 WRITER_INSTRUCTIONS = (
     "Use discover_tools to check real connected capabilities, then tool_schema before calling a tool. "
@@ -358,6 +366,25 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
                 ImageContent(type="image", data=encoded, mime_type=media)
             )
         return result
+
+    @server.tool()
+    @tool_errors
+    async def make_variant(
+        base: Annotated[str, Field(min_length=1, max_length=300)],
+        path: Annotated[str, Field(max_length=300)] = "",
+        overrides: Annotated[list[VariantOverrideArgument], Field(max_length=40)]
+        | None = None,
+    ) -> dict[str, Any]:
+        """Make a variant of a scene: a Godot inherited scene whose root is the base scene, keeping only what differs, so later edits to the base reach every variant. base: the res:// .tscn to inherit. path: the new res:// .tscn (default beside the base, <name>_variant.tscn). overrides: properties to set, each {node ('.' for the root, else a node path in the base), property, value (a Godot value as text: 'Color(1, 0.3, 0.3, 1)', 'Vector2(2, 2)', '1.5', 'true', or plain words for a string)}. Use it whenever the user wants a version of an existing scene (a red goblin, a bigger crate) rather than copying the scene. It is staged in your change; the review shows only the overrides. Change resources or add nodes on the staged variant with edit_scene afterwards."""
+        return await rpc(
+            socket,
+            "make_variant",
+            {
+                "base": base,
+                "path": path,
+                "overrides": [o.model_dump() for o in overrides or []],
+            },
+        )
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
