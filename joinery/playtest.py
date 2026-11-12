@@ -349,6 +349,10 @@ def run(
         report["coverage"]["map"] = str(out / "coverage.png")
     if options.record and (out / REPLAY_NAME).is_file():
         report["replay"] = str(out / REPLAY_NAME)
+    # Saves the run made through the game's save system (ADR 0066): samples to keep.
+    slots = sorted((out / "saves").glob("slot_*.json")) if (out / "saves").is_dir() else []
+    if slots:
+        report["saves"] = [str(slot) for slot in slots]
     if options.screenshots and bot is not None and not (stop and stop.is_set()):
         _screenshots(report, options, out, project)
     (out / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -634,5 +638,10 @@ def main(args: argparse.Namespace) -> int:
     if report.get("replay"):
         print(
             f"Replay: {report['replay']} (keep it as a test: joinery replay add <file>)"
+        )
+    if report.get("saves"):
+        print(
+            f"Saves: {len(report['saves'])} in {report['out']}/saves (keep them so later "
+            f"changes must still load them: joinery saves add {report['out']})"
         )
     return 0

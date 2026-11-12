@@ -36,6 +36,7 @@ from joinery import (
     project_map,
     references,
     replays,
+    saves,
     setup_imports,
     share,
     skills,
@@ -1069,6 +1070,11 @@ def _parser() -> argparse.ArgumentParser:
             "replay", help="keep recorded plays as tests and replay them headless"
         )
     )
+    saves.add_arguments(
+        commands.add_parser(
+            "saves", help="keep saves from playtests and check old saves still load"
+        )
+    )
     bug_reports.add_arguments(
         commands.add_parser("reports", help="list and read bug reports players saved")
     )
@@ -1492,6 +1498,8 @@ def main(argv: list[str] | None = None) -> int:
         return playtest.main(args)
     if args.command == "replay":
         return replays.main(args)
+    if args.command == "saves":
+        return saves.main(args)
     if args.command == "reports":
         return bug_reports.main(args)
     if args.command == "share":
