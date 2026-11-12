@@ -217,6 +217,19 @@ def bundle_version(version: str = __version__) -> str:
     return match.group(0) if match else "0"
 
 
+ICON_SIZES = (16, 32, 48, 64, 128, 256, 512)
+
+
+def _icon(name: str) -> Path:
+    """A built Joinery icon (release/icon/build_icons.py writes them, hashed)."""
+    path = ROOT / "release/icon/dist" / name
+    if not path.is_file():
+        raise ValueError(
+            f"Missing the Joinery icon {name}; run release/icon/build_icons.py."
+        )
+    return path
+
+
 def _launcher(binary: str, *, macos: bool = False) -> bytes:
     root = '"$launcher_dir/../Resources/joinery"' if macos else '"$launcher_dir"'
     executable = (
@@ -285,6 +298,9 @@ def package(
         entries["Joinery.app/Contents/MacOS/Joinery"] = _Entry(
             _launcher(binary.name, macos=True), True
         )
+        entries["Joinery.app/Contents/Resources/Joinery.icns"] = _Entry(
+            _icon("joinery.icns")
+        )
         entries["Joinery.app/Contents/Info.plist"] = _Entry(
             plistlib.dumps(
                 {
@@ -292,6 +308,7 @@ def package(
                     "CFBundleDisplayName": "Joinery",
                     "CFBundleIdentifier": "org.joinery.editor",
                     "CFBundleExecutable": "Joinery",
+                    "CFBundleIconFile": "Joinery",
                     "CFBundlePackageType": "APPL",
                     "CFBundleShortVersionString": bundle_version(),
                     "CFBundleVersion": "1",
@@ -312,8 +329,18 @@ def package(
             + '" %*\r\n)\r\n'
         )
         entries[root + "Joinery.cmd"] = _Entry(launcher.encode())
+        # The editor executable carries the icon itself; this copy is for shortcuts.
+        entries[root + "Joinery.ico"] = _Entry(_icon("joinery.ico"))
     elif desktop:
         entries[root + "Joinery"] = _Entry(_launcher(binary.name), True)
+        # The freedesktop layout, ready to copy under ~/.local.
+        entries[root + "share/applications/joinery.desktop"] = _Entry(
+            _icon("joinery.desktop")
+        )
+        for size in ICON_SIZES:
+            entries[root + f"share/icons/hicolor/{size}x{size}/apps/joinery.png"] = (
+                _Entry(_icon(f"joinery-{size}.png"))
+            )
     manifest = {
         name: hashlib.sha256(entry.read()).hexdigest()
         for name, entry in sorted(entries.items())

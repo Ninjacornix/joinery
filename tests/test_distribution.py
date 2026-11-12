@@ -55,6 +55,10 @@ def source(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
         "licenses/GODOT-LICENSE.txt",
         "licenses/GODOT-COPYRIGHT.txt",
         "godot_addon/joinery/plugin.gd",
+        "release/icon/dist/joinery.icns",
+        "release/icon/dist/joinery.ico",
+        "release/icon/dist/joinery.desktop",
+        *(f"release/icon/dist/joinery-{size}.png" for size in distribution.ICON_SIZES),
     ):
         target = root / name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -129,6 +133,11 @@ def test_macos_desktop_bundle_has_working_layout_and_measured_manifest(
         assert "../Resources/joinery" in archive.read(launcher).decode()
         metadata = plistlib.loads(archive.read("Joinery.app/Contents/Info.plist"))
         assert metadata["CFBundleExecutable"] == "Joinery"
+        assert metadata["CFBundleIconFile"] == "Joinery"
+        assert (
+            archive.read("Joinery.app/Contents/Resources/Joinery.icns")
+            == (source / "release/icon/dist/joinery.icns").read_bytes()
+        )
         assert metadata["CFBundleShortVersionString"] == distribution.bundle_version()
         assert archive.read("Joinery.app/Contents/MacOS/Godot") == binary.read_bytes()
     assert (
@@ -154,6 +163,7 @@ def test_windows_symlink_placeholder_does_not_conflict_with_addon_directory(
         assert "joinery/testbed/addons/joinery" not in archive.namelist()
         assert "joinery/testbed/addons/joinery/plugin.gd" in archive.namelist()
         assert "joinery/Joinery.cmd" in archive.namelist()
+        assert "joinery/Joinery.ico" in archive.namelist()
 
 
 def test_linux_desktop_launcher_and_source_modes_survive_tar(
@@ -167,6 +177,8 @@ def test_linux_desktop_launcher_and_source_modes_survive_tar(
     )
     with tarfile.open(output) as archive:
         assert archive.getmember("joinery/Joinery").mode & 0o111
+        assert archive.getmember("joinery/share/applications/joinery.desktop")
+        assert archive.getmember("joinery/share/icons/hicolor/256x256/apps/joinery.png")
         assert (
             archive.getmember("joinery/bin/godot.linuxbsd.editor.x86_64").mode & 0o111
         )

@@ -70,6 +70,7 @@ def verify(archive: Path) -> dict[str, object]:
         if manifest["target"].startswith("macos-") and "Joinery.app" in runtime.parts:
             binary = runtime.parent.parent / "MacOS/Godot"
             launcher = runtime.parent.parent / "MacOS/Joinery"
+            assert (runtime.parent / "Joinery.icns").read_bytes()[:4] == b"icns"
         else:
             binary = next(
                 p
