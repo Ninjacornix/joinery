@@ -20,6 +20,7 @@ from typing import Any, Literal
 
 from joinery.agents import all_agents, get
 from joinery.api_profiles import list_public
+from joinery.fallback import QUOTA
 from joinery.platform_support import launch_argv
 from joinery.provider_support import require_supported, usability
 
@@ -154,11 +155,9 @@ VERIFY_TIMEOUT = 30
 #: Starting the bridge (project gateway, provider process) gets its own budget.
 CONNECT_TIMEOUT = 90
 VerifyState = Literal["ok", "quota", "auth", "error", "not-installed", "unsupported"]
-_QUOTA = re.compile(
-    r"quota|rate[ _-]?limit|usage limit|too many requests|\b429\b|credit balance|"
-    r"insufficient[ _]funds|billing",
-    re.IGNORECASE,
-)
+#: A test message's quota words: those a mid-turn quota error is read by
+#: (joinery.fallback), and billing.
+_QUOTA = re.compile(QUOTA.pattern + r"|billing", re.IGNORECASE)
 _AUTH = re.compile(
     r"\b401\b|\b403\b|unauthori[sz]ed|forbidden|not (?:logged|signed) in|"
     r"log ?in again|sign ?in|authenticat|invalid api key|expired (?:token|session)",
