@@ -235,6 +235,7 @@ def _project(
         }
     )
     monkeypatch.setattr("servers.blender_ops.ops.edit_document", edit)
+    monkeypatch.setattr("servers.authoring.edit_document", edit)
     return stage, edit
 
 

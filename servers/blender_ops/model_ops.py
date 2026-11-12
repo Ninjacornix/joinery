@@ -12,9 +12,8 @@ from typing import Any
 
 from mcp.server import MCPServer
 
-from joinery.authoring import edit_document
 from joinery.tools import blender_model_ops as model
-from servers.authoring import _exports, _name
+from servers.authoring import Step, _name, run_step
 from servers.errors import tool_errors
 
 
@@ -26,43 +25,77 @@ def _names(objects: list[str]) -> list[str]:
     return list(dict.fromkeys(objects))
 
 
+def plan_apply_scale(
+    project: Path, source: str, objects: list[str], exports: list[str] | None = None
+) -> Step:
+    names = _names(objects)
+    return Step(
+        source,
+        model.apply_scale_code(names),
+        "Apply scale on " + ", ".join(names),
+        exports,
+    )
+
+
+def plan_set_pivot(
+    project: Path,
+    source: str,
+    pivot: str = "bottom-centre",
+    exports: list[str] | None = None,
+) -> Step:
+    return Step(
+        source,
+        model.set_pivot_code(pivot),
+        f"Move the model's pivot to its {pivot}",
+        exports,
+    )
+
+
+def plan_reduce_triangles(
+    project: Path, source: str, max_triangles: int, exports: list[str] | None = None
+) -> Step:
+    return Step(
+        source,
+        model.reduce_triangles_code(max_triangles),
+        f"Decimate to at most {max_triangles} triangles",
+        exports,
+    )
+
+
+def plan_set_texel_density(
+    project: Path,
+    source: str,
+    objects: list[str],
+    px_per_m: float,
+    power_of_two: bool = False,
+    exports: list[str] | None = None,
+) -> Step:
+    names = _names(objects)
+    return Step(
+        source,
+        model.texel_density_code(names, px_per_m, power_of_two),
+        f"Texel density {px_per_m:g} px/m on " + ", ".join(names),
+        exports,
+    )
+
+
 async def apply_scale(
     project: Path, source: str, objects: list[str], exports: list[str] | None
 ) -> dict[str, Any]:
-    names = _names(objects)
-    return await edit_document(
-        project,
-        "blender",
-        source,
-        model.apply_scale_code(names),
-        _exports(project, source, exports),
-        "Apply scale on " + ", ".join(names),
-    )
+    return await run_step(project, plan_apply_scale(project, source, objects, exports))
 
 
 async def set_pivot(
     project: Path, source: str, pivot: str, exports: list[str] | None
 ) -> dict[str, Any]:
-    return await edit_document(
-        project,
-        "blender",
-        source,
-        model.set_pivot_code(pivot),
-        _exports(project, source, exports),
-        f"Move the model's pivot to its {pivot}",
-    )
+    return await run_step(project, plan_set_pivot(project, source, pivot, exports))
 
 
 async def reduce_triangles(
     project: Path, source: str, max_triangles: int, exports: list[str] | None
 ) -> dict[str, Any]:
-    return await edit_document(
-        project,
-        "blender",
-        source,
-        model.reduce_triangles_code(max_triangles),
-        _exports(project, source, exports),
-        f"Decimate to at most {max_triangles} triangles",
+    return await run_step(
+        project, plan_reduce_triangles(project, source, max_triangles, exports)
     )
 
 
@@ -74,14 +107,11 @@ async def set_texel_density(
     power_of_two: bool,
     exports: list[str] | None,
 ) -> dict[str, Any]:
-    names = _names(objects)
-    return await edit_document(
+    return await run_step(
         project,
-        "blender",
-        source,
-        model.texel_density_code(names, px_per_m, power_of_two),
-        _exports(project, source, exports),
-        f"Texel density {px_per_m:g} px/m on " + ", ".join(names),
+        plan_set_texel_density(
+            project, source, objects, px_per_m, power_of_two, exports
+        ),
     )
 
 

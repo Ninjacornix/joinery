@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -26,7 +27,7 @@ from mcp.types import ToolAnnotations
 from joinery import blueprints, parts
 from joinery.authoring import confined, edit_document
 from joinery.tools import blender_anim
-from servers.authoring import _exports, _name
+from servers.authoring import Step, _exports, _name, run_step
 from servers.errors import tool_errors
 
 #: Where an operation lists the actions it touched, for the review's clips.
@@ -160,6 +161,37 @@ async def audit(project: Path, model: str) -> dict[str, Any]:
     }
 
 
+def _reviewed(project: Path, source: str) -> Callable[[dict[str, Any]], dict[str, Any]]:
+    """Lists the actions an edit touched for the review, and sums them up."""
+
+    def after(result: dict[str, Any]) -> dict[str, Any]:
+        note_review(project, source, result)
+        return {**result, "summary": _summary(result.get("animations", []))}
+
+    return after
+
+
+def plan_make_cycle(
+    project: Path,
+    model: str,
+    kind: str,
+    params: dict[str, Any] | None = None,
+    armature: str = "",
+    exports: list[str] | None = None,
+) -> Step:
+    checked = blender_anim.check_cycle(kind, params)
+    source = model_source(project, model)
+    names = blender_anim.cycle_names(kind, checked)
+    check_selection(project, source, armature, names, True)
+    return Step(
+        source,
+        blender_anim.make_cycle_code(source, armature, kind, checked),
+        f"Make {kind} ({', '.join(names)}) {json.dumps(checked, sort_keys=True)}",
+        exports,
+        after=_reviewed(project, source),
+    )
+
+
 async def make_cycle(
     project: Path,
     model: str,
@@ -168,20 +200,33 @@ async def make_cycle(
     armature: str,
     exports: list[str] | None,
 ) -> dict[str, Any]:
-    checked = blender_anim.check_cycle(kind, params)
-    source = model_source(project, model)
-    names = blender_anim.cycle_names(kind, checked)
-    check_selection(project, source, armature, names, True)
-    result = await edit_document(
-        project,
-        "blender",
-        source,
-        blender_anim.make_cycle_code(source, armature, kind, checked),
-        _exports(project, source, exports),
-        f"Make {kind} ({', '.join(names)}) {json.dumps(checked, sort_keys=True)}",
+    return await run_step(
+        project, plan_make_cycle(project, model, kind, params, armature, exports)
     )
-    note_review(project, source, result)
-    return {**result, "summary": _summary(result.get("animations", []))}
+
+
+def plan_edit_action(
+    project: Path,
+    model: str,
+    action: str,
+    ops: list[dict[str, Any]],
+    armature: str = "",
+    exports: list[str] | None = None,
+) -> Step:
+    _name(action, "action")
+    checked = blender_anim.check_edit_ops(ops)
+    source = model_source(project, model)
+    check_selection(project, source, armature, [action], False)
+    made = [str(op["name"]) for op in checked if op["op"] == "copy"]
+    check_selection(project, source, armature, made, True)
+    return Step(
+        source,
+        blender_anim.edit_action_code(source, armature, action, checked),
+        f"Action {action}: "
+        + ", ".join(json.dumps(op, sort_keys=True) for op in checked),
+        exports,
+        after=_reviewed(project, source),
+    )
 
 
 async def edit_action(
@@ -192,23 +237,9 @@ async def edit_action(
     armature: str,
     exports: list[str] | None,
 ) -> dict[str, Any]:
-    _name(action, "action")
-    checked = blender_anim.check_edit_ops(ops)
-    source = model_source(project, model)
-    check_selection(project, source, armature, [action], False)
-    made = [str(op["name"]) for op in checked if op["op"] == "copy"]
-    check_selection(project, source, armature, made, True)
-    result = await edit_document(
-        project,
-        "blender",
-        source,
-        blender_anim.edit_action_code(source, armature, action, checked),
-        _exports(project, source, exports),
-        f"Action {action}: "
-        + ", ".join(json.dumps(op, sort_keys=True) for op in checked),
+    return await run_step(
+        project, plan_edit_action(project, model, action, ops, armature, exports)
     )
-    note_review(project, source, result)
-    return {**result, "summary": _summary(result.get("animations", []))}
 
 
 async def animation_pass(

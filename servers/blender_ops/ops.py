@@ -26,7 +26,7 @@ from joinery.authoring import confined, edit_document, edit_graph
 from joinery.locking import claimed_outputs, write_lock
 from joinery.recipe import HISTORY_DIR, RECIPE_DIR, store_preimage
 from joinery.tools import blender_parts, krita_ops
-from servers.authoring import _exports, _name
+from servers.authoring import Step, _exports, _name, run_step
 from servers.errors import tool_errors
 
 #: Where a model's editable maps live: art/sources/maps/<model>/<image>.kra.
@@ -436,6 +436,29 @@ def _check_owner(
     )
 
 
+def plan_edit_bone(
+    project: Path,
+    source: str,
+    armature: str,
+    bone: str,
+    op: str,
+    params: dict[str, Any] | None = None,
+    exports: list[str] | None = None,
+) -> Step:
+    _name(armature, "armature")
+    _name(bone, "bone")
+    checked = blender_parts.check_params(
+        blender_parts.BONE_OPS, op, dict(params or {}), "bone"
+    )
+    _check_owner(project, source, armature, "bone", bone, False)
+    return Step(
+        source,
+        blender_parts.edit_bone_code(armature, bone, op, checked),
+        f"Bone {bone} of {armature}: {op} {checked}",
+        exports,
+    )
+
+
 async def edit_bone(
     project: Path,
     source: str,
@@ -445,19 +468,35 @@ async def edit_bone(
     params: dict[str, Any] | None,
     exports: list[str] | None,
 ) -> dict[str, Any]:
-    _name(armature, "armature")
-    _name(bone, "bone")
-    checked = blender_parts.check_params(
-        blender_parts.BONE_OPS, op, dict(params or {}), "bone"
+    return await run_step(
+        project, plan_edit_bone(project, source, armature, bone, op, params, exports)
     )
-    _check_owner(project, source, armature, "bone", bone, False)
-    return await edit_document(
-        project,
-        "blender",
+
+
+def plan_edit_shape_key(
+    project: Path,
+    source: str,
+    object: str,
+    shape_key: str,
+    op: str,
+    params: dict[str, Any] | None = None,
+    exports: list[str] | None = None,
+) -> Step:
+    obj = object
+    _name(obj, "object")
+    _name(shape_key, "shape key")
+    checked = blender_parts.check_params(
+        blender_parts.SHAPE_KEY_OPS, op, dict(params or {}), "shape key"
+    )
+    new = op in {"new_from_mix", "new_from_pose"}
+    if new and (len(shape_key) > 63 or not shape_key.strip()):
+        raise ValueError("The new shape key's name is 1 to 63 characters.")
+    _check_owner(project, source, obj, "shape_key", shape_key, new)
+    return Step(
         source,
-        blender_parts.edit_bone_code(armature, bone, op, checked),
-        _exports(project, source, exports),
-        f"Bone {bone} of {armature}: {op} {checked}",
+        blender_parts.edit_shape_key_code(obj, shape_key, op, checked),
+        f"Shape key {shape_key} of {obj}: {op} {checked}",
+        exports,
     )
 
 
@@ -470,22 +509,9 @@ async def edit_shape_key(
     params: dict[str, Any] | None,
     exports: list[str] | None,
 ) -> dict[str, Any]:
-    _name(obj, "object")
-    _name(shape_key, "shape key")
-    checked = blender_parts.check_params(
-        blender_parts.SHAPE_KEY_OPS, op, dict(params or {}), "shape key"
-    )
-    new = op in {"new_from_mix", "new_from_pose"}
-    if new and (len(shape_key) > 63 or not shape_key.strip()):
-        raise ValueError("The new shape key's name is 1 to 63 characters.")
-    _check_owner(project, source, obj, "shape_key", shape_key, new)
-    return await edit_document(
+    return await run_step(
         project,
-        "blender",
-        source,
-        blender_parts.edit_shape_key_code(obj, shape_key, op, checked),
-        _exports(project, source, exports),
-        f"Shape key {shape_key} of {obj}: {op} {checked}",
+        plan_edit_shape_key(project, source, obj, shape_key, op, params, exports),
     )
 
 

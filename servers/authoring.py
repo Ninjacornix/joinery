@@ -7,6 +7,8 @@ import importlib
 import importlib.util
 import json
 import math
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -44,49 +46,8 @@ def make_server(project: Path, family: str) -> MCPServer[Any]:
             source: str, transforms: list[dict[str, Any]], exports: list[str]
         ) -> dict[str, Any]:
             """Change named Blender source parts with typed position/rotation_degrees/scale arrays. Preserves the native model and refreshes existing GLB exports with a replayable operation record."""
-            for change in transforms:
-                if (
-                    not isinstance(change.get("name"), str)
-                    or not change["name"].strip()
-                    or set(change)
-                    - {
-                        "name",
-                        "position",
-                        "rotation_degrees",
-                        "scale",
-                    }
-                ):
-                    raise ValueError(
-                        "Each transform needs a source object name and supported transform fields."
-                    )
-                for key, value in change.items():
-                    if key != "name" and (
-                        not isinstance(value, list)
-                        or len(value) != 3
-                        or not all(
-                            isinstance(x, (int, float))
-                            and not isinstance(x, bool)
-                            and math.isfinite(x)
-                            for x in value
-                        )
-                    ):
-                        raise ValueError(
-                            "Transform values must be finite numeric arrays of length three."
-                        )
-            import json
-
-            code = (
-                "import math\nfor change in "
-                + repr(transforms)
-                + ":\n    obj = bpy.data.objects[change['name']]\n    if 'position' in change: obj.location = change['position']\n    if 'scale' in change: obj.scale = change['scale']\n    if 'rotation_degrees' in change: obj.rotation_euler = [math.radians(x) for x in change['rotation_degrees']]\n"
-            )
-            return await edit_document(
-                project,
-                "blender",
-                source,
-                code,
-                exports,
-                "Named part transforms: " + json.dumps(transforms),
+            return await run_step(
+                project, plan_transform_parts(project, source, transforms, exports)
             )
 
         @server.tool()
@@ -99,20 +60,11 @@ def make_server(project: Path, family: str) -> MCPServer[Any]:
             exports: list[str] | None = None,
         ) -> dict[str, Any]:
             """Set one shader value of a named Blender material that no map drives, such as Roughness 0.4 or Base Color [r, g, b] (0-1). Only the material in the user's part selection may change; anything else changing fails the edit. Exports default to the model's existing GLB."""
-            _name(material, "material")
-            _name(socket, "socket")
-            numbers = value if isinstance(value, list) else [value]
-            if not 1 <= len(numbers) <= 4 or not all(_finite(x) for x in numbers):
-                raise ValueError("The value must be a finite number or 3 to 4 numbers.")
-            parts.check_targets(
-                parts.prompt_targets(project, source), material=material
-            )
-            return await _edit(
+            return await run_step(
                 project,
-                source,
-                blender.material_value_code(material, socket, value),
-                _exports(project, source, exports),
-                f"Set {socket} of {material} to {json.dumps(value)}",
+                plan_set_material_value(
+                    project, source, material, socket, value, exports
+                ),
             )
 
         @server.tool()
@@ -126,19 +78,9 @@ def make_server(project: Path, family: str) -> MCPServer[Any]:
             exports: list[str] | None = None,
         ) -> dict[str, Any]:
             """Change the pixels of one texture map a Blender material uses, so the game sees the change (shader nodes added between a map and the shader are lost on export). op is one of: invert; gamma {gamma}; levels {in_low, in_high, gamma, out_low, out_high}; contrast {factor}; tint {color: [r, g, b], strength}; hue_sat_value {hue (-0.5 to 0.5), saturation, value}. invert, gamma, levels and contrast take an optional channel (R, G, B or A) for packed maps such as ORM. Only the selected map may change. Exports default to the model's existing GLB."""
-            _name(material, "material")
-            _name(image, "image")
-            given = dict(params or {})
-            _map_params(op, given)
-            parts.check_targets(
-                parts.prompt_targets(project, source), material=material, image=image
-            )
-            return await _edit(
+            return await run_step(
                 project,
-                source,
-                blender.adjust_map_code(material, image, op, given),
-                _exports(project, source, exports),
-                f"Adjust map {image} of {material}: {op} {json.dumps(given, sort_keys=True)}",
+                plan_adjust_map(project, source, material, image, op, params, exports),
             )
 
         @server.tool()
@@ -151,21 +93,11 @@ def make_server(project: Path, family: str) -> MCPServer[Any]:
             exports: list[str] | None = None,
         ) -> dict[str, Any]:
             """Bake a Blender material's height map into a tangent-space normal map (<material>_normal_baked) wired to the shader, so the game shows the height detail: glTF cannot carry a height map. The height map keeps driving displacement in Blender. Needs UVs. Exports default to the model's existing GLB."""
-            _name(material, "material")
-            _name(height_image, "height image")
-            if not _finite(strength) or not 0 < strength <= 10:
-                raise ValueError("Strength must be above 0 and at most 10.")
-            parts.check_targets(
-                parts.prompt_targets(project, source),
-                material=material,
-                image=height_image,
-            )
-            return await _edit(
+            return await run_step(
                 project,
-                source,
-                blender.bake_height_code(material, height_image, float(strength)),
-                _exports(project, source, exports),
-                f"Bake {height_image} of {material} into a normal map",
+                plan_bake_height_to_normal(
+                    project, source, material, height_image, strength, exports
+                ),
             )
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
@@ -318,11 +250,140 @@ def _map_params(op: str, params: dict[str, Any]) -> None:
         raise ValueError("gamma must be above 0.")
 
 
-async def _edit(
-    project: Path, source: str, code: str, exports: list[str], note: str
-) -> dict[str, Any]:
+@dataclass(frozen=True)
+class Step:
+    """One typed Blender operation, checked and turned into code, not run yet.
+
+    The single tools run it at once (`run_step`); blender_batch runs several
+    in one Blender process. Either way it is the same code, note and recipe.
+    """
+
+    source: str
+    code: str
+    note: str
+    #: The exports the call named; None keeps the model's own GLB.
+    exports: list[str] | None = None
+    #: Further project files the code reads, listed as recipe sources.
+    inputs: tuple[str, ...] = ()
+    #: Turns the edit's result into the tool's result (notes, summaries).
+    after: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+
+
+async def run_step(project: Path, step: Step) -> dict[str, Any]:
     """A Blender edit; edit_document puts the textures back when it fails."""
-    return await edit_document(project, "blender", source, code, exports, note)
+    result = await edit_document(
+        project,
+        "blender",
+        step.source,
+        step.code,
+        _exports(project, step.source, step.exports),
+        step.note,
+        inputs=step.inputs,
+    )
+    return step.after(result) if step.after is not None else result
+
+
+def plan_transform_parts(
+    project: Path,
+    source: str,
+    transforms: list[dict[str, Any]],
+    exports: list[str] | None = None,
+) -> Step:
+    for change in transforms:
+        if (
+            not isinstance(change.get("name"), str)
+            or not change["name"].strip()
+            or set(change) - {"name", "position", "rotation_degrees", "scale"}
+        ):
+            raise ValueError(
+                "Each transform needs a source object name and supported transform fields."
+            )
+        for key, value in change.items():
+            if key != "name" and (
+                not isinstance(value, list)
+                or len(value) != 3
+                or not all(_finite(x) for x in value)
+            ):
+                raise ValueError(
+                    "Transform values must be finite numeric arrays of length three."
+                )
+    code = (
+        "import math\nfor change in "
+        + repr(transforms)
+        + ":\n    obj = bpy.data.objects[change['name']]\n    if 'position' in change: obj.location = change['position']\n    if 'scale' in change: obj.scale = change['scale']\n    if 'rotation_degrees' in change: obj.rotation_euler = [math.radians(x) for x in change['rotation_degrees']]\n"
+    )
+    return Step(
+        source, code, "Named part transforms: " + json.dumps(transforms), exports
+    )
+
+
+def plan_set_material_value(
+    project: Path,
+    source: str,
+    material: str,
+    socket: str,
+    value: float | list[float],
+    exports: list[str] | None = None,
+) -> Step:
+    _name(material, "material")
+    _name(socket, "socket")
+    numbers = value if isinstance(value, list) else [value]
+    if not 1 <= len(numbers) <= 4 or not all(_finite(x) for x in numbers):
+        raise ValueError("The value must be a finite number or 3 to 4 numbers.")
+    parts.check_targets(parts.prompt_targets(project, source), material=material)
+    return Step(
+        source,
+        blender.material_value_code(material, socket, value),
+        f"Set {socket} of {material} to {json.dumps(value)}",
+        exports,
+    )
+
+
+def plan_adjust_map(
+    project: Path,
+    source: str,
+    material: str,
+    image: str,
+    op: str,
+    params: dict[str, Any] | None = None,
+    exports: list[str] | None = None,
+) -> Step:
+    _name(material, "material")
+    _name(image, "image")
+    given = dict(params or {})
+    _map_params(op, given)
+    parts.check_targets(
+        parts.prompt_targets(project, source), material=material, image=image
+    )
+    return Step(
+        source,
+        blender.adjust_map_code(material, image, op, given),
+        f"Adjust map {image} of {material}: {op} {json.dumps(given, sort_keys=True)}",
+        exports,
+    )
+
+
+def plan_bake_height_to_normal(
+    project: Path,
+    source: str,
+    material: str,
+    height_image: str,
+    strength: float = 1.0,
+    exports: list[str] | None = None,
+) -> Step:
+    _name(material, "material")
+    _name(height_image, "height image")
+    if not _finite(strength) or not 0 < strength <= 10:
+        raise ValueError("Strength must be above 0 and at most 10.")
+    parts.check_targets(
+        parts.prompt_targets(project, source), material=material, image=height_image
+    )
+    return Step(
+        source,
+        blender.bake_height_code(material, height_image, float(strength)),
+        f"Bake {height_image} of {material} into a normal map",
+        exports,
+    )
 
 
 def _exports(project: Path, source: str, exports: list[str] | None) -> list[str]:
