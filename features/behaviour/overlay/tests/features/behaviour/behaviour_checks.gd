@@ -1,11 +1,13 @@
 extends RefCounted
 ## The checks behind behaviour_test.gd, loaded once the game runs. Works on 2D and 3D
 ## blueprints: the tree logic runs on a fake body, then enemies made in code chase,
-## attack, flee, wander and patrol around the real player.
+## attack, flee, wander and patrol around the real player (or, in a game without
+## one, a stand-in target in the group STAND_IN).
 
 const BTNodes := preload("res://features/behaviour/bt_nodes.gd")
 const FakeBody := preload("res://tests/features/behaviour/fake_body.gd")
 const TREES := "res://features/behaviour/trees"
+const STAND_IN := &"behaviour_test_targets"
 
 var tree: SceneTree
 var h: PlayHarness
@@ -21,9 +23,8 @@ func _init(scene_tree: SceneTree, harness: PlayHarness) -> void:
 func run() -> void:
 	await h.boot()
 	player = Game.local_player()
-	h.expect(player != null, "the player spawns")
-	if player == null:
-		return
+	if not (player is Node2D or player is Node3D):
+		player = _stand_in()
 	is_3d = player is Node3D
 	if "controls_enabled" in player:
 		player.set(&"controls_enabled", false)
@@ -217,8 +218,20 @@ func _spawn(at: Vector3, tree_name: String) -> BehaviourAgent:
 		(body as Node2D).global_position = Vector2(at.x, at.y)
 	agent.set(&"_home", agent.position3())
 	agent.blackboard["home"] = agent.position3()
+	if player.is_in_group(STAND_IN):
+		agent.target_group = STAND_IN
 	agent.blackboard["target"] = agent.find_target()
 	return agent
+
+
+## A target for games without a moving player (a card game): 2D or 3D like the level.
+func _stand_in() -> Node:
+	var level: Node = Game.current_level()
+	var target: Node = Node3D.new() if level is Node3D else Node2D.new()
+	target.name = "StandInTarget"
+	target.add_to_group(STAND_IN)
+	level.add_child(target)
+	return target
 
 
 static func _position(node: Node) -> Vector3:

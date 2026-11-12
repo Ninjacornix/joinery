@@ -48,6 +48,8 @@ ONLINE_CHECKS = "online: starting-point checks passed"
 BLUEPRINT_ONLINE: dict[str, tuple[str, str, str]] = {
     "puzzle-cards": (CARDS_ONLINE_TEST, "cards_host", "cards_client"),
 }
+#: Features whose one check is `tests/features/<id>/<id>_test.gd` over a running level.
+PLAYED_FEATURES = frozenset({"behaviour", "camera", "dialogue"})
 _DETAIL_CHARS = 4000
 
 
@@ -226,6 +228,10 @@ def feature_steps(
         ]
     if feature == ONLINE:
         return online_steps(blueprint, work, dedicated=alone)
+    if feature in PLAYED_FEATURES:
+        test = f"res://tests/features/{feature}/{feature}_test.gd"
+        args = ("--autostart", settings(feature))
+        return [Step(feature, lambda p: run_godot(p, test, args, 240, marker=feature))]
     return []
 
 
