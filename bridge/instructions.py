@@ -36,6 +36,12 @@ OBJECT_GUIDE = (
     "Stage a model or texture and the scene that uses it in one change: a scene that "
     "points at a file neither the project nor the same change has is refused, and a "
     "scene accepted without its model opens with a missing file. "
+    "A model you make in this change can be placed right away, in the same change: "
+    "in the scene on screen with edit_scene's instantiate_scene and its res:// path, "
+    "in any other scene with the Godot tools; Joinery imports it first. To replace a "
+    "placeholder with the model, pass replace with the placeholder's identity (and "
+    "fit_size true to keep its size); don't leave the placeholder beside it. Make the "
+    "model, place it, then submit once, so the user reviews both together. "
 )
 
 #: A picked part (a selection target with part_kind) names the typed operations
@@ -287,6 +293,11 @@ REVIEW_GUIDE = (
     "every problem it returns and submit again. "
     "Only after it returns status in_review say the change is open for review; never "
     "ask the user to accept before that, and make no more changes this turn. "
+    "Tell the user plainly what you made and where you placed it (the scene and the "
+    "node), in their terms. Don't narrate Joinery's own steps (staging, importing, "
+    "workers, stages, the live editor), and never call something blocked or say a "
+    "tool can't load a file: when a tool returns an error, fix it and carry on, or "
+    "say in plain words what the user can decide. "
     "If it returns needs_user or final, stop and do what its next field says; Joinery "
     "itself tells the user when a change failed. "
     "The scene on screen and scenes with unsaved edits change live with edit_scene; "

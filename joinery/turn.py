@@ -166,8 +166,9 @@ NEXT_STOP = (
     "would try differently, or nothing."
 )
 NEXT_REVIEW = (
-    "The change is on screen for the user. Say in a sentence or two what changed "
-    "and make no more changes this turn."
+    "The change is on screen for the user. Say in a sentence or two what you made "
+    "and where you placed it (scene and node), plainly and without Joinery's own "
+    "steps, and make no more changes this turn."
 )
 NEXT_NOTHING = (
     "Nothing is staged and no live edit is waiting. Make the change first, or end "
