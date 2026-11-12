@@ -74,6 +74,7 @@ SIDEBAR_STATES = (
     "match",
     "match-fixing",
     "access",
+    "access-guidelines",
     "access-fixing",
     "perf",
     "design",

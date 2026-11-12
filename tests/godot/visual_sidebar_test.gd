@@ -974,6 +974,8 @@ func _check_cards(light: bool, width: int, chat: Control) -> void:
 		_check(card != null, "The %s card shows" % check)
 		await _shot(check, light, width, chat)
 		if check == "access":
+			(card.get("guidelines") as Control).call("set_open", true)
+			await _shot("access-guidelines", light, width, chat)
 			var rows: Array = fixture.call("run_rows")
 			card.call("apply_run", {"state": "fixing", "tasks": rows})
 			for row: Dictionary in rows:
