@@ -37,6 +37,7 @@ from joinery import (
     memory,
     metrics,
     playtest,
+    project_commands,
     project_map,
     references,
     replays,
@@ -1324,6 +1325,7 @@ def _parser() -> argparse.ArgumentParser:
     idle_runs.register(commands)
     project_map.register(commands)
     memory.register(commands)
+    project_commands.register(commands)
     headless.register(commands)
     skills.register(commands)
     chats.register(commands)
@@ -1353,6 +1355,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "memory":
         return memory.run(args)
+
+    if args.command == "command":
+        return project_commands.run(args)
 
     if args.command == "run":
         return headless.run(args)

@@ -65,6 +65,7 @@ IGNORE_RULES = (
     ".joinery/*",
     "!.joinery/game-manifest.json",
     "!.joinery/art-approval.json",
+    "!.joinery/commands/",
 )
 #: Text diffs longer than this are cut, with a note.
 DIFF_LINES = 2000
