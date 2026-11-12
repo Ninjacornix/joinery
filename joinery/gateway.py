@@ -253,10 +253,13 @@ class ProjectGateway:
                 previous = FileTransaction.load(self.project, journal.parent.name)
                 if previous.state == "committing":
                     previous.recover()
-                elif previous.state in {"staging", "review"} and not team.is_conflict(
-                    previous.directory
+                elif previous.state == "staging" or (
+                    previous.state == "review"
+                    and not team.is_conflict(previous.directory)
+                    and not previous.held
                 ):
-                    # A teammate's version waits for the user's choice across sessions.
+                    # A teammate's version, and a change kept for review (a headless
+                    # run's), wait for the user's choice across sessions.
                     previous.reject()
         except BaseException:
             self._lease.close()
@@ -279,6 +282,9 @@ class ProjectGateway:
         self._root = self
         #: The parallel tasks' lanes, by task id (on the chat's own gateway).
         self.lanes: dict[str, ProjectGateway] = {}
+        #: A headless run (``joinery run``): a change still waiting for review when
+        #: the host closes is kept for the user (FileTransaction.hold), not discarded.
+        self.keep_reviews = False
         self.claims.register(MAIN, MAIN_TITLE)
         self.editor_context: dict[str, str] = {}
         self._lane_state()
@@ -1494,7 +1500,10 @@ class ProjectGateway:
             "staging",
             "review",
         }:
-            self.transaction.reject()
+            if self.transaction.state == "review" and self._root.keep_reviews:
+                self.transaction.hold("joinery run")
+            else:
+                self.transaction.reject()
         if self.is_lane:
             # A task's lane: its own apps and claims go; the project's stay.
             for connection in self.staged.values():

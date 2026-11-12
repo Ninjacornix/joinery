@@ -54,6 +54,8 @@ CARRIED = (".joinery/game-manifest.json",)
 #: Where a transaction keeps the CARRIED records as they were when it began, so
 #: a record changed by another accepted change meanwhile is merged, not replaced.
 CARRIED_BASE = "carried-base"
+#: Marks a change kept waiting for review across sessions (FileTransaction.hold).
+HELD = "held.json"
 
 
 class ProjectLease:
@@ -403,6 +405,18 @@ class FileTransaction:
         self.state = "review"
         self._record(changes=changes)
         return changes
+
+    def hold(self, by: str) -> None:
+        """Keep this change waiting for the user's review after the session that made
+        it ends: a headless run (``joinery run``) or ``joinery memory add``. A chat
+        host rejects any other change still pending when it closes or starts."""
+        if self.state != "review":
+            raise ValueError("Only a change waiting for review can be kept for it.")
+        atomic_json(self.directory / HELD, {"by": by, "at": time.time()})
+
+    @property
+    def held(self) -> bool:
+        return (self.directory / HELD).is_file()
 
     def accept(self) -> list[dict[str, str]]:
         if self.state != "review":
