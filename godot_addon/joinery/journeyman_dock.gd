@@ -471,9 +471,10 @@ func _drain() -> void:
 		_drain.call_deferred()
 
 
-## Put [param text] in the message box, ready to edit and send (offers and "Ask Journeyman").
-func fill_composer(text: String) -> void:
-	_fill_prompt(text)
+## Put [param text] in the message box, ready to edit and send (offers and "Ask Journeyman");
+## with none, keep what is typed there and take the focus (the Tools page's "Ask Journeyman").
+func fill_composer(text := "") -> void:
+	_fill_prompt(text if not text.is_empty() else _prompt.text)
 
 
 func _send_request(card: Control) -> void:

@@ -114,14 +114,11 @@ func _run() -> void:
 	)
 	_workspace.select_resource("res://art/materials/stone_tiles_albedo.png")
 	_check(_workspace._preview.get_child(0) is TextureRect, "Image preview must load")
-	_check(_workspace._title.text == "Stone Tiles", "A part shows under its source asset")
+	_check(_workspace._title.text == "Stone tiles", "A part shows under its source asset")
 	_check(_workspace._caption.text == "Material · made in Blender", _workspace._caption.text)
-	_check(_workspace._parts.visible, "A source with parts must list them")
-	var segments: Array[String] = []
-	for segment: Node in _workspace._parts.get_children():
-		if segment is Button:
-			segments.append(segment.text)
-	_check(segments == ["Source", "Albedo", "Roughness"], "Parts: %s" % [segments])
+	_check(_workspace._parts_panel.visible, "A source with parts must list them")
+	var files: Array[String] = _workspace._parts_panel.file_names()
+	_check(files == ["Source", "Albedo", "Roughness"], "Parts: %s" % [files])
 	var owner_row: PackedInt32Array = _workspace._assets.get_selected_items()
 	_check(
 		owner_row.size() == 1 and _workspace._rows[owner_row[0]]["path"].ends_with("tiles.blend"),
@@ -272,16 +269,42 @@ func _run_parts() -> void:
 	_check(int(counts.get("material", 0)) == 2, "2 materials: %s" % [counts])
 	_check(int(counts.get("texture", 0)) == 5, "5 textures: %s" % [counts])
 	_check(int(counts.get("shape_key", 0)) == 1, "Shape key Dent: %s" % [counts])
+	# Every exported map sits inside its material: the files are the source and the model.
+	_check(panel.file_names() == ["Source", "Model"], "Files: %s" % [panel.file_names()])
+	var headings: Array[String] = []
+	for heading: TreeItem in panel.tree.get_root().get_children():
+		if (heading.get_metadata(0) as Dictionary).has("group"):
+			headings.append(heading.get_text(0))
+			_check(heading.collapsed, "Groups start closed: " + heading.get_text(0))
+	_check(headings == ["2 materials", "2 objects", "1 shape key"], "Groups: %s" % [headings])
 	var picked: Array[Dictionary] = []
 	_workspace.part_selected.connect(func(target: Dictionary) -> void: picked.append(target))
 	var rough: TreeItem = null
-	for heading: TreeItem in panel.tree.get_root().get_children():
-		for item: TreeItem in heading.get_children():
-			if (item.get_metadata(0) as Dictionary).get("image") == "steel_rough":
-				rough = item
-	_check(rough != null, "The roughness map of Steel is listed")
+	var steel: TreeItem = null
+	var handle: TreeItem = null
+	for item: TreeItem in panel._all_rows(panel.tree.get_root()):
+		var meta: Dictionary = item.get_metadata(0)
+		if meta.get("image") == "steel_rough":
+			rough = item
+		elif meta.get("part_kind") == "material" and meta.get("material") == "Steel":
+			steel = item
+		elif meta.get("part_kind") == "object" and meta.get("object") == "Handle":
+			handle = item
+	_check(rough != null and rough.get_parent() == steel, "Steel's roughness map is inside Steel")
+	var viewer: SubViewportContainer = _workspace._preview.get_child(0)
+	if steel != null and handle != null:
+		_check(steel.get_text(1) == "3 maps", "Steel holds 3 maps: " + steel.get_text(1))
+		panel.tree.set_selected(handle, 0)
+		_check(viewer._highlighted == "\nHandle", "An object is tinted on the model")
+		panel.tree.set_selected(steel, 0)
+		_check(viewer._highlighted == "Steel\n", "A material is tinted on the model")
+		picked.clear()
 	if rough != null:
-		_check(rough.get_text(0) == "Roughness · Steel", rough.get_text(0))
+		_check(rough.get_text(0) == "Roughness", rough.get_text(0))
+		panel.select_part(str(rough.get_metadata(0)["id"]))
+		_check(picked.is_empty(), "Selecting from code is no pick")
+		_check(not rough.get_parent().collapsed, "Selecting a part opens its group")
+		panel.tree.deselect_all()
 		panel.tree.set_selected(rough, 0)
 	_check(picked.size() == 1, "Selecting a map emits one part")
 	if not picked.is_empty():
@@ -299,7 +322,6 @@ func _run_parts() -> void:
 		chip.free()
 	_check(panel.map_view.visible, "A picked map shows beside the model")
 	_check(panel._map_picture.texture != null, "The map preview has the exported pixels")
-	var viewer: SubViewportContainer = _workspace._preview.get_child(0)
 	await process_frame
 	await process_frame
 	var hit: Dictionary = viewer.pick_at(viewer.size / 2.0)

@@ -11,6 +11,8 @@ signal asset_selected(asset: Dictionary)
 signal setup_requested
 ## The user picked a part of the shown model (list or model click): a target_chip.for_part.
 signal part_selected(target: Dictionary)
+## "Ask Journeyman to change this …" (after asset_selected): the message box takes the focus.
+signal ask_requested
 
 const COMMAND_SCRIPT := preload("res://addons/joinery/command_job.gd")
 const AUDIO_SCRIPT := preload("res://addons/joinery/audio_preview.gd")
@@ -18,6 +20,7 @@ const MODEL_SCRIPT := preload("res://addons/joinery/model_preview.gd")
 const LIST_SCRIPT := preload("res://addons/joinery/asset_list.gd")
 const INDICATOR_SCRIPT := preload("res://addons/joinery/activity_indicator.gd")
 const PARTS_SCRIPT := preload("res://addons/joinery/parts_panel.gd")
+const STAGE_SCRIPT := preload("res://addons/joinery/asset_stage.gd")
 const KITS_SCRIPT := preload("res://addons/joinery/kits_panel.gd")
 const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
 const UI_COMPONENTS := preload("res://addons/joinery/ui_components.gd")
@@ -41,6 +44,8 @@ const BROWSER_EM := 16.0
 ## Seconds between automatic refreshes while visible, and how long "Opened in …" stays.
 const REFRESH_SECONDS := 2.0
 const OPENED_SECONDS := 2.0
+## Under this many ems wide, "Ask Journeyman to change this model" reads "Ask Journeyman".
+const SHORT_ASK_EM := 40.0
 
 var _browser: VBoxContainer
 ## The assets list with its filter and states; the Kits tab swaps in the kit list.
@@ -59,7 +64,11 @@ var _assets: LIST_SCRIPT
 var _header: HBoxContainer
 var _title: Label
 var _caption: Label
+## One quiet line under the caption: how to open the file yourself when only Journeyman can.
+var _quiet_note: Label
 var _actions: HBoxContainer
+var _ask: Button
+var _ask_text := ""
 var _open: Button
 var _open_menu: MenuButton
 var _open_with: PopupMenu
@@ -68,7 +77,8 @@ var _unavailable: HBoxContainer
 var _unavailable_title: Label
 var _unavailable_label: Label
 var _setup_link: Button
-var _parts: HFlowContainer
+## The preview and the parts list, side by side when wide (asset_stage.gd).
+var _stage: STAGE_SCRIPT
 var _preview: VBoxContainer
 var _parts_panel: PARTS_SCRIPT
 var _status: Label
@@ -189,13 +199,22 @@ func _build_body(split: HSplitContainer) -> void:
 	names.add_child(_title)
 	_caption = UI_COMPONENTS.label("", "JoineryCaption")
 	names.add_child(_caption)
+	_quiet_note = UI_COMPONENTS.label("", "JoineryCaption")
+	_quiet_note.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_quiet_note.mouse_filter = Control.MOUSE_FILTER_PASS
+	_quiet_note.hide()
+	names.add_child(_quiet_note)
 	_actions = HBoxContainer.new()
 	_actions.theme_type_variation = "JoineryRow"
 	_actions.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_header.add_child(_actions)
 	_open_indicator = INDICATOR_SCRIPT.new()
 	_actions.add_child(_open_indicator)
-	_open = UI_COMPONENTS.primary("Open")
+	_ask = UI_COMPONENTS.primary("Ask Journeyman")
+	_ask.pressed.connect(_ask_journeyman)
+	UI_MOTION.press_feedback(_ask)
+	_actions.add_child(_ask)
+	_open = UI_COMPONENTS.secondary("Open")
 	_open.pressed.connect(_open_option.bind(0))
 	_actions.add_child(_open)
 	_open_menu = MenuButton.new()
@@ -218,26 +237,16 @@ func _build_body(split: HSplitContainer) -> void:
 	_actions.add_child(_open_menu)
 	_actions.add_child(_kits.edit_button)
 	_build_unavailable(body)
-	_parts = HFlowContainer.new()
-	_parts.hide()
-	body.add_child(_parts)
-	var stage := HBoxContainer.new()
-	stage.theme_type_variation = "JoineryRow"
-	stage.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	body.add_child(stage)
-	_parts_panel = PARTS_SCRIPT.new()
-	_parts_panel.part_selected.connect(part_selected.emit)
-	stage.add_child(_parts_panel.map_view)
-	_preview = VBoxContainer.new()
-	_preview.theme_type_variation = "JoineryTight"
-	_preview.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	_preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	stage.add_child(_preview)
-	body.add_child(_parts_panel.animations)
-	body.add_child(_parts_panel)
 	_status = UI_COMPONENTS.label("", "JoineryError", true)
 	_status.hide()
 	body.add_child(_status)
+	_parts_panel = PARTS_SCRIPT.new()
+	_parts_panel.part_selected.connect(part_selected.emit)
+	_parts_panel.file_selected.connect(_view_part)
+	_stage = STAGE_SCRIPT.new(_parts_panel)
+	body.add_child(_stage)
+	_preview = _stage.preview
+	body.resized.connect(_fit_ask)
 
 
 ## The compact "app isn't installed" notice under the asset title: the same title, line and
@@ -285,6 +294,15 @@ func _notification(what: int) -> void:
 
 func _on_theme_rebuilt() -> void:
 	_browser.custom_minimum_size.x = roundf(UI_THEME.font_size(self, "body") * BROWSER_EM)
+	_fit_ask()
+
+
+## "Ask Journeyman to change this model", or "Ask Journeyman" on a narrow page.
+func _fit_ask() -> void:
+	var short := _body.size.x < UI_THEME.font_size(self, "body") * SHORT_ASK_EM
+	_ask.text = "Ask Journeyman" if short or _ask_text.is_empty() else _ask_text
+	_ask.tooltip_text = _ask_text
+	_ask.accessibility_name = _ask_text
 
 
 func _exit_tree() -> void:
@@ -498,8 +516,9 @@ func use_rail_navigation() -> void:
 	_filter_section.hide()
 
 
+## "CRT station" for art/sources/crt_station.blend: the file's own name in words.
 func _display_name(path: String) -> String:
-	return path.get_file().get_basename().replace("_", " ").replace("-", " ").capitalize()
+	return WORDING.file_title(path)
 
 
 ## The asset's kind from the index, or from its extension for older indexes.
@@ -589,7 +608,8 @@ func _clear_selection() -> void:
 	_clear_preview()
 	_current = {}
 	_header.hide()
-	_parts.hide()
+	_stage.show_side(false)
+	_parts_panel.show_for({})
 	_status.hide()
 	if not _rows.is_empty():
 		_preview.add_child(UI_COMPONENTS.label("Choose an asset to preview it.", "JoineryCaption"))
@@ -672,14 +692,24 @@ func _show_asset(asset: Dictionary, notify: bool) -> void:
 	_caption.text = _describe(owner)
 	_header.show()
 	_status.hide()
-	_show_parts(owner, path)
+	var thing := WORDING.noun(_kind_of(owner), str(owner["path"]))
+	_ask_text = "Ask Journeyman to change this %s" % thing
+	# A change still waiting for review is accepted or rejected first.
+	_ask.visible = str(owner.get("pending", "")).is_empty()
+	_parts_panel.show_for(owner, path, _kind_of(owner) == "model")
+	_stage.show_side(_parts_panel.visible)
+	_fit_ask()
 	_update_open()
 	_show_preview("res://" + path, _preview_import_changed)
 	_preview_import_changed = false
-	_parts_panel.show_for(owner, _kind_of(owner) == "model")
 	_kits.show_asset(owner)
 	if notify:
 		asset_selected.emit(_current.duplicate(true))
+
+
+func _ask_journeyman() -> void:
+	asset_selected.emit(_owner_of(_current).duplicate(true))
+	ask_requested.emit()
 
 
 func _owner_of(asset: Dictionary) -> Dictionary:
@@ -702,48 +732,10 @@ func _describe(asset: Dictionary) -> String:
 	return " · ".join(words)
 
 
-## Parts: a segment per file (the source, then each derived part), each previewed and opened.
-func _show_parts(owner: Dictionary, viewing: String) -> void:
-	for child: Node in _parts.get_children():
-		_parts.remove_child(child)
-		child.queue_free()
-	var parts: Array = owner.get("parts", [])
-	_parts.visible = not parts.is_empty()
-	if parts.is_empty():
-		return
-	var heading := UI_COMPONENTS.label("Parts", "JoineryCaption")
-	heading.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	_parts.add_child(heading)
-	var owner_path := str(owner["path"])
-	for item: Variant in [owner_path] + parts:
-		var path := str(item)
-		var segment := Button.new()
-		segment.theme_type_variation = "JoinerySegment"
-		segment.toggle_mode = true
-		segment.focus_mode = Control.FOCUS_ALL
-		segment.text = "Source" if path == owner_path else _part_name(owner_path, path)
-		segment.tooltip_text = path
-		segment.accessibility_name = segment.text
-		segment.set_pressed_no_signal(path == viewing)
-		segment.pressed.connect(_view_part.bind(path))
-		UI_COMPONENTS.bind_height(segment, "sm")
-		UI_MOTION.press_feedback(segment)
-		_parts.add_child(segment)
-
-
-func _part_name(owner: String, part: String) -> String:
-	var base := owner.get_file().get_basename()
-	var name := part.get_file().get_basename().trim_prefix(base).lstrip("_-. ")
-	if name.is_empty():
-		return _kind_name(_kind_of(_by_path.get(part, {"path": part})))
-	return name.replace("_", " ").replace("-", " ").capitalize()
-
-
+## Show one of the asset's files (from the parts list): the source, the model, a texture.
 func _view_part(path: String) -> void:
 	if _by_path.has(path) and path != _selected_path:
 		_show_asset(_by_path[path], true)
-	else:
-		_show_parts(_owner_of(_current), _selected_path)
 
 
 ## The open action: "Open in Blender" (primary) plus an "Open with…" menu when more than one
@@ -763,6 +755,7 @@ func _update_open() -> void:
 	_open_menu.visible = options.size() > 1
 	_set_menu_label(false)
 	_unavailable.hide()
+	_quiet_note.hide()
 	_open.visible = not options.is_empty()
 	if options.is_empty():
 		return
@@ -772,14 +765,21 @@ func _update_open() -> void:
 		_open.hide()
 		var missing := WORDING.source_missing(primary)
 		var lines := _missing_text(primary, true)
+		# The preview's empty state already says the app is missing: say it once.
+		var unexplained := _explained_app != app or missing
+		_set_menu_label(options.any(func(item: Dictionary) -> bool: return item["available"]))
+		if not missing and WORDING.ready_for(_data.get("tools", []), primary):
+			# Journeyman still changes it ("Ask Journeyman"): one quiet line on opening it.
+			_quiet_note.text = lines[1]
+			_quiet_note.tooltip_text = lines[1]
+			_quiet_note.visible = unexplained
+			return
 		_unavailable_title.text = "The source file is missing" if missing else lines[0]
 		_unavailable_label.text = "" if missing else lines[1]
 		_unavailable_label.visible = not missing
-		# Project apps can't bring back a missing source file, nor help an app that is ready.
-		_setup_link.visible = not missing and not WORDING.ready_for(_data.get("tools", []), primary)
-		# The preview's empty state already says the app is missing: say it once.
-		_unavailable.visible = _explained_app != app or WORDING.source_missing(primary)
-		_set_menu_label(options.any(func(item: Dictionary) -> bool: return item["available"]))
+		# Project apps can't bring back a missing source file.
+		_setup_link.visible = not missing
+		_unavailable.visible = unexplained
 		return
 	_open.tooltip_text = str(primary["path"])
 	if _opening == app:
@@ -917,6 +917,7 @@ func _show_no_preview(extension: String) -> void:
 	# the user to open the file in an app they don't have.
 	_explained_app = app
 	_unavailable.hide()
+	_quiet_note.hide()
 	var lines := _missing_text(primary, false)
 	_empty_state(
 		lines[0],

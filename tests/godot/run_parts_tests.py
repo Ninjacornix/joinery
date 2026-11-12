@@ -8,7 +8,8 @@ cached parts report), imports it, then runs part_pick_test.gd and the parts sect
 workspace_test.gd headless. With --capture it also renders the workspace in dark and
 light and saves workspace-parts-<theme>.png, and asset_workspace_test.gd's and
 kits_panel_test.gd's states as workspace-assets-<theme>-<state>.png, for a visual check
-(the Kits panel shows a preview Blender draws in the worker).
+(the Kits panel shows a preview Blender draws in the worker). asset_workspace_test.gd also
+saves a model page with many materials, wide and narrow (-model.png, -model-narrow.png).
 """
 
 from __future__ import annotations
@@ -66,6 +67,11 @@ def make_project(directory: Path) -> Path:
     problems = write_lock(project)
     assert not problems, problems
     assert (models / "hammer.glb.import").read_text() == GLB_IMPORT
+    # A second model for the asset page's own check (asset_workspace_test.gd): the hammer's
+    # shape under another name, whose many materials and maps that test makes up.
+    shutil.copyfile(FIXTURE / "hammer.blend", sources / "crt_station.blend")
+    shutil.copyfile(FIXTURE / "hammer.glb", models / "crt_station.glb")
+    (models / "crt_station.glb.import").write_text(GLB_IMPORT)
     inspection = json.loads((FIXTURE / "parts.json").read_text())
     digest = parts._sha256(sources / "hammer.blend")
     cached = parts.cache_path(project, digest)

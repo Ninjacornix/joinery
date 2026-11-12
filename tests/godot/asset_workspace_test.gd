@@ -1,13 +1,28 @@
 extends SceneTree
 ## The asset workspace (tool_workspace.gd) with an injected index, headless: an app that is
-## Ready through Joinery but not on this computer says Journeyman can still change the asset,
-## in the asset's own word (material, texture, sound), and assets that a change waiting for
-## review adds are listed and marked, their images shown from the change's own copy.
+## Ready through Joinery but not on this computer leaves "Ask Journeyman to change this …" (in
+## the asset's own word: material, texture, sound) and one quiet line on installing it; assets
+## that a change waiting for review adds are listed and marked, their images shown from the
+## change's own copy. A model page with many materials lists its files and closed groups, its
+## materials in words with their maps inside and no numbered copies, beside the preview when
+## wide and under it when narrow.
 ## With JOINERY_ASSET_CAPTURE (a path prefix, from run_parts_tests.py --capture) and
-## JOINERY_PARTS_THEME it also saves <prefix>-material.png and <prefix>-waiting.png.
+## JOINERY_PARTS_THEME it also saves <prefix>-material.png, <prefix>-waiting.png,
+## <prefix>-model.png and <prefix>-model-narrow.png.
 
 const WORKSPACE := preload("res://addons/joinery/tool_workspace.gd")
 const WORDING := preload("res://addons/joinery/asset_wording.gd")
+## The model page's made-up materials: [Blender name, words in the list].
+const MATERIALS := [
+	["AgedGreyTrim", "Aged grey trim"],
+	["screen_glass", "Screen glass"],
+	["panelmetal", "Panelmetal"],
+	["CRT_Bezel", "CRT bezel"],
+	["knob-rubber", "Knob rubber"],
+	["Speaker Grille", "Speaker grille"],
+	["Label.001", "Label.001"],
+	["wood_ORM_trim", "Wood ORM trim"],
+]
 
 var _failed := false
 
@@ -91,21 +106,27 @@ func _run() -> void:
 	var data := {"tools": [_krita("ready")], "assets": [material], "issues": []}
 	workspace._apply_data(data)
 	workspace.select_resource("res://art/sources/table_surface.kra")
-	var title: String = workspace._unavailable_title.text
-	var line: String = workspace._unavailable_label.text
-	_check(not title.contains("isn't installed"), "Krita is Ready: not 'isn't installed'")
-	_check(title == "Ask Journeyman to change this material", title)
-	_check(line.begins_with("Krita is ready for Journeyman."), line)
-	_check(not workspace._setup_link.visible, "Nothing to set up for an app that is ready")
+	_check(not workspace._unavailable.visible, "Krita is Ready: no 'isn't installed' notice")
+	var note: Label = workspace._quiet_note
+	_check(note.visible, "One quiet line says how to open it yourself")
+	_check(note.text == "To open the file yourself, install Krita on this computer.", note.text)
+	_check(workspace._ask.visible, "Ask Journeyman is offered")
+	_check(workspace._ask.tooltip_text == "Ask Journeyman to change this material", "Ask wording")
+	var asked: Array[int] = [0]
+	workspace.ask_requested.connect(func() -> void: asked[0] += 1)
+	workspace._ask.pressed.emit()
+	_check(asked[0] == 1, "Ask Journeyman asks the sidebar for the message box")
 	await _capture("material")
 	data["tools"] = [_krita("needs_docker")]
 	workspace._apply_data(data)
 	workspace.select_resource("res://art/sources/table_surface.kra")
-	title = workspace._unavailable_title.text
-	line = workspace._unavailable_label.text
+	var title: String = workspace._unavailable_title.text
+	var line: String = workspace._unavailable_label.text
+	_check(not note.visible, "A missing app says so once, in its notice")
 	_check(title == "Krita isn't installed", title)
 	_check(line.contains("changing this material needs Krita"), "Material, not model: " + line)
 	await _check_pending(workspace)
+	await _check_model(workspace)
 	workspace.queue_free()
 	await process_frame
 	print("asset workspace: ", "FAILED" if _failed else "ok")
@@ -120,6 +141,22 @@ func _check_wording() -> void:
 	_check(WORDING.noun("other", "audio/door.ogg") == "sound", "Sound by extension")
 	var lines := WORDING.missing_text("Surge XT", "sound", "wav", true, false)
 	_check(lines[1].begins_with("You can listen here"), lines[1])
+	for pair: Array in [
+		["aged_grey_trim", "Aged grey trim"],
+		["AgedGreyTrim", "Aged grey trim"],
+		["agedgreytrim", "Agedgreytrim"],
+		["crt_station", "CRT station"],
+		["Head.001", "Head.001"],
+		["wood_ORM", "Wood ORM"],
+		["HTTPServer", "HTTP server"],
+	]:
+		_check(
+			WORDING.readable(pair[0]) == pair[1], "%s → %s" % [pair[0], WORDING.readable(pair[0])]
+		)
+	var maps := ["t/a_albedo.png", "t/a_albedo_001.png", "t/a_albedo.001.png", "t/b_002.png"]
+	_check(WORDING.is_copy(maps[1], maps) and WORDING.is_copy(maps[2], maps), "Numbered copies")
+	_check(not WORDING.is_copy(maps[0], maps), "The original is no copy")
+	_check(not WORDING.is_copy(maps[3], maps), "A number with no original is a name")
 
 
 func _check_pending(workspace: WORKSPACE) -> void:
@@ -174,6 +211,111 @@ func _check_pending(workspace: WORKSPACE) -> void:
 	_check(text.begins_with("Waiting for your review."), "A waiting model says so: " + text)
 	_check(not workspace._open.visible, "Nothing to open before it is accepted")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path("res://" + staged))
+
+
+## A Blender model with eight materials, two maps each and a numbered copy of every map: the
+## files, closed groups, names in words, picking a material, and the wide and narrow page.
+func _check_model(workspace: WORKSPACE) -> void:
+	var folder := "art/textures/crt_station"
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://" + folder))
+	var files: Array = ["art/models/crt_station.glb"]
+	var parts: Array[Dictionary] = []
+	for index: int in MATERIALS.size():
+		var material: String = MATERIALS[index][0]
+		var stem := material.to_lower().replace(" ", "_").replace(".", "_")
+		parts.append(_part("material", {"material": material, "used_by": "Body,Screen"}))
+		for map: Array in [["albedo", "base_color"], ["rough", "roughness"]]:
+			for copy: String in ["", "_001"]:
+				var image: String = "%s_%s%s" % [stem, map[0], copy.replace("_", ".")]
+				var path: String = "%s/%s_%s%s.png" % [folder, stem, map[0], copy]
+				var pixels := Image.create(16, 16, false, Image.FORMAT_RGBA8)
+				var tone := Color.from_hsv(index / 8.0, 0.55 if map[0] == "albedo" else 0.0, 0.7)
+				pixels.fill(tone)
+				pixels.save_png(ProjectSettings.globalize_path("res://" + path))
+				files.append(path)
+				var fields := {"material": material, "image": image, "texture": path}
+				fields["role"] = map[1]
+				fields["roles"] = map[1]
+				parts.append(_part("texture", fields))
+	for object: String in ["Body", "Screen", "Knob"]:
+		parts.append(_part("object", {"object": object}))
+	var blender := {"tool": "blender", "name": "Blender", "path": "art/sources/crt_station.blend"}
+	blender.merge({"available": false, "reason": "Application not found"})
+	var model := _asset(
+		"art/sources/crt_station.blend",
+		"model",
+		{
+			"tool": "blender",
+			"open_options": [blender],
+			"parts": files,
+			"previews": ["art/models/crt_station.glb"]
+		}
+	)
+	var tool := _krita("ready")
+	tool.merge({"id": "blender", "name": "Blender", "domain": "3d"}, true)
+	workspace._apply_data({"tools": [tool], "assets": [model], "issues": []})
+	workspace.select_resource("res://art/sources/crt_station.blend")
+	var panel: VBoxContainer = workspace._parts_panel
+	if panel._job != null:
+		panel._job.cancel()
+		panel._job = null
+	panel.set_report({"resource": "res://art/models/crt_station.glb", "parts": parts})
+	_check(workspace._title.text == "CRT station", workspace._title.text)
+	_check(workspace._caption.text == "Model · made in Blender", workspace._caption.text)
+	_check(workspace._ask.tooltip_text == "Ask Journeyman to change this model", "Ask a model")
+	_check(workspace._quiet_note.text.contains("install Blender"), workspace._quiet_note.text)
+	_check(panel.file_names() == ["Source", "Model"], "Files: %s" % [panel.file_names()])
+	var counts: Dictionary = panel.group_counts()
+	_check(int(counts.get("material", 0)) == 8, "8 materials: %s" % [counts])
+	_check(int(counts.get("texture", 0)) == 16, "No numbered copies of maps: %s" % [counts])
+	var tree_root: TreeItem = panel.tree.get_root()
+	var group: TreeItem = null
+	for item: TreeItem in tree_root.get_children():
+		if item.get_text(0) == "8 materials":
+			group = item
+	_check(group != null and group.collapsed, "Materials start closed with their count")
+	if group == null:
+		return
+	var names: Array[String] = []
+	for item: TreeItem in group.get_children():
+		names.append(item.get_text(0))
+		_check(item.get_child_count() == 2, "Two maps inside %s" % item.get_text(0))
+		_check(item.get_text(1) == "2 maps", item.get_text(1))
+	var expected: Array[String] = []
+	for pair: Array in MATERIALS:
+		expected.append(pair[1])
+	_check(names == expected, "Materials in words: %s" % [names])
+	var picked: Array[Dictionary] = []
+	workspace.part_selected.connect(func(target: Dictionary) -> void: picked.append(target))
+	group.collapsed = false
+	var first := group.get_child(0)
+	first.collapsed = false
+	panel.tree.set_selected(first, 0)
+	_check(picked.size() == 1 and picked[0]["material"] == "AgedGreyTrim", "Pick a material")
+	_check(first.get_icon(0) != null, "A material shows a swatch")
+	await process_frame
+	_check(not workspace._stage.vertical, "Wide: the parts list is beside the preview")
+	await _capture("model")
+	root.size = Vector2i(720, 800)
+	await process_frame
+	await process_frame
+	_check(workspace._stage.vertical, "Narrow: the parts list is under the preview")
+	_check(workspace._ask.text == "Ask Journeyman", "Narrow: " + workspace._ask.text)
+	await _capture("model-narrow")
+	for path: Variant in files.slice(1):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path("res://" + str(path)))
+
+
+func _part(kind: String, fields: Dictionary) -> Dictionary:
+	var part := {
+		"part_kind": kind,
+		"resource": "res://art/models/crt_station.glb",
+		"owner": "blender",
+		"owner_source": "art/sources/crt_station.blend",
+	}
+	part.merge(fields)
+	part["id"] = "%s#%s" % [kind, "&".join(PackedStringArray(fields.values()))]
+	return part
 
 
 ## Save the window as <JOINERY_ASSET_CAPTURE>-<state>.png when asked (a windowed run).

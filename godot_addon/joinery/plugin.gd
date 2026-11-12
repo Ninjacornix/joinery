@@ -117,8 +117,8 @@ func _enter_tree() -> void:
 	# rather than through _handles: this plugin has a main screen, and a main-screen plugin
 	# that handles an object takes the editor over to that screen.
 	set_input_event_forwarding_always_enabled()
-	if _workspace.has_signal("setup_requested"):
-		_workspace.connect("setup_requested", _on_project_setup)
+	_workspace.setup_requested.connect(_on_project_setup)
+	_link(_workspace.ask_requested, "fill_composer")
 	_dock.target_opened.connect(_on_target_opened)
 	_raise_dock.call_deferred()
 
