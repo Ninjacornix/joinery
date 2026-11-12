@@ -138,6 +138,40 @@ def test_a_big_project_stays_within_its_budget(tmp_path: Path) -> None:
     assert "- game/level.tscn:" in text and "- game/player.tscn:" in text
 
 
+def test_files_near_the_selection_rank_first(tmp_path: Path) -> None:
+    """Personalised PageRank (ADR 0080): the walk restarts only at the selection
+    and follows references both ways."""
+    root = game(tmp_path, props=6)
+    near = project_map.near(root, ["res://game/player.gd"])
+    assert near[0] == "game/player.tscn", "the scene that uses the script"
+    assert near[1] == "game/level.tscn", "then the scene that instances it"
+    assert "game/player.gd" not in near
+    prop = project_map.near(root, ["res://game/prop3.tscn::Prop3"])
+    assert prop[0] == "game/level.tscn"
+    assert project_map.near(root, ["res://nowhere.tscn"]) == []
+    assert project_map.near(root, []) == []
+    assert len(project_map.near(root, ["res://game/level.tscn"])) == project_map.NEAR
+
+
+def test_the_near_line_goes_with_the_turn_not_the_stable_map(tmp_path: Path) -> None:
+    root = game(tmp_path)
+    plain = Prompt(text="Hi", project_dir=str(root))
+    chosen = plain.model_copy(
+        update={
+            "target_context": ({"id": "res://game/player.tscn::Player"},),
+        }
+    )
+    assert prompt_map(plain) == prompt_map(chosen), "the cached prefix is unchanged"
+    text = turn_text(chosen)
+    line = next(x for x in text.splitlines() if x.startswith("Near the selection"))
+    assert "game/player.gd" in line and "game/level.tscn" in line
+    assert "Near the selection" not in turn_text(plain)
+    scene = plain.model_copy(
+        update={"editor_context": {"scene_path": "res://game/player.tscn"}}
+    )
+    assert "Near the selection" in turn_text(scene)
+
+
 def test_the_map_is_cached_by_content(tmp_path: Path) -> None:
     root = game(tmp_path)
     first = project_map.cached(root)

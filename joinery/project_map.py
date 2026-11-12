@@ -185,13 +185,17 @@ def _settings(text: str) -> dict[str, dict[str, str]]:
 
 
 def _rank(
-    edges: dict[str, Counter[str]], nodes: set[str], seeds: set[str]
+    edges: dict[str, Counter[str]],
+    nodes: set[str],
+    seeds: set[str],
+    only_seeds: bool = False,
 ) -> dict[str, float]:
     """PageRank with the walk restarting at the seeds (main scene, autoloads) more
-    often than anywhere else."""
-    if not nodes:
+    often than anywhere else; with ``only_seeds`` it restarts only there
+    (personalised PageRank)."""
+    if not nodes or (only_seeds and not seeds & nodes):
         return {}
-    teleport = {n: (10.0 if n in seeds else 1.0) for n in nodes}
+    teleport = {n: (10.0 if n in seeds else 0.0 if only_seeds else 1.0) for n in nodes}
     total = sum(teleport.values())
     teleport = {n: v / total for n, v in teleport.items()}
     rank = dict(teleport)
@@ -218,10 +222,26 @@ def _short(items: list[str], limit: int) -> str:
     return shown + (f" +{len(items) - limit}" if len(items) > limit else "")
 
 
-def build(project: Path, budget: int = BUDGET) -> str:
-    """The map's text (uncached)."""
+@dataclass
+class Graph:
+    """The project's files and what refers to what, read once for the map and the
+    files near a selection."""
+
+    files: list[str]
+    edges: dict[str, Counter[str]]
+    nodes: set[str]
+    seeds: set[str]
+    scenes: dict[str, Scene]
+    scripts: dict[str, Script]
+    settings: dict[str, dict[str, str]]
+    main: str
+    autoloads: dict[str, str]
+
+
+def graph(project: Path, files: list[str] | None = None) -> Graph:
+    """Read the project's scenes, scripts and settings into a reference graph."""
     project = project.resolve()
-    files = _files(project)
+    files = _files(project) if files is None else files
     present = set(files)
     edges: dict[str, Counter[str]] = defaultdict(Counter)
     scenes: dict[str, Scene] = {}
@@ -267,6 +287,17 @@ def build(project: Path, budget: int = BUDGET) -> str:
             if match.removeprefix("res://") in present:
                 seeds.add(match.removeprefix("res://"))
     nodes = set(texts) | {t for out in edges.values() for t in out}
+    return Graph(files, edges, nodes, seeds, scenes, scripts, settings, main, autoloads)
+
+
+def build(project: Path, budget: int = BUDGET) -> str:
+    """The map's text (uncached)."""
+    project = project.resolve()
+    found = graph(project)
+    files, edges, nodes, seeds = found.files, found.edges, found.nodes, found.seeds
+    scenes, scripts, settings = found.scenes, found.scripts, found.settings
+    main, autoloads = found.main, found.autoloads
+    application = settings.get("application", {})
     rank = _rank(edges, nodes, seeds)
     used_by: Counter[str] = Counter()
     for out in edges.values():
@@ -448,6 +479,59 @@ def build(project: Path, budget: int = BUDGET) -> str:
 
 
 _memo: dict[Path, tuple[str, str]] = {}
+_graphs: dict[Path, tuple[str, Graph]] = {}
+#: Files listed as near the selection, at most.
+NEAR = 8
+
+
+def _res_paths(values: list[str]) -> set[str]:
+    """Project paths in target ids and resources ("res://a.tscn::Node", "res://b.tres#x")."""
+    found: set[str] = set()
+    for value in values:
+        for match in _RES.findall(value.split("::")[0].split("#")[0]):
+            found.add(match.removeprefix("res://"))
+    return found
+
+
+def near(project: Path, selected: list[str], limit: int = NEAR) -> list[str]:
+    """The project files closest to ``selected`` (res:// paths or target ids), most
+    connected first: PageRank over the references in both directions, restarting
+    only at the selection, so the scenes that use a selected script rank as well
+    as the files it uses. The selection itself is left out."""
+    project = project.resolve()
+    seeds = _res_paths(selected)
+    if not seeds or not (project / "project.godot").is_file():
+        return []
+    files = _files(project)
+    quick = _quick_key(project, files)
+    memo = _graphs.get(project)
+    if memo is None or memo[0] != quick:
+        memo = (quick, graph(project, files))
+        _graphs[project] = memo
+    found = memo[1]
+    both: dict[str, Counter[str]] = defaultdict(Counter)
+    for source, out in found.edges.items():
+        for target, count in out.items():
+            both[source][target] += count
+            both[target][source] += count
+    rank = _rank(both, found.nodes, seeds, only_seeds=True)
+    listed = [
+        p
+        for p, score in sorted(rank.items(), key=lambda i: (-i[1], i[0]))
+        if score > 0 and p not in seeds and p != "project.godot"
+    ]
+    return listed[:limit]
+
+
+def near_line(project: Path, selected: list[str]) -> str:
+    """One line for the turn: the files near the selection ("" when none)."""
+    try:
+        listed = near(project, selected)
+    except OSError:
+        return ""
+    if not listed:
+        return ""
+    return "Near the selection (most connected first): " + ", ".join(listed) + "."
 
 
 def _quick_key(project: Path, files: list[str]) -> str:

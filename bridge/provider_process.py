@@ -21,6 +21,7 @@ from joinery.chat_attachments import listed
 from joinery.compact import editor_outline
 from joinery.connection import status
 from joinery.project_map import cached as cached_map
+from joinery.project_map import near_line
 from joinery.provider_support import WINDOWS_BOUNDARY_REASON, require_supported
 from joinery.wiring import _command_str
 
@@ -81,10 +82,25 @@ def project_map(prompt: Prompt) -> str:
     )
 
 
+def nearby(prompt: Prompt) -> str:
+    """The files near the selection and the open scene (ADR 0080), as a line after
+    the selection: per turn, so the stable map above keeps its cached bytes."""
+    if not prompt.project_dir:
+        return ""
+    selected = [
+        str(entry.get(key, ""))
+        for entry in prompt.target_context
+        for key in ("id", "resource", "source")
+    ]
+    selected.append(str(prompt.editor_context.get("scene_path", "")))
+    line = near_line(Path(prompt.project_dir), [s for s in selected if s])
+    return "\n" + line if line else ""
+
+
 def turn_part(prompt: Prompt, images_inline: bool = False) -> str:
     """What only this turn has: the summary, the editor's per-turn keys, the
-    selection, the request and the attached images (listed by path unless the
-    provider takes them inline)."""
+    selection and the files near it, the request and the attached images (listed
+    by path unless the provider takes them inline)."""
     volatile = {
         k: prompt.editor_context[k] for k in TURN_KEYS if k in prompt.editor_context
     }
@@ -94,6 +110,7 @@ def turn_part(prompt: Prompt, images_inline: bool = False) -> str:
         + _json(volatile)
         + "\nSelection:\n"
         + _json(prompt.target_context)
+        + nearby(prompt)
         + "\n\nUser:\n"
         + prompt.text
         + ("" if images_inline else listed(prompt.attachments))
