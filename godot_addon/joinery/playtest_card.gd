@@ -65,7 +65,7 @@ var _more: Button
 var _coverage: VBoxContainer
 var _coverage_text: Label
 var _map: Control
-var _layers: HBoxContainer
+var _layers: HFlowContainer
 var _layer_buttons: Dictionary = {}
 var _runs_text: Label
 ## The legend's "not reached" square: it follows the map's unreached tone.
@@ -163,8 +163,14 @@ func _init(identifier := "") -> void:
 	legend.add_child(key)
 	_map = MAP.new()
 	_coverage.add_child(_map)
-	_layers = HBoxContainer.new()
-	_layers.theme_type_variation = "JoineryRowTight"
+	# The layer toggles and "last N playtests" flow onto a second line in a narrow sidebar.
+	_layers = HFlowContainer.new()
+	STYLE.on_theme_overrides(
+		_layers,
+		func() -> void:
+			_layers.add_theme_constant_override("h_separation", UI_THEME.space(_layers, 2))
+			_layers.add_theme_constant_override("v_separation", UI_THEME.space(_layers, 1))
+	)
 	_layers.accessibility_name = "Heat layers on the map"
 	_layers.hide()
 	_coverage.add_child(_layers)

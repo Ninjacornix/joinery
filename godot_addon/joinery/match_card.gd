@@ -31,6 +31,8 @@ const GUIDELINES := preload("access_guidelines.gd")
 const DOTS := {"high": "attention", "medium": "working", "low": "off"}
 ## Findings shown before "Show all".
 const FIRST_FINDINGS := 3
+## Below this card width, in em, it shows one finding fewer.
+const NARROW_EM := 23.0
 const FINAL := ["accepted", "discarded", "done", "failed", "stopped"]
 ## Per kind: [title while checking, step while checking, accessible name].
 const WORDS := {
@@ -105,6 +107,8 @@ var _areas: VBoxContainer
 var _area_rows: Dictionary = {}
 var _findings: VBoxContainer
 var _more: Button
+## The user pressed Show all: every finding stays shown whatever the width.
+var _all_shown := false
 var _foot: HFlowContainer
 var _needs: Label
 var _kept: Label
@@ -190,9 +194,15 @@ func _init(card_kind := "match") -> void:
 	_more.pressed.connect(_show_all)
 	_more.hide()
 	if kind == "access":
-		# Show all and the guidelines share a line, so the closed card is no taller.
-		var links := HBoxContainer.new()
-		links.theme_type_variation = "JoineryRowTight"
+		# Show all and the guidelines share a line, so the closed card is no taller; in a
+		# narrow sidebar the guidelines flow onto the next.
+		var links := HFlowContainer.new()
+		STYLE.on_theme_overrides(
+			links,
+			func() -> void:
+				links.add_theme_constant_override("h_separation", UI_THEME.space(links, 2))
+				links.add_theme_constant_override("v_separation", UI_THEME.space(links, 1))
+		)
 		column.add_child(links)
 		links.add_child(_more)
 		guidelines = GUIDELINES.new()
@@ -538,17 +548,26 @@ func _area_row(entry: Dictionary) -> Dictionary:
 func _fill_findings(findings: Array) -> void:
 	for child: Node in _findings.get_children():
 		child.queue_free()
+	_all_shown = false
 	var shown: Array = []
+	var first := _first_findings()
 	for index: int in findings.size():
 		var row := _finding_row(findings[index] as Dictionary)
-		row.visible = index < FIRST_FINDINGS
+		row.visible = index < first
 		_findings.add_child(row)
 		if row.visible:
 			shown.append(row)
 	_findings.visible = not findings.is_empty()
 	_more.text = "Show all %d" % findings.size()
-	_more.visible = findings.size() > FIRST_FINDINGS
+	_more.visible = findings.size() > first
 	UI_MOTION.stagger(shown)
+
+
+## How many findings the closed card shows: one fewer in a narrow sidebar, where the card's
+## lines wrap and it would otherwise outgrow a short window.
+func _first_findings() -> int:
+	var narrow := size.x > 0.0 and size.x < NARROW_EM * UI_THEME.font_size(self, "body")
+	return FIRST_FINDINGS - 1 if narrow else FIRST_FINDINGS
 
 
 func _finding_row(item: Dictionary) -> HBoxContainer:
@@ -595,7 +614,27 @@ func _by_guideline(open: bool) -> void:
 	_more.visible = not open and hidden_rows
 
 
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_RESIZED:
+		_fit_first()
+
+
+## Shows the first findings for the card's width now (it settles after the rows are made).
+func _fit_first() -> void:
+	if _findings == null or _all_shown:
+		return
+	var rows: Array = []
+	for child: Node in _findings.get_children():
+		if child is Control and not child.is_queued_for_deletion():
+			rows.append(child)
+	var first := _first_findings()
+	for index: int in rows.size():
+		(rows[index] as Control).visible = index < first
+	_more.visible = rows.size() > first
+
+
 func _show_all() -> void:
+	_all_shown = true
 	var shown: Array = []
 	for child: Node in _findings.get_children():
 		if child is Control and not (child as Control).visible:

@@ -57,6 +57,8 @@ func _audit(args: PackedStringArray) -> Dictionary:
 func _run() -> void:
 	_fixture = load(get_script().resource_path.get_base_dir().path_join("match_fixture.gd"))
 	load("res://addons/joinery/ui_motion.gd").call("set_enabled", false)
+	# The sidebar's usual width: below about 320 px the card shows one finding fewer.
+	root.size = Vector2i(480, 760)
 	var dock: Control = load(DOCK_PATH).new()
 	root.add_child(dock)
 	dock.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
