@@ -28,6 +28,7 @@ const FLUNG_2D := 40000.0
 ## Coverage cells: how much of the world the player has been to.
 const CELL_3D := 2.0
 const CELL_2D := 64.0
+const RESPAWN_LIMIT := 200
 
 var fps: int = 60
 var softlock_frames: int = 900
@@ -35,6 +36,9 @@ var frame_ms: PackedFloat32Array = PackedFloat32Array()
 var spikes: Array[Dictionary] = []
 var samples: Array[Dictionary] = []
 var respawns: int = 0
+## Where the player was just before each respawn (a death the game handled itself):
+## {frame, at: [x, y, z]}, at most RESPAWN_LIMIT.
+var respawn_at: Array[Dictionary] = []
 var cells: Dictionary = {}
 
 var _last_usec: int = 0
@@ -141,6 +145,7 @@ func summary() -> Dictionary:
 		"spikes": spikes,
 		"samples": samples,
 		"respawns": respawns,
+		"respawn_at": respawn_at,
 		"cells": cells.size(),
 	}
 
@@ -161,6 +166,14 @@ func _watch_player(frame: int, moving: bool, paused: bool) -> Array[Dictionary]:
 	var step := at.distance_to(_last)
 	if step > (JUMP_3D if _is_3d else JUMP_2D):
 		respawns += 1
+		if respawn_at.size() < RESPAWN_LIMIT:
+			respawn_at.append(
+				{
+					"frame": frame,
+					"at":
+					[snappedf(_last.x, 0.01), snappedf(_last.y, 0.01), snappedf(_last.z, 0.01)]
+				}
+			)
 		_progress = frame
 		_out_since = -1
 	_last = at

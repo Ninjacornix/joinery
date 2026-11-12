@@ -28,7 +28,7 @@ from typing import Any, Protocol
 
 from bridge.instructions import PLAYTEST_PROMPT
 from bridge.protocol import Done, Message, MessageDelta, Prompt
-from joinery import playtest
+from joinery import playtest, playtest_heat
 
 Emit = Callable[[dict[str, Any]], None]
 Runner = Callable[
@@ -210,7 +210,11 @@ class Playtester:
         if run.origin == "agent":
             run.state = "done"
             self.emit(run.event())
-        return {**playtest.for_agent(report), "note_for_you": _TOOL_NOTE}
+        data = {**playtest.for_agent(report), "note_for_you": _TOOL_NOTE}
+        heat = playtest_heat.for_agent((run.report or {}).get("heatmap") or {})
+        if heat:
+            data["heatmap"] = heat
+        return data
 
     async def _play(self, run: Run, checked: dict[str, Any]) -> dict[str, Any]:
         self._playing = True
@@ -241,6 +245,12 @@ class Playtester:
         finally:
             self._playing = False
         run.report = playtest.for_agent(report)
+        # The card draws the map itself: the whole grid, and the recent runs' heat on it.
+        if report.get("coverage"):
+            run.report["coverage"] = report["coverage"]
+        heat = playtest_heat.aggregate(self.project, base=report)
+        if heat:
+            run.report["heatmap"] = heat
         run.elapsed = float(report.get("played_seconds", run.seconds))
         run.state = "writing"
         self.emit(run.event())

@@ -61,6 +61,8 @@ var save_game: Node
 var events: Array[Dictionary] = []
 var findings: Array[Dictionary] = []
 var moments: Array[Dictionary] = []
+## Where the player was when each level was lost: {t, frame, at, reason} (the heatmaps).
+var deaths: Array[Dictionary] = []
 var goals: Dictionary = {
 	"levels_started": 0,
 	"completed": [],
@@ -251,6 +253,18 @@ func _on_level_completed(result: Dictionary) -> void:
 
 func _on_level_failed(reason: String) -> void:
 	(goals["failed"] as Array).append({"t": snappedf(frame / float(fps), 0.01), "reason": reason})
+	if _player != null and is_instance_valid(_player) and deaths.size() < LIMIT_EVENTS:
+		(
+			deaths
+			. append(
+				{
+					"t": snappedf(frame / float(fps), 0.01),
+					"frame": frame,
+					"at": _round(_where(_player)),
+					"reason": reason,
+				}
+			)
+		)
 	_event("level_failed", {"reason": reason})
 	_level_over = frame
 
@@ -684,6 +698,7 @@ func _write(done: bool) -> void:
 		"findings": findings,
 		"checks": checks,
 		"moments": moments,
+		"deaths": deaths,
 		"route": walker.get(&"results") if walker != null else [],
 		"coverage": cover.call(&"summary"),
 		"reach": drive.get(&"reach_results"),

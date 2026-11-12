@@ -36,7 +36,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from joinery import playtest_report
+from joinery import playtest_heat, playtest_report
 from joinery.catalog import ROOT
 
 BOT = Path(__file__).resolve().parent / "playtest_bot" / "bot.gd"
@@ -344,6 +344,7 @@ def run(
     )
     report["engine"] = godot.name
     report["out"] = str(out)
+    report["heat"] = playtest_heat.run_heat(bot)
     if report.get("coverage") and (out / "coverage.png").is_file():
         report["coverage"]["map"] = str(out / "coverage.png")
     if options.record and (out / REPLAY_NAME).is_file():
@@ -486,6 +487,12 @@ def for_agent(report: dict[str, Any], limit: int = 25) -> dict[str, Any]:
         }
     if report.get("reach"):
         data["reach"] = report["reach"]
+    heat = report.get("heat") or {}
+    if heat:
+        data["heat"] = {
+            "deaths": [d["at"] for d in heat.get("deaths", [])][:10],
+            "stuck": [s["at"] for s in heat.get("stuck", [])][:10],
+        }
     data["screenshots"] = report.get("screenshots", [])
     data["note"] = (
         "Timings and deaths come from a bot pressing keys with some aim, not a person; "
@@ -543,11 +550,31 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="record the run as a replay (joinery replay add keeps it as a test)",
     )
+    parser.add_argument(
+        "--heatmap",
+        action="store_true",
+        help="don't play: where recent playtests died, got stuck and spent time",
+    )
+    parser.add_argument(
+        "--last",
+        type=int,
+        default=0,
+        help="with --heatmap: how many recent playtests (default [agents] heatmap_runs)",
+    )
     parser.add_argument("--json", action="store_true")
 
 
 def main(args: argparse.Namespace) -> int:
     project: Path = args.project
+    if getattr(args, "heatmap", False):
+        heat = playtest_heat.aggregate(
+            project.resolve(), last=int(args.last) if args.last else None
+        )
+        if args.json:
+            print(json.dumps(heat))
+        else:
+            print("\n".join(playtest_heat.summary_lines(heat)))
+        return 0
     if args.seconds is not None:
         seconds = float(args.seconds)
     elif args.minutes is not None:

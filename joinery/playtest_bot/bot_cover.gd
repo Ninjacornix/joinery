@@ -40,6 +40,8 @@ var rows: int = 0
 var navigable: PackedByteArray = PackedByteArray()
 ## Per cell: the frame the player first stood in it plus one, 0 never.
 var visited: PackedInt32Array = PackedInt32Array()
+## Per cell: the frames the player spent in it (the time-spent heatmap).
+var dwell: PackedInt32Array = PackedInt32Array()
 var start: Vector2i = Vector2i(-1, -1)
 var built: bool = false
 
@@ -82,6 +84,7 @@ func build(player: Node, style: String) -> void:
 	# The same level again (a restart, a new player): where the player has been still counts,
 	# and so does the floor found before (the player may be mid-fall this time).
 	var seen: Dictionary = {}
+	var spent: Dictionary = {}
 	var floors: Array[Vector2] = []
 	var heights: Array[float] = []
 	if key == _key and built:
@@ -89,6 +92,8 @@ func build(player: Node, style: String) -> void:
 			var centre := origin + Vector2(index % cols + 0.5, index / cols + 0.5) * cell
 			if visited[index] != 0:
 				seen[centre] = visited[index]
+			if index < dwell.size() and dwell[index] != 0:
+				spent[centre] = dwell[index]
 			if navigable[index] != 0:
 				floors.append(centre)
 				heights.append(_floor[index])
@@ -99,10 +104,16 @@ func build(player: Node, style: String) -> void:
 	_key = key
 	visited = PackedInt32Array()
 	visited.resize(cols * rows)
+	dwell = PackedInt32Array()
+	dwell.resize(cols * rows)
 	for centre: Vector2 in seen:
 		var index := _index(_cell_of(centre))
 		if index >= 0:
 			visited[index] = int(seen[centre])
+	for centre: Vector2 in spent:
+		var index := _index(_cell_of(centre))
+		if index >= 0:
+			dwell[index] += int(spent[centre])
 	_skip.clear()
 	_goal = -1
 	start = _cell_of(at)
@@ -123,6 +134,7 @@ func visit(at: Vector3, frame: int) -> void:
 	if here < 0:
 		return
 	navigable[here] = 1
+	dwell[here] += 1
 	if visited[here] == 0:
 		visited[here] = frame + 1
 	if here == _goal:
@@ -157,18 +169,22 @@ func route(at: Vector3, target: Vector3) -> Vector3:
 	return step if step is Vector3 else target
 
 
-## {mode, cell, origin, cols, rows, start, navigable, visited, percent, grid}: the grid as
-## rows of text, "#" visited, "." navigable and never reached, " " not navigable.
+## {mode, cell, origin, cols, rows, start, navigable, visited, percent, grid, dwell}: the
+## grid as rows of text, "#" visited, "." navigable and never reached, " " not navigable;
+## dwell lists [col, row, frames] for each cell the player spent time in.
 func summary() -> Dictionary:
 	if not built:
 		return {}
 	var lines: Array[String] = []
+	var spent: Array = []
 	var open := 0
 	var seen := 0
 	for row: int in rows:
 		var line := ""
 		for col: int in cols:
 			var index := row * cols + col
+			if dwell[index] != 0:
+				spent.append([col, row, dwell[index]])
 			if visited[index] != 0:
 				line += "#"
 				seen += 1
@@ -190,6 +206,7 @@ func summary() -> Dictionary:
 		"visited": seen,
 		"percent": snappedf(100.0 * seen / maxf(open, 1.0), 0.1),
 		"grid": lines,
+		"dwell": spent,
 	}
 
 

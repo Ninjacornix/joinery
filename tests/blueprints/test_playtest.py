@@ -17,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from joinery import blueprints, done_when, playtest
+from joinery import blueprints, done_when, playtest, playtest_heat
 from tests.blueprints.godot_run import import_project, make_project, needs_godot
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "playtest_game"
@@ -92,6 +92,13 @@ def test_a_save_on_the_result_screen_never_loads_a_stuck_level(tmp_path: Path) -
     assert report["checks"]["save_after_end"] == "ok: refused"
     assert report["checks"]["save_load"] == "ok"
     assert _serious(report) == []
+    # The heatmaps: where it lost, and the time it spent, on the coverage map's plane.
+    heat = report["heat"]
+    assert heat["mode"] == "topdown" and heat["deaths"], heat
+    assert sum(cell["seconds"] for cell in heat["time"]) > 10, heat["time"]
+    layered = playtest_heat.aggregate(project)
+    assert layered["runs"] == 1 and layered["totals"]["deaths"] >= 1, layered
+    assert layered["grid"] == report["coverage"]["grid"]
 
 
 @needs_godot
