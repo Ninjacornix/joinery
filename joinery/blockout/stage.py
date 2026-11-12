@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import shutil
 import tempfile
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -145,6 +146,28 @@ async def tool(gateway: ProjectGateway, params: dict[str, Any]) -> dict[str, Any
         )
     except LayoutError as exc:
         return {"status": "problems", "problems": exc.problems, "next": FIX}
+
+    def sketch(tx_id: str) -> str:
+        return _sketch(
+            gateway,
+            str(params.get("sketch", "") or ""),
+            _kept_reference(gateway, tx_id, built.layout_file),
+        )
+
+    return await stage(gateway, built, sketch)
+
+
+async def stage(
+    gateway: ProjectGateway,
+    built: blockout.Built,
+    reference: Callable[[str], str],
+    *,
+    label: str = "Blockout",
+    facts: Sequence[str] = (),
+    fix: str = FIX,
+) -> dict[str, Any]:
+    """Stage a built layout, walk it and set up its review: the plan beside
+    ``reference(tx_id)`` (the user's sketch or sample), ``facts`` after the walk's."""
     checks = gateway.project / CHECKS
     checks.mkdir(parents=True, exist_ok=True)
     picture = checks / f"{built.layout.name}.png"
@@ -157,7 +180,7 @@ async def tool(gateway: ProjectGateway, params: dict[str, Any]) -> dict[str, Any
             "problems": [p for p in problems if p["severity"] == "error"],
             "warnings": [p["text"] for p in problems if p["severity"] == "warning"],
             "picture": str(picture),
-            "next": FIX,
+            "next": fix,
         }
     from joinery.turn import scene_route
 
@@ -218,22 +241,18 @@ async def tool(gateway: ProjectGateway, params: dict[str, Any]) -> dict[str, Any
         item: dict[str, Any] = {
             "path": built.layout_file,
             "media": "image",
-            "label": "Blockout",
+            "label": label,
             "after": str(after_png),
         }
         if before is not None:
             before_png = previews / f"blockout-{built.layout.name}-before.png"
             before_png.write_bytes(before)
             item["before"] = str(before_png)
-        sketch = _sketch(
-            gateway,
-            str(params.get("sketch", "") or ""),
-            _kept_reference(gateway, tx.id, built.layout_file),
-        )
-        if sketch:
-            item["reference"] = sketch
+        shown = reference(tx.id)
+        if shown:
+            item["reference"] = shown
         counts = built.counts()
-        gateway.review_extras[tx.id] = {"facts": [fact], "media": [item]}
+        gateway.review_extras[tx.id] = {"facts": [fact, *facts], "media": [item]}
     return {
         "status": "staged",
         "scene": built.scene,
@@ -248,8 +267,107 @@ async def tool(gateway: ProjectGateway, params: dict[str, Any]) -> dict[str, Any
                 for t in reach.targets
             ],
         },
-        "facts": [fact],
+        "facts": [fact, *facts],
         "warnings": warnings,
         "picture": str(picture),
         "next": NEXT,
     }
+
+
+GROW_FIX = (
+    "Change what the message says (another seed, a larger size, another sample of "
+    "the user's) and call grow_level again, or ask the user for a sample with wider "
+    "passages."
+)
+GROW_NEXT = (
+    "The grown level is staged. Call submit_for_review with a short summary and "
+    "these facts; the user sees the grown plan beside their sample."
+)
+
+
+def _grow_size(value: Any) -> tuple[int, int]:
+    if isinstance(value, str):
+        width, _, height = value.lower().partition("x")
+        try:
+            return int(width), int(height)
+        except ValueError:
+            pass
+    elif (
+        isinstance(value, list | tuple)
+        and len(value) == 2
+        and all(isinstance(v, int) and not isinstance(v, bool) for v in value)
+    ):
+        return int(value[0]), int(value[1])
+    raise ValueError("size is [width, height] in cells, such as [32, 24].")
+
+
+async def grow_tool(gateway: ProjectGateway, params: dict[str, Any]) -> dict[str, Any]:
+    """``grow_level``: grow a layout from the user's own example (ADR 0069), then
+    stage, walk and review it like a blockout, with the sample beside the plan."""
+    from joinery.blockout import grow
+
+    if gateway.turn is not None:
+        gateway.turn.admit_mutation()
+    sample = params.get("sample")
+    if not isinstance(sample, str) or not sample.strip():
+        raise ValueError(
+            "sample is the user's own example: an attached picture, a grid or a "
+            "blockout layout in the project."
+        )
+    width, height = _grow_size(params.get("size", [32, 24]))
+    seed = params.get("seed", 1)
+    if not isinstance(seed, int) or isinstance(seed, bool):
+        raise TypeError("seed is a whole number.")
+    mode = params.get("mode") or None
+    scene = params.get("scene") or None
+    blueprint = params.get("blueprint") or None
+    name = str(params.get("name") or "grown")
+    for key, value in (("mode", mode), ("scene", scene), ("blueprint", blueprint)):
+        if value is not None and not isinstance(value, str):
+            raise ValueError(f"{key} is text.")
+    project = gateway.project.resolve()
+    located = Path(sample.removeprefix("res://")).expanduser()
+    if not located.is_absolute():
+        located = project / located
+    if not located.resolve().is_relative_to(project):
+        raise ValueError(
+            "The sample must be in the project: a picture the user attached, or "
+            "their own grid or layout (art/reference/ keeps it for growing again)."
+        )
+    try:
+        made = grow.make(
+            gateway.project,
+            sample,
+            width=width,
+            height=height,
+            seed=seed,
+            name=name,
+            mode=mode,
+            blueprint=blueprint,
+            scene=scene,
+        )
+    except (grow.GrowError, LayoutError) as exc:
+        problems = exc.problems if isinstance(exc, LayoutError) else [str(exc)]
+        return {"status": "problems", "problems": problems, "next": GROW_FIX}
+    recipe = made.grown.layout.grown
+    assert recipe is not None
+    checks = gateway.project / CHECKS
+    checks.mkdir(parents=True, exist_ok=True)
+    sample_png = checks / f"{made.built.layout.name}-sample.png"
+    sample_png.write_bytes(made.sample_png)
+    grown_fact = (
+        f"Grown from {recipe.sample}: {recipe.size[0]}x{recipe.size[1]} cells, "
+        f"seed {recipe.seed}"
+    )
+    result = await stage(
+        gateway,
+        made.built,
+        lambda _tx: str(sample_png),
+        label="Grown level",
+        facts=[grown_fact],
+        fix=GROW_FIX,
+    )
+    result["grown"] = recipe.model_dump()
+    if result.get("status") == "staged":
+        result["next"] = GROW_NEXT
+    return result

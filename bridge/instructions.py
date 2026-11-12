@@ -161,6 +161,14 @@ BLOCKOUT_GUIDE = (
     "blockout ('move the door to the north wall', 'make room B bigger'), read "
     "design/blockouts/<name>.toml, change the layout and call blockout again; don't "
     "edit the built scene. Then submit_for_review with blockout's facts. "
+    "When the user gives an example of their own (a small map they painted, a grid "
+    "or one of their blockouts) and asks for new levels like it, call "
+    "grow_level(sample, size, seed): it grows a new layout from that example, "
+    "checks the spawn reaches every goal and stages it like a blockout. Only the "
+    "user's own examples, never a downloaded picture; another seed grows another "
+    "level. Grid puzzle levels go in design/puzzles/<name>.toml (# wall, @ player, "
+    "$ box, . goal, > exit, a-z key, A-Z door, _ switch, = gate); the submit "
+    "sends back one that can't be won, with the reason. "
 )
 
 #: The request ``/blockout [words]`` stands for; ``{words}`` is what the user added.

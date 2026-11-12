@@ -369,6 +369,47 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
 
     @server.tool()
     @tool_errors
+    async def grow_level(
+        sample: Annotated[str, Field(min_length=1, max_length=1000)],
+        size: Annotated[
+            list[Annotated[int, Field(ge=6, le=64)]], Field(min_length=2, max_length=2)
+        ],
+        seed: Annotated[int, Field(ge=0, le=2**31 - 1)] = 1,
+        name: Annotated[str, Field(max_length=32)] = "grown",
+        mode: Literal["", "3d", "2d-topdown", "2d-side"] = "",
+        scene: Annotated[str, Field(max_length=200)] = "",
+        blueprint: Annotated[str, Field(max_length=40)] = "",
+    ) -> CallToolResult:
+        """Grow a new level from the user's own example with Wave Function Collapse: a small map they painted (dark wall, light floor, blue spawn, green goal, yellow coin, cyan pickup, magenta checkpoint, red hazard), a grid TOML (grid = '''...''': # wall, . floor, S spawn, G goal, c coin, p pickup, k checkpoint, ! hazard) or one of their blockout layouts. Only the user's own examples in the project (an attached picture counts), never a downloaded one. size: [width, height] in cells (2 m in 3D, 2 tiles top-down, 1 tile side-on). seed: another seed grows another level; the same seed grows the same one. Joinery checks the spawn reaches every goal (dropping tries that don't), stages design/blockouts/<name>.toml (its [grown] table records the sample's hash and the seed) and the scene, walks it in Godot like blockout, and returns facts for submit_for_review; the review shows the grown plan beside the sample. mode: default the sample's or the project's. To change a grown level, edit its layout and call blockout."""
+        data = await rpc(
+            socket,
+            "grow_level",
+            {
+                "sample": sample,
+                "size": size,
+                "seed": seed,
+                "name": name,
+                "mode": mode,
+                "scene": scene,
+                "blueprint": blueprint,
+            },
+        )
+        result = CallToolResult(
+            content=[TextContent(type="text", text=json.dumps(data))]
+        )
+        picture = str(data.get("picture", "") or "")
+        if picture:
+            try:
+                media, encoded = chat_attachments.encoded(Path(picture))
+            except (OSError, ValueError):
+                return result
+            result.content.append(
+                ImageContent(type="image", data=encoded, mime_type=media)
+            )
+        return result
+
+    @server.tool()
+    @tool_errors
     async def make_variant(
         base: Annotated[str, Field(min_length=1, max_length=300)],
         path: Annotated[str, Field(max_length=300)] = "",

@@ -44,6 +44,7 @@ COMPACTED = frozenset(
         "delegate",
         "reproduce",
         "blockout",
+        "grow_level",
         "playtest",
         "access_check",
         "perf_check",
@@ -519,6 +520,12 @@ class GatewayRPC:
                         "Specialists cannot build blockouts; the main thread does."
                     )
                 data = await blockout_stage.tool(self.gateway, params)
+            elif method == "grow_level":
+                if self.inspection_only:
+                    raise ValueError(
+                        "Specialists cannot grow levels; the main thread does."
+                    )
+                data = await blockout_stage.grow_tool(self.gateway, params)
             elif method == "make_variant":
                 if self.inspection_only:
                     raise ValueError(
@@ -545,7 +552,7 @@ class GatewayRPC:
                 data = self.task_status(str(params.get("id", "")))
             else:
                 raise ValueError(
-                    "The model interface supports inventory, schema, call, submit, propose_todo, blockout, make_variant, playtest, the checks, sound_audit and the running game's inspect_game and drive_game; no approval methods."
+                    "The model interface supports inventory, schema, call, submit, propose_todo, blockout, grow_level, make_variant, playtest, the checks, sound_audit and the running game's inspect_game and drive_game; no approval methods."
                 )
             project = getattr(self.gateway, "project", None)
             if method in COMPACTED and isinstance(project, Path):

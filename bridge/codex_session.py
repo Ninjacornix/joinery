@@ -69,6 +69,7 @@ APPROVED_TOOLS = (
     "task_status",
     "playtest",
     "blockout",
+    "grow_level",
     "make_variant",
     "access_check",
     "perf_check",

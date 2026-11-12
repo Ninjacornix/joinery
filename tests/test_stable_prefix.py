@@ -53,6 +53,7 @@ WRITERS = {
     "start_task",
     "start_variants",
     "blockout",
+    "grow_level",
     "inspect_in_parallel",
 }
 
