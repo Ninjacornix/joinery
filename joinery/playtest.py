@@ -51,6 +51,8 @@ FREEZE_SECONDS = 45.0
 SHOTS_LIMIT = 8
 #: Words dropped from a place to reach: node names don't carry them.
 _ARTICLES = frozenset({"the", "a", "an"})
+#: The replay ``--record`` keeps in the run's folder.
+REPLAY_NAME = "play.replay"
 
 Progress = Callable[[float, float], None]
 
@@ -76,6 +78,8 @@ class Options:
     luma: bool = False
     #: Places to reach first: words naming nodes ("key room" finds KeyRoom).
     reach: list[str] = field(default_factory=list)
+    #: Have the game core record the run as a replay (``<out>/play.replay``, ADR 0059).
+    record: bool = False
 
     def public(self) -> dict[str, Any]:
         data = asdict(self)
@@ -182,7 +186,11 @@ def _bot_args(
         f"--softlock={options.softlock:g}",
         f"--settings-path={out / 'settings.cfg'}",
         f"--saves-dir={out / 'saves'}",
+        # The game core seeds the game's own random numbers from it (ADR 0059).
+        f"--joinery-seed={options.seed}",
     ]
+    if options.record and not shots:
+        args.append(f"--joinery-record={out / REPLAY_NAME}")
     if options.scene:
         args.append(f"--scene={options.scene}")
     words = [
@@ -338,6 +346,8 @@ def run(
     report["out"] = str(out)
     if report.get("coverage") and (out / "coverage.png").is_file():
         report["coverage"]["map"] = str(out / "coverage.png")
+    if options.record and (out / REPLAY_NAME).is_file():
+        report["replay"] = str(out / REPLAY_NAME)
     if options.screenshots and bot is not None and not (stop and stop.is_set()):
         _screenshots(report, options, out, project)
     (out / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
@@ -528,6 +538,11 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         default=[],
         help="a place to head for first (a node's name); repeat for more",
     )
+    parser.add_argument(
+        "--record",
+        action="store_true",
+        help="record the run as a replay (joinery replay add keeps it as a test)",
+    )
     parser.add_argument("--json", action="store_true")
 
 
@@ -552,6 +567,7 @@ def main(args: argparse.Namespace) -> int:
         screenshots=bool(args.screenshots),
         route=args.route,
         reach=[str(r) for r in args.reach],
+        record=bool(getattr(args, "record", False)),
     )
 
     def show(t: float, total: float) -> None:
@@ -588,4 +604,8 @@ def main(args: argparse.Namespace) -> int:
     for place in report.get("reach", []):
         print(f"- {place['target']}: {reach_line(place)}")
     print(f"Report: {report['out']}/report.json")
+    if report.get("replay"):
+        print(
+            f"Replay: {report['replay']} (keep it as a test: joinery replay add <file>)"
+        )
     return 0

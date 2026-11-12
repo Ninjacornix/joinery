@@ -27,7 +27,7 @@ const GOAL_GROUPS: Array[StringName] = [
 ]
 ## Buttons the bot never clicks: they leave the game instead of playing it.
 const SKIP_WORDS: Array[String] = [
-	"quit", "exit", "main menu", "menu", "leave", "disconnect", "delete", "settings"
+	"quit", "exit", "main menu", "menu", "leave", "disconnect", "delete", "settings", "report"
 ]
 const MOVES_3D: Array[StringName] = [&"move_forward", &"move_back", &"move_left", &"move_right"]
 const MOVES_2D: Array[StringName] = [&"move_up", &"move_down", &"move_left", &"move_right"]
@@ -79,7 +79,7 @@ func _init(scene_tree: SceneTree, generator: RandomNumberGenerator) -> void:
 	rng = generator
 	for action: StringName in InputMap.get_actions():
 		var name := String(action)
-		if name.begins_with("ui_") or name == "pause" or name in ["restart", "quit"]:
+		if name.begins_with("ui_") or name in ["pause", "report_bug", "restart", "quit"]:
 			continue
 		if action in MOVES_3D or action in MOVES_2D or action in EXTRAS or action in LOOKS:
 			continue
@@ -443,7 +443,11 @@ func _random_presses(frame: int) -> void:
 	var pool: Array[StringName] = []
 	for action: StringName in InputMap.get_actions():
 		var name := String(action)
-		if name == "pause" or name.begins_with("ui_text") or name.begins_with("ui_graph"):
+		if (
+			name in ["pause", "report_bug"]
+			or name.begins_with("ui_text")
+			or name.begins_with("ui_graph")
+		):
 			continue
 		if name.begins_with("ui_") and not name in ["ui_left", "ui_right", "ui_up", "ui_down"]:
 			continue

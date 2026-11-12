@@ -302,12 +302,12 @@ func _handle_menus() -> void:
 	if open and frame - _menu_since == fps:
 		var which := str(menus.call(&"current_menu"))
 		if which == "main" and game != null:
-			game.call(&"start_game", game.get(&"options"))
+			_act(game, &"start_game", [game.get(&"options")])
 		else:
-			menus.call(&"close_all")
+			_act(menus, &"close_all")
 	if _level_over >= 0 and frame - _level_over == fps * 4 and game != null:
 		checks["continue_after_level"] = "restart"
-		game.call(&"restart_level")
+		_act(game, &"restart_level")
 		_level_over = -1
 
 
@@ -315,10 +315,10 @@ func _handle_menus() -> void:
 func _recover() -> void:
 	drive.call(&"release_all")
 	if menus != null and bool(menus.call(&"is_open")):
-		menus.call(&"close_all")
+		_act(menus, &"close_all")
 	paused = false
 	if game != null:
-		game.call(&"restart_level")
+		_act(game, &"restart_level")
 	elif current_scene != null:
 		reload_current_scene()
 	watch.call(&"recovered", frame)
@@ -371,14 +371,14 @@ func _check_save_load() -> void:
 	drive.call(&"release_all")
 	await _wait(2)
 	var before: Dictionary = game.call(&"capture_state")
-	var saved := int(save_game.call(&"save_slot", SAVE_SLOT))
+	var saved := int(_act(save_game, &"save_slot", [SAVE_SLOT]))
 	if saved != OK:
 		_save_problem("Saving failed: %s." % error_string(saved))
 		return
 	await _wait(fps * 2, true)
 	drive.call(&"release_all")
 	var started := int(goals["levels_started"])
-	var loaded := int(save_game.call(&"load_slot", SAVE_SLOT))
+	var loaded := int(_act(save_game, &"load_slot", [SAVE_SLOT]))
 	if loaded != OK:
 		_save_problem("Loading a fresh save failed: %s." % error_string(loaded))
 		return
@@ -408,13 +408,13 @@ func _check_save_after_end() -> void:
 	if save_game == null or not save_game.has_method(&"save_slot"):
 		return
 	drive.call(&"release_all")
-	var saved := int(save_game.call(&"save_slot", SAVE_SLOT))
+	var saved := int(_act(save_game, &"save_slot", [SAVE_SLOT]))
 	if saved != OK:
 		checks["save_after_end"] = "ok: refused"
 		return
 	var started := int(goals["levels_started"])
 	var ends := _ends()
-	var loaded := int(save_game.call(&"load_slot", SAVE_SLOT))
+	var loaded := int(_act(save_game, &"load_slot", [SAVE_SLOT]))
 	if loaded != OK:
 		_save_after_end_problem(
 			"A save made after the level ended doesn't load: %s." % error_string(loaded)
@@ -584,6 +584,16 @@ func _clipped(control: Control, text: String) -> bool:
 	)
 	var width := font.get_string_size(shown, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
 	return width > control.size.x + 1.0
+
+
+## Calls [param method] on a core autoload. Through the game core's Replays where the
+## game has it, so a recording of this run (`joinery playtest --record`) makes the same
+## call when it is replayed.
+func _act(target: Node, method: StringName, args: Array = []) -> Variant:
+	var replays := root.get_node_or_null(^"Replays")
+	if replays != null and replays.has_method(&"perform"):
+		return replays.call(&"perform", target, method, args)
+	return target.callv(method, args)
 
 
 ## Lets [param count] frames pass, watching (and playing, with [param play]).
