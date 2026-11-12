@@ -541,6 +541,9 @@ def refresh_recent(project: Path, now: float | None = None) -> dict[str, Any]:
         project,
         "log",
         "--no-merges",
+        # Never a parent before its children: commits made in the same second keep
+        # their order, so the newest change to a file is the one seen first.
+        "--date-order",
         "-z",
         "--name-only",
         f"--since={since}",
