@@ -19,6 +19,10 @@ const TIMED_FRAMES := 31
 const HOT_SCRIPTS := 16
 const CENSUS_LIMIT := 40
 const UI_LIMIT := 160
+## The pseudolocalised pass: text 30 % longer, wrapped in right-to-left marks, as a
+## translation into German or Arabic would stretch and turn it.
+const EXPANSION := 0.3
+const PROBLEMS_PER_SCREEN := 24
 
 var tree: SceneTree
 var kind: String = ""
@@ -30,6 +34,9 @@ var census: Dictionary = {}
 var hot: Array[Dictionary] = []
 var hud: Array[Dictionary] = []
 var pages: Array[Dictionary] = []
+## access: the pseudolocalised pass ({ran, expansion, fake_bidi, screens: [{page, checked,
+## shot, problems: [{node, scene, type, text, shown, problem, rect}]}]}).
+var long_text: Dictionary = {}
 var _boot_usec: int = 0
 var _hud_at: int = -1
 ## Rendered frames so far: each is 1/60 s of game time under --fixed-fps 60.
@@ -85,6 +92,7 @@ func finish() -> void:
 		if hud.is_empty():
 			hud = _controls(tree.root, "hud")
 		await _menus()
+		await _long_text()
 
 
 func result() -> Dictionary:
@@ -96,6 +104,7 @@ func result() -> Dictionary:
 		"hot": hot,
 		"hud": hud,
 		"pages": pages,
+		"long_text": long_text,
 		"luma": luma_trace,
 		"headless": DisplayServer.get_name() == "headless",
 		"viewport":
@@ -390,6 +399,183 @@ func _page(id: String, label: String, menus: Node) -> Dictionary:
 		"label": label,
 		"controls": _controls(top, id) if top != null else [],
 	}
+
+
+## Every screen again with the pseudo-locale on: text 30 % longer and in right-to-left marks.
+## What runs off the screen, is cut off or hides past its box is listed with its node; in a
+## window each screen is saved with those boxes outlined.
+func _long_text() -> void:
+	var domain := TranslationServer.get_or_add_domain(&"")
+	var before := [
+		domain.pseudolocalization_enabled,
+		domain.pseudolocalization_expansion_ratio,
+		domain.pseudolocalization_fake_bidi_enabled,
+	]
+	domain.pseudolocalization_expansion_ratio = EXPANSION
+	domain.pseudolocalization_fake_bidi_enabled = true
+	domain.pseudolocalization_enabled = true
+	var screens: Array[Dictionary] = []
+	var menus := tree.root.get_node_or_null(^"Menus")
+	if menus != null:
+		menus.call(&"close_all")
+	if tree.current_scene != null:
+		screens.append(await _scan(tree.current_scene, "hud"))
+	if menus != null and menus.has_method(&"settings_pages"):
+		var game := tree.root.get_node_or_null(^"Game")
+		if game != null and game.call(&"current_level") != null:
+			menus.call(&"open_pause")
+			screens.append(await _scan_menu(menus, "pause"))
+		menus.call(&"close_all")
+		menus.call(&"open_settings")
+		screens.append(await _scan_menu(menus, "settings"))
+		for page: Dictionary in menus.call(&"settings_pages"):
+			menus.call(&"close_all")
+			menus.call(&"open_settings")
+			menus.call(&"_open_settings_page", page["id"])
+			screens.append(await _scan_menu(menus, str(page["id"])))
+		menus.call(&"close_all")
+		menus.call(&"open_main")
+		screens.append(await _scan_menu(menus, "main"))
+		menus.call(&"close_all")
+	domain.pseudolocalization_enabled = before[0]
+	domain.pseudolocalization_expansion_ratio = before[1]
+	domain.pseudolocalization_fake_bidi_enabled = before[2]
+	tree.root.propagate_notification(Node.NOTIFICATION_TRANSLATION_CHANGED)
+	long_text = {"ran": true, "expansion": EXPANSION, "fake_bidi": true, "screens": screens}
+
+
+func _scan_menu(menus: Node, page: String) -> Dictionary:
+	var top: Control = menus.call(&"current_page")
+	return await _scan(top, page)
+
+
+func _scan(root_node: Node, page: String) -> Dictionary:
+	tree.root.propagate_notification(Node.NOTIFICATION_TRANSLATION_CHANGED)
+	# Containers lay the longer text out over a couple of frames.
+	for _i: int in 4:
+		await tree.process_frame
+	var checked: Array[int] = [0]
+	var problems: Array[Dictionary] = []
+	if root_node != null:
+		_overflows(root_node, page, checked, problems)
+	var shot := ""
+	if DisplayServer.get_name() != "headless" and root_node != null:
+		shot = _outlined(page, problems)
+	return {"page": page, "checked": checked[0], "problems": problems, "shot": shot}
+
+
+func _overflows(node: Node, page: String, checked: Array[int], problems: Array[Dictionary]) -> void:
+	if node is CanvasItem and not (node as CanvasItem).is_visible_in_tree():
+		return
+	if node is Label or node is Button:
+		var control := node as Control
+		var text := str(control.get(&"text"))
+		if not text.strip_edges().is_empty():
+			checked[0] += 1
+			var problem := _overflow(control, text)
+			if not problem.is_empty() and problems.size() < PROBLEMS_PER_SCREEN:
+				var entry := _where(control)
+				var rect := control.get_global_rect()
+				(
+					entry
+					. merge(
+						{
+							"page": page,
+							"type": control.get_class(),
+							"text": text.left(60),
+							"shown": _shown(control, text).left(80),
+							"problem": problem,
+							"rect":
+							[
+								roundi(rect.position.x),
+								roundi(rect.position.y),
+								roundi(rect.size.x),
+								roundi(rect.size.y)
+							],
+							"autowrap": control is Label and (control as Label).autowrap_mode != 0,
+						}
+					)
+				)
+				problems.append(entry)
+	for child: Node in node.get_children():
+		_overflows(child, page, checked, problems)
+
+
+## "off_screen", "cut_off", "cut_below", "past_box" or "" when [param text] fits.
+func _overflow(control: Control, text: String) -> String:
+	var rect := control.get_global_rect()
+	if not control.get_viewport_rect().encloses(rect.grow(-1.0)):
+		return "off_screen"
+	if control is Label:
+		var label := control as Label
+		if label.autowrap_mode != TextServer.AUTOWRAP_OFF:
+			if label.get_line_count() > label.get_visible_line_count():
+				return "cut_below"
+		elif label.clip_text or label.text_overrun_behavior != TextServer.OVERRUN_NO_TRIMMING:
+			if _width(control, text) > control.size.x + 1.0:
+				return "cut_off"
+	elif control is Button:
+		var button := control as Button
+		if button.clip_text or button.text_overrun_behavior != TextServer.OVERRUN_NO_TRIMMING:
+			var box := button.get_theme_stylebox(&"normal")
+			var room := button.size.x - (box.get_margin(SIDE_LEFT) + box.get_margin(SIDE_RIGHT))
+			if button.icon != null:
+				room -= button.icon.get_width() + button.get_theme_constant(&"h_separation")
+			if _width(control, text) > room + 1.0:
+				return "cut_off"
+	# A clipping ancestor (a scroll area, a panel that clips) hides what runs past it.
+	var parent := control.get_parent()
+	while parent != null:
+		if parent is Control and (parent as Control).clip_contents:
+			if not (parent as Control).get_global_rect().grow(1.0).encloses(rect):
+				return "past_box"
+			break
+		parent = parent.get_parent()
+	return ""
+
+
+func _shown(control: Control, text: String) -> String:
+	if control.auto_translate_mode == Node.AUTO_TRANSLATE_MODE_DISABLED:
+		return text
+	return control.tr(text)
+
+
+func _width(control: Control, text: String) -> float:
+	var font := control.get_theme_font(&"font")
+	var size := control.get_theme_font_size(&"font_size")
+	return font.get_string_size(_shown(control, text), HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+
+
+## The screen as drawn, each problem outlined, saved beside the bot's report.
+func _outlined(page: String, problems: Array[Dictionary]) -> String:
+	var out := str(tree.get(&"out_dir"))
+	if out.is_empty():
+		return ""
+	var image := tree.root.get_texture().get_image()
+	if image == null or image.is_empty():
+		return ""
+	var scale := float(image.get_width()) / maxf(tree.root.get_visible_rect().size.x, 1.0)
+	var ink := Color(0.93, 0.18, 0.36)
+	for problem: Dictionary in problems:
+		var box: Array = problem["rect"]
+		var rect := Rect2i(
+			roundi(box[0] * scale),
+			roundi(box[1] * scale),
+			roundi(box[2] * scale),
+			roundi(box[3] * scale)
+		)
+		rect = rect.intersection(Rect2i(Vector2i.ZERO, image.get_size()))
+		if rect.size.x <= 0 or rect.size.y <= 0:
+			continue
+		for edge: Rect2i in [
+			Rect2i(rect.position.x, rect.position.y, rect.size.x, 2),
+			Rect2i(rect.position.x, rect.end.y - 2, rect.size.x, 2),
+			Rect2i(rect.position.x, rect.position.y, 2, rect.size.y),
+			Rect2i(rect.end.x - 2, rect.position.y, 2, rect.size.y),
+		]:
+			image.fill_rect(edge, ink)
+	var path := out.path_join("long_text_%s.png" % page.validate_filename())
+	return path if image.save_png(path) == OK else ""
 
 
 func _controls(root_node: Node, where: String) -> Array[Dictionary]:

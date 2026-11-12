@@ -128,13 +128,22 @@ def test_access_finds_the_planted_problems(tmp_path: Path) -> None:
     assert found["pause"][0].measured == "no pause action"
     assert found["remap"] and found["controller"] and found["voice_subtitles"]
     assert found["colour_only"][0].path == "main.gd"
+    # "Continue" fits its 80 px label in English, not 30% longer and right-to-left.
+    (hint,) = [f for f in found["long_text"] if f.evidence["node"] == "Hint"]
+    assert hint.measured == "cut_off" and hint.evidence["page"] == "hud"
+    assert hint.fix is not None and hint.fix.kind == "typed"
     if WINDOW:
         flash = found["photosensitivity"][0]
         assert flash.measured.endswith("flashes/s")
         assert float(flash.measured.split()[0]) >= 7.0
+        shot = Path(hint.evidence["shot"])
+        assert shot.is_file() and shot.name == "long_text_hud.png"
     # The typed fixes, applied as accepted changes would be, pass when measured again.
     tasks = checks_core.plan(
-        project, report, areas=["contrast", "text", "menus"], labels=access.AREAS
+        project,
+        report,
+        areas=["contrast", "text", "menus", "translation"],
+        labels=access.AREAS,
     )
     for task in [t for t in tasks if t.kind == "scripted"]:
         for step in task.steps:
@@ -142,6 +151,7 @@ def test_access_finds_the_planted_problems(tmp_path: Path) -> None:
     again = _by_check(access.audit(project, window=False))
     assert "contrast" not in again and "text_size" not in again
     assert "accessible_name" not in again
+    assert not [f for f in again.get("long_text", []) if f.evidence["node"] == "Hint"]
 
 
 @needs_godot

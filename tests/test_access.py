@@ -295,3 +295,83 @@ def test_fast_flashing_is_a_photosensitivity_finding(game: Path) -> None:
     assert flash.measured == "7.5 flashes/s" and flash.severity == "high"
     assert flash.evidence["seed"] == 9
     assert found["motion:flash_setting"].path == "main.gd"
+
+
+def _long(
+    *problems: dict[str, Any], checked: int = 5, page: str = "hud"
+) -> dict[str, Any]:
+    return {
+        "long_text": {
+            "ran": True,
+            "expansion": 0.3,
+            "fake_bidi": True,
+            "screens": [{"page": page, "checked": checked, "problems": list(problems)}],
+        }
+    }
+
+
+def _problem(**over: Any) -> dict[str, Any]:
+    problem: dict[str, Any] = {
+        "page": "hud",
+        "scene": "res://main.tscn",
+        "node": "Box/Row/Dim",
+        "name": "Dim",
+        "type": "Label",
+        "text": "Score: 12",
+        "shown": "[Šççöŕé: 12 ẋẋ]",
+        "problem": "cut_off",
+        "rect": [10, 10, 40, 20],
+        "autowrap": False,
+    }
+    problem.update(over)
+    return problem
+
+
+def test_longer_text_cut_off_on_one_line_wraps_in_its_scene(game: Path) -> None:
+    state = access._State(game)
+    drawn = {
+        "long_text": {"screens": [{"page": "hud", "shot": "/runs/w/long_text_hud.png"}]}
+    }
+    access.long_text(state, _long(_problem()), seed=4, drawn=drawn)
+    finding = _found(state)["translation:long_text"]
+    assert finding.severity == "medium" and finding.path == "main.tscn"
+    assert "30% longer" in finding.message and "Box/Row/Dim" in finding.message
+    assert finding.evidence["node"] == "Box/Row/Dim"
+    assert finding.evidence["shot"] == "/runs/w/long_text_hud.png"
+    assert finding.evidence["rect"] == [10, 10, 40, 20]
+    fix = finding.fix
+    assert fix is not None and fix.kind == "typed" and fix.source == "main.tscn"
+    assert fix.arguments["edits"] == [
+        {
+            "node": ["Dim", "Box/Row"],
+            "props": {"autowrap_mode": 3, "text_overrun_behavior": 0},
+        }
+    ]
+    # Four of the five texts on the screen fit: the area scores 80%.
+    (score,) = [a for a in state.tally.scores() if a.id == "translation"]
+    assert (score.checked, score.failing, score.score) == (5, 1, 80)
+
+
+def test_text_off_the_screen_or_in_code_is_an_agents_change(game: Path) -> None:
+    state = access._State(game)
+    access.long_text(
+        state,
+        _long(
+            _problem(problem="off_screen", type="Button", node="Menu/Quit"),
+            _problem(problem="cut_off", scene="", node="/root/Menus/x/Title"),
+            page="settings",
+        ),
+        seed=4,
+    )
+    (off, code) = state.tally.findings
+    assert off.severity == "high" and "runs off the screen" in off.message
+    assert off.fix is not None and off.fix.kind == "agent"
+    assert off.fix.targets == ["main.tscn"] and "settings screen" in off.fix.request
+    assert code.fix is not None and code.fix.kind == "agent" and code.fix.targets == []
+    assert "shot" not in off.evidence
+
+
+def test_no_pseudo_pass_means_no_translation_area(game: Path) -> None:
+    state = access._State(game)
+    access.long_text(state, _probe(), seed=1)
+    assert not [a for a in state.tally.scores() if a.id == "translation"]

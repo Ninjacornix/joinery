@@ -12,6 +12,14 @@ anchor_right = 1.0
 anchor_bottom = 1.0
 script = ExtResource("1_main")
 
+[node name="Hint" type="Label" parent="."]
+offset_left = 40.0
+offset_top = 200.0
+offset_right = 120.0
+offset_bottom = 230.0
+text = "Continue"
+text_overrun_behavior = 3
+
 [node name="Light" type="ColorRect" parent="."]
 offset_left = 40.0
 offset_top = 40.0

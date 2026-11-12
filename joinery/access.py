@@ -42,7 +42,15 @@ from joinery.bible_rules import (
     hex_rgb,
     load_rules,
 )
-from joinery.checks_core import CheckFix, Report, Tally, config, res, text_fix
+from joinery.checks_core import (
+    CheckFix,
+    Report,
+    Severity,
+    Tally,
+    config,
+    res,
+    text_fix,
+)
 from joinery.godot_config import GodotConfig, action_events
 from joinery.perf_static import all_files
 
@@ -56,7 +64,17 @@ AREAS: dict[str, str] = {
     "pause": "Pause",
     "assists": "Assists",
     "menus": "Screen readers",
+    "translation": "Translations",
 }
+#: Words for each way longer text fails (the probe's ``problem``) and how bad it is.
+LONG_TEXT: dict[str, tuple[str, Severity]] = {
+    "off_screen": ("runs off the screen", "high"),
+    "cut_off": ("is cut off", "medium"),
+    "cut_below": ("loses its last lines", "medium"),
+    "past_box": ("runs past its box and is hidden", "medium"),
+}
+#: Label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART.
+AUTOWRAP_WORD_SMART = 3
 FEATURE = "accessibility"
 #: Settings the Accessibility feature adds, by the control name its page gives them.
 OPTIONS = {
@@ -843,6 +861,105 @@ def menus(state: _State, probe: dict[str, Any]) -> None:
         )
 
 
+def long_text(
+    state: _State, probe: dict[str, Any], seed: int, drawn: dict[str, Any] | None = None
+) -> None:
+    """Text 30 % longer and in right-to-left marks (Godot's pseudo-locale): what is cut
+    off or runs off the screen, by node, with the windowed run's outlined screenshot."""
+    found = probe.get("long_text") or {}
+    if not found.get("ran"):
+        return
+    shots = {
+        str(s.get("page", "")): str(s.get("shot", ""))
+        for s in ((drawn or {}).get("long_text") or {}).get("screens", [])
+        if isinstance(s, dict) and s.get("shot")
+    }
+    expansion = float(found.get("expansion", 0.3) or 0.3)
+    for screen in found.get("screens", []):
+        if not isinstance(screen, dict):
+            continue
+        page = str(screen.get("page", ""))
+        problems = [p for p in screen.get("problems", []) if isinstance(p, dict)]
+        failing = {str(p.get("node", "")) for p in problems}
+        for index in range(int(screen.get("checked", 0) or 0) - len(failing)):
+            state.tally.check("translation", f"{page}:fits:{index}", True)
+        for problem in problems:
+            node = str(problem.get("node", ""))
+            key = f"{page}:{node}"
+            words, severity = LONG_TEXT.get(
+                str(problem.get("problem", "")), ("doesn't fit", "medium")
+            )
+            text = str(problem.get("text", ""))
+            where = {**_where(problem, seed), "rect": problem.get("rect", [])}
+            if shots.get(page):
+                where["shot"] = shots[page]
+            path = res(str(problem.get("scene", ""))) or "project.godot"
+            state.tally.add(
+                "translation",
+                path,
+                "long_text",
+                severity,
+                str(problem.get("problem", "")),
+                "fits 30% longer text",
+                f'"{text[:30]}" {words} when text is {expansion:.0%} longer and '
+                f"right-to-left ({problem.get('type', 'Label')} {node} on the {page} "
+                "screen).",
+                subject=key,
+                fix=_long_text_fix(state, problem, page, words),
+                evidence=where,
+                item=key,
+            )
+
+
+def _long_text_fix(
+    state: _State, problem: dict[str, Any], page: str, words: str
+) -> CheckFix:
+    """A label cut off on one line wraps instead; anything else is an agent's change."""
+    target = (
+        _scene_edit(
+            {
+                "kind": "scene",
+                "file": problem.get("scene"),
+                "node": problem.get("node"),
+            },
+            problem,
+        )
+        if problem.get("scene")
+        else None
+    )
+    if (
+        target is not None
+        and problem.get("type") == "Label"
+        and problem.get("problem") == "cut_off"
+        and not problem.get("autowrap")
+    ):
+        return text_fix(
+            state.project,
+            target[0],
+            [
+                {
+                    "node": target[1],
+                    "props": {
+                        "autowrap_mode": AUTOWRAP_WORD_SMART,
+                        "text_overrun_behavior": 0,
+                    },
+                }
+            ],
+            "Let cut-off labels wrap in Godot",
+        )
+    scene = res(str(problem.get("scene", "")))
+    return CheckFix(
+        kind="agent",
+        label="Make room for longer text",
+        request=f"The {problem.get('type', 'Label')} {problem.get('node')} "
+        f'("{str(problem.get("text", ""))[:30]}") on the {page} screen {words} when '
+        "the text is 30% longer and right-to-left, as translations make it. Give it "
+        "room: let it wrap, let its container grow or scroll, or shorten the layout's "
+        "fixed sizes; keep it reading well in English too.",
+        targets=[scene] if scene else [],
+    )
+
+
 def audit(
     project: Path, *, window: bool = True, seconds: float = check_runs.HEADLESS_SECONDS
 ) -> Report:
@@ -875,6 +992,7 @@ def audit(
     if not run.error:
         pause(state, run.report)
         menus(state, probe)
+        long_text(state, probe, run.seed, drawn.probe)
     report = state.tally.report("access", project, errors)
     report.facts = {
         "target_height": state.target_height,
