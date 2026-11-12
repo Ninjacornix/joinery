@@ -231,6 +231,33 @@ def test_game_setup_without_the_catalogue(project: Path, no_optional: None) -> N
     assert "user action" in data["feature_action"]
 
 
+def test_game_setup_points_at_each_added_features_guide(project: Path) -> None:
+    assert "feature_guides" not in call(project, "game_setup")
+    guide = project / "features/save-load/GUIDE.md"
+    guide.parent.mkdir(parents=True)
+    guide.write_text("# Save and load\n\nSlots and autosave.\nCall SaveGame.save().\n\n## More\n")
+    data = call(project, "game_setup")
+    assert data["feature_guides"]["features"] == {
+        "save-load": {
+            "path": "res://features/save-load/GUIDE.md",
+            "summary": "Slots and autosave. Call SaveGame.save().",
+        }
+    }
+    assert "Read a guide" in data["feature_guides"]["note"]
+
+
+def test_every_shipped_guide_reaches_the_agent() -> None:
+    features = Path(registry.__file__).resolve().parents[2] / "features"
+    found: set[str] = set()
+    for folder in features.iterdir():
+        guide = folder / "overlay" / registry.FEATURE_GUIDE.format(id=folder.name)
+        if guide.is_file():
+            found.add(folder.name)
+    stray = {p.parent.name for p in features.glob("*/overlay/features/*/GUIDE.md")} - found
+    assert {"behaviour", "camera", "dialogue"} <= found
+    assert stray == set(), "a guide the agent would not be pointed at"
+
+
 def test_game_setup_lists_only_what_can_still_be_added(
     project: Path, fake_blueprints: types.ModuleType
 ) -> None:

@@ -87,7 +87,10 @@ const TROUBLESHOOTING: Array[String] = [
 ]
 ## Feature names as the new-project questionnaire shows them.
 const FEATURE_NAMES := {
+	"behaviour": "Enemy behaviour",
+	"camera": "Camera rig",
 	"controller": "Controller support",
+	"dialogue": "Dialogue",
 	"online-play": "Online play",
 	"save-load": "Save and load",
 	"steam": "Steam",

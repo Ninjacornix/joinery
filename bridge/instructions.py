@@ -102,7 +102,8 @@ KIT_GUIDE = (
 #: through its extension points, and only ever suggest a feature.
 GAME_GUIDE = (
     "Read game_brief and game_setup with art_direction; extend the game through "
-    "game_setup.extension_points; suggest /feature add, never apply it. "
+    "game_setup.extension_points and each added feature's guide (game_setup.feature_guides); "
+    "suggest /feature add, never apply it. "
     "At the start of a session read game_brief, game_setup and art_direction once. "
     "When their suggestions fit what the user is doing, offer one at a time, in one "
     "short line, and never act on a suggestion the user has not asked for. "

@@ -1,7 +1,8 @@
 # Features
 
 Optional capabilities added to a project made from a blueprint: online play,
-Steam, controller support, saving, translations. `joinery/blueprints.py` adds
+Steam, controller support, saving, translations, accessibility, VR, dialogue,
+enemy behaviour trees, camera rigs. `joinery/blueprints.py` adds
 and removes them; `docs/adr/0024-blueprints-and-features.md` explains the
 design. Adding or removing a feature is a user action with a before/after
 review; Journeyman may suggest one, never apply it.
@@ -11,6 +12,7 @@ features/<id>/
   feature.toml
   overlay/                       -> project root
     features/<id>/…              res://features/<id>/
+    features/<id>/GUIDE.md       optional: how game code uses it (read by the agent)
     tests/features/<id>/…        res://tests/features/<id>/
   adapters/<blueprint-id>/overlay/…   optional, applied only with that blueprint
   export_presets/*.cfg           optional [preset.0] fragments, renumbered on apply
@@ -59,6 +61,10 @@ pad_buttons = [0]
   subset.
 - A base `[append]` and an adapter's `[adapters.<id>.append]` may add to the
   same key; the manifest keeps the union, so removal takes back both.
+- A feature that game code calls into ships `overlay/features/<id>/GUIDE.md`:
+  its API and the formats it reads, with examples. It lands in the game, so any
+  agent working there can read it; the registry's `game_setup` points the agent
+  at the guides of the features the game has (ADR 0065).
 - Removal must leave the project as it was: keep everything a feature changes
   declared in `feature.toml` or shipped in its overlay, so the manifest can
   undo it.

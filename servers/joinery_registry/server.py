@@ -56,6 +56,12 @@ EXTENSION_POINTS: dict[str, Any] = {
     "strings": "Every user-visible string goes through tr() or a Control's auto-translate; never build sentences by concatenation.",
     "visuals": "Until the art bible is approved and assets are made with the tools, the game stays greybox: primitive meshes, CSG, Polygon2D, ColorRect, StyleBoxFlat.",
 }
+#: A feature that ships a guide for the agent puts it here, inside the game.
+FEATURE_GUIDE = "features/{id}/GUIDE.md"
+FEATURE_GUIDES_NOTE = (
+    "Each added feature's guide, in the game: how to use it from game code and "
+    "the formats it reads. Read a guide in full before using its feature."
+)
 FEATURE_ACTION = (
     "Adding or removing a feature is a user action (/feature add <id>, /feature "
     "remove <id>, or the CLI), reviewed as a before/after. Suggest it in one line "
@@ -71,6 +77,21 @@ def _optional(name: str) -> ModuleType | None:
         if exc.name == name:
             return None
         raise
+
+
+def feature_guides(project: Path, game: Mapping[str, Any] | None) -> dict[str, Any]:
+    """The guide of each added feature that ships one: its res:// path and first lines."""
+    guides: dict[str, Any] = {}
+    for feature_id in (game or {}).get("features", []) or []:
+        rel = FEATURE_GUIDE.format(id=feature_id)
+        path = project / rel
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="replace")
+        paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+        intro = next((p for p in paragraphs if not p.startswith("#")), "")
+        guides[str(feature_id)] = {"path": f"res://{rel}", "summary": " ".join(intro.split())}
+    return guides
 
 
 def _toml_game(project: Path) -> dict[str, Any] | None:
@@ -289,7 +310,7 @@ def make_server(project: Path) -> MCPServer[Any]:
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
     async def game_setup() -> dict[str, Any]:
-        """Read how the game is put together: its starting point and features, what features can still be added (and what cannot, and why), and the extension points to build on instead of editing core files. Features are added by the user, never by the model."""
+        """Read how the game is put together: its starting point and features, each added feature's guide (feature_guides: read one before using its feature), what features can still be added (and what cannot, and why), and the extension points to build on instead of editing core files. Features are added by the user, never by the model."""
         game = project_game(project)
         blueprints = _optional("joinery.blueprints")
         result: dict[str, Any] = {
@@ -298,6 +319,9 @@ def make_server(project: Path) -> MCPServer[Any]:
             "extension_points": EXTENSION_POINTS,
             "feature_action": FEATURE_ACTION,
         }
+        guides = feature_guides(project, game)
+        if guides:
+            result["feature_guides"] = {"note": FEATURE_GUIDES_NOTE, "features": guides}
         if blueprints is None:
             result["catalogue"] = (
                 "The starting-point catalogue is not part of this Joinery."

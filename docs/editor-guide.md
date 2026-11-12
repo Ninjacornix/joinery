@@ -962,8 +962,13 @@ The starting points: `blank`, `first-person-3d`, `third-person-3d`,
 `platformer-2d`, `top-down`, `puzzle-cards` and `vr-room` (a small greybox room
 to walk and teleport in, with things to pick up, a button and a goal: put the
 cube on the table). The features: `controller`, `save-load`, `online-play`,
-`steam`, `translations` and `vr`. VR works with the three 3D starting points
-and is refused for the others with a plain reason.
+`steam`, `translations`, `accessibility`, `vr`, `dialogue` (conversations in
+plain-text `.dlg` files), `behaviour` (enemy behaviour trees) and `camera`
+(follow, look-ahead, framing and shake rigs). VR works with the three 3D
+starting points and is refused for the others with a plain reason. Each of the
+last three ships a `GUIDE.md` in `features/<id>/` that Journeyman reads before
+using it; a changed `.dlg` file shows in the review as a conversation you can
+click through.
 
 Without `--features` the blueprint's suggested features are used;
 `--features ""` adds none. Every new project gets the Joinery addon with its MIT
