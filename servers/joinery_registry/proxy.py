@@ -24,6 +24,9 @@ class ReviewNoteArgument(BaseModel):
     severity: Literal["info", "warn", "block"]
     text: Annotated[str, Field(min_length=1, max_length=400)]
     file: str | None = None
+    rule: (
+        Literal["request", "art_bible", "brief", "broken", "work_lost", "other"] | None
+    ) = None
 
 
 class DesignEvidenceArgument(BaseModel):
@@ -119,6 +122,12 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
     ) -> dict[str, Any]:
         """Hand your finished change to Joinery. Joinery checks it (art bible rules, Godot import, missing res:// files, asset provenance, project tests). status 'in_review': the user now sees it; make no more changes this turn. 'failed' and not final: fix every problem listed and submit again (attempts_left). 'needs_user', or final: stop and tell the user plainly what failed. summary: one short line in the user's words naming what changed. facts: optional, up to 3 tiny plain phrases of what visibly changed, with numbers when known ('door 20% wider', 'wood darker')."""
         return await rpc(socket, "submit", {"summary": summary, "facts": facts or []})
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True))
+    @tool_errors
+    async def precheck() -> dict[str, Any]:
+        """Run the checks submit_for_review runs (protected files, missing res:// files, objects built from placeholder shapes, asset provenance, dependencies, art bible rules, Godot import, project tests) on your change as it is now, without submitting: no reviewer, no submit attempt used, nothing changed. status 'clean', 'problems', 'needs_user' (stop and tell the user), 'nothing_to_check' or 'error'. Each problem has items {rule, file, node, measured, expected, fix}: fix them, then submit. Call it once before submit_for_review when your change touched assets, scenes or code."""
+        return await rpc(socket, "precheck", {})
 
     @server.tool()
     @tool_errors
@@ -244,7 +253,7 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
     @server.tool()
     @tool_errors
     async def report_review(notes: list[ReviewNoteArgument]) -> dict[str, Any]:
-        """Reviewer agents only: report your review of the submitted change, once, then end your turn. notes: up to 12 findings, most important first, each {severity, text, file?}. severity 'block': the change is wrong and the author must fix it (breaks the request, the art bible, the game brief or the game); 'warn': worth the user's attention; 'info': a small remark. An empty list means nothing to note."""
+        """Reviewer agents only: report your review of the submitted change, once, then end your turn. notes: up to 12 findings, most important first, each {severity, text, file?, rule?}. severity 'block': the change is wrong and the author must fix it (breaks the request, the art bible, the game brief or the game); 'warn': worth the user's attention; 'info': a small remark. rule: what a block breaks: request, art_bible, brief, broken (the game), work_lost, or other. An empty list means nothing to note."""
         return await rpc(
             socket,
             "report_review",

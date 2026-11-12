@@ -337,6 +337,14 @@ class GatewayRPC:
                     raise ValueError("facts is a list of short phrases.")
                 submitted = await self.gateway.turn.submit(summary, "agent", facts)
                 data = submitted.as_tool_result()
+            elif method == "precheck":
+                if self.inspection_only:
+                    raise ValueError(
+                        "Specialists cannot precheck changes; the main thread does."
+                    )
+                if self.gateway.turn is None:
+                    raise ValueError("No user request is open.")
+                data = await self.gateway.turn.precheck()
             elif method == "delegate":
                 if self.inspection_only or self.delegate is None:
                     raise ValueError("Nested specialist delegation is unavailable.")

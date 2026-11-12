@@ -274,6 +274,7 @@ def _save_metrics(controller: TurnController, timing: TurnTiming, outcome: str) 
             metrics.RESPONSE_MODEL: timing.model,
             metrics.SUBMITS: controller.attempts + controller.review_rounds,
             metrics.SEND_BACKS: controller.review_rounds,
+            metrics.PRECHECKS: getattr(controller, "prechecks", 0),
         }
     )
     project = getattr(controller.gateway, "project", None)

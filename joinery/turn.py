@@ -17,9 +17,10 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
-from joinery import metrics
+from joinery import metrics, reasons
 from joinery.claims import LEAD_BUSY, live_refusal
 from joinery.peer_review import PeerReview, Reviewer, request_for
+from joinery.reasons import Reason
 from joinery.transactions import inventory
 
 if TYPE_CHECKING:
@@ -127,9 +128,20 @@ class Problem:
     paths: list[str] = field(default_factory=list)
     #: False when no fix in this turn can pass it (protected files, a live conflict).
     fixable: bool = True
+    #: The same failure as items of one shape (rule, file, node, measured,
+    #: expected, fix); empty means one generic item per path (``reasons()``).
+    items: list[Reason] = field(default_factory=list, compare=False)
+
+    def reasons(self) -> list[Reason]:
+        return self.items or reasons.generic(self.check, self.message, self.paths)
 
     def as_dict(self) -> dict[str, Any]:
-        return {"check": self.check, "message": self.message, "paths": self.paths}
+        return {
+            "check": self.check,
+            "message": self.message,
+            "paths": self.paths,
+            "items": [reason.as_dict() for reason in self.reasons()],
+        }
 
 
 @dataclass
@@ -179,6 +191,22 @@ NEXT_REVIEWER = (
     "Joinery's reviewer read your change and found the problems listed. Fix each one "
     "in the same change, then call submit_for_review again. If one is wrong, leave it "
     "and say why in one line; the user sees the reviewer's notes with the change."
+)
+NEXT_PRECHECK_CLEAN = (
+    "Joinery's checks pass on the change as it is now. Finish it if anything is "
+    "left, then call submit_for_review."
+)
+NEXT_PRECHECK_FIX = (
+    "Fix each item, then call submit_for_review (or precheck again first). This "
+    "precheck used no submit attempt."
+)
+NEXT_PRECHECK_ART = (
+    "This change needs the user's approval of the art direction first. Stop here "
+    "and tell the user (/art)."
+)
+NEXT_PRECHECK_ERROR = (
+    "Joinery could not run its checks; nothing in the change can fix that. Call "
+    "submit_for_review when the change is complete."
 )
 #: The checks a change passed before the reviewer reads it, in plain words.
 PASSED = (
@@ -258,6 +286,8 @@ class TurnController:
         self.usage_totals: metrics.Totals = (0, 0, 0)
         #: A change sent back to the agent, until it submits again: (since, by whom).
         self._sent_back: tuple[metrics.Clock, str] | None = None
+        #: Prechecks this turn (they are not submit attempts).
+        self.prechecks = 0
         gateway.turn = self
 
     # --- State -----------------------------------------------------------------------
@@ -290,6 +320,7 @@ class TurnController:
         self.review_rounds = 0
         self._peer = self._peer_print = None
         self._sent_back = None
+        self.prechecks = 0
         self.request = request
         self.requests = [*self.requests, request.strip()[:160]][-10:]
         if not self.review_open:
@@ -432,6 +463,25 @@ class TurnController:
             },
         )
 
+    def _record_findings(self, by: str, problems: list[Problem], final: bool) -> None:
+        """Which rules a failed submit (or a precheck) found, for ``joinery metrics
+        --rules``: rule ids only, never the messages."""
+        timing = getattr(self.gateway, "timing", None)
+        if timing is None or not problems:
+            return
+        now = metrics.Clock().wall
+        timing.trace.add(
+            metrics.FINDINGS,
+            "findings " + by,
+            now,
+            now,
+            {
+                metrics.FOUND_BY: by,
+                metrics.FINAL: final,
+                metrics.RULES: ",".join(reasons.rules_of(problems)),
+            },
+        )
+
     def _staged(self) -> bool:
         tx = self.gateway.transaction
         return tx is not None and tx.state == "staging" and bool(tx.diff())
@@ -479,11 +529,12 @@ class TurnController:
         except (OSError, ValueError):
             return None
 
-    def _live_shape_problems(self) -> list[Problem]:
+    def _live_shape_problems(self, *, consume: bool = True) -> list[Problem]:
         """Objects the live edits built from placeholder shapes (shared core).
 
         Said once: the shapes the author removes live can't be told apart by name,
-        so the next submit judges only shapes added after this one."""
+        so the next submit judges only shapes added after this one. A precheck
+        (``consume`` False) says them and leaves them for the submit."""
         from joinery.complex_models import check_live
 
         if not self.live_shapes:
@@ -491,7 +542,8 @@ class TurnController:
         found = check_live(self.gateway.project, self.live_shapes)
         if found is None:
             return []
-        self.live_shapes = []
+        if consume:
+            self.live_shapes = []
         return [found]
 
     async def _run_checks(self) -> Validation:
@@ -586,6 +638,7 @@ class TurnController:
                     "problems": [problem.as_dict() for problem in problems],
                 }
             )
+            self._record_findings("checks", problems, final)
             if final:
                 await self._drop("failed")
                 return self._result(
@@ -624,14 +677,21 @@ class TurnController:
             self._to(TurnState.WORKING)
             self._send_back("reviewer")
             self.gateway.progress("Fixing what the reviewer found…")
+            objections = [
+                Problem(
+                    "reviewer",
+                    note.text,
+                    [note.file] if note.file else [],
+                    items=[reasons.reviewer(note.text, note.file, note.rule)],
+                )
+                for note in blocks
+            ]
+            self._record_findings("reviewer", objections, False)
             return self._result(
                 "failed",
                 False,
                 changes=changes,
-                problems=[
-                    Problem("reviewer", note.text, [note.file] if note.file else [])
-                    for note in blocks
-                ],
+                problems=objections,
                 next=NEXT_REVIEWER,
             )
         try:
@@ -663,6 +723,79 @@ class TurnController:
             changes=changes,
             next=NEXT_REVIEW,
         )
+
+    async def precheck(self) -> dict[str, Any]:
+        """Run the submit's deterministic checks on the change as it is, read-only.
+
+        The same checks and the same findings a submit would return now, without
+        the reviewer, without a submit attempt and without a send-back: the turn
+        stays where it is and the stage is not dropped, whatever is found. Nothing
+        the agent made is changed (``ProjectGateway.precheck_checks``).
+        """
+        self.admit_mutation()
+        if not self._staged() and not self.live_edits:
+            return {
+                "status": "nothing_to_check",
+                "changes": [],
+                "problems": [],
+                "ran": [],
+                "skipped": [],
+                "notes": [],
+                "attempts_left": max(MAX_SUBMITS - self.attempts, 0),
+                "next": NEXT_NOTHING,
+            }
+        self.prechecks += 1
+        notes: list[str] = []
+        with self.gateway.span(
+            "precheck", "precheck", {metrics.ROUND: self.prechecks}
+        ) as attrs:
+            try:
+                async with self.gateway.call_lock:
+                    checked, notes = await self.gateway.precheck_checks(
+                        self.live_scenes
+                    )
+            except (OSError, RuntimeError, ValueError, TimeoutError) as error:
+                problem = Problem(
+                    "checks",
+                    f"Joinery could not run its checks: {error}",
+                    fixable=False,
+                )
+                attrs[metrics.OUTCOME] = "error"
+                return {
+                    "status": "error",
+                    "changes": [],
+                    "problems": [problem.as_dict()],
+                    "ran": [],
+                    "skipped": [],
+                    "notes": notes,
+                    "attempts_left": max(MAX_SUBMITS - self.attempts, 0),
+                    "next": NEXT_PRECHECK_ERROR,
+                }
+            changes = [
+                {"path": c["path"], "change": c["change"]} for c in checked.changes
+            ]
+            problems = checked.problems + self._live_shape_problems(consume=False)
+            if checked.gate is not None:
+                status, after = "needs_user", NEXT_PRECHECK_ART
+                problems = [
+                    Problem("art_gate", str(checked.gate["message"]), fixable=False)
+                ]
+            elif problems:
+                status, after = "problems", NEXT_PRECHECK_FIX
+            else:
+                status, after = "clean", NEXT_PRECHECK_CLEAN
+            attrs[metrics.OUTCOME] = status
+        self._record_findings("precheck", problems, False)
+        return {
+            "status": status,
+            "changes": changes,
+            "problems": [problem.as_dict() for problem in problems],
+            "ran": checked.ran,
+            "skipped": checked.skipped,
+            "notes": notes,
+            "attempts_left": max(MAX_SUBMITS - self.attempts, 0),
+            "next": after,
+        }
 
     async def _peer_review(
         self, summary: str, found: list[dict[str, str]], skipped: list[str]

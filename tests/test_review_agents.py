@@ -114,9 +114,15 @@ def test_a_block_goes_back_to_the_author_who_fixes_it_then_the_review_opens(
             assert outcome == "done"
             sent_back, opened = results
             assert sent_back["status"] == "failed" and not sent_back["final"]
-            assert sent_back["problems"] == [
-                {"check": "reviewer", "message": BLOCK.text, "paths": ["notes/lamp.md"]}
-            ]
+            (problem,) = sent_back["problems"]
+            assert {k: problem[k] for k in ("check", "message", "paths")} == {
+                "check": "reviewer",
+                "message": BLOCK.text,
+                "paths": ["notes/lamp.md"],
+            }
+            (item,) = problem["items"]
+            assert item["rule"] == "reviewer.other" and item["file"] == "notes/lamp.md"
+            assert item["measured"] == BLOCK.text and item["fix"]
             # A send-back costs no submit attempt.
             assert sent_back["attempts_left"] == 3
             assert "reviewer" in author.prompts[1].text.lower() or "did not pass" in (

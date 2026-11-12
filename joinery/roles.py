@@ -206,6 +206,7 @@ REGISTRY_TOOLS: tuple[str, ...] = (
     "view_editor",
     "inspect_in_parallel",
     "submit_for_review",
+    "precheck",
     "start_task",
     "start_variants",
     "task_status",

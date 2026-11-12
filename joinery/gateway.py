@@ -941,6 +941,70 @@ class ProjectGateway:
         checked.problems[:0] = moved
         return checked
 
+    async def precheck_checks(
+        self, live_scenes: set[str]
+    ) -> tuple[submission.Validation, list[str]]:
+        """The submit's checks on the stage as it is, changing nothing the agent made.
+
+        Unlike :meth:`submit_checks` the staged apps stay open, a running game keeps
+        its inspector, no file is put back for another task and the stage does not
+        follow changes accepted meanwhile: those are said in the returned notes
+        instead. Godot may fill the stage's import cache, as any staged Godot
+        call does; a clean import here spares the submit its own.
+        """
+        tx = self.transaction
+        notes: list[str] = []
+        if tx is None or tx.state != "staging":
+            return submission.Validation(), notes
+        moved: list[Problem] = []
+        if self.claims.contended():
+            changed = {
+                c["path"]
+                for c in tx.diff()
+                if DIRECTORY not in {c["before"], c["after"]}
+            }
+            held = {
+                path: title
+                for path in sorted(changed)
+                if (title := self.claims.holder(path, self.task_id))
+            }
+            if held:
+                path = min(held)
+                moved.append(
+                    Problem(
+                        "conflict",
+                        refusal(path, held[path])
+                        + " Submitting puts that file back as the project has it.",
+                        sorted(held),
+                    )
+                )
+        if self._synced < self.claims.generation:
+            notes.append(
+                "The user accepted another change while you worked; submit first "
+                "brings your stage up to date with it, which can change what the "
+                "checks find."
+            )
+        if self.runtime_config is not None:
+            notes.append(
+                "The game is running from the stage; submit stops it first, so its "
+                "files in project.godot are not part of your change."
+            )
+        gate = self.art_gate
+        with self.span("precheck"):
+            checked = await submission.validate(self, tx, live_scenes)
+        # The art gate is the submit's to raise: a precheck only reports it.
+        self.art_gate = gate
+        checked.problems[:0] = moved
+        return checked, notes
+
+    def mark_imported(self, tx: FileTransaction) -> None:
+        """Godot just imported ``tx``'s stage cleanly; the next check may skip that."""
+        if tx is self.transaction and tx.state == "staging":
+            try:
+                self._imported = (tx.id, inventory(tx.stage, include_dirs=True))
+            except (OSError, ValueError):
+                self._imported = None
+
     def text_diff(self) -> list[str]:
         """The staged change's text files as unified diff lines."""
         tx = self.transaction

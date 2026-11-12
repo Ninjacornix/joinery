@@ -32,7 +32,7 @@ INSTRUCTIONS = (
     + REVIEW_GUIDE
     + " Never claim staged changes are accepted or saved. "
     "Use focused tool searches, cache discovered schemas within the session, and write compact native scripts. "
-    "Document operators automatically export, import and record provenance; submit_for_review runs the final checks and opens the review. "
+    "Document operators automatically export, import and record provenance; precheck runs the same checks early without submitting; submit_for_review runs the final checks and opens the review. "
     "Avoid repeating those checks after every call. If the user asks to place an asset in their scene, create the scene instance too. "
     "Never generate assets or fetch assets. Operate actual tools. A Rule Zero STOP halts the turn. "
     + GAME_GUIDE

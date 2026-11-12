@@ -240,6 +240,7 @@ def test_a_change_records_its_turns_tools_checks_reviewer_and_send_back(
         "submits": 2,
         "send_backs": 1,
         "continuations": 1,
+        "prechecks": 0,
     }
     assert {"agent_turn", "tool", "checks", "reviewer", "send_back"} <= set(
         summary["by_kind_ms"]

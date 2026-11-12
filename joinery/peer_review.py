@@ -22,6 +22,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
 
+from joinery.reasons import REVIEW_RULES
+
 Severity = Literal["info", "warn", "block"]
 SEVERITIES: tuple[Severity, ...] = ("info", "warn", "block")
 #: How the reviewer's part of the review went.
@@ -44,11 +46,15 @@ class ReviewNote:
     severity: Severity
     text: str
     file: str = ""
+    #: What kind of problem it is (``joinery.reasons.REVIEW_RULES``); "" untold.
+    rule: str = ""
 
     def as_dict(self) -> dict[str, str]:
         data = {"severity": self.severity, "text": self.text}
         if self.file:
             data["file"] = self.file
+        if self.rule:
+            data["rule"] = self.rule
         return data
 
 
@@ -129,7 +135,10 @@ def notes_from(payload: Any) -> list[ReviewNote]:
             raise ValueError(f"Each note's text is one to {NOTE_CHARS} characters.")
         if len(path) > 400 or "\n" in path:
             raise ValueError("file is one project path.")
-        found.append(ReviewNote(severity, text, path.removeprefix("res://")))
+        rule = str(entry.get("rule", "") or "").strip().lower()
+        if rule and rule not in REVIEW_RULES:
+            raise ValueError("rule is one of " + ", ".join(REVIEW_RULES) + ".")
+        found.append(ReviewNote(severity, text, path.removeprefix("res://"), rule))
     return found
 
 

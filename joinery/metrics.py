@@ -50,6 +50,12 @@ SUBMITS = "joinery.submit.attempts"
 SEND_BACKS = "joinery.review.send_backs"
 CONTINUATIONS = "joinery.continuations"
 USAGE_REPORTED = "joinery.usage.reported"
+PRECHECKS = "joinery.prechecks"
+#: A findings span: who found them, whether the change was dropped, and the rule
+#: ids (``joinery.reasons``), comma-separated, one per item.
+FOUND_BY = "joinery.findings.by"
+FINAL = "joinery.findings.final"
+RULES = "joinery.findings.rules"
 
 #: Span kinds, in the order the breakdown lists them.
 CHANGE = "change"
@@ -60,14 +66,26 @@ CHECKS = "checks"
 REVIEWER = "reviewer"
 REVIEW_RENDER = "review_render"
 SEND_BACK = "send_back"
+PRECHECK = "precheck"
+FINDINGS = "findings"
 DECIDED = "decision"
-KINDS = (AGENT_TURN, TOOL, WORKER_START, CHECKS, REVIEWER, REVIEW_RENDER, SEND_BACK)
+KINDS = (
+    AGENT_TURN,
+    TOOL,
+    WORKER_START,
+    PRECHECK,
+    CHECKS,
+    REVIEWER,
+    REVIEW_RENDER,
+    SEND_BACK,
+)
 
 #: The latency phases' names (joinery.timing) as span kinds.
 PHASE_KINDS = {
     "tools": TOOL,
     "tool_connection": WORKER_START,
     "submit": CHECKS,
+    "precheck": PRECHECK,
     "review_media": REVIEW_RENDER,
 }
 
@@ -349,7 +367,7 @@ def summarise(identifier: str, spans: list[dict[str, Any]]) -> dict[str, Any]:
         if kind == DECIDED:
             decision = str(attrs.get(DECISION, ""))
             continue
-        if kind == CHANGE:
+        if kind in {CHANGE, FINDINGS}:
             continue
         by_kind[kind] = by_kind.get(kind, 0.0) + _ms(span)
         counts[kind] = counts.get(kind, 0) + 1
@@ -386,8 +404,82 @@ def summarise(identifier: str, spans: list[dict[str, Any]]) -> dict[str, Any]:
             "continuations": sum(
                 int(r["attributes"].get(CONTINUATIONS, 0) or 0) for r in roots
             ),
+            "prechecks": sum(
+                int(r["attributes"].get(PRECHECKS, 0) or 0) for r in roots
+            ),
         },
     }
+
+
+def rules(project: Path, last: int = 0) -> list[dict[str, Any]]:
+    """How often each check rule turned a change back, most often first.
+
+    Per rule: ``sent_back`` (items in failed submits the agent could fix),
+    ``final`` (items in failures that dropped the change), ``prechecked`` (items
+    a precheck found before any submit) and ``changes`` (changes it showed up in).
+    Only the newest ``last`` changes count when ``last`` is above 0.
+    """
+    files = []
+    for path in metrics_dir(project).glob("*.jsonl"):
+        if path.is_symlink():
+            continue
+        spans = read(path)
+        start = min((int(s["start_time_unix_nano"]) for s in spans), default=0)
+        files.append((start, path.stem, spans))
+    files.sort(key=lambda f: (f[0], f[1]))
+    if last > 0:
+        files = files[-last:]
+    found: dict[str, dict[str, Any]] = {}
+    for _start, _name, spans in files:
+        seen: set[str] = set()
+        for span in spans:
+            attrs = span["attributes"]
+            if attrs.get(KIND) != FINDINGS:
+                continue
+            by = str(attrs.get(FOUND_BY, ""))
+            column = (
+                "prechecked"
+                if by == PRECHECK
+                else "final"
+                if attrs.get(FINAL) is True
+                else "sent_back"
+            )
+            for rule in str(attrs.get(RULES, "")).split(","):
+                rule = rule.strip()
+                if not rule:
+                    continue
+                row = found.setdefault(
+                    rule,
+                    {
+                        "rule": rule,
+                        "sent_back": 0,
+                        "final": 0,
+                        "prechecked": 0,
+                        "changes": 0,
+                    },
+                )
+                row[column] += 1
+                if rule not in seen:
+                    seen.add(rule)
+                    row["changes"] += 1
+    return sorted(
+        found.values(),
+        key=lambda r: (-(r["sent_back"] + r["final"]), -r["prechecked"], r["rule"]),
+    )
+
+
+def render_rules(rows: list[dict[str, Any]]) -> str:
+    if not rows:
+        return "No check has turned a change back in this project yet."
+    width = max(len("rule"), *(len(r["rule"]) for r in rows))
+    lines = [f"{'rule':<{width}}  sent back  dropped  prechecked  changes"]
+    for row in rows:
+        lines.append(
+            f"{row['rule']:<{width}}  {row['sent_back']:>9}  {row['final']:>7}"
+            f"  {row['prechecked']:>10}  {row['changes']:>7}"
+        )
+    lines.append("Counts are items: one finding of a rule in one check run.")
+    return "\n".join(lines)
 
 
 def changes(project: Path, last: int = 0) -> list[dict[str, Any]]:
@@ -490,9 +582,17 @@ def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) ->
     )
     parser.add_argument("--project", type=Path, required=True)
     parser.add_argument(
-        "--last", type=int, default=10, help="newest N changes (0: all)"
+        "--last",
+        type=int,
+        default=None,
+        help="newest N changes (0: all; default 10, all with --rules)",
     )
     parser.add_argument("--json", action="store_true", help="print JSON")
+    parser.add_argument(
+        "--rules",
+        action="store_true",
+        help="which check rules send changes back most often",
+    )
 
 
 def run(args: argparse.Namespace) -> int:
@@ -501,6 +601,11 @@ def run(args: argparse.Namespace) -> int:
         message = f"No project at {project}."
         print(json.dumps({"error": message}) if args.json else message)
         return 1
-    summaries = changes(project, max(int(args.last), 0))
+    if getattr(args, "rules", False):
+        rows = rules(project, max(int(args.last or 0), 0))
+        print(json.dumps({"rules": rows}) if args.json else render_rules(rows))
+        return 0
+    last = 10 if args.last is None else int(args.last)
+    summaries = changes(project, max(last, 0))
     print(json.dumps({"changes": summaries}) if args.json else render(summaries))
     return 0

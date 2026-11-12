@@ -318,6 +318,10 @@ REVIEW_GUIDE = (
     + PLAYTEST_GUIDE
     + CHECKS_GUIDE
     + "The user accepts or discards every change in the Review panel. "
+    "When your change touched assets, scenes or code, call precheck once before "
+    "submitting: it runs the same checks on the change as it is, uses no submit "
+    "attempt and changes nothing. Fix every item it returns first (each names its "
+    "rule, file, node, what was measured, what is expected and a fix). "
     "When your change is complete, call submit_for_review with one short line naming "
     "what changed. Joinery checks it (art bible rules, Godot import, missing files, "
     "asset provenance, project tests, objects built from placeholder shapes). Fix "
@@ -371,7 +375,9 @@ REVIEWER_PROMPT = RolePrompt(
     "before the user sees it (it doesn't do what was asked, breaks the art bible or the "
     "game, or loses work); warn = worth the user's attention; info = a small remark. "
     "Block only for real problems, never for taste. No notes is a fine answer. Each "
-    "note is one plain sentence naming the file. Then end your turn; don't summarise.\n\n"
+    "note is one plain sentence naming the file; give a block its rule (request, "
+    "art_bible, brief, broken, work_lost or other). Then end your turn; don't "
+    "summarise.\n\n"
     # The project's own documents change rarely: they stay ahead of the change.
     "Art bible:\n{bible}\n\n"
     "Game brief:\n{brief}",

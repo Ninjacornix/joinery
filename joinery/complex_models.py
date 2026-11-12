@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from joinery.reasons import Reason
 from joinery.roles import set_agents_values
 from joinery.scatter import IDENTITY, Section, Transform, _compose, _transform, parse
 from joinery.turn import Problem
@@ -458,6 +459,18 @@ def problem(findings: Sequence[Finding]) -> Problem | None:
         "complex_models",
         " ".join(f.line() for f in findings),
         sorted({f.file for f in findings if f.file}),
+        items=[
+            Reason(
+                "complex_models.placeholder_shapes",
+                f.file if f.file != "the scene on screen" else "",
+                node=f.name,
+                measured=f"{len(f.shapes)} placeholder shapes: "
+                + ", ".join(s.path for s in f.shapes)[:200],
+                expected="one model made in Blender (or a kit model)",
+                fix=FIX,
+            )
+            for f in findings
+        ],
     )
 
 

@@ -107,6 +107,18 @@ def test_submit_result_reads_as_a_tool_result() -> None:
             "check": "references",
             "message": "room.tscn uses crate.glb",
             "paths": ["room.tscn"],
+            "items": [
+                {
+                    "rule": "references.missing_file",
+                    "file": "room.tscn",
+                    "node": "",
+                    "measured": "room.tscn uses crate.glb",
+                    "expected": "every file a scene loads exists in the project or "
+                    "in this change",
+                    "fix": "Make the missing file in this change, or point the scene "
+                    "at one that exists.",
+                }
+            ],
         }
     ]
 

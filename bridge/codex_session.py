@@ -62,6 +62,7 @@ APPROVED_TOOLS = (
     "call_tool",
     "edit_scene",
     "submit_for_review",
+    "precheck",
     "start_task",
     "start_variants",
     "task_status",
@@ -278,7 +279,7 @@ class CodexSession:
                 "in isolated staging. Never interpret the raw filesystem sandbox as a reason to refuse gateway edits. "
                 "For creative work read art_direction and resolve the owning native source first. "
                 "Use first-party typed/document operations to save native sources, refresh exports and record replay/provenance. "
-                "Use focused searches and reuse schemas already read. Keep native scripts compact; save/export/import/provenance are automatic, and submit_for_review runs the final checks. "
+                "Use focused searches and reuse schemas already read. Keep native scripts compact; save/export/import/provenance are automatic, precheck runs the same checks early without submitting, and submit_for_review runs the final checks. "
                 "Avoid redundant inspection or validation calls. Asset export does not place a scene instance; create one if the user requested placement. "
                 "Raw bpy/Lua/sclang is allowed only through the logged offline document operator, not an unrecorded host script. "
                 "A missing or unapproved art bible requires the user to complete and approve its actual content before asset creation. "

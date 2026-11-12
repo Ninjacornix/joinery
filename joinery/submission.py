@@ -9,12 +9,13 @@ decides what happens next: that is the turn controller's job.
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from joinery import complex_models, references
+from joinery import complex_models, reasons, references
 from joinery.art_approval import approved
 from joinery.art_approval import fingerprint as bible_fingerprint
 from joinery.authoring import run_offline
@@ -209,7 +210,12 @@ async def validate(
         gaps.setdefault(scene, []).extend(paths)
     if gaps:
         found.problems.append(
-            Problem("references", references.refusal(gaps), sorted(gaps))
+            Problem(
+                "references",
+                references.refusal(gaps),
+                sorted(gaps),
+                items=reasons.references(gaps),
+            )
         )
     found.ran.append("references")
     # Complex objects are Blender (or kit) models, not piles of placeholder shapes.
@@ -246,6 +252,7 @@ async def validate(
                     "assets",
                     "Asset validation failed: " + "; ".join(problems),
                     _paths(problems),
+                    items=[reasons.provenance(line) for line in problems],
                 )
             )
         rules = bible_ok
@@ -260,6 +267,7 @@ async def validate(
                 "dependencies",
                 "Dependency validation failed: " + "; ".join(problems),
                 _paths(problems),
+                items=[reasons.dependency(line) for line in problems],
             )
         )
     godot = any(
@@ -287,6 +295,7 @@ async def validate(
         godot=importing,
         tests=tests,
         span=gateway.span,
+        imported=lambda: gateway.mark_imported(tx),
     )
     return found
 
@@ -299,11 +308,14 @@ async def checks(
     godot: bool,
     tests: list[str] | None = None,
     span: Any = None,
+    imported: Callable[[], None] | None = None,
 ) -> list[Problem]:
     """The art bible's measured rules beside Godot's import check and the project's tests.
 
     Each runs in the offline worker and takes seconds. The rules mount the stage
     read-only and run alongside; the tests need the import, so they follow it.
+    ``imported`` is told when Godot imported the stage cleanly, so the next check
+    of the same stage (a submit after a precheck) can skip that import.
     """
 
     def timed(phase: str) -> AbstractContextManager[None]:
@@ -323,7 +335,12 @@ async def checks(
         # One problem per finding, each naming its file, so the author sees a
         # list it can work through rather than one long joined line.
         return [
-            Problem("art_bible", "Art bible check failed: " + line, _paths([line]))
+            Problem(
+                "art_bible",
+                "Art bible check failed: " + line,
+                _paths([line]),
+                items=[reasons.art_bible(line)],
+            )
             for line in found
         ]
 
@@ -343,9 +360,12 @@ async def checks(
                         "godot_import",
                         "Godot import/script validation failed: "
                         + (got.output[-4000:] or "Godot exited with an error."),
+                        items=reasons.godot_import(got.output),
                     )
                 )
                 return found
+            if imported is not None:
+                imported()
         if tests:
             found += await run_tests(tx.stage, tests, timed)
         return found
@@ -399,6 +419,7 @@ async def run_tests(
             "tests",
             "The project's tests failed: "
             + (got.output[-4000:] or "GUT exited with an error."),
+            items=reasons.tests(got.output),
         )
     ]
 
