@@ -68,6 +68,7 @@ SIDEBAR_STATES = (
     "debugging",
     "playtest",
     "playtest-report",
+    "playtest-heat",
     "todo",
     "todo-checked",
     "match",

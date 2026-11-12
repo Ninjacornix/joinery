@@ -460,6 +460,7 @@ func _debugging(light: bool, width: int, chat: Control, tasks: Node, backend: No
 ## The playtester: its card while the bot plays, then the findings with one opened.
 func _playtest(light: bool, width: int, chat: Control) -> void:
 	var tasks: Node = chat.get("_tasks")
+	var fixture: GDScript = load(get_script().resource_path.get_base_dir() + "/playtest_fixture.gd")
 	var event := {"kind": "playtest", "playtest_id": "pt", "state": "playing", "seconds": 120}
 	event["elapsed"] = 42.0
 	tasks.call("on_playtest", event)
@@ -495,16 +496,21 @@ func _playtest(light: bool, width: int, chat: Control) -> void:
 		"items": items,
 		"seed": 4821,
 		"played_seconds": 120.0,
-		"coverage":
-		load(get_script().resource_path.get_base_dir().path_join("playtest_fixture.gd")).call(
-			"coverage"
-		),
+		"coverage": fixture.call("coverage"),
 	}
 	tasks.call("on_playtest", event)
 	var card: Control = tasks.get("playtest")
 	var first: Control = (card.call("item_rows") as Array)[0]
 	(first.find_children("", "Button", true, false)[0] as Button).button_pressed = true
 	await _shot("playtest-report", light, width, chat)
+	card.free()
+	# The last five runs' heat on the same map, time spent on too.
+	tasks.set("playtest", null)
+	event["report"]["heatmap"] = fixture.call("heat")
+	tasks.call("on_playtest", event)
+	card = tasks.get("playtest")
+	card.call("show_layer", "time", true)
+	await _shot("playtest-heat", light, width, chat)
 	card.free()
 	tasks.set("playtest", null)
 	tasks.hide()
