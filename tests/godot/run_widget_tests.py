@@ -60,6 +60,7 @@ CASES = {
     "design_card_test.gd": "design card: ok",
     "variants_test.gd": "variants: ok",
     "complex_models_setting_test.gd": "complex models setting: ok",
+    "fix_errors_setting_test.gd": "fix errors setting: ok",
     "mixer_test.gd": "mixer: ok",
     "sound_pass_card_test.gd": "sound pass card: ok",
     "sidebar_margins_test.gd": "sidebar margins: ok",

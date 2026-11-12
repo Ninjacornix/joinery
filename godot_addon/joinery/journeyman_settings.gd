@@ -18,6 +18,7 @@ const TEAM_SETTING := preload("team_setting.gd")
 const REVIEWER_SETTING := preload("reviewer_setting.gd")
 const DESIGN_SETTING := preload("design_setting.gd")
 const COMPLEX_MODELS_SETTING := preload("complex_models_setting.gd")
+const FIX_ERRORS_SETTING := preload("fix_errors_setting.gd")
 const PATH := "Joinery/journeyman.cfg"
 const TEXT_SIZES := UI_THEME.TEXT_SIZES
 const MODES := ["Auto", "Fast", "Thorough"]
@@ -457,6 +458,8 @@ func _build_project() -> void:
 	section.body.add_child(REVIEWER_SETTING.new())
 	# Complex models made in Blender or with a kit (`[agents] complex_models`).
 	section.body.add_child(COMPLEX_MODELS_SETTING.new())
+	# Console errors fixed on their own, or offered first (`[agents] fix_errors`).
+	section.body.add_child(FIX_ERRORS_SETTING.new())
 	# The design check after every N accepted changes (`[agents] design_check_every`).
 	var design: Control = DESIGN_SETTING.new()
 	section.body.add_child(design)
