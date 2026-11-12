@@ -14,16 +14,35 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from joinery import kit_preview, kits
+from joinery import kit_groups, kit_preview, kits
 from joinery.art_approval import approved
 from joinery.transactions import FileTransaction
 
-ACTIONS = ("list", "preview", "make", "edit")
+ACTIONS = ("list", "preview", "make", "edit", "from-blend")
 ART_GATE = "Approve the art bible first: in chat, type /art and approve it."
 
 
 def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("action", choices=ACTIONS)
+    parser.add_argument(
+        "blend", nargs="?", type=Path, help="from-blend: your own .blend file"
+    )
+    parser.add_argument(
+        "--group", default="", help="from-blend: the Geometry Nodes group to wrap"
+    )
+    parser.add_argument("--id", default="", help="from-blend: the new kit's id")
+    parser.add_argument("--label", default="", help="from-blend: the kit's label")
+    parser.add_argument(
+        "--base",
+        choices=kit_groups.BASES,
+        default="none",
+        help="from-blend: the mesh the group runs on",
+    )
+    parser.add_argument(
+        "--licence",
+        default="the user's own work",
+        help="from-blend: the .blend's licence, for the lock",
+    )
     parser.add_argument("--project", type=Path)
     parser.add_argument("--kit", default="")
     parser.add_argument("--params", default="{}", help="kit parameters as JSON")
@@ -64,6 +83,16 @@ def main(args: argparse.Namespace) -> int:
         print(json.dumps(data))
     else:
         print(data.get("summary", ""))
+        if data.get("group"):
+            print(
+                f"Kit {data['kit']}: parameters "
+                + (", ".join(data.get("params", [])) or "none")
+                + (
+                    "; fixed at the group's values: " + ", ".join(data["fixed"])
+                    if data.get("fixed")
+                    else ""
+                )
+            )
         for path in data.get("files", []):
             print("  " + path)
         if data.get("state") == "review":
@@ -83,6 +112,26 @@ def _run(args: argparse.Namespace) -> dict[str, Any]:
     params = _object(args.params, "--params")
     colours = _object(args.colours, "--colours")
     seed = 1 if args.seed is None else args.seed
+    if args.action == "from-blend":
+        if args.blend is None:
+            raise ValueError("Name your .blend: joinery kits from-blend <file.blend>.")
+        blend = args.blend.expanduser().resolve()
+
+        async def wrap(stage: Path) -> dict[str, Any]:
+            return await kit_groups.import_group(
+                stage,
+                blend,
+                args.group,
+                kit=args.id,
+                label=args.label,
+                folder=args.folder or "art/props",
+                base=args.base,
+                licence=args.licence,
+            )
+
+        return _stage(
+            project, f"Make a kit from the node group {args.group}", wrap, args.yes
+        )
     if args.action == "preview":
         return asyncio.run(
             kit_preview.preview(project, args.kit, params, seed=seed, colours=colours)
@@ -154,4 +203,9 @@ def _stage(project: Path, summary: str, work: Any, yes: bool) -> dict[str, Any]:
         "kit": made.get("kit"),
         "models": made.get("models", []),
         "seconds": made.get("seconds"),
+        **{
+            key: made[key]
+            for key in ("group", "params", "fixed", "materials", "seed_input")
+            if key in made
+        },
     }
