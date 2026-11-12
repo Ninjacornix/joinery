@@ -245,7 +245,7 @@ def test_a_patch_changes_only_what_it_names() -> None:
         text, [{"find": "var speed := 4.0", "replace": "var speed := 6.0"}]
     )
     assert patched == text.replace("4.0", "6.0")
-    with pytest.raises(ValueError, match="matches 0 times"):
+    with pytest.raises(ValueError, match="not in the file"):
         apply_patch(text, [{"find": "var run", "replace": "x"}])
     with pytest.raises(ValueError, match="matches 2 times"):
         apply_patch(text, [{"find": "var ", "replace": "x"}])
@@ -274,6 +274,16 @@ def test_the_gateway_turns_a_patch_into_the_staged_file(
         "filePath": "res://player.gd",
         "content": "extends Node\nvar speed := 6.0\n",
     }
+    assert gateway._write_notes == []
+    # A find that matches only with tolerance says which one it needed.
+    tolerant = gateway._patched(
+        {
+            "filePath": "res://player.gd",
+            "patch": [{"find": "  var speed := 4.0  ", "replace": "var speed := 5.0"}],
+        }
+    )
+    assert tolerant["content"] == "extends Node\nvar speed := 5.0\n"
+    assert gateway._write_notes == ["Patch: pair 1 matched ignoring indentation."]
     with pytest.raises(ValueError, match="already has"):
         gateway._patched(
             {"filePath": "new.gd", "patch": [{"find": "a", "replace": "b"}]}

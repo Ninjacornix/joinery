@@ -57,7 +57,7 @@ from joinery.review import Render, plan, render
 from joinery.server_install import configured
 from joinery.stage_watch import StageWatch
 from joinery.submission import is_reference
-from joinery.text_patch import apply_patch
+from joinery.text_patch import apply as apply_patch
 from joinery.timing import TurnTiming
 from joinery.transactions import (
     DIRECTORY,
@@ -308,6 +308,11 @@ class ProjectGateway:
         #: Teammates' recent changes said this turn, and those for the call now.
         self._team_warned: set[str] = set()
         self._team_notes: list[str] = []
+        #: What a write did beyond the call itself (a tolerant patch, new script
+        #: errors), said after the call's own result (ADR 0078).
+        self._write_notes: list[str] = []
+        #: Span attributes the call adds as it goes (a refused raw script, a check).
+        self._call_attrs: dict[str, Any] = {}
 
     @property
     def is_lane(self) -> bool:
@@ -492,8 +497,16 @@ class ProjectGateway:
                     metrics.TASK: self.task_id,
                 },
             ) as attrs:
-                self._team_notes = []
-                result = await self._call(server, tool, arguments, view=view)
+                self._team_notes, self._write_notes, self._call_attrs = [], [], {}
+                try:
+                    result = await self._call(server, tool, arguments, view=view)
+                finally:
+                    attrs.update(self._call_attrs)
+                if self._write_notes:
+                    result.content = [
+                        *result.content,
+                        TextContent(type="text", text="\n".join(self._write_notes)),
+                    ]
                 if self._team_notes:
                     # Said before the agent's next step, and shown to the user.
                     result.content = [
@@ -536,8 +549,11 @@ class ProjectGateway:
             raise ValueError(
                 "patch changes a file the project already has; write a new file with content."
             )
-        content = apply_patch(target.read_text(encoding="utf-8"), arguments["patch"])
+        applied = apply_patch(target.read_text(encoding="utf-8"), arguments["patch"])
+        content = applied.text
         validate_arguments(content)
+        if applied.note():
+            self._write_notes.append(applied.note())
         return {
             **{k: v for k, v in arguments.items() if k != "patch"},
             "content": content,
