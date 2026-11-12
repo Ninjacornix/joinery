@@ -19,8 +19,9 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from joinery import done_when, metrics, reasons
 from joinery.claims import LEAD_BUSY, live_refusal
-from joinery.peer_review import PeerReview, Reviewer, request_for
+from joinery.peer_review import PeerReview, Reviewer, ReviewPlan, request_for
 from joinery.reasons import Reason
+from joinery.routing import change_risk
 from joinery.transactions import inventory
 
 if TYPE_CHECKING:
@@ -1002,7 +1003,34 @@ class TurnController:
             selection=self.selection,
             round=self.review_rounds + 1,
             previous=tuple(self._peer.blocking()) if self._peer is not None else (),
+            risk=change_risk(tx.stage, found),
         )
+        # The reviewer's own plan (``ReviewAgent.plan``): skip, light first or main.
+        planner = getattr(self.reviewer, "plan", None)
+        plan: ReviewPlan = (
+            planner(request)
+            if callable(planner)
+            else ReviewPlan("main", float(self.review_seconds))
+        )
+        route_attrs = {
+            metrics.REVIEW_RISK: request.risk.level,
+            metrics.REVIEW_ROUTE: plan.route,
+        }
+        if plan.route == "skip":
+            with self.gateway.span(
+                "reviewer",
+                "reviewer",
+                {
+                    metrics.AGENT_NAME: "reviewer",
+                    metrics.ROUND: self.review_rounds + 1,
+                    "joinery.review.status": "skipped",
+                    **route_attrs,
+                },
+            ):
+                pass
+            peer = PeerReview("skipped", message=plan.message)
+            self._peer, self._peer_print = peer, printed
+            return peer
         if getattr(self.reviewer, "active", True):
             self.gateway.progress("Reviewing the change…")
         job: asyncio.Task[PeerReview] = asyncio.ensure_future(self.reviewer(request))
@@ -1010,12 +1038,14 @@ class TurnController:
         with self.gateway.span(
             "reviewer",
             "reviewer",
-            {metrics.AGENT_NAME: "reviewer", metrics.ROUND: self.review_rounds + 1},
+            {
+                metrics.AGENT_NAME: "reviewer",
+                metrics.ROUND: self.review_rounds + 1,
+                **route_attrs,
+            },
         ) as span:
             try:
-                done, _ = await asyncio.wait(
-                    {job}, timeout=self.review_seconds + REVIEW_GRACE
-                )
+                done, _ = await asyncio.wait({job}, timeout=plan.seconds + REVIEW_GRACE)
             except asyncio.CancelledError:
                 job.cancel()
                 await asyncio.wait({job})
@@ -1032,13 +1062,20 @@ class TurnController:
                 if job.exception() is not None
                 else job.result().status
             )
+            if done and not job.cancelled() and job.exception() is None:
+                result = job.result()
+                if result.tier:
+                    span[metrics.MODEL_TIER] = result.tier
+                if result.model:
+                    span[metrics.RESPONSE_MODEL] = result.model
+                span[metrics.REVIEW_ESCALATED] = result.escalated
         if not done:
             job.cancel()
             await asyncio.wait({job})
             peer = PeerReview(
                 "timeout",
                 message="The reviewer ran out of time, so this opened without its notes.",
-                elapsed_s=float(self.review_seconds + REVIEW_GRACE),
+                elapsed_s=float(plan.seconds + REVIEW_GRACE),
             )
         elif job.cancelled():
             return None

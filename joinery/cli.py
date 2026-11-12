@@ -529,6 +529,7 @@ def _feature(args: argparse.Namespace) -> int:
 def _reviewer(args: argparse.Namespace) -> int:
     """`joinery reviewer`: the Settings page's Reviewer agent switch and model."""
     from joinery.roles import reviewer_settings, set_reviewer
+    from joinery.routing import routing_settings, set_routing
 
     project = args.project.resolve()
     try:
@@ -538,7 +539,17 @@ def _reviewer(args: argparse.Namespace) -> int:
                 enabled=None if args.set is None else args.set == "on",
                 model=args.model,
             )
+        review = getattr(args, "review", None)
+        light = getattr(args, "light_model", None)
+        if review is not None or light is not None:
+            set_routing(
+                project,
+                review=review,
+                light_model=light,
+                provider=getattr(args, "provider", "") or "",
+            )
         settings = reviewer_settings(project)
+        routing = routing_settings(project)
     except (OSError, ValueError) as exc:
         if args.json:
             print(json.dumps({"error": str(exc)}))
@@ -549,6 +560,8 @@ def _reviewer(args: argparse.Namespace) -> int:
         "enabled": settings.enabled,
         "model": settings.model,
         "rounds": settings.rounds,
+        "review": routing.review,
+        "light_model": dict(routing.light_models),
     }
     if args.json:
         print(json.dumps(data))
@@ -557,7 +570,13 @@ def _reviewer(args: argparse.Namespace) -> int:
             "Reviewer agent: "
             + ("on" if settings.enabled else "off")
             + (f" ({settings.model})" if settings.model else " (the author's model)")
+            + f", reviews {routing.review}"
         )
+        light_line = ", ".join(
+            ("every provider" if k == "*" else k) + f": {v}"
+            for k, v in routing.light_models.items()
+        )
+        print("Light model: " + (light_line or "none (the main model does it all)"))
     return 0
 
 
@@ -1028,10 +1047,14 @@ def _parser() -> argparse.ArgumentParser:
     steam_cmd.add_argument("--connect", choices=["steam", "direct"])
     steam_cmd.add_argument("--json", action="store_true")
     checks_cli.add_access(
-        commands.add_parser("access", help="check the game's accessibility; list what to fix")
+        commands.add_parser(
+            "access", help="check the game's accessibility; list what to fix"
+        )
     )
     checks_cli.add_perf(
-        commands.add_parser("perf", help="measure how the game runs against a target machine")
+        commands.add_parser(
+            "perf", help="measure how the game runs against a target machine"
+        )
     )
     sound_cmd = commands.add_parser(
         "sound-pass", help="list the sounds the level and player are missing"
@@ -1092,6 +1115,24 @@ def _parser() -> argparse.ArgumentParser:
     reviewer_cmd.add_argument("--set", choices=["on", "off"], default=None)
     reviewer_cmd.add_argument(
         "--model", default=None, help="the reviewer's model; empty for the author's"
+    )
+    reviewer_cmd.add_argument(
+        "--review",
+        choices=["always", "risky", "never"],
+        default=None,
+        help="review every change, only risky ones, or none",
+    )
+    reviewer_cmd.add_argument(
+        "--light-model",
+        default=None,
+        help="a cheaper model for light work (first review pass, summaries, "
+        "check wording); empty clears it",
+    )
+    reviewer_cmd.add_argument(
+        "--provider",
+        default="",
+        choices=["", "claude", "codex", "gemini", "opencode"],
+        help="set --light-model for this provider only",
     )
     reviewer_cmd.add_argument("--json", action="store_true")
     complex_models.add_arguments(

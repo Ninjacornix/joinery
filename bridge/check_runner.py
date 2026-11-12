@@ -31,9 +31,11 @@ from typing import Any, Protocol
 
 from bridge.crew import WORKING, Crew, ScriptedCall, Task
 from bridge.instructions import CHECK_PROMPT
+from bridge.models import Selection
 from bridge.protocol import Done, Message, MessageDelta, Prompt
 from joinery import access, checks_core, perf
 from joinery.roles import spec
+from joinery.routing import routing_settings
 
 Emit = Callable[[dict[str, Any]], None]
 Audit = Callable[[str, dict[str, Any]], Awaitable[checks_core.Report]]
@@ -191,7 +193,18 @@ class Checks:
         )
 
     async def advise(self, kind: str, task: checks_core.CheckTask) -> str:
-        """The check's read-only agent words the change; "" when it can't."""
+        """The check's read-only agent words the change; "" when it can't.
+
+        With ``[agents] light_model`` the light model words it first; when it can't
+        say (no words, NONE, an error or no time) the main model tries again."""
+        light = routing_settings(self.project).light_model(self.agent)
+        if light:
+            words = await self._advise(kind, task, light)
+            if words:
+                return words
+        return await self._advise(kind, task, "")
+
+    async def _advise(self, kind: str, task: checks_core.CheckTask, model: str) -> str:
         if self.bridge is None or self.endpoint is None:
             return ""
         role = ROLES[kind]
@@ -211,6 +224,7 @@ class Checks:
                 text=parts["text"],
                 rules=parts["rules"],
                 project_dir=str(self.project),
+                selection=Selection(model=model),
             )
             messages: list[str] = []
 

@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from bridge.instructions import SUMMARY_REQUEST
+from bridge.models import Selection
 from bridge.protocol import (
     AgentEvent,
     Done,
@@ -27,6 +28,7 @@ from bridge.protocol import (
     Usage,
 )
 from joinery import session_summary
+from joinery.routing import routing_settings
 from joinery.session_summary import SessionSummary, SummaryStore
 from joinery.turn import TurnController
 
@@ -48,12 +50,17 @@ class SessionBridge(Protocol):
     async def new_session(self) -> None: ...
 
 
-async def ask(bridge: SessionBridge, project: Path) -> str:
-    """The agent's summary: its text only, never shown in the chat."""
+async def ask(bridge: SessionBridge, project: Path, model: str = "") -> str:
+    """The agent's summary: its text only, never shown in the chat. ``model`` is
+    the light model to write it ("" for the session's own)."""
     text = ""
     event: AgentEvent
     async for event in bridge.send(
-        Prompt(text=SUMMARY_REQUEST, project_dir=str(project))
+        Prompt(
+            text=SUMMARY_REQUEST,
+            project_dir=str(project),
+            selection=Selection(model=model),
+        )
     ):
         if isinstance(event, MessageDelta | Message):
             text += event.text
@@ -67,6 +74,17 @@ async def ask(bridge: SessionBridge, project: Path) -> str:
         elif isinstance(event, Done) and not event.ok:
             return ""
     return text
+
+
+async def _ask_within(
+    bridge: SessionBridge, project: Path, model: str, seconds: float
+) -> str:
+    try:
+        return await asyncio.wait_for(ask(bridge, project, model), seconds)
+    except (TimeoutError, OSError, RuntimeError, ValueError, TypeError):
+        with contextlib.suppress(Exception):
+            await bridge.cancel()
+        return ""
 
 
 async def compact(
@@ -84,12 +102,16 @@ async def compact(
     ``chat_id`` is the chat summarised: the summary primes only its next prompt."""
     controller.begin_compaction()
     try:
-        try:
-            text = await asyncio.wait_for(ask(bridge, project), seconds)
-        except (TimeoutError, OSError, RuntimeError, ValueError, TypeError):
-            with contextlib.suppress(Exception):
-                await bridge.cancel()
-            text = ""
+        text = ""
+        light = routing_settings(project).light_model(controller.agent_id)
+        if light:
+            # The light model writes it first; on no text the session's own model
+            # tries again with the time left.
+            text = await _ask_within(bridge, project, light, seconds / 2)
+        if not text.strip():
+            text = await _ask_within(
+                bridge, project, "", seconds / 2 if light else seconds
+            )
         recorded = session_summary.facts(project, since, controller.requests)
         summary = SessionSummary(
             agent=controller.agent_id,

@@ -23,12 +23,15 @@ from pathlib import Path
 from typing import Any, Literal
 
 from joinery.reasons import REVIEW_RULES
+from joinery.routing import Risk, Route
 
 Severity = Literal["info", "warn", "block"]
 SEVERITIES: tuple[Severity, ...] = ("info", "warn", "block")
 #: How the reviewer's part of the review went.
 Status = Literal["reviewed", "timeout", "error", "off", "skipped"]
 MAX_NOTES = 12
+#: A request whose risk nobody measured is read as high: the reviewer reads it.
+HIGH_RISK = Risk("high", ("not measured",))
 NOTE_CHARS = 400
 #: Images the reviewer sees with the change (the providers' own limit is about this).
 MAX_IMAGES = 4
@@ -68,6 +71,17 @@ class PeerReview:
     message: str = ""
     elapsed_s: float = 0.0
     model: str = ""
+    #: Which model gave these notes: "light" or "main" ("" when none ran).
+    tier: str = ""
+    #: The light model's pass was not enough, so the main model reviewed again.
+    escalated: bool = False
+
+    def unsure(self) -> bool:
+        """A light pass the main model must redo: it did not finish, or it sends the
+        change back or warns (a light model never decides alone)."""
+        return self.status != "reviewed" or any(
+            note.severity in {"block", "warn"} for note in self.notes
+        )
 
     def blocking(self) -> list[ReviewNote]:
         return [note for note in self.notes if note.severity == "block"]
@@ -83,6 +97,10 @@ class PeerReview:
             data["message"] = self.message
         if self.model:
             data["model"] = self.model
+        if self.tier:
+            data["tier"] = self.tier
+        if self.escalated:
+            data["escalated"] = True
         return data
 
 
@@ -106,10 +124,31 @@ class ReviewRequest:
     round: int
     #: The notes the author was asked to fix last time, to check they were.
     previous: tuple[ReviewNote, ...] = ()
+    #: How much the change needs a reviewer (``joinery.routing.change_risk``).
+    risk: Risk = HIGH_RISK
 
 
 #: Runs one review: the chat host's reviewer agent, or a test's fake.
 Reviewer = Callable[[ReviewRequest], Awaitable[PeerReview]]
+
+
+@dataclass(frozen=True)
+class ReviewPlan:
+    """How a reviewer will take one request (``ReviewAgent.plan``): skip it, a light
+    pass first, or the main model; and the seconds it may take in all."""
+
+    route: Route
+    seconds: float
+    #: Why it skips, for the user ("" otherwise).
+    message: str = ""
+
+
+def skip_message(risk: Risk) -> str:
+    return (
+        "Reviewer skipped: Joinery's checks cover this change ("
+        + (risk.line() or "low risk")
+        + ")."
+    )
 
 
 def notes_from(payload: Any) -> list[ReviewNote]:
@@ -179,6 +218,7 @@ def request_for(
     selection: dict[str, Any],
     round: int,
     previous: tuple[ReviewNote, ...] = (),
+    risk: Risk | None = None,
 ) -> ReviewRequest:
     """Gather what the reviewer reads. The bible and brief come from the stage, so a
     change to them is reviewed as changed."""
@@ -203,6 +243,7 @@ def request_for(
         selection=dict(selection),
         round=round,
         previous=previous,
+        risk=risk if risk is not None else HIGH_RISK,
     )
 
 
@@ -211,6 +252,8 @@ def one_line(notes: list[ReviewNote], reviewer: dict[str, Any]) -> str:
     status = str(reviewer.get("status", ""))
     if status in {"timeout", "error"}:
         return str(reviewer.get("message", "")) or "Opened without the reviewer."
+    if status == "skipped" and not notes:
+        return str(reviewer.get("message", ""))
     if not notes:
         return "Reviewer: no notes." if status == "reviewed" else ""
     counts = {s: sum(1 for n in notes if n.severity == s) for s in SEVERITIES}

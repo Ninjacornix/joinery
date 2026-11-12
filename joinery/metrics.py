@@ -51,6 +51,12 @@ SEND_BACKS = "joinery.review.send_backs"
 CONTINUATIONS = "joinery.continuations"
 USAGE_REPORTED = "joinery.usage.reported"
 PRECHECKS = "joinery.prechecks"
+#: Model routing (ADR 0061): which model ran a turn ("light" or "main"), and how a
+#: review was routed ("skip", "light" or "main") for a change of which risk.
+MODEL_TIER = "joinery.model.tier"
+REVIEW_RISK = "joinery.review.risk"
+REVIEW_ROUTE = "joinery.review.route"
+REVIEW_ESCALATED = "joinery.review.escalated"
 #: A findings span: who found them, whether the change was dropped, and the rule
 #: ids (``joinery.reasons``), comma-separated, one per item.
 FOUND_BY = "joinery.findings.by"
@@ -296,12 +302,15 @@ def token_attributes(tokens: Totals | None) -> dict[str, Any]:
     }
 
 
-def agent_attributes(agent: str, role: str, model: str = "") -> dict[str, Any]:
+def agent_attributes(
+    agent: str, role: str, model: str = "", tier: str = ""
+) -> dict[str, Any]:
     attrs: dict[str, Any] = {
         OPERATION: "invoke_agent",
         AGENT_NAME: role,
         AGENT: agent,
         RESPONSE_MODEL: model,
+        MODEL_TIER: tier,
     }
     if agent in PROVIDERS:
         attrs[PROVIDER] = PROVIDERS[agent]
@@ -361,6 +370,10 @@ def summarise(identifier: str, spans: list[dict[str, Any]]) -> dict[str, Any]:
     reported = False
     turns = 0
     decision = ""
+    #: Which model ran which role's turns: (role, model, tier) -> turns.
+    models: dict[tuple[str, str, str], int] = {}
+    routes: dict[str, int] = {}
+    escalations = 0
     for span in spans:
         attrs = span["attributes"]
         kind = str(attrs.get(KIND, ""))
@@ -371,7 +384,19 @@ def summarise(identifier: str, spans: list[dict[str, Any]]) -> dict[str, Any]:
             continue
         by_kind[kind] = by_kind.get(kind, 0.0) + _ms(span)
         counts[kind] = counts.get(kind, 0) + 1
+        if kind == REVIEWER:
+            route = str(attrs.get(REVIEW_ROUTE, ""))
+            if route:
+                routes[route] = routes.get(route, 0) + 1
+            if attrs.get(REVIEW_ESCALATED) is True:
+                escalations += 1
         if kind == AGENT_TURN:
+            key = (
+                str(attrs.get(AGENT_NAME, "")),
+                str(attrs.get(RESPONSE_MODEL, "") or attrs.get(REQUEST_MODEL, "")),
+                str(attrs.get(MODEL_TIER, "") or "main"),
+            )
+            models[key] = models.get(key, 0) + 1
             turns += 1
             if attrs.get(USAGE_REPORTED):
                 reported = True
@@ -397,6 +422,12 @@ def summarise(identifier: str, spans: list[dict[str, Any]]) -> dict[str, Any]:
         "by_kind_ms": {k: round(v) for k, v in sorted(by_kind.items())},
         "counts": dict(sorted(counts.items())),
         "tokens": tokens if reported else None,
+        "models": [
+            {"role": role, "model": model, "tier": tier, "turns": n}
+            for (role, model, tier), n in models.items()
+        ],
+        "review_routes": dict(sorted(routes.items())),
+        "escalations": escalations,
         "rounds": {
             "agent_turns": turns,
             "submits": sum(int(r["attributes"].get(SUBMITS, 0) or 0) for r in roots),
@@ -566,6 +597,15 @@ def render(summaries: list[dict[str, Any]]) -> str:
                 f" out {_tokens(tokens['output'])}"
             )
         )
+        light = [m for m in change.get("models", []) if m["tier"] == "light"]
+        if light or change.get("review_routes"):
+            parts = [
+                f"{m['role']} {m['model'] or '?'} (light) ×{m['turns']}" for m in light
+            ]
+            parts += [f"review {k} ×{v}" for k, v in change["review_routes"].items()]
+            if change.get("escalations"):
+                parts.append(f"escalated ×{change['escalations']}")
+            lines.append("  models: " + ", ".join(parts))
         rounds = change["rounds"]
         lines.append(
             f"  rounds: {rounds['agent_turns']} agent turns, {rounds['submits']} submits,"

@@ -427,6 +427,8 @@ def test_the_settings_page_reads_and_saves_the_reviewer_through_the_cli(
         "enabled": True,
         "model": "",
         "rounds": 2,
+        "review": "always",
+        "light_model": {},
     }
     argv = ["reviewer", "--project", str(tmp_path), "--set", "off", "--model", "m2"]
     assert cli.main([*argv, "--json"]) == 0

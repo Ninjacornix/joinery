@@ -24,15 +24,20 @@ from joinery.debugging import DebugRequest, Diagnosis, diagnosis_from
 from joinery.gateway import ProjectGateway
 from joinery.peer_review import (
     PeerReview,
+    ReviewPlan,
     ReviewRequest,
     notes_from,
     notes_in_text,
+    skip_message,
 )
 from joinery.roles import ReviewerSettings, reviewer_settings, spec
+from joinery.routing import RoutingSettings, review_route, routing_settings
 from joinery.turn import TurnController
 
 #: Characters of reply a read-only agent may write before Joinery stops reading.
 REPLY_CHARS = 12_000
+#: Seconds the light model's first pass may take; the main model keeps its own.
+LIGHT_SECONDS = 45
 
 
 class RoleBridge(Protocol):
@@ -75,6 +80,7 @@ async def _run_role(
     bridge: BridgeFactory,
     endpoint: EndpointFactory,
     prepare: Callable[[RoleEndpoint], None] | None = None,
+    tier: str = "",
 ) -> tuple[list[dict[str, Any]], str, str]:
     """One read-only turn of ``role``: (its reports, its reply, the model it ran)."""
     serving = endpoint(gateway, role)
@@ -110,7 +116,7 @@ async def _run_role(
                 await child.close()
         with contextlib.suppress(Exception):
             await serving.close()
-        _record(gateway, role, agent, model, usage, clock)
+        _record(gateway, role, agent, model, usage, clock, tier)
     return list(serving.reports), "".join(parts), model
 
 
@@ -121,13 +127,14 @@ def _record(
     model: str,
     usage: Usage | None,
     clock: metrics.Clock,
+    tier: str = "",
 ) -> None:
     """The role's turn as one agent-turn span of the change. Its provider session
     is its own, so the totals it reported are all this turn's."""
     timing = gateway.timing
     if timing is None:
         return
-    attrs = metrics.agent_attributes(agent, role, usage.model if usage else "")
+    attrs = metrics.agent_attributes(agent, role, usage.model if usage else "", tier)
     attrs[metrics.REQUEST_MODEL] = model
     attrs[metrics.TASK] = gateway.task_id
     attrs.update(
@@ -178,7 +185,30 @@ class ReviewAgent:
         controller.review_seconds = settings.seconds
         return controller
 
-    def prompt(self, request: ReviewRequest, settings: ReviewerSettings) -> Prompt:
+    @property
+    def routing(self) -> RoutingSettings:
+        return routing_settings(self.gateway.project)
+
+    def plan(self, request: ReviewRequest) -> ReviewPlan:
+        """Skip the review (``[agents] review``), give a light model the first pass on
+        a low-risk change (``light_model``), or the main model; and its time."""
+        settings, routing = self.settings, self.routing
+        route = review_route(routing, request.risk, self.agent)
+        if route == "skip":
+            message = (
+                'Reviewer off for this project ([agents] review = "never").'
+                if routing.review == "never"
+                else skip_message(request.risk)
+            )
+            return ReviewPlan("skip", 0.0, message)
+        seconds = float(settings.seconds)
+        if route == "light":
+            seconds += min(LIGHT_SECONDS, settings.seconds)
+        return ReviewPlan(route, seconds)
+
+    def prompt(
+        self, request: ReviewRequest, settings: ReviewerSettings, model: str = ""
+    ) -> Prompt:
         previous = (
             "; last round you asked for: "
             + " | ".join(note.text for note in request.previous)
@@ -200,8 +230,11 @@ class ReviewAgent:
             brief=request.brief or "(this project has no game brief)",
         )
         selection = dict(request.selection)
-        if settings.model:
-            selection["model"] = settings.model
+        if model or settings.model:
+            selection["model"] = model or settings.model
+            if model:
+                # The author's effort may not exist on the light model.
+                selection.pop("effort", None)
         return Prompt(
             text=parts["text"],
             rules=parts["rules"],
@@ -217,26 +250,83 @@ class ReviewAgent:
         settings = self.settings
         if not settings.enabled:
             return PeerReview("off")
+        plan = self.plan(request)
+        if plan.route == "skip":
+            return PeerReview("skipped", message=plan.message)
+        if plan.route == "light":
+            light = await self._review(
+                request,
+                settings,
+                model=self.routing.light_model(self.agent),
+                tier="light",
+                seconds=min(LIGHT_SECONDS, settings.seconds),
+            )
+            if not light.unsure():
+                return light
+            # A light model never decides alone: the main model reviews again.
+            main = await self._review(request, settings, tier="main")
+            main.escalated = True
+            main.elapsed_s += light.elapsed_s
+            return main
+        return await self._review(request, settings, tier="main")
+
+    async def _review(
+        self,
+        request: ReviewRequest,
+        settings: ReviewerSettings,
+        *,
+        model: str = "",
+        tier: str,
+        seconds: float = 0.0,
+    ) -> PeerReview:
+        """One reviewer turn on ``model`` ("" for the main one)."""
         started = time.monotonic()
-        reports: list[dict[str, Any]] = []
-        reply = model = ""
+        result = await self._turn(
+            request, settings, model=model, tier=tier, seconds=seconds
+        )
+        if isinstance(result, PeerReview):
+            result.elapsed_s = time.monotonic() - started
+            return result
+        reports, reply, ran = result
+        notes = notes_from(reports[-1]) if reports else notes_in_text(reply)
+        elapsed = time.monotonic() - started
+        if notes is None:
+            return PeerReview(
+                "error",
+                message="The reviewer gave no findings, so this opened without its notes.",
+                elapsed_s=elapsed,
+                model=ran,
+                tier=tier,
+            )
+        return PeerReview("reviewed", notes, elapsed_s=elapsed, model=ran, tier=tier)
+
+    async def _turn(
+        self,
+        request: ReviewRequest,
+        settings: ReviewerSettings,
+        *,
+        model: str,
+        tier: str,
+        seconds: float,
+    ) -> tuple[list[dict[str, Any]], str, str] | PeerReview:
         try:
-            async with asyncio.timeout(settings.seconds):
-                reports, reply, model = await _run_role(
+            async with asyncio.timeout(seconds or settings.seconds):
+                return await _run_role(
                     self.gateway,
                     "reviewer",
                     agent=self.agent,
                     profile=self.profile,
-                    prompt=self.prompt(request, settings),
+                    prompt=self.prompt(request, settings, model),
                     bridge=self._bridge,
                     endpoint=self._endpoint,
+                    tier=tier,
                 )
         except TimeoutError:
             return PeerReview(
                 "timeout",
                 message="The reviewer ran out of time, so this opened without its notes.",
-                elapsed_s=time.monotonic() - started,
                 model=model or settings.model,
+                tier=tier,
             )
         except (
             OSError,
@@ -249,19 +339,9 @@ class ReviewAgent:
             return PeerReview(
                 "error",
                 message="The reviewer couldn't run, so this opened without its notes.",
-                elapsed_s=time.monotonic() - started,
                 model=model or settings.model,
+                tier=tier,
             )
-        notes = notes_from(reports[-1]) if reports else notes_in_text(reply)
-        elapsed = time.monotonic() - started
-        if notes is None:
-            return PeerReview(
-                "error",
-                message="The reviewer gave no findings, so this opened without its notes.",
-                elapsed_s=elapsed,
-                model=model,
-            )
-        return PeerReview("reviewed", notes, elapsed_s=elapsed, model=model)
 
 
 class Debugger:
