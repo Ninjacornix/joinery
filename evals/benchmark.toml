@@ -1,0 +1,150 @@
+# Ten typical requests on the testbed, to judge a harness change by its cost.
+#
+# Run with a pinned agent and model, before and after the change:
+#   uv run python evals/run.py --suite benchmark --live --agent claude --model <id>
+# Each run starts from a fresh copy of the testbed plus the case's seed files;
+# the report gives median wall time, tokens and rounds per case and overall.
+# A live run spends the agent's real tokens.
+
+[suite]
+name = "benchmark"
+project = "../testbed"
+repeats = 3
+
+[pin]
+# The agent and model every run uses; --agent / --model override. A live run
+# refuses to start without an agent.
+agent = ""
+model = ""
+effort = ""
+
+[[case]]
+id = "model-edit"
+kind = "model edit"
+request = "Make the door 20% wider. Keep its handle at the same height."
+expect = ["art/props/door.blend", "recipes/door.toml"]
+
+[[case]]
+id = "new-prop"
+kind = "new prop"
+request = "Add a small wooden stool beside the door, about knee height, made in Blender."
+expect = ["art/props/", "main.tscn", "joinery.lock"]
+
+[[case]]
+id = "texture-recolour"
+kind = "texture recolour"
+request = "Make the stone floor tiles a warmer, sandier colour; keep the pattern."
+expect = ["art/materials/stone_tiles.blend", "art/materials/stone_tiles_albedo.png"]
+
+[[case]]
+id = "sound"
+kind = "sound"
+request = "Make the door creak shorter and a little higher pitched."
+expect = ["recipes/sfx_door.scd", "audio/sfx/door_creak.wav"]
+
+[[case]]
+id = "animation-tweak"
+kind = "animation tweak"
+request = "The door in door_swing.tscn opens too slowly. Make it open in half the time."
+expect = ["game/door_swing.tscn"]
+
+[case.seed]
+"game/door_swing.tscn" = '''
+[gd_scene load_steps=3 format=3]
+
+[sub_resource type="Animation" id="Animation_open"]
+resource_name = "open"
+length = 1.2
+tracks/0/type = "value"
+tracks/0/imported = false
+tracks/0/enabled = true
+tracks/0/path = NodePath("Hinge:rotation")
+tracks/0/interp = 1
+tracks/0/loop_wrap = true
+tracks/0/keys = {
+"times": PackedFloat32Array(0, 1.2),
+"transitions": PackedFloat32Array(1, 1),
+"update": 0,
+"values": [Vector3(0, 0, 0), Vector3(0, -1.5708, 0)]
+}
+
+[sub_resource type="AnimationLibrary" id="AnimationLibrary_door"]
+_data = {
+&"open": SubResource("Animation_open")
+}
+
+[node name="DoorSwing" type="Node3D"]
+
+[node name="Hinge" type="Node3D" parent="."]
+
+[node name="AnimationPlayer" type="AnimationPlayer" parent="."]
+libraries = {
+&"": SubResource("AnimationLibrary_door")
+}
+'''
+
+[[case]]
+id = "script-fix"
+kind = "script fix"
+request = "Pressing the interact key a second time never closes the door again. Fix door_toggle.gd."
+expect = ["game/door_toggle.gd"]
+
+[case.seed]
+"game/door_toggle.gd" = '''
+extends Node3D
+## Opens and closes the door with the interact key.
+
+@export var animation: AnimationPlayer
+var is_open: bool = false
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event.is_action_pressed(&"ui_accept"):
+		toggle()
+
+
+func toggle() -> void:
+	is_open = true
+	if is_open:
+		animation.play(&"open")
+	else:
+		animation.play_backwards(&"open")
+'''
+
+[[case]]
+id = "blockout"
+kind = "blockout"
+request = "Block out a small walled courtyard behind the room, with one archway leading to the door."
+expect = ["design/blockouts/", "game/"]
+
+[[case]]
+id = "kit-batch"
+kind = "kit batch"
+request = "Make five rocks from the rock kit, varied in size, to line the courtyard edge."
+expect = ["art/", "joinery.lock"]
+
+[[case]]
+id = "scene-layout"
+kind = "scene layout"
+request = "Turn the sun so the light comes in low through the doorway, and aim the camera at the door."
+expect = ["main.tscn"]
+
+[[case]]
+id = "ui-text"
+kind = "UI text"
+request = "Change the HUD prompt to say \"Press E to open the door\"."
+expect = ["ui/hud.tscn"]
+
+[case.seed]
+"ui/hud.tscn" = '''
+[gd_scene format=3]
+
+[node name="Hud" type="CanvasLayer"]
+
+[node name="Prompt" type="Label" parent="."]
+offset_left = 24.0
+offset_top = 24.0
+offset_right = 240.0
+offset_bottom = 48.0
+text = "Press E to open"
+'''
