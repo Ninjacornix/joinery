@@ -3,7 +3,8 @@ extends SceneTree
 ## the dock's edges. The header's last icon glyph, the readiness line and "Check again", the
 ## user's bubble, the reply, the review row, a check card, the footer and "Show review", and
 ## the composer share the same left and right edge; the transcript's scrollbar sits in the
-## gutter, and the header row starts SPACE.1 under the top edge.
+## gutter, and the header row starts SPACE.1 under the top edge. Settings' reviewer Model field
+## shows "Same as Journeyman" uncut.
 
 const WIDTHS: Array[int] = [340, 480, 1000]
 const HEIGHT := 760
@@ -172,5 +173,34 @@ func _measure(width: int) -> void:
 	_on(footer.get("_text"), "left", left, "Waiting for your review", width)
 	_on(footer.get("_show"), "right", right, "Show review", width)
 	_both(chat.get("_composer"), left, right, "The composer", width)
+	await _model_field(chat, width)
 	host.free()
+	await _frames(2)
+
+
+## Settings: the reviewer's Model field has room for "Same as Journeyman".
+func _model_field(chat: Control, width: int) -> void:
+	var settings: Node = chat.get("_settings")
+	settings.call("set_open", true)
+	await _frames(4)
+	var reviewer: Node = settings.find_child("ReviewerSetting", true, false)
+	_check(reviewer != null, "Settings shows the Reviewer agent (%d px)" % width)
+	if reviewer != null:
+		reviewer.call("apply_status", {"enabled": true, "model": ""})
+		await _frames(4)
+		var field: LineEdit = reviewer.get("model")
+		var font := field.get_theme_font("font")
+		var size := field.get_theme_font_size("font_size")
+		var text := font.get_string_size(field.placeholder_text, 0, -1, size).x
+		var box := field.get_theme_stylebox("normal")
+		var room := field.size.x - box.get_margin(SIDE_LEFT) - box.get_margin(SIDE_RIGHT)
+		_measured += 1
+		_check(
+			room >= text, "Model has %.0f px for %.0f of placeholder (%d px)" % [room, text, width]
+		)
+		_check(
+			field.get_global_rect().end.x <= chat.get_global_rect().end.x + 0.5,
+			"The Model field stays inside the sidebar (%d px)" % width
+		)
+	settings.call("set_open", false)
 	await _frames(2)

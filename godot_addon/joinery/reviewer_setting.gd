@@ -37,8 +37,12 @@ func _init() -> void:
 	model.editable = false
 	model.text_submitted.connect(func(_text: String) -> void: _save_model())
 	model.focus_exited.connect(_save_model)
-	# Under "Reviewer agent", so "Model" says enough and fits narrow sidebars.
-	model_row = UI.setting_row("Model", model)
+	# Under "Reviewer agent", so "Model" says enough. The field sits under its title at the full
+	# row width, so "Same as Journeyman" and a full model name show uncut in a narrow sidebar;
+	# the inset lines the title up with the setting rows'.
+	model_row = MarginContainer.new()
+	model_row.theme_type_variation = "JoineryInset"
+	model_row.add_child(UI.field("Model", model))
 	add_child(model_row)
 	set_process(false)
 
@@ -73,6 +77,7 @@ func apply_status(data: Dictionary) -> void:
 	_saved_model = str(data.get("model", ""))
 	if not model.has_focus():
 		model.text = _saved_model
+	model.tooltip_text = _saved_model if not _saved_model.is_empty() else model.placeholder_text
 	model.editable = true
 	model_row.visible = on
 
