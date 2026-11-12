@@ -49,6 +49,7 @@ from joinery import (
     team,
     tidy_cli,
     timeline,
+    update_cli,
 )
 from joinery.agents import all_agents
 from joinery.agents import get as get_agent
@@ -1058,6 +1059,16 @@ def _parser() -> argparse.ArgumentParser:
         "design", help="check the game design against its brief; list what breaks it"
     )
     design_cli.add_arguments(design_cmd)
+    update_cli.add_update(
+        commands.add_parser(
+            "update", help="check GitHub Releases for a newer Joinery; install it on request"
+        )
+    )
+    update_cli.add_verify(
+        commands.add_parser(
+            "verify", help="check a release archive's SHA-256 and Sigstore signature"
+        )
+    )
     tidy_cmd = commands.add_parser(
         "tidy", help="find what the game never uses; remove it as one reviewed change"
     )
@@ -1573,6 +1584,10 @@ def main(argv: list[str] | None = None) -> int:
         return design_cli.main(args)
     if args.command == "tidy":
         return tidy_cli.main(args)
+    if args.command == "update":
+        return update_cli.update(args)
+    if args.command == "verify":
+        return update_cli.verify(args)
     if args.command == "blockout":
         return blockout_command.main(args)
     if args.command == "puzzle":
