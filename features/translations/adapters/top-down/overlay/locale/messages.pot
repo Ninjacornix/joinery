@@ -440,6 +440,10 @@ msgstr ""
 msgid "Controls are back to the game's defaults."
 msgstr ""
 
+#: res://features/dialogue/dialogue_box.gd
+msgid "Press Accept to continue"
+msgstr ""
+
 #: res://features/online-play/adapter.gd
 #: res://game/level.gd
 msgid "Wave %d"

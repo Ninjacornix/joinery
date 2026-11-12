@@ -439,6 +439,10 @@ msgstr ""
 msgid "Controls are back to the game's defaults."
 msgstr ""
 
+#: res://features/dialogue/dialogue_box.gd
+msgid "Press Accept to continue"
+msgstr ""
+
 #: res://features/online-play/lobby.gd
 #: res://features/online-play/net.gd
 msgid "Play online"
