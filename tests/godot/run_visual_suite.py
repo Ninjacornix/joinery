@@ -153,6 +153,9 @@ EDITOR_SCREENS = (
     "timeline-entry",
     "timeline-restored",
     "timeline-start",
+    "timeline-team",
+    "review-team",
+    "settings-team",
     "share-empty",
     "share-built",
     "share-steam",
@@ -437,6 +440,7 @@ def editor(theme: str, capture: Path, logs: Path) -> Harness:
         shutil.copyfile(TESTS / "visual_review.gd", check / "visual_review.gd")
         shutil.copyfile(TESTS / "visual_share.gd", check / "visual_share.gd")
         shutil.copyfile(TESTS / "visual_tour.gd", check / "visual_tour.gd")
+        shutil.copyfile(TESTS / "visual_team.gd", check / "visual_team.gd")
         (check / "plugin.cfg").write_text(
             '[plugin]\nname="Visual check"\ndescription="Test"\nauthor="Joinery"\n'
             'version="1"\nscript="test.gd"\n'

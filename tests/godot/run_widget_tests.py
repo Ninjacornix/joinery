@@ -66,6 +66,8 @@ CASES = {
     "tour_test.gd": "tour: ok",
     # Last: it puts the shared disposable project under git.
     "timeline_test.gd": "timeline: ok",
+    # After the timeline: it shares the same project through a local bare remote.
+    "team_test.gd": "team: ok",
 }
 #: Cases that need a game made from a blueprint (the real `joinery feature` CLI runs there).
 GAME_CASES = {"sidebar_feature_test.gd"}
