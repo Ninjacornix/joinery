@@ -195,6 +195,51 @@ def registry_allowed(role: str, tool: str) -> bool:
     return tool in allowed
 
 
+# --- What each role is offered --------------------------------------------------------
+
+#: Every tool the joinery-registry MCP proxy serves (servers.joinery_registry.proxy).
+REGISTRY_TOOLS: tuple[str, ...] = (
+    "discover_tools",
+    "tool_schema",
+    "edit_scene",
+    "inspect_editor",
+    "view_editor",
+    "inspect_in_parallel",
+    "submit_for_review",
+    "start_task",
+    "start_variants",
+    "task_status",
+    "playtest",
+    "access_check",
+    "perf_check",
+    "blockout",
+    "sound_audit",
+    "report_review",
+    "report_design",
+    "report_diagnosis",
+    "reproduce_error",
+    "call_tool",
+)
+#: Judged per call by what it calls: a read-only role reaches audited reads only.
+CALL_TOOL = "call_tool"
+
+
+def offered_tools(role: str) -> frozenset[str]:
+    """The joinery-registry tools listed to ``role``'s agent: what it may call, so a
+    read-only role never sees a writer's schema. Listing is not the gate: the policy
+    hook and the gateway still judge every call (``role_violation``, GatewayRPC)."""
+    if spec(role).read_only:
+        return frozenset(spec(role).registry | {CALL_TOOL}) & frozenset(REGISTRY_TOOLS)
+    return frozenset(t for t in REGISTRY_TOOLS if registry_allowed(role, t))
+
+
+# --- Provider built-in tools offered to read-only roles -------------------------------
+
+#: Claude Code's built-in tools a read-only role is offered (``claude --tools``): its
+#: reads, and Bash, which the hook holds to read-only commands.
+CLAUDE_READ_TOOLS: tuple[str, ...] = ("Read", "Grep", "Glob", "Bash")
+
+
 # --- Read-only shell ------------------------------------------------------------------
 
 _SEGMENTS = re.compile(r"&&|\|\||[;|\n]")

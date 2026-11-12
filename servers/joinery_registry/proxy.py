@@ -11,7 +11,7 @@ from mcp.server import MCPServer
 from mcp.types import CallToolResult, ImageContent, TextContent, ToolAnnotations
 from pydantic import BaseModel, Field
 
-from joinery import chat_attachments
+from joinery import chat_attachments, roles
 from joinery.blockout.layout import Layout
 from joinery.editor_ops import SceneEdit
 from joinery.gateway_rpc import rpc
@@ -47,14 +47,25 @@ class DesignFindingArgument(BaseModel):
     fix: Annotated[str, Field(max_length=600)] = ""
 
 
-def make_server(socket: Path) -> MCPServer[Any]:
+#: The server's instructions: the same bytes for every agent of a role.
+WRITER_INSTRUCTIONS = (
+    "Use discover_tools to check real connected capabilities, then tool_schema before calling a tool. "
+    "Mutations are staged; call submit_for_review when the change is complete. "
+    "Never claim staged changes are accepted or saved."
+)
+READER_INSTRUCTIONS = (
+    "Use discover_tools to check real connected capabilities, then tool_schema before calling a tool. "
+    "This agent only reads: call_tool reaches read-only project tools."
+)
+
+
+def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
+    """The proxy's tools. With ``role`` (joinery.roles), only what that role may call
+    is listed, so a read-only agent never carries a writer's schemas; None lists all."""
+    reader = role is not None and roles.spec(role).read_only
     server: MCPServer[Any] = MCPServer(
         "joinery-registry",
-        instructions=(
-            "Use discover_tools to check real connected capabilities, then tool_schema before calling a tool. "
-            "Mutations are staged; call submit_for_review when the change is complete. "
-            "Never claim staged changes are accepted or saved."
-        ),
+        instructions=READER_INSTRUCTIONS if reader else WRITER_INSTRUCTIONS,
     )
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
@@ -294,14 +305,20 @@ def make_server(socket: Path) -> MCPServer[Any]:
             )
         return result
 
+    if role is not None:
+        offered = roles.offered_tools(role)
+        for name in roles.REGISTRY_TOOLS:
+            if name not in offered:
+                server.remove_tool(name)
     return server
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--socket", type=Path, required=True)
+    parser.add_argument("--role", choices=roles.ROLES, default=None)
     args = parser.parse_args()
-    make_server(args.socket).run()
+    make_server(args.socket, args.role).run()
 
 
 if __name__ == "__main__":
