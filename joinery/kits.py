@@ -141,6 +141,8 @@ class Kit:
     credit: str = ""
     #: Named parameter sets a shared kit brings: [{name, params, colours}].
     presets: tuple[Mapping[str, Any], ...] = ()
+    #: Project files the build reads (a user's own .blend), listed as recipe sources.
+    sources: tuple[str, ...] = ()
 
     def param(self, name: str) -> Param:
         for param in self.params:
@@ -179,7 +181,16 @@ def from_spec(
                 vary=raw.get("vary", ""),
             )
         )
-    fields = {k: spec[k] for k in ("id", "label", "summary", "folder")}
+    fields: dict[str, Any] = {k: spec[k] for k in ("id", "label", "summary", "folder")}
+    sources = spec.get("sources", ())
+    if not isinstance(sources, (list, tuple)) or not all(
+        isinstance(s, str)
+        and s.startswith("art/")
+        and ".." not in PurePosixPath(s).parts
+        for s in sources
+    ):
+        raise ValueError("A kit's sources are project files under art/.")
+    fields["sources"] = tuple(sources)
     return Kit(
         **{**fields, **extra},
         params=tuple(params),
@@ -647,6 +658,11 @@ async def make(project: Path, made: Plan, *, replacing: str = "") -> dict[str, A
                 f"{taken[0]} already exists. Choose another name, or change those "
                 "models with kit_edit."
             )
+    for needed in made.kit.sources:
+        if not confined(project, needed).is_file():
+            raise ValueError(
+                f"The {made.kit.label.lower()} kit builds from {needed}, which is missing."
+            )
     kept = {p: (project / p).read_bytes() for p in outputs if (project / p).is_file()}
     identifier = uuid.uuid4().hex
     recipes = project / "recipes"
@@ -658,6 +674,7 @@ async def make(project: Path, made: Plan, *, replacing: str = "") -> dict[str, A
         tool="blender",
         script=path.relative_to(project).as_posix(),
         outputs=tuple(outputs),
+        sources=made.kit.sources,
         note=(
             f"{made.kit.label} kit"
             + (f", {made.count} models" if made.count > 1 else "")

@@ -88,7 +88,11 @@ def project_kits(project: Path) -> dict[str, Kit]:
             spec = read_spec(source, path.name)
             kit_id = spec["id"] if spec["id"] not in builtin else f"own_{spec['id']}"
             found[kit_id] = _kit(
-                spec, source, id=kit_id, credit=f"this project ({path.name})"
+                spec,
+                source,
+                id=kit_id,
+                credit=f"this project ({path.name})",
+                presets=_presets(spec),
             )
         except (OSError, ValueError):
             continue
@@ -120,6 +124,26 @@ def project_kits(project: Path) -> dict[str, Kit]:
             except (OSError, ValueError):
                 continue
     return found
+
+
+def _presets(spec: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    """A project generator's own named parameter sets (SPEC["presets"])."""
+    found = []
+    for row in spec.get("presets") or ():
+        if (
+            isinstance(row, dict)
+            and isinstance(row.get("name"), str)
+            and isinstance(row.get("params", {}), dict)
+            and isinstance(row.get("colours", {}), dict)
+        ):
+            found.append(
+                {
+                    "name": row["name"],
+                    "params": dict(row.get("params", {})),
+                    "colours": dict(row.get("colours", {})),
+                }
+            )
+    return tuple(found)
 
 
 def _kit(spec: dict[str, Any], source: str, **extra: Any) -> Kit:
