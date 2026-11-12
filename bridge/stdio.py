@@ -243,7 +243,7 @@ async def _serve(
         ok = False
         try:
             payload = edit.model_dump(mode="json")
-            # A model made in this change is loaded from its stage (ADR 0054).
+            # A model made in this change is loaded from its stage (ADR 0055).
             staged = await lane.staged_files(payload)
             editor_calls[request_id] = future
             emit(

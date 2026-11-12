@@ -12,7 +12,7 @@ file, and the live editor is handed the stage's own imported copy of each file
 only the change has (:func:`staged_only`, :func:`imported_file`). The scene keeps
 the project path (``res://art/…``), which exists once the change is accepted.
 Shared core: every provider's live edits and staged Godot calls come through
-the gateway (ADR 0054).
+the gateway (ADR 0055).
 """
 
 from __future__ import annotations

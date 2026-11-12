@@ -33,7 +33,7 @@ func pending() -> bool:
 
 # gdlint: disable=max-returns
 ## [param staged] maps a res:// path only the change's stage has to the stage's own loadable
-## copy, so a model made in the same change can be placed (ADR 0054).
+## copy, so a model made in the same change can be placed (ADR 0055).
 func preview(
 	scene: Node, payload: Dictionary, expected: Dictionary, targets: Array, staged: Dictionary = {}
 ) -> Dictionary:

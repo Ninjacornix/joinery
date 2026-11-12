@@ -1,4 +1,4 @@
-"""A model made in a change is placed in the same change (ADR 0054).
+"""A model made in a change is placed in the same change (ADR 0055).
 
 The stage starts without Godot's import cache and the editor's res:// is the
 project, so a model exported into the stage could be neither loaded by the

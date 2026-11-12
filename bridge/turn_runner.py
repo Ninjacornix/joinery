@@ -180,7 +180,7 @@ async def _stream(
                 )
                 continue
             try:
-                # A model made in this change is loaded from its stage (ADR 0054).
+                # A model made in this change is loaded from its stage (ADR 0055).
                 staged = await gateway.staged_files(dict(event.payload))
             except ValueError as exc:
                 controller.record_live_edit(scene, False)
