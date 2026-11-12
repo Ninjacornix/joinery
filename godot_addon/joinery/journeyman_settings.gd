@@ -382,6 +382,13 @@ static func _editor_settings() -> EditorSettings:
 
 func _build_replies() -> void:
 	var section := _section("Replies")
+	# Which agent Journeyman runs (Codex, Claude Code, …): the same Connect screen the banner
+	# opens, picked on the current agent; choosing another restarts the chat with it.
+	var agent := UI.row_button("Switch agent")
+	agent.tooltip_text = "Connect Journeyman to Codex, Claude Code, Gemini CLI or opencode"
+	agent.pressed.connect(_run.bind("connect"))
+	_flush_row(agent)
+	section.body.add_child(agent)
 	_mode_picker = UI.picker(MODES)
 	_flush_picker(_mode_picker)
 	for index: int in MODES.size():
@@ -790,6 +797,9 @@ func _run(command: String) -> void:
 	if command == "reconnect":
 		if dock.has_signal("reconnect_requested"):
 			dock.emit_signal("reconnect_requested")
+	elif command == "connect":
+		if dock.has_signal("connect_requested"):
+			dock.emit_signal("connect_requested")
 	elif dock.has_method("run_command"):
 		dock.call("run_command", command)
 
