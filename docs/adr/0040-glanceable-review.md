@@ -148,7 +148,7 @@ the title, facts, Details and actions each took a full-width row of height.
     itself, so a review opening while the user types cannot be decided by a stray key. A
     accepts, D discards, B flips Before and After, Left and Right go to the previous or next
     change waiting, Escape closes Details. With a clicked animation, Space and Left/Right keep
-    playing and stepping frames; the filmstrip keeps Left/Right between its tiles. The hints are
+    playing and stepping frames. The hints are
     in the tooltips. Enter, Backspace and Delete no longer decide (Enter on a focused button
     still presses it).
 
@@ -157,3 +157,36 @@ rather than their own, so the stage can shrink as well as grow. Reduce motion ma
 the crossfade and the transport's fade instant. A rail crowded by many notes or ways scrolls in
 its middle; the actions never scroll away. Ask for changes while a review waits queues the
 message like any other (the composer says so); it does not discard the change.
+
+## Addendum: a list of files, and pictures in their own shape (2026-11-12)
+
+A model change with sixteen textures and its `.blend` came out as a filmstrip of small tiles
+whose names only showed in tooltips, square textures sat in a wide frame between two dark
+bands, and the Before/After pill lay over the top of tall pictures.
+
+1. **A list of files beside the preview** (`review_files.gd`, laid out by `review_split.gd`)
+   replaces the filmstrip for a change with several files. One row per file down the leading
+   side of the stage: a small square thumbnail (the file's picture, else its kind's glyph or
+   file type), the whole name (wrapped after its underscores, never cut short) and a quiet mark,
+   New, Changed or Removed. The model or source comes first with its part views, clips and
+   textures grouped under it (the only model, else the one whose name starts the texture's or
+   that shares its folder; `review_items.gd`'s `grouped`), then the other files, text last. The
+   shown row is filled with the accent tint; a long list scrolls and keeps it in view. Up and
+   Down move through the files once the review has the focus; Left and Right still step through
+   the changes waiting. The preview fills the rest; a single file keeps the whole stage.
+2. **Narrow, the list folds above the preview** (below 36 em of stage): at most 30% of the
+   stage's height and never less than one row, so the preview keeps its room and Accept and
+   Discard stay on screen.
+3. **No bands around a picture of another shape.** A picture with a background of its own (an
+   even edge colour) fills the frame with it, as clips and model renders already did; a split
+   pair on one background does too. A picture without one (a real texture) leaves the frame
+   unfilled, so it sits on the panel in its own shape, square, wide or tall.
+4. **The pill never covers the media.** When the media, fitted to the whole frame in its own
+   shape, would reach under the pill, it gives up a strip at the top as tall as the pill and
+   its margin (`review_sides.gd`'s `clearance`). The decision depends on the media's shape and
+   the frame alone, so the strip does not flicker as the media shrinks into it; a wide picture
+   that leaves room above it keeps the full height.
+
+Consequences: a texture grouped under the wrong model is still one click away and its full path
+is in the row's tooltip. A picture without an even background shows the panel around it rather
+than a frame, so a texture with transparent pixels shows the panel through them.
