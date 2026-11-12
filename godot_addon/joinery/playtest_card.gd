@@ -68,6 +68,8 @@ var _map: Control
 var _layers: HBoxContainer
 var _layer_buttons: Dictionary = {}
 var _runs_text: Label
+## The legend's "not reached" square: it follows the map's unreached tone.
+var _missed_key: ColorRect
 var _seconds := 0.0
 
 
@@ -153,7 +155,9 @@ func _init(identifier := "") -> void:
 	var gap := Control.new()
 	STYLE.on_theme(gap, func() -> void: gap.custom_minimum_size.x = float(UI_THEME.space(gap, 1)))
 	legend.add_child(gap)
-	legend.add_child(_swatch("danger", MAP.MISSED_ALPHA))
+	_missed_key = _swatch("danger", MAP.MISSED_ALPHA)
+	_missed_key.theme_changed.connect(_sync_key)
+	legend.add_child(_missed_key)
 	var key := UI.label("not reached", "JoineryCaption")
 	key.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	legend.add_child(key)
@@ -371,6 +375,17 @@ func _show_heat(heat: Dictionary) -> void:
 	)
 	_runs_text.tooltip_text = "Deaths, stuck points and time spent, added up over these runs"
 	_layers.visible = any
+	_sync_key()
+
+
+## The "not reached" square in the tone the map draws it in now.
+func _sync_key() -> void:
+	if _map == null or not _missed_key.is_inside_tree():
+		return
+	var heat := bool(_map.call("heat_shown"))
+	var colour := UI_THEME.color(_missed_key, "text_faint" if heat else "danger")
+	colour.a = MAP.HEAT_MISSED_ALPHA if heat else MAP.MISSED_ALPHA
+	_missed_key.color = colour
 
 
 func _layer_toggle(layer: String) -> Button:
@@ -384,7 +399,11 @@ func _layer_toggle(layer: String) -> Button:
 	toggle.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	UI.bind_height(toggle, "sm", false)
 	UI_MOTION.press_feedback(toggle)
-	toggle.toggled.connect(func(on: bool) -> void: _map.call("set_layer", layer, on))
+	toggle.toggled.connect(
+		func(on: bool) -> void:
+			_map.call("set_layer", layer, on)
+			_sync_key()
+	)
 	toggle.hide()
 	return toggle
 
@@ -398,7 +417,7 @@ static func _percent(value: float) -> String:
 
 
 ## A small square of the map's colour [param role], for the legend.
-func _swatch(role: String, alpha: float) -> Control:
+func _swatch(role: String, alpha: float) -> ColorRect:
 	var swatch := ColorRect.new()
 	swatch.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	swatch.size_flags_vertical = Control.SIZE_SHRINK_CENTER

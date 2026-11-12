@@ -189,10 +189,18 @@ func _init(card_kind := "match") -> void:
 	STYLE.hug_left(_more)
 	_more.pressed.connect(_show_all)
 	_more.hide()
-	column.add_child(_more)
 	if kind == "access":
+		# Show all and the guidelines share a line, so the closed card is no taller.
+		var links := HBoxContainer.new()
+		links.theme_type_variation = "JoineryRowTight"
+		column.add_child(links)
+		links.add_child(_more)
 		guidelines = GUIDELINES.new()
+		links.add_child(guidelines.get("head"))
 		column.add_child(guidelines)
+		guidelines.connect("opened", _by_guideline)
+	else:
+		column.add_child(_more)
 	# Fix all and its two counts on one line; in a narrow sidebar the counts flow onto the next.
 	_foot = HFlowContainer.new()
 	STYLE.on_theme_overrides(
@@ -258,6 +266,8 @@ func show_audit(data: Dictionary) -> void:
 	_fill_findings(findings)
 	if guidelines != null:
 		guidelines.call("show_xag", (data.get("facts", {}) as Dictionary).get("xag", {}), findings)
+		if guidelines.visible:
+			_by_guideline(true)
 	fix_all.text = "Fix %d %s" % [fixable, "thing" if fixable == 1 else "things"]
 	fix_all.visible = fixable > 0
 	var needs := findings.size() - fixable
@@ -307,9 +317,8 @@ func apply_run(event: Dictionary) -> void:
 			_findings.visible = _findings.get_child_count() > 0
 			_areas.visible = not _area_rows.is_empty()
 			if guidelines != null:
-				guidelines.visible = not (
-					((audit.get("facts", {}) as Dictionary).get("xag", {}) as Dictionary).is_empty()
-				)
+				var xag: Dictionary = (audit.get("facts", {}) as Dictionary).get("xag", {})
+				(guidelines.get("head") as Control).visible = not xag.is_empty()
 			for id: String in _area_rows:
 				_show_fix(_area_rows[id]["fix"] as Button, false)
 			UI_MOTION.pulse(self)
@@ -576,6 +585,16 @@ func _finding_row(item: Dictionary) -> HBoxContainer:
 	return row
 
 
+## The guidelines open in place of the scores and findings, and close back to them.
+func _by_guideline(open: bool) -> void:
+	_areas.visible = not open and not _area_rows.is_empty()
+	_findings.visible = not open and _findings.get_child_count() > 0
+	var hidden_rows := false
+	for child: Node in _findings.get_children():
+		hidden_rows = hidden_rows or not (child as Control).visible
+	_more.visible = not open and hidden_rows
+
+
 func _show_all() -> void:
 	var shown: Array = []
 	for child: Node in _findings.get_children():
@@ -627,12 +646,14 @@ func _total(scores: Dictionary) -> int:
 
 ## While the changes run: the details step back; the task cards say what happens.
 func _quiet_details() -> void:
+	if guidelines != null:
+		# Closed first: closing brings the scores back, which step back just below.
+		guidelines.call("set_open", false)
+		(guidelines.get("head") as Control).hide()
 	_foot.hide()
 	_areas.hide()
 	_findings.hide()
 	_more.hide()
-	if guidelines != null:
-		guidelines.hide()
 	_again.hide()
 	stop.show()
 	close.hide()

@@ -1,11 +1,17 @@
 @tool
 extends VBoxContainer
 ## The accessibility card's findings by Xbox Accessibility Guideline (ADR 0067), under a
-## disclosure: "Xbox Accessibility Guidelines · 9 of 23 checked". Open, it lists what failed
+## disclosure, "Xbox guidelines  9 of 23 checked", that sits beside the card's Show all
+## ([member head]; the card places it). Open, it takes the place of the card's scores and
+## findings (the same findings, grouped the other way) and lists what failed
 ## first (each guideline opens to its findings in their own words), then what Joinery
 ## measured and found fine, then what it checks but didn't measure this time, and last one
 ## line naming the guidelines a person has to judge. The report's facts carry the list
-## (joinery/access_xag.py); the card only draws it.
+## (joinery/access_xag.py); the card only draws it. The list scrolls past a share of the
+## window's height, so the card never pushes the composer away.
+
+## The list opened or closed: the card swaps its scores and findings for it.
+signal opened(open: bool)
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
@@ -18,10 +24,15 @@ const STATUS := {
 	"not_run": [2, "off", "not measured"],
 	"not_checked": [3, "off", ""],
 }
+## The open list scrolls past this share of the window's height.
+const MAX_SHARE := 0.3
 
+## The disclosure and its count, for the card to place in its own row.
+var head: HBoxContainer
 var toggle: Button
 var _count: Label
 var _body: VBoxContainer
+var _scroll: ScrollContainer
 var _rows: VBoxContainer
 var _left: Label
 var _xag: Dictionary = {}
@@ -32,22 +43,30 @@ func _init() -> void:
 	theme_type_variation = "JoineryTight"
 	size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	accessibility_name = "Findings by Xbox Accessibility Guideline"
-	var head := HBoxContainer.new()
+	head = HBoxContainer.new()
 	head.theme_type_variation = "JoineryRowTight"
-	add_child(head)
-	toggle = UI.disclosure("Xbox Accessibility Guidelines")
-	toggle.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	toggle.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	head.alignment = BoxContainer.ALIGNMENT_END
+	head.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.hide()
+	toggle = UI.disclosure("Xbox guidelines")
+	toggle.accessibility_name = "Findings by Xbox Accessibility Guideline"
+	toggle.tooltip_text = "The findings filed under the Xbox Accessibility Guidelines"
+	toggle.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 	UI.bind_height(toggle, "xs")
 	head.add_child(toggle)
 	_count = UI.label("", "JoineryNumeric")
 	_count.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_count.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 	head.add_child(_count)
+	_scroll = ScrollContainer.new()
+	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	add_child(_scroll)
 	_body = VBoxContainer.new()
 	_body.theme_type_variation = "JoineryTight"
-	_body.hide()
-	add_child(_body)
+	_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_body.minimum_size_changed.connect(_fit)
+	_scroll.add_child(_body)
 	_rows = VBoxContainer.new()
 	_rows.theme_type_variation = "JoineryTight"
 	_body.add_child(_rows)
@@ -63,8 +82,9 @@ func show_xag(xag: Dictionary, findings: Array) -> void:
 	for child: Node in _rows.get_children():
 		child.queue_free()
 	var guidelines: Array = xag.get("guidelines", [])
-	visible = not guidelines.is_empty()
-	if not visible:
+	head.visible = not guidelines.is_empty()
+	if not head.visible:
+		set_open(false)
 		return
 	_count.text = "%d of %d checked" % [int(xag.get("checked", 0)), int(xag.get("total", 0))]
 	_count.tooltip_text = (
@@ -103,10 +123,22 @@ func show_xag(xag: Dictionary, findings: Array) -> void:
 ## Open or close the list.
 func set_open(open: bool) -> void:
 	toggle.set_pressed_no_signal(open)
-	_body.visible = open
+	var changed := visible != open
+	visible = open
+	if changed:
+		opened.emit(open)
 	if open:
-		UI_MOTION.reveal(_body)
+		_fit()
+		UI_MOTION.reveal(self)
 		UI_MOTION.stagger(_rows.get_children())
+
+
+## The list is as tall as its rows, up to a share of the window; past that it scrolls.
+func _fit() -> void:
+	if not is_inside_tree():
+		return
+	var limit := get_viewport_rect().size.y * MAX_SHARE
+	_scroll.custom_minimum_size.y = minf(_body.get_combined_minimum_size().y, limit)
 
 
 ## Each listed guideline as shown: "102 Contrast · 2 problems", "101 Text display · passes".

@@ -19,6 +19,8 @@ const HEIGHT_UNITS := 96.0
 const MISSED_ALPHA := 0.72
 ## The heat layers, in drawing order.
 const LAYERS: Array[String] = ["time", "deaths", "stuck"]
+## The unreached floor while a heat layer shows: floor only.
+const HEAT_MISSED_ALPHA := 0.22
 ## Time spent: the faintest and strongest wash.
 const TIME_ALPHA := Vector2(0.18, 0.85)
 
@@ -123,7 +125,8 @@ func _fit() -> void:
 	custom_minimum_size = Vector2(0, ceilf(side * _rows))
 
 
-func _heat_shown() -> bool:
+## Whether a heat layer with anything on it shows.
+func heat_shown() -> bool:
 	for layer: String in LAYERS:
 		if layer_on(layer) and layer_cells(layer) > 0:
 			return true
@@ -139,7 +142,7 @@ func _draw() -> void:
 	)
 	if side <= 0.0:
 		return
-	var heat := _heat_shown()
+	var heat := heat_shown()
 	var reached := UI_THEME.color(self, "text_muted")
 	reached.a = 0.32
 	var missed := UI_THEME.color(self, "danger")
@@ -147,7 +150,7 @@ func _draw() -> void:
 	if heat:
 		# The heat reads first: unreached floor is only floor now.
 		missed = UI_THEME.color(self, "text_faint")
-		missed.a = 0.22
+		missed.a = HEAT_MISSED_ALPHA
 	var gap := 1.0 if side >= 4.0 else 0.0
 	for row: int in _rows:
 		var line := _grid[row]

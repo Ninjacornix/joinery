@@ -104,7 +104,7 @@ func _run() -> void:
 
 	# The same findings by Xbox Accessibility Guideline, with what Joinery checks.
 	var guide: Control = card.get("guidelines")
-	_check(guide != null and guide.visible, "The guidelines show under the findings")
+	_check(guide != null and (guide.get("head") as Control).visible, "The guidelines are offered")
 	_check(guide.call("coverage_text") == "9 of 23 checked", guide.call("coverage_text"))
 	var listed: PackedStringArray = guide.call("row_words")
 	_check(listed[0] == "101 Text display · 1 problem", "Failing first: %s" % listed)
@@ -118,6 +118,7 @@ func _run() -> void:
 		guide.call("left_text")
 	)
 	guide.call("set_open", true)
+	_check(not (card.get("_areas") as Control).visible, "The list takes the scores' place")
 	var opener := _button(guide, "102 Contrast")
 	_check(opener != null, "A failing guideline opens")
 	opener.button_pressed = true
@@ -128,6 +129,9 @@ func _run() -> void:
 	_check(
 		shown.has('main.tscn: "Score: 12" (#777777 on #888888) has contrast 1.3:1.'), "%s" % shown
 	)
+	(guide.get("toggle") as Button).button_pressed = false
+	_check((card.get("_areas") as Control).visible, "Closing brings the scores back")
+	_check((card.get("_more") as Control).visible, "and Show all")
 
 	# A feature-only area: its Fix opens the feature's plan; nothing goes to the host.
 	(card.call("area_fix", "captions") as Button).pressed.emit()
