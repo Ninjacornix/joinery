@@ -150,7 +150,13 @@ def _check(result: Completed, marker: str | None, *, xr: bool = False) -> Comple
         if not found:
             problems.append(f"missing marker {marker + ': ok' if marker else '<name>: ok'}")
     if problems:
-        tail = "\n".join(result.output.splitlines()[-60:])
+        lines = result.output.splitlines()
+        # The harness prints "FAIL: ..." on stdout, ahead of stderr's warnings; keep
+        # those lines even when the warnings push them out of the tail.
+        failed = [line for line in lines if line.startswith("FAIL:")][:20]
+        if failed:
+            problems.append("failed: " + "; ".join(failed))
+        tail = "\n".join(lines[-60:])
         raise AssertionError(
             f"{' '.join(result.args)}\n{', '.join(problems)}\n--- output ---\n{tail}"
         )
