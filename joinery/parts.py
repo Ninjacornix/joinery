@@ -1,8 +1,11 @@
-"""Parts of a model the user can pick: objects, materials and texture maps.
+"""Parts of a model the user can pick: objects, materials, maps, and a character's body.
 
 A part is one named piece inside a native source document: an object of a
 Blender model, a material, an image a material uses (with the role it plays:
-base colour, roughness, normal, height and so on), a bone or a shape key. The
+base colour, roughness, normal, height and so on), a bone or a shape key. A
+character also has body regions (head, shoulders, arms ...: the vertices its
+deform bones weigh most, `blender_regions`) and, for an MPFB2 human, its body
+settings (MPFB2's macros: muscle, weight, age ...). The
 owning tool reports them by name; Joinery never guesses them from the game's
 copy, because Godot renames nodes (``Head.001`` becomes ``Head_001``) and glTF
 cannot carry some maps at all (a height map).
@@ -22,6 +25,7 @@ import argparse
 import asyncio
 import hashlib
 import json
+import re
 import sys
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
@@ -32,13 +36,40 @@ from pydantic import BaseModel, ConfigDict
 
 from joinery import tools
 from joinery.recipe import load_recipe, recipe_paths
+from joinery.tools.blender_export import ExportShapeKeys, is_macro_key
+from joinery.tools.blender_regions import (
+    MACROS,
+    REGION_MACROS,
+    REGION_TARGETS,
+    REGIONS,
+    WORN_ROLES,
+    region_of,
+)
 
-PartKind = Literal["object", "material", "texture", "bone", "shape_key", "animation"]
+PartKind = Literal[
+    "object",
+    "material",
+    "texture",
+    "bone",
+    "shape_key",
+    "animation",
+    "region",
+    "body_shape",
+]
 #: Where the editor and gateway put a prompt's part targets for the tool servers.
 TARGETS_FILE = ".joinery/part_targets.json"
 CACHE_DIR = ".joinery/parts"
 #: Part id fields, in the order they appear in an id.
-ID_FIELDS = ("object", "material", "image", "bone", "shape_key", "action")
+ID_FIELDS = (
+    "object",
+    "material",
+    "image",
+    "bone",
+    "shape_key",
+    "action",
+    "region",
+    "parameter",
+)
 #: How each map role reads in the editor.
 ROLE_NAMES = {
     "base_color": "Base colour",
@@ -59,14 +90,18 @@ IDENTITY: dict[str, tuple[str, ...]] = {
     "shape_key": ("object", "shape_key"),
     # Action names are unique in a model; a chip from Godot may not know the rig.
     "animation": ("action",),
+    "region": ("object", "region"),
+    "body_shape": ("object", "parameter"),
 }
 #: Typed operations per part kind (maps depend on the map; see Part.ops).
 PART_OPS: dict[str, tuple[str, ...]] = {
     "object": ("transform_parts",),
     "material": ("set_material_value", "split_material"),
     "bone": ("edit_bone",),
-    "shape_key": ("edit_shape_key",),
+    "shape_key": ("edit_shape_key", "bake_shape_keys"),
     "animation": ("edit_action", "make_cycle"),
+    "region": ("edit_bone",),
+    "body_shape": ("set_body_shape",),
 }
 KIND_NAMES = {
     "object": "Object",
@@ -75,6 +110,8 @@ KIND_NAMES = {
     "bone": "Bone",
     "shape_key": "Shape key",
     "animation": "Animation",
+    "region": "Body region",
+    "body_shape": "Body setting",
 }
 
 
@@ -119,10 +156,31 @@ class Part(BaseModel):
     seconds: str = ""
     loop: bool = False
     animation_kind: str = ""
+    #: A body region ("shoulders") of a character mesh, with the bones that
+    #: move it and how many of the mesh's vertices it holds.
+    region: str = ""
+    bones: tuple[str, ...] = ()
+    vertices: int = 0
+    #: A bone's region; the regions a shape key moves.
+    regions: tuple[str, ...] = ()
+    #: MPFB2: a body setting (a macro such as "muscle") and its value; the
+    #: targets and macros that shape a region.
+    parameter: str = ""
+    value: str = ""
+    targets: tuple[str, ...] = ()
+    macros: tuple[str, ...] = ()
+    #: What MPFB2 made an object as ("basemesh", "clothes", "hair"); a shape
+    #: key's role ("body": an MPFB2 body shape the export bakes, or
+    #: "expression"); whether the game's GLB has the key as a morph target.
+    object_role: str = ""
+    shape_role: str = ""
+    in_game: bool = False
 
     @property
     def ops(self) -> tuple[str, ...]:
         """The typed operations that change this part (joinery-blender-ops)."""
+        if self.part_kind == "region" and self.targets:
+            return ("set_body_shape", "edit_bone")
         if self.part_kind == "texture":
             found = ["adjust_map", "make_map_editable", "replace_map"]
             if self.editable.endswith(".kra"):
@@ -166,8 +224,19 @@ class Part(BaseModel):
             "fps",
             "seconds",
             "animation_kind",
+            "region",
+            "parameter",
+            "value",
+            "object_role",
+            "shape_role",
         ):
             flat[key] = str(getattr(self, key))
+        flat["vertices"] = str(self.vertices) if self.vertices else ""
+        flat["bones"] = ",".join(self.bones)
+        flat["regions"] = ",".join(self.regions)
+        flat["targets"] = ",".join(self.targets)
+        flat["macros"] = ",".join(self.macros)
+        flat["in_game"] = "true" if self.in_game else ""
         flat["loop"] = "true" if self.loop else ""
         flat["roles"] = ",".join(self.roles)
         flat["used_by"] = ",".join(self.used_by)
@@ -217,6 +286,10 @@ class PartsReport(BaseModel):
 
 
 def _kind_from_fields(fields: Mapping[str, str]) -> str:
+    if fields.get("region"):
+        return "region"
+    if fields.get("parameter"):
+        return "body_shape"
     if fields.get("action"):
         return "animation"
     if fields.get("image"):
@@ -279,6 +352,12 @@ def chip_label(target: Mapping[str, str]) -> str:
         return f"{target.get('shape_key', '')} · {obj or model}"
     if kind == "animation":
         return f"{target.get('action', '')} · {model}"
+    if kind == "region":
+        region = str(target.get("region", ""))
+        return f"{REGIONS.get(region, region.capitalize())} · {obj or model}"
+    if kind == "body_shape":
+        parameter = str(target.get("parameter", ""))
+        return f"{MACROS.get(parameter, parameter)} · {obj or model}"
     return f"{obj} · {model}"
 
 
@@ -290,6 +369,8 @@ def chip_tooltip(target: Mapping[str, str]) -> str:
         if target.get(key):
             crumbs.append(str(target[key]))
     if target.get("part_kind") == "texture":
+        crumbs.append(chip_label(target).split(" · ")[0])
+    if target.get("part_kind") in {"region", "body_shape"}:
         crumbs.append(chip_label(target).split(" · ")[0])
     for key in ("bone", "shape_key", "action"):
         if target.get(key):
@@ -335,36 +416,48 @@ def blender_parts(inspection: dict[str, Any], resource: str, source: str) -> lis
                 str(s["material"]) for s in obj.get("slots", []) if s.get("material")
             )
         )
+        role = str(obj.get("role", ""))
         found.append(
             Part(
                 id=part_id(resource, object=name),
                 part_kind="object",
                 object=name,
                 materials=slots,
+                object_role=role,
                 resource=resource,
                 source=source,
                 owner="blender",
             )
         )
+        found += _character_parts(obj, resource, source)
+        values = obj.get("shape_key_values", {})
+        moves = obj.get("shape_key_regions", {})
+        human = bool(obj.get("mpfb_macros"))
         for key in obj.get("shape_keys", [])[1:]:
+            key = str(key)
             found.append(
                 Part(
-                    id=part_id(resource, object=name, shape_key=str(key)),
+                    id=part_id(resource, object=name, shape_key=key),
                     part_kind="shape_key",
                     object=name,
-                    shape_key=str(key),
+                    shape_key=key,
+                    value=f"{float(values[key]):g}" if key in values else "",
+                    regions=tuple(str(r) for r in moves.get(key, [])),
+                    shape_role="body" if is_body_key(key, human) else "expression",
                     resource=resource,
                     source=source,
                     owner="blender",
                 )
             )
         for bone in obj.get("bones", []):
+            region = region_of(str(bone["name"]))
             found.append(
                 Part(
                     id=part_id(resource, object=name, bone=str(bone["name"])),
                     part_kind="bone",
                     object=name,
                     bone=str(bone["name"]),
+                    regions=(region,) if region else (),
                     resource=resource,
                     source=source,
                     owner="blender",
@@ -424,6 +517,83 @@ def blender_parts(inspection: dict[str, Any], resource: str, source: str) -> lis
                 )
             )
     return found
+
+
+#: An MPFB2 detail target's shape key: its target file's name ("l-hand-scale-incr").
+_TARGET_KEY = re.compile(r"[a-z0-9][a-z0-9-]*")
+
+
+def is_body_key(name: str, human: bool) -> bool:
+    """True for a body-shape key of an MPFB2 human: a macro, or a detail target by name.
+
+    The export knows MPFB2's targets from its files (`blender_export`); this
+    reads the names alone, which MPFB2 gives its targets and an expression
+    key ("smile", "!ex-mouth-open", "viseme_aa") rarely has.
+    """
+    if is_macro_key(name):
+        return True
+    return human and bool(_TARGET_KEY.fullmatch(name)) and "-" in name
+
+
+def _character_parts(obj: dict[str, Any], resource: str, source: str) -> list[Part]:
+    """Body regions of a character mesh and, for an MPFB2 human, its body settings."""
+    name = str(obj["name"])
+    if str(obj.get("role", "")) in WORN_ROLES:
+        return []
+    macros = obj.get("mpfb_macros") or {}
+    rows = obj.get("regions") or {}
+    found: list[Part] = []
+    for region in REGIONS:
+        row = rows.get(region)
+        if not isinstance(row, dict):
+            continue
+        found.append(
+            Part(
+                id=part_id(resource, object=name, region=region),
+                part_kind="region",
+                object=name,
+                region=region,
+                bones=tuple(str(b) for b in row.get("bones", [])),
+                vertices=int(row.get("vertices", 0)),
+                targets=REGION_TARGETS.get(region, ()) if macros else (),
+                macros=REGION_MACROS.get(region, ()) if macros else (),
+                object_role=str(obj.get("role", "")),
+                resource=resource,
+                source=source,
+                owner="blender",
+            )
+        )
+    for parameter in MACROS:
+        if parameter not in macros:
+            continue
+        found.append(
+            Part(
+                id=part_id(resource, object=name, parameter=parameter),
+                part_kind="body_shape",
+                object=name,
+                parameter=parameter,
+                value=f"{float(macros[parameter]):g}",
+                object_role=str(obj.get("role", "")),
+                resource=resource,
+                source=source,
+                owner="blender",
+            )
+        )
+    return found
+
+
+def mark_in_game(found: list[Part], chosen: ExportShapeKeys) -> list[Part]:
+    """Each shape key flagged by whether the model's export keeps it as a morph target."""
+    marked: list[Part] = []
+    for part in found:
+        if part.part_kind == "shape_key":
+            if chosen.keep is not None:
+                kept = part.shape_key in chosen.keep
+            else:
+                kept = chosen.keep_macros or part.shape_role != "body"
+            part = part.model_copy(update={"in_game": kept})
+        marked.append(part)
+    return marked
 
 
 def _animation_parts(
@@ -498,17 +668,31 @@ def cache_path(project: Path, digest: str) -> Path:
 
 
 def build_report(
-    inspection: dict[str, Any], tool: str, source: str, resource: str, digest: str
+    inspection: dict[str, Any],
+    tool: str,
+    source: str,
+    resource: str,
+    digest: str,
+    shape_keys: ExportShapeKeys | None = None,
 ) -> PartsReport:
     if tool not in PROVIDERS:
         raise ValueError(f"{tool} cannot list parts yet.")
+    found = PROVIDERS[tool](inspection, resource, source)
     return PartsReport(
         resource=resource,
         source=source,
         owner=tool,
         sha256=digest,
-        parts=PROVIDERS[tool](inspection, resource, source),
+        parts=mark_in_game(found, shape_keys or ExportShapeKeys()),
     )
+
+
+def _shape_keys(project: Path, tool: str, source: str) -> ExportShapeKeys | None:
+    if tool != "blender":
+        return None
+    from joinery.authoring import recorded_shape_keys
+
+    return recorded_shape_keys(project, source)
 
 
 def cached_report(project: Path, asset: str) -> PartsReport | None:
@@ -521,7 +705,14 @@ def cached_report(project: Path, asset: str) -> PartsReport | None:
     if not cached.is_file():
         return None
     data = json.loads(cached.read_text())
-    return build_report(data["inspection"], tool, source, resource, data["sha256"])
+    return build_report(
+        data["inspection"],
+        tool,
+        source,
+        resource,
+        data["sha256"],
+        _shape_keys(project, tool, source),
+    )
 
 
 async def report(project: Path, asset: str, *, refresh: bool = False) -> PartsReport:
@@ -534,13 +725,22 @@ async def report(project: Path, asset: str, *, refresh: bool = False) -> PartsRe
     cached = cache_path(project, digest)
     if cached.is_file() and not refresh:
         data = json.loads(cached.read_text())
-        return build_report(data["inspection"], tool, source, resource, digest)
+        return build_report(
+            data["inspection"],
+            tool,
+            source,
+            resource,
+            digest,
+            _shape_keys(project, tool, source),
+        )
     from joinery.authoring import inspect_document
 
     inspection = await inspect_document(project, tool, source)
     cached.parent.mkdir(parents=True, exist_ok=True)
     cached.write_text(json.dumps({"sha256": digest, "inspection": inspection}))
-    return build_report(inspection, tool, source, resource, digest)
+    return build_report(
+        inspection, tool, source, resource, digest, _shape_keys(project, tool, source)
+    )
 
 
 def as_json(found: PartsReport) -> dict[str, Any]:
@@ -669,7 +869,7 @@ def run(args: argparse.Namespace) -> int:
         return 0
     print(f"{found.source} ({found.owner})")
     for part in found.parts:
-        print(f"  {KIND_NAMES[part.part_kind]:<10} {part.label}")
+        print(f"  {KIND_NAMES[part.part_kind]:<12} {part.label}")
     return 0
 
 

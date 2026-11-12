@@ -201,6 +201,7 @@ def test_each_part_lists_the_operations_that_change_it() -> None:
     )
     assert report.find({"object": "Head.001", "shape_key": "Dent"}).ops == (
         "edit_shape_key",
+        "bake_shape_keys",
     )
     painted = _report("art/sources/maps/hammer/steel_rough.kra")
     target = painted.find({"material": "Steel", "image": "steel_rough"}).target()
