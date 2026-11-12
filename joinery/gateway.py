@@ -22,6 +22,7 @@ from joinery import (
     sound_kit,
     staged_assets,
     submission,
+    team,
 )
 from joinery import parts as part_targets
 from joinery import tools as tool_modules
@@ -241,7 +242,10 @@ class ProjectGateway:
                 previous = FileTransaction.load(self.project, journal.parent.name)
                 if previous.state == "committing":
                     previous.recover()
-                elif previous.state in {"staging", "review"}:
+                elif previous.state in {"staging", "review"} and not team.is_conflict(
+                    previous.directory
+                ):
+                    # A teammate's version waits for the user's choice across sessions.
                     previous.reject()
         except BaseException:
             self._lease.close()
@@ -301,6 +305,9 @@ class ProjectGateway:
         #: While others work: the stage's stat snapshot and the files it changed.
         self._watch: StageWatch | None = None
         self._changed: set[str] = set()
+        #: Teammates' recent changes said this turn, and those for the call now.
+        self._team_warned: set[str] = set()
+        self._team_notes: list[str] = []
 
     @property
     def is_lane(self) -> bool:
@@ -485,7 +492,14 @@ class ProjectGateway:
                     metrics.TASK: self.task_id,
                 },
             ) as attrs:
+                self._team_notes = []
                 result = await self._call(server, tool, arguments, view=view)
+                if self._team_notes:
+                    # Said before the agent's next step, and shown to the user.
+                    result.content = [
+                        TextContent(type="text", text=" ".join(self._team_notes)),
+                        *result.content,
+                    ]
                 attrs.update(metrics.worker_split(result.meta))
                 if result.is_error:
                     attrs[metrics.ERROR_TYPE] = "tool_error"
@@ -593,6 +607,8 @@ class ProjectGateway:
             path, title = self.claims.first_conflict(named, self.task_id)
             if path:
                 raise ValueError(refusal(path, title))
+        if not readonly and named:
+            self._team_check(named)
         connection = await self.connection(server)
         if server == "godot" and tool.startswith("game_") and not self.runtime_owned:
             raise ValueError(
@@ -946,9 +962,23 @@ class ProjectGateway:
             "kind": "art_gate",
             "needs_art_approval": True,
             "resume": self.request_summary,
-            "message": ART_GATE_MESSAGE,
+            "message": team.gate_message(self.project) or ART_GATE_MESSAGE,
         }
         return self.art_gate
+
+    def _team_check(self, named: set[str]) -> None:
+        """Teammates' work on the files a call names (ADR 0071): a teammate's
+        claim refuses the call; a recent change by a teammate is said first."""
+        held = team.teammate_claim(self.project, named)
+        if held is not None:
+            raise ValueError(team.claim_refusal(held))
+        for entry in team.recent(self.project, sorted(named)):
+            note = team.recent_note(entry)
+            if note in self._team_warned:
+                continue
+            self._team_warned.add(note)
+            self._team_notes.append(note)
+            self.progress(note)
 
     async def submit_checks(self, live_scenes: set[str]) -> submission.Validation:
         """Check the staged change as it stands now (``submission.validate``).
@@ -1250,6 +1280,9 @@ class ProjectGateway:
         if tx is None or tx.id != identifier:
             raise ValueError("This transaction is not pending in the current session.")
         await self.stop_media()
+        if accept:
+            # A pull from the Timeline may have moved this change on disk.
+            self._reload_review(tx)
         if accept and self._synced < self.claims.generation:
             # Another change was accepted since this one was staged.
             refresh_review(tx)
@@ -1293,6 +1326,17 @@ class ProjectGateway:
             )
             event["art_review"] = review(self.project)
         return event
+
+    @staticmethod
+    def _reload_review(tx: FileTransaction) -> None:
+        """Take the journal's base and changes when another process (a pull) brought
+        this change up to date since it was staged."""
+        try:
+            fresh = FileTransaction.load(tx.project, tx.id)
+        except (OSError, ValueError, KeyError):
+            return
+        if fresh.state == tx.state == "review":
+            tx.base, tx.changes = fresh.base, fresh.changes
 
     def rollback_decision(self, identifier: str) -> dict[str, Any]:
         """Compensate user acceptance when an accompanying live preview went stale.
