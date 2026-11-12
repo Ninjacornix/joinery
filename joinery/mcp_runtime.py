@@ -354,7 +354,7 @@ class MCPConnection:
         self.readiness.state = "starting"
         active: _Request | None = None
         try:
-            mode = "legacy" if self.spec.name in {"godot", "blender", "inkscape", "claude-collider"} else "auto"
+            mode = "legacy" if self.spec.name in {"godot", "blender", "inkscape", "audacity", "claude-collider"} else "auto"
             async with Client(parameters, read_timeout_seconds=30, mode=mode) as client:
                 self.readiness.state = "connected"
                 self.readiness.connected = True

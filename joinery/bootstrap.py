@@ -128,7 +128,11 @@ def setup(project: Path) -> dict[str, Any]:
                 continue
             try:
                 install(tool)
-                worker = {"blender": "blender", "inkscape": "inkscape"}.get(tool)
+                worker = {
+                    "blender": "blender",
+                    "inkscape": "inkscape",
+                    "audacity": "audacity",
+                }.get(tool)
                 if worker:
                     tag = "joinery-" + worker + "-worker"
                     readiness.mark_setup("build", tag)

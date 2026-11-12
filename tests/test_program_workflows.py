@@ -11,12 +11,12 @@ from joinery.mcp_runtime import ServerSpec
 from joinery.workspace import index, open_asset
 
 PROGRAMS = tuple(desktop.TOOLS)
-#: Desktop programs that are also catalog tools. The rest (Audacity) only open
-#: files by hand and are offered only when installed.
+#: Desktop programs that are also catalog tools. Any others only open files by
+#: hand and are offered only when installed.
 CATALOG_PROGRAMS = tuple(t for t in PROGRAMS if t in {c.id for c in load_catalog().tool})
 #: Servers whose pinned source is mounted from the host install. Godot's is
 #: baked into its worker image (tests/test_godot_worker.py).
-UPSTREAM = ("blender", "supercollider", "inkscape")
+UPSTREAM = ("blender", "supercollider", "inkscape", "audacity")
 
 
 @pytest.fixture
@@ -122,6 +122,7 @@ def installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
             "blender": ["mcp/blmcp/__main__.py"],
             "supercollider": ["dist/index.js"],
             "inkscape": ["src/inkscape_mcp/main.py", "uv.lock"],
+            "audacity": ["audacity_mcp/main.py"],
         }[tool]:
             path = source / entry
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -276,7 +277,7 @@ def test_project_setup_exposes_owning_first_party_mcp_only_when_selected(
     assert {spec.name for spec in unselected} == {"joinery-registry", "joinery-verify"}
 
 
-@pytest.mark.parametrize("tool", ["aseprite", "audacity", "reaper", "musescore"])
+@pytest.mark.parametrize("tool", ["aseprite", "reaper", "musescore"])
 def test_removed_tool_in_an_old_project_starts_no_server_and_cannot_be_installed(
     project: Path, monkeypatch: pytest.MonkeyPatch, tool: str
 ) -> None:

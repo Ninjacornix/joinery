@@ -36,7 +36,7 @@ def test_every_preferred_and_first_party_mcp_is_accounted_for() -> None:
     }
     actual = {server for plan in PROGRAMS.values() for server in plan.servers}
     assert actual == expected
-    assert len(actual) == 10
+    assert len(actual) == 11
 
 
 @pytest.mark.parametrize("program", sorted(PROGRAMS))

@@ -20,6 +20,7 @@ from joinery import readiness
 from joinery.catalog import load_catalog
 from joinery.readiness import Image, ProbeResult, lines, status
 from joinery.tools.base import (
+    AUDACITY_WORKER,
     BLENDER_WORKER,
     CREATIVE_WORKER,
     INKSCAPE_WORKER,
@@ -27,7 +28,7 @@ from joinery.tools.base import (
     McpProbe,
 )
 
-IMAGES = (CREATIVE_WORKER, MCP_WORKER, BLENDER_WORKER, INKSCAPE_WORKER)
+IMAGES = (CREATIVE_WORKER, MCP_WORKER, BLENDER_WORKER, INKSCAPE_WORKER, AUDACITY_WORKER)
 
 #: What a healthy worker prints, keyed by a fragment of the command.
 HEALTHY: dict[str, tuple[int, str]] = {
@@ -46,6 +47,8 @@ HEALTHY: dict[str, tuple[int, str]] = {
     "Surge XT.vst3": (0, "1.3.4\n"),
     "godot --version": (0, "4.7.2.stable.official.abcdef\n"),
     "joinery-surge --list": (0, '{"a/volume": 0.5}\n'),
+    "audacity-plugins/pluginregistry.cfg": (0, "3.7.3+dfsg-1\n"),
+    "joinery-audacity --check": (0, "JOINERY_AUDACITY_READY 3.7.3+dfsg-1 5.7\n"),
     "JOINERY_AUDIO_EDIT_OK": (0, "4\n1\nJOINERY_AUDIO_EDIT_OK\n"),
     "FluidR3_GM": (
         0,
@@ -169,6 +172,7 @@ def test_every_catalog_tool_is_ready_in_healthy_workers(host: FakeHost) -> None:
         "material-maker": "1.8",
         "supercollider": "3.13.0",
         "surge-xt": "1.3.4",
+        "audacity": "3.7.3",
     }
     assert tools["blender"]["summary"].startswith(
         "Blender 5.2.1 ready (offline worker). Rigify, MPFB2 humans"

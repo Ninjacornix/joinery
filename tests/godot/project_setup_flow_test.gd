@@ -745,7 +745,7 @@ func _check_rows(dialog: AcceptDialog) -> void:
 		"MIDI" in str(_readiness(_row(dialog, "surge-xt"))[3]),
 		"A ready Surge XT still says which of its features is missing"
 	)
-	for id: String in ["aseprite", "reaper", "musescore", "audacity"]:
+	for id: String in ["aseprite", "reaper", "musescore"]:
 		_check(_row(dialog, id) == null, "No row for the scrapped app " + id)
 
 

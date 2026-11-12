@@ -80,7 +80,7 @@ def install(tool_id: str) -> ServerSpec:
             pass
     if tool_id == "godot":
         return _install_from_worker(tool_id, destination)
-    if tool_id not in {"blender", "supercollider", "inkscape"}:
+    if tool_id not in {"blender", "supercollider", "inkscape", "audacity"}:
         raise ValueError(
             f"{tool.name}: its app-specific pinned installer is not implemented yet."
         )
@@ -106,6 +106,26 @@ def install(tool_id: str) -> ServerSpec:
             raise ValueError(
                 "Pinned server dependencies fail the shared dependency gate."
             )
+        if tool_id == "audacity":
+            # Runs on the worker's hashed audacity-requirements.txt, never on
+            # the source's own manifest (which also names a speech model).
+            if not (source / "audacity_mcp/main.py").is_file():
+                raise ValueError("Pinned Audacity MCP source is incomplete.")
+            spec = ServerSpec(
+                name=tool.mcp.server,
+                command="docker",
+                source=tool.mcp.repo,
+                revision=tool.mcp.ref,
+            )
+            (temporary / "server.json").write_text(
+                json.dumps(
+                    {"spec": spec.model_dump(), "tree_sha256": tree_hash(source)},
+                    indent=2,
+                )
+                + "\n"
+            )
+            _place(temporary, destination)
+            return spec
         if tool_id == "inkscape":
             lock = source / "uv.lock"
             if (
@@ -348,7 +368,7 @@ def load_installed(tool_id: str) -> ServerSpec:
         )
     if tree_hash(path / "source") != metadata["tree_sha256"]:
         raise ReinstallRequired("Installed MCP source or build changed. Reinstall it.")
-    if tool_id in {"blender", "inkscape"}:
+    if tool_id in {"blender", "inkscape", "audacity"}:
         return spec
     lock = path / "source/package-lock.json"
     if (
@@ -430,6 +450,10 @@ def configured(project: Path) -> tuple[list[ServerSpec], list[Readiness]]:
                 from joinery.workers import inkscape_worker
 
                 spec = inkscape_worker(project, readonly=True)
+            elif tool_id == "audacity":
+                from joinery.workers import audacity_worker
+
+                spec = audacity_worker(project, readonly=True)
             specs.append(spec)
         except (OSError, ValueError, KeyError) as exc:
             detail = f"{tool.name} has been selected but its server is not installed."

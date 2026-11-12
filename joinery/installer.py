@@ -36,6 +36,7 @@ BLURBS = {
     "inkscape": "Vector art and icons",
     "supercollider": "Synthesised sound effects",
     "surge-xt": "Synth sounds and music",
+    "audacity": "Cleaning and editing your own recordings",
 }
 
 #: Where to get each app, for the "Needs your licence" row's link.
@@ -48,6 +49,7 @@ GET_URLS = {
     "inkscape": "https://inkscape.org/",
     "supercollider": "https://supercollider.github.io/",
     "surge-xt": "https://surge-synthesizer.github.io/",
+    "audacity": "https://www.audacityteam.org/",
 }
 
 #: Readiness states and the words every front end shows for them. The one

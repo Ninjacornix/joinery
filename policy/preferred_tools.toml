@@ -6,7 +6,8 @@
 # telemetry, generative services and outbound calls. Any new ref means re-vetting.
 
 vetted_on = 2026-11-07
-# Aseprite, REAPER, MuseScore and Audacity were removed (docs/adr/0025-tool-removals.md).
+# Aseprite, REAPER and MuseScore were removed (docs/adr/0025-tool-removals.md);
+# Audacity came back in its own worker (docs/adr/0082-audacity-worker.md).
 # joinery/catalog.py REMOVED_TOOLS tells projects that still enable them.
 
 # Joinery's own servers, always allowed.
@@ -128,6 +129,32 @@ builtin_server = "joinery-sound"
 candidates = ["redsquidleader/surge-xt-mcp: 1 star"]
 # Joinery's sound server renders Surge XT 1.3.4 (pinned stable release) offline
 # through its real VST3 in the creative worker. See docs/adr/0021-surge-xt.md.
+
+[[tool]]
+id = "audacity"
+name = "Audacity"
+domain = "audio"
+status = "available"
+[tool.mcp]
+server = "audacity"
+repo = "https://github.com/xDarkzx/Audacity-MCP"
+ref = "2835f96c18934fe93b0b0673ba18fc88d884a12b"
+tier = "community"
+stars = 133
+last_push = 2026-10-31
+licence = "Apache-2.0"
+# Speech-to-text runs a downloaded model (faster-whisper), which Rule Zero
+# keeps out: the worker never installs it and these tools are refused.
+blocked_tools = [
+  "transcribe_audio",
+  "transcribe_selection",
+  "transcribe_to_file",
+  "transcribe_to_labels",
+  "transcription_set_model",
+  "check_transcription_status",
+  "get_default_transcription_folder",
+]
+notes = "Audacity 3.7.3 in its own offline worker (docs/adr/0082-audacity-worker.md). Kept edits go through joinery-sound operate_document, whose typed steps are recorded and replayed exactly. This MCP is for inspection; its transcription tools need a speech model and are blocked."
 
 [[tool]]
 id = "material-maker"

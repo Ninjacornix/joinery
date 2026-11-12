@@ -327,19 +327,22 @@ def test_two_native_outputs_are_not_folded_and_sounds_keep_their_kind(
     assert [(a["kind"], a["part_of"]) for a in sounds] == [("sound", ""), ("sound", "")]
 
 
-def test_removed_desktop_apps_are_offered_only_when_installed(
+def test_open_in_audacity_says_when_it_is_not_installed(
     project: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     recipe(project, "supercollider", ["audio/creak.wav"], "recipes/creak.scd")
     sound = next(a for a in index(project)["assets"] if a["path"] == "audio/creak.wav")
-    assert "audacity" in {o["tool"] for o in sound["open_options"]}
+    offered = {o["tool"]: o for o in sound["open_options"]}
+    assert offered["audacity"]["available"]
     monkeypatch.setattr(
         desktop.shutil,
         "which",
         lambda name: None if name == "audacity" else f"/apps/{name}",
     )
     sound = next(a for a in index(project)["assets"] if a["path"] == "audio/creak.wav")
-    assert "audacity" not in {o["tool"] for o in sound["open_options"]}
+    # A catalog tool stays listed, like Krita or Blender, and says why it can't open.
+    offered = {o["tool"]: o for o in sound["open_options"]}
+    assert not offered["audacity"]["available"] and offered["audacity"]["reason"]
 
 
 def test_tools_carry_readiness_from_the_cache_without_asking_docker(

@@ -53,12 +53,23 @@ PROGRAMS = {
         ("joinery-sound",),
         ("named parameters", "notes", "exact WAV replay", "review/revert"),
     ),
+    "audacity": Program(
+        ("audacity", "joinery-sound"),
+        (
+            "typed steps from the user's recording",
+            "noise profile and spectral edits",
+            "exact WAV/label/.aup3 replay",
+            "transcription refused",
+        ),
+        "joinery-audacity-worker",
+    ),
 }
 
 # Community MCPs whose pinned upstream tests run in an isolated SDK profile.
-# None today: Aseprite, REAPER, MuseScore and Audacity were removed from the
-# catalog, and GIMP is driven by Joinery's own paint server. A new community
-# MCP adds its id here with a profile under tests/upstream/.
+# None today: Aseprite, REAPER and MuseScore were removed from the catalog,
+# GIMP is driven by Joinery's own paint server, and Audacity's pinned MCP is
+# exercised natively in its worker (tests/integration/audacity_native.py). A
+# new community MCP adds its id here with a profile under tests/upstream/.
 PROFILES: dict[str, str] = {}
 #: Profile used when a lane runs a tool not listed above.
 DEFAULT_PROFILE = "sdk1"
@@ -70,6 +81,7 @@ CORE_SERVERS = {
     "blender",
     "claude-collider",
     "inkscape",
+    "audacity",
     "joinery-registry",
     "joinery-verify",
     "joinery-blender-ops",

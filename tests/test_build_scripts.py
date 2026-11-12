@@ -49,6 +49,8 @@ def test_checksum_fetch_keeps_every_downloaded_hash_and_existing_entry(
             "materialmaker",
             "surge",
             "godotmcp",
+            "audacity",
+            "audacitydata",
             "retained",
         }
     assert all(

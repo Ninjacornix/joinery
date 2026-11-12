@@ -70,6 +70,7 @@ from joinery.transactions import (
 )
 from joinery.turn import Problem, scene_route
 from joinery.workers import (
+    audacity_worker,
     blender_worker,
     godot_runtime_script,
     godot_worker,
@@ -651,6 +652,8 @@ class ProjectGateway:
                 spec = godot_worker(tx.stage, readonly=True)
             elif server == "inkscape":
                 spec = inkscape_worker(tx.stage, readonly=True)
+            elif server == "audacity":
+                spec = audacity_worker(tx.stage, readonly=True)
             else:
                 return None
             view = MCPConnection(spec, self.project)
@@ -768,6 +771,8 @@ class ProjectGateway:
                     spec = supercollider_worker(self.transaction.stage)
                 elif server == "inkscape":
                     spec = inkscape_worker(self.transaction.stage)
+                elif server == "audacity":
+                    spec = audacity_worker(self.transaction.stage)
                 else:
                     spec.args = _map_paths(
                         spec.args, self.project, self.transaction.stage

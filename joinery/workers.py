@@ -250,3 +250,51 @@ def inkscape_worker(project: Path, readonly: bool = False) -> ServerSpec:
             setup,
         ],
     )
+
+
+def audacity_worker(project: Path, readonly: bool = False) -> ServerSpec:
+    """The pinned Audacity MCP, next to its own Audacity in the Audacity worker.
+
+    `joinery-audacity --serve-mcp` starts Audacity from the image's recorded
+    settings, waits until its script pipe is ready and then becomes the MCP,
+    which runs on the image's hashed packages (no speech model is installed;
+    its transcription tools are refused by policy).
+    """
+    source = installation("audacity") / "source"
+    if not (source / "audacity_mcp/main.py").is_file():
+        raise ValueError("Install the pinned Audacity MCP first.")
+    name = "joinery-mcp-" + uuid.uuid4().hex
+    return ServerSpec(
+        name="audacity",
+        revision=source.parent.name,
+        command="docker",
+        container_name=name,
+        cwd=str(project),
+        source="sandbox",
+        worker_image="joinery-audacity-worker",
+        args=[
+            "run",
+            "--rm",
+            *docker_owner_args(),
+            "-i",
+            "--platform",
+            "linux/amd64",
+            "--network",
+            "none",
+            "--name",
+            name,
+            "--pids-limit",
+            "512",
+            "--memory",
+            "4g",
+            "-v",
+            f"{source}:/opt/audacity-mcp:ro",
+            "-v",
+            f"{project.resolve()}:/work" + (":ro" if readonly else ""),
+            "-w",
+            "/work",
+            "joinery-audacity-worker",
+            "joinery-audacity",
+            "--serve-mcp",
+        ],
+    )

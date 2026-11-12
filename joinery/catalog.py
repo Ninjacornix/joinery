@@ -223,12 +223,6 @@ REMOVED_TOOLS: dict[str, str] = {
         "written as MIDI sources and rendered through FluidSynth and Surge XT; you "
         "can still add MuseScore yourself as a custom tool."
     ),
-    "audacity": (
-        "Audacity was removed as an editing tool: it can't run reliably in "
-        "Joinery's offline workers. Sound edits (trim, fade, normalise, loop "
-        "points, format) run in Joinery's sound tools; Open in Audacity still "
-        "works when it is installed."
-    ),
 }
 
 

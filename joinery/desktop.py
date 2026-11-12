@@ -35,8 +35,8 @@ TOOLS = {
     "inkscape": DesktopTool(
         "inkscape", "Inkscape", (".svg", ".svgz"), (".svg", ".svgz")
     ),
-    # Audacity is no longer an editing tool, but it still opens sound files by
-    # hand when it is installed. Other programs are added per project with a
+    # Audacity edits run in its offline worker; Open in Audacity is the
+    # desktop app. Other programs are added per project with a
     # [desktop.<id>] entry in joinery.toml.
     "audacity": DesktopTool(
         "audacity", "Audacity", (".aup3", ".aup", *AUDIO), (".aup3", ".aup")
