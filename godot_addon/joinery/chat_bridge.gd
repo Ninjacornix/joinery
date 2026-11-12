@@ -63,6 +63,9 @@ signal check_event(event: Dictionary)
 signal variants_event(event: Dictionary)
 ## The design check's agent pass, or the check after accepted changes (design_id set).
 signal design_event(event: Dictionary)
+## A request's to-do (ADR 0060): {todo_id, state: waiting|going|checking|fixing|checked|
+## cancelled|dropped, steps?, done_when?, results?, summary?}.
+signal todo_event(event: Dictionary)
 ## The sound pass: {state: auditing|making|done|failed|stopped, audit?, tasks: [{key, title,
 ## category, categories, apps, sounds, facts, task_id, state, message}], summary?, message?}.
 signal sound_pass_event(event: Dictionary)
@@ -81,6 +84,8 @@ var parallel := 1
 var _job: RefCounted
 var _connected := false
 var _pending: Dictionary = {}
+## Go on a to-do: the line the next request carries (hold_line).
+var _held_line: Dictionary = {}
 var _agent := ""
 var _profile := ""
 var _engine := ""
@@ -152,6 +157,11 @@ func submit(text: String, targets: Array) -> void:
 	}
 	if not images.is_empty():
 		_pending["attachments"] = images
+	if not _held_line.is_empty():
+		# Go on a to-do: the same request line, as "todo_go" with the to-do as left.
+		_pending.merge(_held_line, true)
+		_pending["kind"] = "todo_go"
+		_held_line = {}
 	busy_changed.emit(true)
 	if _job == null:
 		var pending := _pending.duplicate(true)
@@ -211,6 +221,18 @@ func start_debug(error: String, output: String, log: String, scene := "") -> boo
 	}
 	_job.send_line(JSON.stringify(line))
 	return true
+
+
+## The next [method submit] is Go on a to-do: [param line] ({todo_id, steps, done_when}) goes
+## with it (sidebar_todo.gd).
+func hold_line(line: Dictionary) -> void:
+	_held_line = line.duplicate(true)
+
+
+## Drop the to-do [param todo_id] still waiting for Go.
+func cancel_todo(todo_id: String) -> void:
+	if _job != null and _connected:
+		_job.send_line(JSON.stringify({"kind": "todo_cancel", "todo_id": todo_id}))
 
 
 ## Stop one parallel task.
@@ -366,6 +388,9 @@ func _handle(event: Dictionary) -> void:
 		return
 	if not str(event.get("group_id", "")).is_empty():
 		variants_event.emit(event)
+		return
+	if str(event.get("kind", "")) == "todo":
+		todo_event.emit(event)
 		return
 	match str(event.get("kind", "")):
 		"connection":

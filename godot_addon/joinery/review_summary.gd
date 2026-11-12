@@ -4,6 +4,9 @@ extends VBoxContainer
 ## wood darker · 2 files", up to two lines), the checks as small chips ("Checks passed",
 ## "Reviewer checking…", "1 warning"), and the reviewer's worst note as one quiet line when
 ## there are any ("· 2 more"). The full texts are in tooltips and in Details ([method info]).
+##
+## A request with a to-do (ADR 0060) adds what "done" meant, checked: a chip "2 of 3 done" and
+## one row per item, Pass, Fail or Inconclusive with the evidence under its words.
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
@@ -17,6 +20,12 @@ const NOTE_LOOK := {
 }
 ## Lines the facts take at most before they end in an ellipsis.
 const FACT_LINES := 2
+## Done-when status -> [glyph (ui_components.gd status_icon), word].
+const DONE_LOOK := {
+	"pass": ["done", "Pass"],
+	"fail": ["failed", "Fail"],
+	"inconclusive": ["warning", "Inconclusive"],
+}
 
 var _review: Dictionary = {}
 var _measured: Array = []
@@ -37,6 +46,10 @@ var _notes_text: Label
 var _info: VBoxContainer
 var _info_checks: Label
 var _info_notes: VBoxContainer
+## The to-do's done-when results ({id, text, status, evidence}), and where they show.
+var _done: Array[Dictionary] = []
+var _done_chip: Array
+var _done_rows: VBoxContainer
 
 
 func _init() -> void:
@@ -62,11 +75,19 @@ func _init() -> void:
 	_reviewer_chip = reviewer[0]
 	_reviewer_text = reviewer[2]
 	_reviewer_chip.hide()
+	_done_chip = _chip("success", "success")
+	(_done_chip[0] as Control).hide()
 	for severity: int in [2, 1, 0]:
 		var look: Array = NOTE_LOOK[severity]
 		var made := _chip(look[0], look[1])
 		(made[0] as Control).hide()
 		_note_chips[severity] = made
+	_done_rows = VBoxContainer.new()
+	_done_rows.name = "DoneWhen"
+	_done_rows.theme_type_variation = "JoineryTight"
+	_done_rows.accessibility_name = "Done when"
+	_done_rows.hide()
+	add_child(_done_rows)
 	_notes_row = HBoxContainer.new()
 	_notes_row.theme_type_variation = "JoineryRowTight"
 	_notes_row.accessibility_name = "Reviewer notes"
@@ -103,6 +124,7 @@ func show_review(review: Dictionary) -> void:
 	_measured = []
 	_notes = GLANCE.sorted_notes(review.get("review_notes", []))
 	_reviewer = _status_of(review)
+	_done = _results(review.get("done_when", []))
 	_sync()
 
 
@@ -128,6 +150,8 @@ func update(extra: Dictionary) -> void:
 	var status := _status_of(extra)
 	if not status.is_empty() or extra.has("reviewer_status"):
 		_reviewer = status
+	if extra.has("done_when"):
+		_done = _results(extra["done_when"])
 	_sync()
 	if fresh and is_inside_tree():
 		UI_MOTION.fade_in(_notes_row)
@@ -168,6 +192,30 @@ func note_chips() -> Array[String]:
 	return words
 
 
+## The done-when chip as shown ("" without a to-do): "2 of 3 done".
+func done_text() -> String:
+	return (_done_chip[2] as Label).text if (_done_chip[0] as Control).visible else ""
+
+
+## The done-when rows as shown: [{text, status, evidence}].
+func done_rows() -> Array[Dictionary]:
+	var found: Array[Dictionary] = []
+	for row: Node in _done_rows.get_children():
+		if row.is_queued_for_deletion():
+			continue
+		(
+			found
+			. append(
+				{
+					"text": (row.find_child("Words", true, false) as Label).text,
+					"status": str(row.get_meta("status", "")),
+					"evidence": (row.find_child("Evidence", true, false) as Label).text,
+				}
+			)
+		)
+	return found
+
+
 ## The reviewer's notes, worst first.
 func notes() -> Array[Dictionary]:
 	return _notes.duplicate()
@@ -175,6 +223,10 @@ func notes() -> Array[Dictionary]:
 
 ## True when the change is small enough to decide from the chat card.
 func simple(assets: int) -> bool:
+	# A done-when item that failed is worth opening the panel for.
+	for result: Dictionary in _done:
+		if str(result.get("status", "")) == "fail":
+			return false
 	return GLANCE.is_simple(_review, assets, _notes)
 
 
@@ -216,6 +268,7 @@ func _sync() -> void:
 		var word: String = NOTE_LOOK[severity][2]
 		(chip[2] as Label).text = "%d %s%s" % [count, word, "" if count == 1 else "s"]
 		(chip[0] as Control).tooltip_text = "\n".join(words)
+	_sync_done()
 	_chips.visible = _status.visible or _reviewer_chip.visible or not _notes.is_empty()
 	var summary := GLANCE.notes_line(_notes)
 	_notes_text.text = summary
@@ -238,6 +291,71 @@ func _sync() -> void:
 		text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(text)
 	_tint()
+
+
+## What "done" meant, checked: the chip ("2 of 3 done", its glyph the worst result) and a
+## row per item with its result and evidence.
+func _sync_done() -> void:
+	for child: Node in _done_rows.get_children():
+		_done_rows.remove_child(child)
+		child.queue_free()
+	var chip := _done_chip[0] as Control
+	chip.visible = not _done.is_empty() and not _review.is_empty()
+	_done_rows.visible = chip.visible
+	if not chip.visible:
+		return
+	var passed := 0
+	var worst := "done"
+	for result: Dictionary in _done:
+		var status := str(result.get("status", ""))
+		if status == "pass":
+			passed += 1
+		elif status == "fail":
+			worst = "failed"
+		elif worst == "done":
+			worst = "warning"
+	(_done_chip[2] as Label).text = "%d of %d done" % [passed, _done.size()]
+	chip.tooltip_text = "What done means for this request, checked after Joinery's checks"
+	# The chip's glyph follows the worst result, tinted like the status icons.
+	var glyph := _done_chip[1] as TextureRect
+	var spec: Array = UI.STATUS_ICONS[worst]
+	UI.bind_icon(glyph, str(spec[0]), "texture")
+	glyph.set_meta("role", str(spec[1]))
+	for result: Dictionary in _done:
+		_done_rows.add_child(_done_row(result))
+
+
+func _done_row(result: Dictionary) -> HBoxContainer:
+	var status := str(result.get("status", "inconclusive"))
+	var look: Array = DONE_LOOK.get(status, DONE_LOOK["inconclusive"])
+	var row := HBoxContainer.new()
+	row.theme_type_variation = "JoineryRowTight"
+	row.set_meta("status", status)
+	var icon := UI.status_icon(str(look[0]))
+	icon.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
+	icon.tooltip_text = str(look[1])
+	row.add_child(icon)
+	var words := VBoxContainer.new()
+	words.theme_type_variation = "JoineryTight"
+	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(words)
+	var text := UI.label(str(result.get("text", "")), "", true)
+	text.name = "Words"
+	text.accessibility_name = "%s: %s" % [str(result.get("text", "")), str(look[1])]
+	words.add_child(text)
+	var evidence := UI.label(str(result.get("evidence", "")), "JoineryCaption", true)
+	evidence.name = "Evidence"
+	words.add_child(evidence)
+	return row
+
+
+static func _results(value: Variant) -> Array[Dictionary]:
+	var found: Array[Dictionary] = []
+	if value is Array:
+		for item: Variant in value:
+			if item is Dictionary and not str((item as Dictionary).get("text", "")).is_empty():
+				found.append(item as Dictionary)
+	return found
 
 
 static func _note_words(note: Dictionary) -> String:

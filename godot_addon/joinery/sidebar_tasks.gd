@@ -21,11 +21,13 @@ extends VBoxContainer
 ## against the art bible, while its fixes run as tasks with cards of their own. So do the
 ## accessibility and performance checks (ADR 0049, ADR 0050), with the same card, and the
 ## sound pass (sidebar_sound_pass.gd): what the level is missing, while its sounds are made.
-## The design check has a card of its own (sidebar_design.gd).
+## The design check has a card of its own (sidebar_design.gd), and so does a request's to-do
+## (sidebar_todo.gd): its steps and "done when" items, Go, and each item's result.
 
 const CARD := preload("sidebar_task_card.gd")
 const DEBUG := preload("sidebar_debug.gd")
 const DESIGN := preload("sidebar_design.gd")
+const TODO := preload("sidebar_todo.gd")
 const MATCH := preload("sidebar_match.gd")
 const SOUND_PASS := preload("sidebar_sound_pass.gd")
 const PLAYTEST_CARD := preload("playtest_card.gd")
@@ -53,6 +55,8 @@ var bridge: Object:
 				bridge.connect("playtest_event", on_playtest)
 		if variants != null:
 			variants.call("follow", bridge)
+		if todo != null:
+			todo.call("listen", bridge)
 ## The playtest card, while there is one.
 var playtest: Control
 ## The match card (match_card.gd), while there is one.
@@ -66,6 +70,9 @@ var design_card: Control
 var variants: Node
 ## The sound pass card (sound_pass_card.gd), while there is one.
 var sound_card: Control
+## A request's to-do (sidebar_todo.gd) and its card (todo_card.gd), while there is one.
+var todo: Node
+var todo_card: Control
 var _cards: Dictionary = {}
 var _main_busy := false
 var _offer: Control
@@ -91,6 +98,10 @@ static func attach(sidebar: Control, content: Control, before: Control) -> VBoxC
 	tasks.variants = VARIANTS.attach(sidebar, tasks)
 	# "/sound-pass": the sounds the level lacks.
 	SOUND_PASS.attach(sidebar, tasks)
+	# A request's to-do: its steps, Go, and what "done" means, checked.
+	tasks.todo = TODO.attach(sidebar, tasks)
+	if tasks.bridge != null:
+		tasks.todo.call("listen", tasks.bridge)
 	var slash: Object = sidebar.get("_slash")
 	if slash != null and slash.has_signal("playtest_requested"):
 		slash.connect("playtest_requested", tasks.start_playtest)
@@ -368,6 +379,7 @@ func sync_visible() -> void:
 		or is_instance_valid(perf_card)
 		or is_instance_valid(design_card)
 		or is_instance_valid(sound_card)
+		or is_instance_valid(todo_card)
 		or _has_variants()
 	)
 
