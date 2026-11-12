@@ -30,6 +30,7 @@ from joinery import (
     kit_share_cli,
     kits_cli,
     match_cli,
+    metrics,
     playtest,
     references,
     setup_imports,
@@ -1222,6 +1223,7 @@ def _parser() -> argparse.ArgumentParser:
     check.add_argument("--project", type=Path, default=ROOT / "testbed")
     history.register(commands)
     timeline.register(commands)
+    metrics.register(commands)
     chats.register(commands)
     parts = _parts()
     if parts is not None:
@@ -1237,6 +1239,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "timeline":
         return timeline.run(args)
+
+    if args.command == "metrics":
+        return metrics.run(args)
 
     if args.command == "chats":
         return chats.run(args)

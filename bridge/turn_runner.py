@@ -9,6 +9,7 @@ says plainly when a change didn't make it.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from collections.abc import Callable, Coroutine
 from pathlib import Path
 from typing import Any, Protocol
@@ -26,6 +27,7 @@ from bridge.protocol import (
     ToolActivity,
     Usage,
 )
+from joinery import metrics
 from joinery.timing import TurnTiming
 from joinery.turn import MAX_CONTINUATIONS, Problem, SubmitResult, TurnController
 
@@ -104,16 +106,55 @@ def continuation(prompt: Prompt, result: SubmitResult) -> Prompt:
     )
 
 
+def _usage(controller: TurnController, usage: Usage | None) -> metrics.Totals | None:
+    """This provider prompt's tokens, from the session totals it reported."""
+    if usage is None:
+        return None
+    now = (usage.input_tokens, usage.output_tokens, usage.cached_tokens)
+    turn = metrics.usage_delta(controller.usage_totals, now)
+    controller.usage_totals = now
+    return turn
+
+
 async def stream(
     controller: TurnController,
     bridge: AgentBridge,
     prompt: Prompt,
     emit: Emit,
     timing: TurnTiming,
+    asked: int = 0,
 ) -> bool:
-    """Stream one provider prompt to the sidebar; returns the provider's ``Done.ok``."""
+    """Stream one provider prompt to the sidebar; returns the provider's ``Done.ok``.
+
+    The prompt is one agent-turn span of the change, with the tokens the
+    provider reported for it."""
+    ok = False
+    usage: Usage | None = None
+    attrs = metrics.agent_attributes(controller.agent_id, "lead")
+    attrs[metrics.ROUND] = asked
+    attrs[metrics.TASK] = getattr(controller.gateway, "task_id", "")
+    with timing.trace.span(metrics.AGENT_TURN, "invoke_agent lead", attrs) as span:
+        try:
+            ok, usage = await _stream(controller, bridge, prompt, emit, timing)
+        finally:
+            if timing.model:
+                span[metrics.REQUEST_MODEL] = timing.model
+            if usage is not None and usage.model:
+                span[metrics.RESPONSE_MODEL] = usage.model
+            span.update(metrics.token_attributes(_usage(controller, usage)))
+    return ok
+
+
+async def _stream(
+    controller: TurnController,
+    bridge: AgentBridge,
+    prompt: Prompt,
+    emit: Emit,
+    timing: TurnTiming,
+) -> tuple[bool, Usage | None]:
     gateway = controller.gateway
     ok = False
+    usage: Usage | None = None
     event: AgentEvent
     async for event in bridge.send(prompt):
         if isinstance(event, Execution):
@@ -128,6 +169,7 @@ async def stream(
             gateway.progress("Using " + event.server.capitalize() + "…")
         if isinstance(event, Usage):
             controller.meter.update(event.context_used, event.context_window)
+            usage = event
         if isinstance(event, EditorAction):
             # A provider's own scene tool (Codex) is admitted like edit_scene.
             try:
@@ -142,7 +184,7 @@ async def stream(
             ok = event.ok
             continue
         emit(event.model_dump())
-    return ok
+    return ok, usage
 
 
 async def settle_compaction(controller: TurnController) -> None:
@@ -183,6 +225,64 @@ async def run_turn(
     more in the same turn; a change that still fails is dropped, and Joinery says
     so in its own line.
     """
+    gateway = controller.gateway
+    # The turn's spans: the chat host shares its timing with the gateway already.
+    lent = getattr(gateway, "timing", None) is None
+    if lent:
+        gateway.timing = timing
+    outcome = "failed"
+    try:
+        outcome = await _run_turn(
+            controller, bridge, prompt, emit, timing, compact, request, chat_id
+        )
+    except asyncio.CancelledError:
+        outcome = "stopped"
+        raise
+    finally:
+        controller.close_send_back()
+        _save_metrics(controller, timing, outcome)
+        if lent and gateway.timing is timing:
+            gateway.timing = None
+    return outcome
+
+
+def _save_metrics(controller: TurnController, timing: TurnTiming, outcome: str) -> None:
+    """Write the change's spans; measuring never fails the change it measures."""
+    # Only a change this turn put in review: a question asked while an earlier
+    # change waits is a request of its own.
+    last = controller.last_result
+    transaction = last.transaction_id if last is not None else ""
+    trace = timing.trace
+    if trace.path is not None:
+        return
+    trace.attributes.update(
+        {
+            metrics.OUTCOME: outcome,
+            metrics.TRANSACTION: transaction,
+            metrics.AGENT: controller.agent_id,
+            metrics.TASK: getattr(controller.gateway, "task_id", ""),
+            metrics.RESPONSE_MODEL: timing.model,
+            metrics.SUBMITS: controller.attempts + controller.review_rounds,
+            metrics.SEND_BACKS: controller.review_rounds,
+        }
+    )
+    project = getattr(controller.gateway, "project", None)
+    if project is None:
+        return  # a host without a project folder keeps no evidence
+    with contextlib.suppress(OSError, ValueError):
+        trace.save(project)
+
+
+async def _run_turn(
+    controller: TurnController,
+    bridge: AgentBridge,
+    prompt: Prompt,
+    emit: Emit,
+    timing: TurnTiming,
+    compact: Callable[[], Coroutine[Any, Any, Any]] | None,
+    request: str,
+    chat_id: str,
+) -> str:
     # The session may be being summarised while the user reviewed; wait for it.
     await settle_compaction(controller)
     if controller.primer and controller.primer_chat == chat_id:
@@ -201,11 +301,14 @@ async def run_turn(
         # Joinery submitted the change the agent left, and it failed: the agent
         # gets one chance in this turn to fix it.
         asked += 1
+        timing.trace.attributes[metrics.CONTINUATIONS] = asked
         ok = await stream(
-            controller, bridge, continuation(prompt, result), emit, timing
+            controller, bridge, continuation(prompt, result), emit, timing, asked
         )
     last = controller.last_result
-    dropped = last is not None and last.final and last.status in {"failed", "needs_user"}
+    dropped = (
+        last is not None and last.final and last.status in {"failed", "needs_user"}
+    )
     if last is not None and last.status == "failed" and last.final:
         emit(failure_notice(last))
     emit(Done(ok=ok).model_dump())

@@ -17,6 +17,7 @@ from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
+from joinery import metrics
 from joinery.claims import LEAD_BUSY, live_refusal
 from joinery.peer_review import PeerReview, Reviewer, request_for
 from joinery.transactions import inventory
@@ -252,6 +253,10 @@ class TurnController:
         self._reviewing: asyncio.Task[PeerReview] | None = None
         #: Joinery's own last submit: the reviewer's notes no longer send it back.
         self._last_chance = False
+        #: The provider session's token totals as last reported (input, output, cached).
+        self.usage_totals: metrics.Totals = (0, 0, 0)
+        #: A change sent back to the agent, until it submits again: (since, by whom).
+        self._sent_back: tuple[metrics.Clock, str] | None = None
         gateway.turn = self
 
     # --- State -----------------------------------------------------------------------
@@ -283,6 +288,7 @@ class TurnController:
         self._facts = []
         self.review_rounds = 0
         self._peer = self._peer_print = None
+        self._sent_back = None
         self.request = request
         self.requests = [*self.requests, request.strip()[:160]][-10:]
         if not self.review_open:
@@ -327,8 +333,10 @@ class TurnController:
 
     def idle(self) -> bool:
         """Nothing running and nothing on screen for the user."""
-        return self.state is TurnState.IDLE and not self.review_open and not (
-            self.live_edits
+        return (
+            self.state is TurnState.IDLE
+            and not self.review_open
+            and not (self.live_edits)
         )
 
     def admit_live_edit(self, editor_context: Mapping[str, str]) -> str:
@@ -397,6 +405,31 @@ class TurnController:
                 self._to(TurnState.IDLE)
 
     # --- Submitting --------------------------------------------------------------------
+
+    def _send_back(self, by: str) -> None:
+        """A change went back to the agent to fix; its round is timed until it
+        submits again (or the turn ends)."""
+        self.close_send_back()
+        self._sent_back = (metrics.Clock(), by)
+
+    def close_send_back(self) -> None:
+        sent, self._sent_back = self._sent_back, None
+        timing = getattr(self.gateway, "timing", None)
+        if sent is None or timing is None:
+            return
+        clock, by = sent
+        timing.trace.add(
+            metrics.SEND_BACK,
+            "send_back " + by,
+            clock.wall,
+            clock.end(),
+            {
+                metrics.SENT_BACK_BY: by,
+                metrics.ROUND: self.review_rounds
+                if by == "reviewer"
+                else self.attempts,
+            },
+        )
 
     def _staged(self) -> bool:
         tx = self.gateway.transaction
@@ -486,6 +519,7 @@ class TurnController:
             return self._result("nothing_to_review", False, next=NEXT_NOTHING)
         turn = self.turn_id
         self.attempts += 1
+        self.close_send_back()
         self._to(TurnState.SUBMITTING)
         checks = asyncio.create_task(self._run_checks())
         self._checks = checks
@@ -561,6 +595,7 @@ class TurnController:
                     next=NEXT_STOP,
                 )
             self._to(TurnState.WORKING)
+            self._send_back("checks")
             self.gateway.progress("Fixing what the checks found…")
             return self._result(
                 "failed",
@@ -586,6 +621,7 @@ class TurnController:
             self.review_rounds += 1
             self.attempts -= 1
             self._to(TurnState.WORKING)
+            self._send_back("reviewer")
             self.gateway.progress("Fixing what the reviewer found…")
             return self._result(
                 "failed",
@@ -667,17 +703,31 @@ class TurnController:
             self.gateway.progress("Reviewing the change…")
         job: asyncio.Task[PeerReview] = asyncio.ensure_future(self.reviewer(request))
         self._reviewing = job
-        try:
-            done, _ = await asyncio.wait(
-                {job}, timeout=self.review_seconds + REVIEW_GRACE
+        with self.gateway.span(
+            "reviewer",
+            "reviewer",
+            {metrics.AGENT_NAME: "reviewer", metrics.ROUND: self.review_rounds + 1},
+        ) as span:
+            try:
+                done, _ = await asyncio.wait(
+                    {job}, timeout=self.review_seconds + REVIEW_GRACE
+                )
+            except asyncio.CancelledError:
+                job.cancel()
+                await asyncio.wait({job})
+                raise
+            finally:
+                if self._reviewing is job:
+                    self._reviewing = None
+            span["joinery.review.status"] = (
+                "timeout"
+                if not done
+                else "cancelled"
+                if job.cancelled()
+                else "error"
+                if job.exception() is not None
+                else job.result().status
             )
-        except asyncio.CancelledError:
-            job.cancel()
-            await asyncio.wait({job})
-            raise
-        finally:
-            if self._reviewing is job:
-                self._reviewing = None
         if not done:
             job.cancel()
             await asyncio.wait({job})
@@ -798,6 +848,7 @@ class TurnController:
     async def decide(self, transaction_id: str, accept: bool) -> dict[str, Any]:
         """The user's Accept or Discard on the change in review."""
         event = await self.gateway.decide(transaction_id, accept)
+        metrics.record_decision(self.gateway.project, transaction_id, accept)
         if transaction_id == self.review_id:
             self.review_open = False
             if self.state is TurnState.IN_REVIEW:

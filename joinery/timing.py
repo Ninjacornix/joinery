@@ -10,6 +10,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from joinery.metrics import PHASE_KINDS, Trace
+
 
 class TurnTiming:
     def __init__(self) -> None:
@@ -20,12 +22,21 @@ class TurnTiming:
         self.model = ""
         self.effort = ""
         self.mode = ""
+        #: The same work as spans, for the change's cost (joinery.metrics).
+        self.trace = Trace(self.id)
 
     @contextmanager
-    def span(self, phase: str) -> Iterator[None]:
+    def span(
+        self, phase: str, name: str = "", attributes: dict[str, Any] | None = None
+    ) -> Iterator[dict[str, Any]]:
+        """Time a phase; it is also one span of the change, whose attributes the
+        yielded dict takes."""
         start = time.monotonic()
         try:
-            yield
+            with self.trace.span(
+                PHASE_KINDS.get(phase, phase), name or phase, attributes
+            ) as attrs:
+                yield attrs
         finally:
             self.phases[phase] = self.phases.get(phase, 0.0) + time.monotonic() - start
 

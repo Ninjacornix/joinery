@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING, Any, cast
 
 from mcp.types import CallToolResult, TextContent
 
+from joinery import metrics, references, sound_kit, submission
 from joinery import parts as part_targets
-from joinery import references, sound_kit, submission
 from joinery import tools as tool_modules
 from joinery.art_approval import approved, review
 from joinery.authoring import run_offline
@@ -355,7 +355,7 @@ class ProjectGateway:
             connection = MCPConnection(spec, self.project)
             self.connections[server] = connection
         lock = self._connecting.setdefault(server, asyncio.Lock())
-        with self.timing.span("tool_connection") if self.timing else nullcontext():
+        with self.span("tool_connection", server):
             async with lock:
                 await connection.connect()
         return connection
@@ -441,8 +441,20 @@ class ProjectGateway:
         a debugger, a specialist): an audited read, answered from a read-only view
         of this gateway's staged change while there is one (ADR 0037, 0041)."""
         async with self._call_lock:
-            with self.timing.span("tools") if self.timing else nullcontext():
-                return await self._call(server, tool, arguments, view=view)
+            with self.span(
+                "tools",
+                f"execute_tool {server}.{tool}",
+                {
+                    metrics.OPERATION: "execute_tool",
+                    metrics.TOOL_NAME: f"{server}.{tool}",
+                    metrics.TASK: self.task_id,
+                },
+            ) as attrs:
+                result = await self._call(server, tool, arguments, view=view)
+                attrs.update(metrics.worker_split(result.meta))
+                if result.is_error:
+                    attrs[metrics.ERROR_TYPE] = "tool_error"
+                return result
 
     def _project_arguments(
         self, server: str, arguments: dict[str, Any]
@@ -650,7 +662,7 @@ class ProjectGateway:
             # Subsequent saved-scene operations can immediately reference the
             # new portable resources; import must precede their first load.
             self.progress("Importing the result into Godot…")
-            with self.timing.span("import") if self.timing else nullcontext():
+            with self.span("import"):
                 imported = await run_offline(
                     ["godot", "--headless", "--path", "/work", "--editor", "--import"],
                     self.transaction.stage,
@@ -1013,8 +1025,11 @@ class ProjectGateway:
         if not jobs:
             return
 
+        # Taken now: the turn (and its timing) may be over when the renders start.
+        span = self.span("review_media")
+
         async def rendered() -> None:
-            with self.span("review_media"):
+            with span:
                 await render(jobs)
             emit({"kind": "review_media", "transaction_id": identifier, "media": media})
 
@@ -1028,8 +1043,13 @@ class ProjectGateway:
         if task is not None:
             await asyncio.gather(task, return_exceptions=True)
 
-    def span(self, phase: str) -> AbstractContextManager[None]:
-        return self.timing.span(phase) if self.timing else nullcontext()
+    def span(
+        self, phase: str, name: str = "", attributes: dict[str, Any] | None = None
+    ) -> AbstractContextManager[dict[str, Any]]:
+        """Time a phase of this turn (and record it as a span of the change)."""
+        if self.timing is None:
+            return nullcontext({})
+        return self.timing.span(phase, name, attributes)
 
     def import_current(self, tx: FileTransaction) -> bool:
         """Godot already imported this exact stage cleanly (after a native export)."""

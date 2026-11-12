@@ -18,8 +18,8 @@ from typing import Any, Protocol
 
 from bridge.instructions import DEBUGGER_PROMPT, REVIEWER_PROMPT
 from bridge.models import Selection
-from bridge.protocol import Done, Execution, Message, MessageDelta, Prompt
-from joinery import debugging
+from bridge.protocol import Done, Execution, Message, MessageDelta, Prompt, Usage
+from joinery import debugging, metrics
 from joinery.debugging import DebugRequest, Diagnosis, diagnosis_from
 from joinery.gateway import ProjectGateway
 from joinery.peer_review import (
@@ -83,6 +83,8 @@ async def _run_role(
     child: RoleBridge | None = None
     parts: list[str] = []
     model = ""
+    usage: Usage | None = None
+    clock = metrics.Clock()
     try:
         await serving.start()
         child = bridge(agent, role)
@@ -98,6 +100,8 @@ async def _run_role(
                 parts.append(event.text)
                 if sum(len(part) for part in parts) > REPLY_CHARS:
                     break
+            elif isinstance(event, Usage):
+                usage = event
             elif isinstance(event, Done):
                 break
     finally:
@@ -106,7 +110,36 @@ async def _run_role(
                 await child.close()
         with contextlib.suppress(Exception):
             await serving.close()
+        _record(gateway, role, agent, model, usage, clock)
     return list(serving.reports), "".join(parts), model
+
+
+def _record(
+    gateway: ProjectGateway,
+    role: str,
+    agent: str,
+    model: str,
+    usage: Usage | None,
+    clock: metrics.Clock,
+) -> None:
+    """The role's turn as one agent-turn span of the change. Its provider session
+    is its own, so the totals it reported are all this turn's."""
+    timing = gateway.timing
+    if timing is None:
+        return
+    attrs = metrics.agent_attributes(agent, role, usage.model if usage else "")
+    attrs[metrics.REQUEST_MODEL] = model
+    attrs[metrics.TASK] = gateway.task_id
+    attrs.update(
+        metrics.token_attributes(
+            None
+            if usage is None
+            else (usage.input_tokens, usage.output_tokens, usage.cached_tokens)
+        )
+    )
+    timing.trace.add(
+        metrics.AGENT_TURN, "invoke_agent " + role, clock.wall, clock.end(), attrs
+    )
 
 
 class ReviewAgent:

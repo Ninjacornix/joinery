@@ -13,7 +13,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from joinery import readiness, references
+from joinery import metrics, readiness, references
 from joinery.catalog import ROOT, load_catalog, load_project_tools, selection_ids
 from joinery.platform_support import bash_script_argv, editor_running
 from joinery.server_install import install
@@ -343,6 +343,8 @@ def transactions(
                 # The reviewer agent's notes and how its review went.
                 "review_notes": tx.review_notes,
                 "reviewer": tx.reviewer,
+                # What the change cost to make, when it was measured (joinery.metrics).
+                "cost": metrics.cost(project, tx.id),
                 "file_count": len(tx.changes),
                 "files": [
                     {"path": change["path"], "change": _change_kind(change)}
