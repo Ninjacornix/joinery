@@ -78,6 +78,14 @@ func _report() -> Dictionary:
 		"seed": 4821,
 		"played_seconds": 120.0,
 		"summary": "Played 2:00 (seed 4821): 1 high, 5 low.",
+		"coverage":
+		{
+			"percent": 40.0,
+			"visited": 4,
+			"navigable": 10,
+			"start": [0, 0],
+			"grid": ["##..", "#  .", "#..."],
+		},
 	}
 
 
@@ -137,6 +145,11 @@ func _run() -> void:
 	_check(card.call("step_text") == "Writing the report…", "Then it writes")
 	var words: PackedStringArray = card.call("count_words")
 	_check(words == PackedStringArray(["1 high", "5 low"]), "Counts by severity: %s" % words)
+	# How much of the level the bot reached, over a map of what it missed.
+	_check(card.call("coverage_text") == "Explored 40% of the level", card.call("coverage_text"))
+	var map: Control = card.find_child("CoverageMap", true, false)
+	_check(map != null and map.is_visible_in_tree(), "The map shows")
+	_check(map.call("counts") == [4, 6], "Reached and unreached cells: %s" % [map.call("counts")])
 	var rows: Array[Control] = card.call("item_rows")
 	_check(rows.size() == 4, "The first four findings show")
 	var more := _button(card, "Show all 6")

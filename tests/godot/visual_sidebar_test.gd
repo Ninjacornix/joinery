@@ -483,6 +483,10 @@ func _playtest(light: bool, width: int, chat: Control) -> void:
 		"items": items,
 		"seed": 4821,
 		"played_seconds": 120.0,
+		"coverage":
+		load(get_script().resource_path.get_base_dir().path_join("playtest_fixture.gd")).call(
+			"coverage"
+		),
 	}
 	tasks.call("on_playtest", event)
 	var card: Control = tasks.get("playtest")

@@ -4,8 +4,10 @@ extends PanelContainer
 ## bot plays it reads "Playing… 0:42" with the run's length and its own Stop; once the run
 ## is over it shows what was found at a glance: one count per severity, then each finding
 ## as a row that opens to its detail, the place in the code, the seed and a screenshot,
-## with "Fix this" to put a ready request in the composer. The playtester's written report
-## goes to the transcript (sidebar_tasks.gd), not here.
+## with "Fix this" to put a ready request in the composer. Under the counts, how much of the
+## level the bot reached ("Explored 34% of the level") over a top-down map with the places
+## nobody reached marked (playtest_map.gd). The playtester's written report goes to the
+## transcript (sidebar_tasks.gd), not here.
 
 signal stop_pressed
 signal close_pressed
@@ -17,6 +19,7 @@ const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
 const INDICATOR := preload("activity_indicator.gd")
+const MAP := preload("playtest_map.gd")
 const SEVERITIES: Array[String] = ["critical", "high", "medium", "low", "note"]
 ## Severity -> status dot state: bugs in the danger colour, the rest quiet.
 const DOTS := {
@@ -51,6 +54,9 @@ var _counts: HBoxContainer
 var _items: VBoxContainer
 var _scroll: ScrollContainer
 var _more: Button
+var _coverage: VBoxContainer
+var _coverage_text: Label
+var _map: Control
 var _seconds := 0.0
 
 
@@ -110,6 +116,22 @@ func _init(identifier := "") -> void:
 	_counts.accessibility_name = "Findings by severity"
 	_counts.hide()
 	column.add_child(_counts)
+	_coverage = VBoxContainer.new()
+	_coverage.theme_type_variation = "JoineryTight"
+	_coverage.accessibility_name = "How much of the level was reached"
+	_coverage.hide()
+	column.add_child(_coverage)
+	var legend := HBoxContainer.new()
+	legend.theme_type_variation = "JoineryRowTight"
+	_coverage.add_child(legend)
+	_coverage_text = UI.label("", "JoineryCaption")
+	_coverage_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_coverage_text.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	legend.add_child(_coverage_text)
+	legend.add_child(_swatch("danger", 1.0))
+	legend.add_child(UI.label("Not reached", "JoineryCaption"))
+	_map = MAP.new()
+	_coverage.add_child(_map)
 	_scroll = ScrollContainer.new()
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -189,6 +211,11 @@ func item_rows() -> Array[Control]:
 	return rows
 
 
+## The coverage line as shown ("" without one): "Explored 34% of the level".
+func coverage_text() -> String:
+	return _coverage_text.text if _coverage.visible else ""
+
+
 ## Words of the counts row ("1 high", "2 low", …).
 func count_words() -> PackedStringArray:
 	var words := PackedStringArray()
@@ -235,6 +262,7 @@ func _show_report() -> void:
 	_counts.visible = _counts.get_child_count() > 0
 	if _counts.visible:
 		UI_MOTION.fade_in(_counts)
+	_show_coverage(report.get("coverage", {}) as Dictionary)
 	var items: Array = report.get("items", [])
 	var rows: Array = []
 	for index: int in items.size():
@@ -249,6 +277,48 @@ func _show_report() -> void:
 		_more.text = "Show all %d" % items.size()
 		_more.show()
 	UI_MOTION.stagger(rows)
+
+
+## How much of the level the bot reached, over the map of what it missed.
+func _show_coverage(coverage: Dictionary) -> void:
+	var grid: Variant = coverage.get("grid", [])
+	if coverage.is_empty() or not grid is Array or (grid as Array).is_empty():
+		_coverage.hide()
+		return
+	var percent := float(coverage.get("percent", 0.0))
+	_coverage_text.text = "Explored %s%% of the level" % _percent(percent)
+	_coverage_text.tooltip_text = (
+		"The bot stood in %d of the %d places on the level's floor it could map."
+		% [int(coverage.get("visited", 0)), int(coverage.get("navigable", 0))]
+	)
+	_map.call("set_coverage", coverage)
+	_coverage.show()
+	UI_MOTION.fade_in(_coverage)
+
+
+static func _percent(value: float) -> String:
+	return (
+		str(roundi(value))
+		if value >= 10.0 or is_equal_approx(value, roundf(value))
+		else "%.1f" % value
+	)
+
+
+## A small square of the map's colour [param role], for the legend.
+func _swatch(role: String, alpha: float) -> Control:
+	var swatch := ColorRect.new()
+	swatch.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	swatch.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	STYLE.on_theme(
+		swatch,
+		func() -> void:
+			var side := float(UI_THEME.dot_px(swatch))
+			swatch.custom_minimum_size = Vector2(side, side)
+			var colour := UI_THEME.color(swatch, role)
+			colour.a = alpha
+			swatch.color = colour
+	)
+	return swatch
 
 
 func _item_row(item: Dictionary) -> VBoxContainer:
