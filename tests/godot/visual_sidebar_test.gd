@@ -931,6 +931,10 @@ func _saved_chats(light: bool, width: int) -> void:
 	sessions.call("show_states", {"transactions": []})
 	_check(sessions.get("viewing"), "An older chat opens read-only")
 	await _shot("chat-earlier", light, width, chat)
+	var rewind: GDScript = load(
+		get_script().resource_path.get_base_dir().path_join("visual_rewind.gd")
+	)
+	await rewind.shots(self, light, width, chat)
 	host.queue_free()
 	await _frames(2)
 	var folder := ProjectSettings.globalize_path("res://.joinery/chats")

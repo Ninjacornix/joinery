@@ -131,9 +131,10 @@ static func build(
 	chip.remove.tooltip_text = "Remove from this message"
 	chip.remove.accessibility_name = "Remove %s from this message" % text
 	chip.remove.pressed.connect(removed)
-	var picture := STYLE.glyph("text_muted")
 	var icon_name := str(KIND_ICONS.get(str(target.get("kind", "")), ""))
 	if not icon_name.is_empty():
+		# Made only when shown: a glyph left out of the tree would never be freed.
+		var picture := STYLE.glyph("text_muted")
 		STYLE.set_glyph(picture, icon_name)
 		var row := chip.get_child(0)
 		row.add_child(picture)

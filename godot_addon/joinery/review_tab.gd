@@ -117,6 +117,7 @@ func _init() -> void:
 
 func _ready() -> void:
 	UI_THEME.watch(self)
+	add_to_group("joinery_review")  # A rewound chat's undo refreshes it (chat_rewind.gd).
 	set_process(false)
 
 

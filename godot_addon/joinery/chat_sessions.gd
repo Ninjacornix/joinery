@@ -12,6 +12,9 @@ extends Node
 ##
 ## Continuing is the chat host's job: the next prompt names the chat, and the host resumes the
 ## provider's own session or starts a fresh one from a summary, which the transcript says.
+##
+## Each request's menu rewinds the chat to it (Edit and resend) or branches a new chat there
+## (chat_rewind.gd, ADR 0080).
 
 const TASKS := preload("sidebar_tasks.gd")
 const VARIANTS := preload("sidebar_variants.gd")
@@ -22,6 +25,7 @@ const UI_MOTION := preload("ui_motion.gd")
 const COMMAND_SCRIPT := preload("command_job.gd")
 const SLASH := preload("slash_commands.gd")
 const ATTACHMENTS := preload("chat_attachments.gd")
+const REWIND := preload("chat_rewind.gd")
 const PERSONA := "Journeyman"
 const DISCARDED := "Discarded. Your files were not touched."
 const BUSY := "Wait for Journeyman to finish, or stop it first."
@@ -50,6 +54,8 @@ var project := ""
 ## Runs a Joinery CLI call: (args: PackedStringArray, done: Callable(result)). Unset, it runs
 ## `uv run joinery …` in the background; tests set it to answer themselves.
 var runner := Callable()
+## Rewind and branch from a request (chat_rewind.gd).
+var rewinder: REWIND
 ## The chat the next message continues ("" starts a new one).
 var _current_id := ""
 var _bridge: Node
@@ -109,6 +115,12 @@ func _build(header_row: Control, content: Control) -> void:
 	content.add_child(past_bar)
 	content.move_child(past_bar, _composer.get_index())
 	dock.child_entered_tree.connect(_on_dock_child)
+	rewinder = REWIND.new(self)
+	var body: Variant = _transcript.get("_body")
+	if body is Node:
+		(body as Node).child_entered_tree.connect(
+			func(turn: Node) -> void: _offer_rewind.call_deferred(turn)
+		)
 
 
 func _ready() -> void:
@@ -286,6 +298,10 @@ func render(entries: Array) -> void:
 				if not ending.is_empty():
 					var line := "%s: %s" % [str(entry.get("title", "Task")), ending]
 					_transcript.call("add_notice", line, "info")
+			"rewind":
+				_transcript.call(
+					"add_notice", "Rewound to here. Accepted changes stay in the Timeline.", "info"
+				)
 			"session":
 				if str(entry.get("mode", "")) == "summary":
 					_transcript.call(
@@ -355,6 +371,12 @@ func _targets(entry: Dictionary) -> Array:
 				{"attachment": "image", "id": "attachment:" + stem, "path": file, "label": stem}
 			)
 	return targets
+
+
+## A turn joined the transcript: its request card gets the rewind menu.
+func _offer_rewind(turn: Node) -> void:
+	if is_instance_valid(turn) and turn.get_child_count() > 0 and turn.get_child(0) is Control:
+		rewinder.offer(turn.get_child(0) as Control)
 
 
 func _reset() -> void:

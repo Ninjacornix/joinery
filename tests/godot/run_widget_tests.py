@@ -49,6 +49,7 @@ CASES = {
     "chat_images_test.gd": "chat images: ok",
     "usage_meter_test.gd": "usage meter: ok",
     "chat_sessions_test.gd": "chat sessions: ok",
+    "chat_rewind_test.gd": "chat rewind: ok",
     "parallel_tasks_test.gd": "parallel tasks: ok",
     "agent_roles_test.gd": "agent roles: ok",
     "playtest_card_test.gd": "playtest card: ok",
