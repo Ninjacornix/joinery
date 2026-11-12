@@ -24,6 +24,8 @@ const PART_KINDS := {
 	"bone": "Object",
 	"shape_key": "Object",
 	"animation": "Animation",
+	"region": "Object",
+	"body_shape": "Object",
 }
 ## Part kind -> the typed operations that change it (`joinery parts` lists the same, and
 ## knows more: a map with a Krita source is painted with paint_map). The agent reads them
@@ -33,8 +35,35 @@ const PART_OPS := {
 	"material": "set_material_value,split_material",
 	"texture": "adjust_map,make_map_editable,replace_map,split_material",
 	"bone": "edit_bone",
-	"shape_key": "edit_shape_key",
+	"shape_key": "edit_shape_key,bake_shape_keys",
 	"animation": "edit_action,make_cycle",
+	"region": "edit_bone",
+	"body_shape": "set_body_shape",
+}
+## How each body region and MPFB2 body setting reads (the same words as `joinery parts`).
+const REGION_NAMES := {
+	"head": "Head",
+	"neck": "Neck",
+	"shoulders": "Shoulders",
+	"torso": "Torso",
+	"hips": "Hips",
+	"arms": "Arms",
+	"hands": "Hands",
+	"legs": "Legs",
+	"feet": "Feet",
+}
+const SETTING_NAMES := {
+	"gender": "Gender",
+	"age": "Age",
+	"muscle": "Muscle",
+	"weight": "Weight",
+	"height": "Height",
+	"proportions": "Proportions",
+	"cupsize": "Cup size",
+	"firmness": "Firmness",
+	"african": "African",
+	"asian": "Asian",
+	"caucasian": "Caucasian",
 }
 ## How each map role reads (the same words as `joinery parts`).
 const ROLE_NAMES := {
@@ -199,6 +228,9 @@ static func for_part(part: Dictionary) -> Dictionary:
 	target["kind"] = PART_KINDS.get(kind, "Object")
 	if str(target.get("ops", "")).is_empty():
 		target["ops"] = str(PART_OPS.get(kind, ""))
+		# A region of an MPFB2 body is shaped through MPFB2 first.
+		if kind == "region" and str(target.get("object_role", "")) == "basemesh":
+			target["ops"] = "set_body_shape,edit_bone"
 	target["label"] = part_label(target)
 	target["tooltip"] = part_tooltip(target)
 	if str(target.get("id", "")).is_empty():
@@ -246,7 +278,18 @@ static func part_label(target: Dictionary) -> String:
 			return "%s · %s" % [target.get("shape_key", ""), context]
 		"animation":
 			return "%s · %s" % [target.get("action", ""), _model_name(target)]
+		"region", "body_shape":
+			return "%s · %s" % [leaf_name(target), context]
 	return "%s · %s" % [object_name, _model_name(target)]
+
+
+## "Shoulders" for a body region, "Muscle" for a body setting.
+static func leaf_name(target: Dictionary) -> String:
+	var region := str(target.get("region", ""))
+	if not region.is_empty():
+		return str(REGION_NAMES.get(region, region.capitalize()))
+	var setting := str(target.get("parameter", ""))
+	return str(SETTING_NAMES.get(setting, setting.capitalize()))
 
 
 static func part_tooltip(target: Dictionary) -> String:
@@ -256,6 +299,8 @@ static func part_tooltip(target: Dictionary) -> String:
 			path.append(str(target[key]))
 	if str(target.get("part_kind", "")) == "texture":
 		path.append(_map_name(target))
+	if str(target.get("part_kind", "")) in ["region", "body_shape"]:
+		path.append(leaf_name(target))
 	for key: String in ["bone", "shape_key", "action"]:
 		if not str(target.get(key, "")).is_empty():
 			path.append(str(target[key]))

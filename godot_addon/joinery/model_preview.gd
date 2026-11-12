@@ -29,6 +29,8 @@ var _radius := 0.5
 var _world: WorldEnvironment
 var _press_at := Vector2.INF
 var _highlighted := "\n"
+var _region_key := "\n"
+var _region_triangles := 0
 
 
 func _init() -> void:
@@ -172,6 +174,34 @@ func highlight(material: String, object := "") -> void:
 			var tinted := original.duplicate() as Material
 			tinted.next_pass = _tint()
 			instance.set_surface_override_material(surface, tinted)
+
+
+## Tint a character's body region: the triangles of [param object] (every skinned mesh when
+## "") that follow [param bones] most. Empty bones clear it. Returns the tinted triangles.
+func highlight_region(object: String, bones: PackedStringArray) -> int:
+	var key := object + "\n" + ",".join(bones)
+	if model == null:
+		return 0
+	if key == _region_key:
+		return _region_triangles
+	_region_key = key
+	_region_triangles = PICK_SCRIPT.show_region(model, object, bones, region_tint(self))
+	return _region_triangles
+
+
+## The region overlay's material: the accent laid over the surface (mixed, not added, so it
+## shows on a pale body too), pushed out a little along the normals so it never fights the
+## body for depth.
+static func region_tint(host: Control) -> StandardMaterial3D:
+	var tint := StandardMaterial3D.new()
+	tint.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	tint.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	tint.cull_mode = BaseMaterial3D.CULL_BACK
+	tint.grow = true
+	tint.grow_amount = 0.002
+	var accent := UI_THEME.color(host, "accent") if host.is_inside_tree() else Color("4f8cff")
+	tint.albedo_color = Color(accent, 0.6)
+	return tint
 
 
 func _tint() -> StandardMaterial3D:

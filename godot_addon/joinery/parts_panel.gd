@@ -1,17 +1,21 @@
 @tool
 extends VBoxContainer
 ## The parts of one asset as a compact list: its files (the source, the game model, loose
-## files), then, for a model made in Blender, its materials with their maps inside, objects,
-## shape keys and bones, as the owning tool names them (`joinery parts <asset> --json`, read
-## from the native source, so maps the game copy cannot carry, such as height, are listed
-## too). Groups start closed with a count ("8 materials"); a material shows a swatch of its
-## base colour and its maps show as thumbnails once opened. Numbered copies of a file
-## ("albedo_001.png") are left out.
+## files), then, for a model made in Blender, a character's body regions (head, shoulders,
+## arms ...) and MPFB2 body settings, its materials with their maps inside, objects, shape
+## keys (marked In game or Baked) and bones, as the owning tool names them
+## (`joinery parts <asset> --json`, read from the native source, so maps the game copy
+## cannot carry, such as height, are listed too). Groups start closed with a count
+## ("8 materials"); a material shows a swatch of its base colour and its maps show as
+## thumbnails once opened. Numbered copies of a file ("albedo_001.png") are left out.
 ##
 ## Click a file to view it; click a part, or the model in the preview, to make the part the
-## message target and tint it on the model; drag a part onto the message to add it. A picked
-## map shows in [member map_view] (the workspace places it). The model's actions are listed
-## and played by [member animations] (animation_browser.gd), placed under the preview.
+## message target and tint it on the model (a region, a bone or the regions a shape key moves
+## as the triangles that follow those bones); drag a part onto the message to add it. A click
+## on a character's body picks the region under the pointer; on clothes, the whole object.
+## A picked map shows in [member map_view] (the workspace places it). The model's actions
+## are listed and played by [member animations] (animation_browser.gd), placed under the
+## preview.
 
 ## The user picked a part: a message target from target_chip.for_part (label, tooltip, ids).
 signal part_selected(target: Dictionary)
@@ -23,6 +27,7 @@ signal file_selected(path: String)
 const COMMAND_SCRIPT := preload("command_job.gd")
 const INDICATOR_SCRIPT := preload("activity_indicator.gd")
 const CHIP_SCRIPT := preload("target_chip.gd")
+const PICK_SCRIPT := preload("part_pick.gd")
 const ANIMATIONS_SCRIPT := preload("animation_browser.gd")
 const UI_COMPONENTS := preload("ui_components.gd")
 const UI_THEME := preload("ui_theme.gd")
@@ -32,6 +37,8 @@ const IMAGES := ["png", "jpg", "jpeg", "webp", "bmp", "tga", "svg"]
 const MODELS := ["glb", "gltf"]
 ## Part groups in list order: [part kind, one, many].
 const GROUPS := [
+	["region", "body region", "body regions"],
+	["body_shape", "body setting", "body settings"],
 	["material", "material", "materials"],
 	["object", "object", "objects"],
 	["shape_key", "shape key", "shape keys"],
@@ -450,31 +457,38 @@ func _part_row(parent: TreeItem, part: Dictionary) -> TreeItem:
 ## "Aged grey trim" (a material, in words); "Roughness" (a map, inside its material);
 ## Blender's own names for objects, shape keys and bones ("Head.001").
 func _row_text(part: Dictionary) -> String:
-	match str(part.get("part_kind", "")):
-		"object":
-			return str(part.get("object", ""))
+	var kind := str(part.get("part_kind", ""))
+	match kind:
 		"material":
 			return WORDING.readable(str(part.get("material", "")))
 		"texture":
 			return CHIP_SCRIPT._map_name(part)
-		"shape_key":
-			return str(part.get("shape_key", ""))
-		"bone":
-			return str(part.get("bone", ""))
+		"region", "body_shape":
+			return CHIP_SCRIPT.leaf_name(part)
+	if kind in ["object", "shape_key", "bone"]:
+		return str(part.get(kind, ""))
 	return str(part.get("label", ""))
 
 
-## The muted right-hand detail: "on 2 objects", "Source only", the object of a shape key.
+## The muted right-hand detail: "on 2 objects", "Source only", a body setting's value,
+## whether the game gets a shape key ("In game", or "Baked" into the mesh), the object.
 func _row_detail(part: Dictionary) -> String:
+	var detail := ""
 	match str(part.get("part_kind", "")):
 		"material":
 			var users := str(part.get("used_by", "")).split(",", false)
-			return "on %d objects" % users.size() if users.size() > 1 else ""
+			detail = "on %d objects" % users.size() if users.size() > 1 else ""
 		"texture":
-			return "Source only" if str(part.get("source_only", "")) == "true" else ""
-		"shape_key", "bone":
-			return str(part.get("object", ""))
-	return ""
+			detail = "Source only" if str(part.get("source_only", "")) == "true" else ""
+		"shape_key":
+			detail = str(part.get("object", ""))
+			if not str(part.get("shape_role", "")).is_empty():
+				detail = "In game" if str(part.get("in_game", "")) == "true" else "Baked"
+		"body_shape":
+			detail = str(part.get("value", ""))
+		"bone", "region":
+			detail = str(part.get("object", ""))
+	return detail
 
 
 ## A derived file's name in words, without the asset's own name in front ("Albedo").
@@ -660,8 +674,18 @@ func _on_item_collapsed(item: TreeItem) -> void:
 	_fit.call_deferred()
 
 
-## A click on the model picks the material there; a picked map of that material stays picked.
+## A click on the model picks the body region there on a character, the whole object on its
+## clothes or hair, else the material there; a picked map of that material stays picked.
 func _on_model_clicked(hit: Dictionary) -> void:
+	var picked := find_region(str(hit.get("object", "")), str(hit.get("region", "")))
+	if picked.is_empty() and str(hit.get("role", "")) in PICK_SCRIPT.WORN:
+		picked = find_object(str(hit.get("object", "")))
+	if not picked.is_empty():
+		select_part(str(picked.get("id", "")))
+		var chosen := CHIP_SCRIPT.for_part(picked)
+		show_part(chosen)
+		part_selected.emit(chosen)
+		return
 	var material := str(hit.get("material", ""))
 	var part := {}
 	if str(_target.get("material", "")) == material and _target.get("part_kind") == "texture":
@@ -693,8 +717,50 @@ func _highlight() -> void:
 	if not is_instance_valid(_viewer):
 		return
 	var kind := str(_target.get("part_kind", ""))
-	var object := str(_target.get("object", "")) if kind == "object" else ""
+	var object := str(_target.get("object", "")) if kind in ["object", "body_shape"] else ""
 	_viewer.call("highlight", str(_target.get("material", "")), object)
+	if _viewer.has_method("highlight_region"):
+		var mesh := str(_target.get("object", "")) if kind in ["region", "shape_key"] else ""
+		_viewer.call("highlight_region", mesh, region_bones(_target))
+
+
+## The bones whose triangles show [param target] on the model: a region's, one bone, or the
+## bones of the regions a shape key moves (from the listed regions of its mesh).
+func region_bones(target: Dictionary) -> PackedStringArray:
+	var bones := PackedStringArray()
+	match str(target.get("part_kind", "")):
+		"region":
+			for bone: String in str(target.get("bones", "")).split(",", false):
+				bones.append(PICK_SCRIPT.bone_key(bone))
+		"bone":
+			bones.append(PICK_SCRIPT.bone_key(str(target.get("bone", ""))))
+		"shape_key":
+			for region: String in str(target.get("regions", "")).split(",", false):
+				var row := find_region(str(target.get("object", "")), region)
+				bones.append_array(region_bones(row) if not row.is_empty() else PackedStringArray())
+	return bones
+
+
+## The listed body region [param region] of [param object], or {}.
+func find_region(object: String, region: String) -> Dictionary:
+	if region.is_empty():
+		return {}
+	for part: Dictionary in _report.get("parts", []):
+		if (
+			str(part.get("part_kind")) == "region"
+			and str(part.get("object")) == object
+			and str(part.get("region")) == region
+		):
+			return part
+	return {}
+
+
+## The listed object part named [param object], or {}.
+func find_object(object: String) -> Dictionary:
+	for part: Dictionary in _report.get("parts", []):
+		if str(part.get("part_kind")) == "object" and str(part.get("object")) == object:
+			return part
+	return {}
 
 
 ## The exact source pixels Joinery exported for a map (not Godot's copy); one channel of a
