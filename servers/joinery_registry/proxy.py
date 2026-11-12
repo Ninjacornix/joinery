@@ -29,6 +29,15 @@ class ReviewNoteArgument(BaseModel):
     ) = None
 
 
+class DoneWhenArgument(BaseModel):
+    """One item of a to-do's "done when": what done means, and what checks it."""
+
+    text: Annotated[str, Field(min_length=1, max_length=160)]
+    kind: Literal["reach", "no_errors", "test", "check", "look"] = "look"
+    target: Annotated[str, Field(max_length=200)] | None = None
+    seconds: Annotated[float, Field(ge=10, le=300)] | None = None
+
+
 class DesignEvidenceArgument(BaseModel):
     """One place in the project a design finding rests on."""
 
@@ -128,6 +137,24 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
     async def precheck() -> dict[str, Any]:
         """Run the checks submit_for_review runs (protected files, missing res:// files, objects built from placeholder shapes, asset provenance, dependencies, art bible rules, Godot import, project tests) on your change as it is now, without submitting: no reviewer, no submit attempt used, nothing changed. status 'clean', 'problems', 'needs_user' (stop and tell the user), 'nothing_to_check' or 'error'. Each problem has items {rule, file, node, measured, expected, fix}: fix them, then submit. Call it once before submit_for_review when your change touched assets, scenes or code."""
         return await rpc(socket, "precheck", {})
+
+    @server.tool()
+    @tool_errors
+    async def propose_todo(
+        steps: Annotated[list[str], Field(min_length=1, max_length=8)],
+        done_when: Annotated[list[DoneWhenArgument], Field(max_length=6)] | None = None,
+    ) -> dict[str, Any]:
+        """For a request that takes several steps, before changing anything: show the user your to-do. steps: 1 to 8 short lines in the user's words. done_when: up to 6 items that say when the request is done, each checked by Joinery after your change passes its checks, with its result shown in the review; a failed item comes back to you once to fix. Each item is {text, kind, target?, seconds?}: kind 'reach' (target: a place named like its node, 'key room'; the playtest bot must get there), 'no_errors' (seconds of play with no crash or script error, default 60), 'test' (target: the res:// GUT test you write in the change, e.g. that the door opens when the lever is pulled), 'check' (target: tests, godot_import, art_bible, references, provenance or dependencies), or 'look' (only the user can judge). status 'waiting_for_go': end your turn now without changing anything; the user's Go starts the work. status 'go': carry on. Skip it for small, one-step requests."""
+        return await rpc(
+            socket,
+            "propose_todo",
+            {
+                "steps": steps,
+                "done_when": [
+                    item.model_dump(exclude_none=True) for item in done_when or []
+                ],
+            },
+        )
 
     @server.tool()
     @tool_errors

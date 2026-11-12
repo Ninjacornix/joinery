@@ -210,6 +210,19 @@ VARIANT_MIX_PROMPT = RolePrompt(
     "The request:\n{request}\n\nThe ways so far:\n{ways}\n\nCombine them: {note}",
 )
 
+#: A request that takes several steps: the to-do and its done-when items (ADR 0060).
+TODO_GUIDE = (
+    "When a request takes several steps (a lever that opens a door, a key room and its "
+    "key), call propose_todo before changing anything: the steps in the user's words "
+    "and done_when items Joinery can check after your change: reach (the playtest bot "
+    "must get to a place, named like its node), no_errors (seconds of play without "
+    "errors), test (a small GUT test you write in the change for behaviour, such as "
+    "the door opening when the lever is pulled), check, or look when only the user can "
+    "judge. If it returns waiting_for_go, end your turn at once without changing "
+    "anything and without repeating the list; the user's Go starts the work. Skip it "
+    "for small, one-step requests. "
+)
+
 #: When to play the game rather than reason about it.
 PLAYTEST_GUIDE = (
     "To try the game, call playtest(minutes?, seed?, focus?): a bot plays it headless "
@@ -315,6 +328,7 @@ REVIEW_GUIDE = (
     TASK_GUIDE
     + BLOCKOUT_GUIDE
     + VARIANT_GUIDE
+    + TODO_GUIDE
     + PLAYTEST_GUIDE
     + CHECKS_GUIDE
     + "The user accepts or discards every change in the Review panel. "

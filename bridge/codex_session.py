@@ -65,6 +65,7 @@ APPROVED_TOOLS = (
     "precheck",
     "start_task",
     "start_variants",
+    "propose_todo",
     "task_status",
     "playtest",
     "blockout",

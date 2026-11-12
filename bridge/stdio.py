@@ -39,6 +39,7 @@ from joinery import (
     chat_attachments,
     chats,
     complex_models,
+    done_when,
     playtest,
 )
 from joinery.art_approval import approve, review
@@ -406,6 +407,11 @@ async def _serve(
             raw = str(data.get("text", ""))
             if text.endswith(raw) and expand_command(raw) != raw:
                 text = text[: len(text) - len(raw)] + expand_command(raw)
+            # Go on a to-do: the agent hears the to-do as the user left it (ADR 0060).
+            todo = data.get("todo")
+            todo = todo if isinstance(todo, done_when.Todo) else None
+            if todo is not None:
+                text = text[: len(text) - len(raw)] + done_when.go_prompt(todo)
             prompt = Prompt(
                 text=text,
                 project_dir=str(project),
@@ -419,7 +425,8 @@ async def _serve(
             )
             gateway.editor_context = prompt.editor_context
             gateway.target_context = prompt.target_context
-            gateway.request_summary = str(data["text"])
+            request = todo.request if todo is not None else str(data["text"])
+            gateway.request_summary = request
             gateway.attachments = attachments
             selection.clear()
             selection.update(prompt.selection.model_dump())
@@ -438,8 +445,9 @@ async def _serve(
                     session_start,
                     chat_id=recorder.chat_id,
                 ),
-                request=str(data["text"]),
+                request=request,
                 chat_id=recorder.chat_id,
+                todo=todo,
             )
         except asyncio.CancelledError:
             outcome = "cancelled"
@@ -879,6 +887,21 @@ async def _serve(
                         await asyncio.gather(active, return_exceptions=True)
                         emit(Done(ok=False).model_dump())
                     await controller.cancel()
+                elif data.get("kind") == "todo_go":
+                    # Go on the to-do card: the work starts as a request of its own.
+                    if active is not None and not active.done():
+                        raise ValueError("Journeyman is still responding.")
+                    held = controller.pending_todo
+                    if held is None or held.id != str(data.get("todo_id", "")):
+                        raise ValueError("That to-do is no longer waiting for Go.")
+                    todo = done_when.edited(held, data)
+                    emit({"kind": "todo", **todo.as_dict(), "state": "going"})
+                    rpc_server.stop_reason = ""
+                    active = asyncio.create_task(
+                        turn({**data, "text": "Go", "todo": todo})
+                    )
+                elif data.get("kind") == "todo_cancel":
+                    controller.drop_todo(str(data.get("todo_id", "")))
                 elif data.get("kind") == "playtest_start":
                     playtester.start(str(data.get("focus", "")))
                 elif data.get("kind") == "playtest_cancel":

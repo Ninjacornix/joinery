@@ -345,6 +345,14 @@ class GatewayRPC:
                 if self.gateway.turn is None:
                     raise ValueError("No user request is open.")
                 data = await self.gateway.turn.precheck()
+            elif method == "propose_todo":
+                if self.worker or self.inspection_only or self.role not in {"", "lead"}:
+                    raise ValueError(
+                        "Only Journeyman's own request proposes a to-do; do the work."
+                    )
+                if self.gateway.turn is None:
+                    raise ValueError("No user request is open.")
+                data = self.gateway.turn.propose_todo(params)
             elif method == "delegate":
                 if self.inspection_only or self.delegate is None:
                     raise ValueError("Nested specialist delegation is unavailable.")
@@ -455,7 +463,7 @@ class GatewayRPC:
                 data = self.task_status(str(params.get("id", "")))
             else:
                 raise ValueError(
-                    "The model interface supports inventory, schema, call, submit, blockout, playtest, the checks and sound_audit; no approval methods."
+                    "The model interface supports inventory, schema, call, submit, propose_todo, blockout, playtest, the checks and sound_audit; no approval methods."
                 )
             response = {"ok": True, "result": data}
         except PolicyStop as exc:

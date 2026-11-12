@@ -27,7 +27,7 @@ from bridge.protocol import (
     ToolActivity,
     Usage,
 )
-from joinery import metrics
+from joinery import done_when, metrics
 from joinery.timing import TurnTiming
 from joinery.turn import MAX_CONTINUATIONS, Problem, SubmitResult, TurnController
 
@@ -223,8 +223,12 @@ async def run_turn(
     *,
     request: str = "",
     chat_id: str = "",
+    todo: done_when.Todo | None = None,
 ) -> str:
     """Run one user request; returns its outcome ("done" or "failed").
+
+    ``todo`` is the to-do the user pressed Go on (ADR 0060): its done-when items are
+    checked once the change passes Joinery's checks.
 
     A turn whose change was dropped (it failed its checks, or needs the user
     first) is "failed" even when the provider finished well. The session
@@ -243,7 +247,7 @@ async def run_turn(
     outcome = "failed"
     try:
         outcome = await _run_turn(
-            controller, bridge, prompt, emit, timing, compact, request, chat_id
+            controller, bridge, prompt, emit, timing, compact, request, chat_id, todo
         )
     except asyncio.CancelledError:
         outcome = "stopped"
@@ -272,8 +276,11 @@ def _save_metrics(controller: TurnController, timing: TurnTiming, outcome: str) 
             metrics.AGENT: controller.agent_id,
             metrics.TASK: getattr(controller.gateway, "task_id", ""),
             metrics.RESPONSE_MODEL: timing.model,
-            metrics.SUBMITS: controller.attempts + controller.review_rounds,
-            metrics.SEND_BACKS: controller.review_rounds,
+            metrics.SUBMITS: controller.attempts
+            + controller.review_rounds
+            + controller.check_rounds,
+            # The reviewer's and the done-when checks' send-backs alike.
+            metrics.SEND_BACKS: controller.review_rounds + controller.check_rounds,
             metrics.PRECHECKS: getattr(controller, "prechecks", 0),
         }
     )
@@ -293,6 +300,7 @@ async def _run_turn(
     compact: Callable[[], Coroutine[Any, Any, Any]] | None,
     request: str,
     chat_id: str,
+    todo: done_when.Todo | None = None,
 ) -> str:
     # The session may be being summarised while the user reviewed; wait for it.
     await settle_compaction(controller)
@@ -301,7 +309,7 @@ async def _run_turn(
     controller.primer = controller.primer_chat = ""
     # The reviewer reads the change with the same model choice.
     controller.selection = prompt.selection.model_dump()
-    controller.begin(request or prompt.text)
+    controller.begin(request or prompt.text, todo)
     controller.gateway.progress("Thinking through your request…")
     ok = await stream(controller, bridge, prompt, emit, timing)
     asked = 0

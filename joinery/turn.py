@@ -12,12 +12,12 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any, Literal
 
-from joinery import metrics, reasons
+from joinery import done_when, metrics, reasons
 from joinery.claims import LEAD_BUSY, live_refusal
 from joinery.peer_review import PeerReview, Reviewer, request_for
 from joinery.reasons import Reason
@@ -44,6 +44,8 @@ MAX_SUBMITS = 3
 MAX_CONTINUATIONS = 1
 #: Times the reviewer agent may send a change back before it opens with notes.
 MAX_REVIEW_ROUNDS = 2
+#: Times the done-when checks may send a change back before it opens with their results.
+MAX_CHECK_ROUNDS = 1
 #: Seconds past the reviewer's own time box before Joinery stops waiting for it.
 REVIEW_GRACE = 15
 #: Share of the context window at which Joinery summarises the session.
@@ -208,6 +210,17 @@ NEXT_PRECHECK_ERROR = (
     "Joinery could not run its checks; nothing in the change can fix that. Call "
     "submit_for_review when the change is complete."
 )
+NEXT_DONE_WHEN = (
+    "Joinery played and checked your change against the to-do's done-when items and "
+    "these failed. Fix each in the same change, then call submit_for_review again. If "
+    "one can't pass (a bot can't make a jump a person can), leave it and say why in one "
+    "line; the user sees every item's result with the change."
+)
+#: A to-do waits for the user's Go: nothing may change until then.
+WAITING_FOR_GO = (
+    "The user hasn't pressed Go on your to-do yet. End your turn now without changing "
+    "anything; Go starts the work as a new request."
+)
 #: The checks a change passed before the reviewer reads it, in plain words.
 PASSED = (
     "Joinery's checks passed: protected files, missing files, asset provenance, "
@@ -288,6 +301,21 @@ class TurnController:
         self._sent_back: tuple[metrics.Clock, str] | None = None
         #: Prechecks this turn (they are not submit attempts).
         self.prechecks = 0
+        #: The request's to-do (ADR 0060): its steps and the done-when items checked after
+        #: the change passes; None for a request without one.
+        self.todo: done_when.Todo | None = None
+        #: A to-do proposed and waiting for the user's Go (nothing may change meanwhile).
+        self.pending_todo: done_when.Todo | None = None
+        #: Times the done-when checks sent the change back this turn.
+        self.check_rounds = 0
+        #: Checks the to-do's items against the change (default: done_when.verify).
+        self.verifier: (
+            Callable[[TurnController], Awaitable[list[done_when.Result]]] | None
+        ) = None
+        #: The last done-when results this turn, and the stage they checked.
+        self._done: list[done_when.Result] = []
+        self._done_print: tuple[dict[str, str], int] | None = None
+        self._verifying: asyncio.Task[list[done_when.Result]] | None = None
         gateway.turn = self
 
     # --- State -----------------------------------------------------------------------
@@ -307,11 +335,18 @@ class TurnController:
             event["reason"] = reason
         self.emit(event)
 
-    def begin(self, request: str) -> None:
+    def begin(self, request: str, todo: done_when.Todo | None = None) -> None:
         """A user request starts a turn. While a change waits for the user the turn
-        may only look, not change anything."""
+        may only look, not change anything. ``todo`` is the to-do the user pressed Go on;
+        any other request drops a to-do still waiting for Go."""
         if self.state not in {TurnState.IDLE, TurnState.IN_REVIEW}:
             raise ValueError("Journeyman is still working on the last request.")
+        waiting, self.pending_todo = self.pending_todo, None
+        if waiting is not None and (todo is None or todo.id != waiting.id):
+            self.emit({"kind": "todo", "todo_id": waiting.id, "state": "dropped"})
+        self.todo = todo
+        self.check_rounds = 0
+        self._done, self._done_print = [], None
         self.turn_id = uuid.uuid4().hex
         self.attempts = 0
         self.last_result = None
@@ -358,6 +393,130 @@ class TurnController:
             raise ValueError("Changes need an active user request.")
         if self.review_open:
             raise ValueError("Accept or reject the change on screen first.")
+        if self.pending_todo is not None:
+            raise ValueError(WAITING_FOR_GO)
+
+    # --- The to-do -----------------------------------------------------------------------
+
+    def propose_todo(self, params: dict[str, Any]) -> dict[str, Any]:
+        """The agent's to-do for a request with several steps (``propose_todo``).
+
+        It shows in the sidebar at once. When the project's ``[agents] todo_go`` asks for
+        the user's Go (by default, two steps or more) and nothing has changed yet, the
+        agent ends its turn and Go starts the work as a new request; otherwise it carries
+        on and the done-when items are checked after it submits.
+        """
+        if self.state is not TurnState.WORKING:
+            raise ValueError("Propose a to-do while working on a user request.")
+        if self.pending_todo is not None:
+            raise ValueError(WAITING_FOR_GO)
+        if self.todo is not None:
+            raise ValueError(
+                "This request has its to-do already; work through it and submit."
+            )
+        todo = done_when.proposal(params, self.request)
+        wait = done_when.waits_for_go(
+            todo, done_when.go_mode(self.gateway.project)
+        ) and not (self._staged() or self.live_edits)
+        if wait:
+            self.pending_todo = todo
+        else:
+            self.todo = todo
+        self.emit(
+            {"kind": "todo", **todo.as_dict(), "state": "waiting" if wait else "going"}
+        )
+        if wait:
+            return {
+                "status": "waiting_for_go",
+                "todo_id": todo.id,
+                "next": "The user sees your to-do and may edit it. " + WAITING_FOR_GO,
+            }
+        return {
+            "status": "go",
+            "todo_id": todo.id,
+            "next": (
+                "Work through the steps as one change and submit it. Joinery checks each "
+                "done-when item after the change passes its checks."
+            ),
+        }
+
+    def drop_todo(self, todo_id: str) -> bool:
+        """The user cancelled the to-do waiting for Go."""
+        waiting = self.pending_todo
+        if waiting is None or waiting.id != todo_id:
+            return False
+        self.pending_todo = None
+        self.emit({"kind": "todo", "todo_id": todo_id, "state": "cancelled"})
+        return True
+
+    def todo_event(self, state: str, **extra: Any) -> None:
+        if self.todo is not None:
+            self.emit(
+                {"kind": "todo", "todo_id": self.todo.id, "state": state, **extra}
+            )
+
+    async def _check_done(self, changes: list[dict[str, str]]) -> SubmitResult | None:
+        """Check the to-do's done-when items; a Fail sends the change back once.
+
+        Returns the send-back, or None when the change goes on to the reviewer (with the
+        results kept for the review). A stage unchanged since the last check keeps it.
+        """
+        todo = self.todo
+        if todo is None or not todo.done_when:
+            return None
+        printed = self._fingerprint()
+        if not self._done or printed is None or printed != self._done_print:
+            self.todo_event("checking")
+            self.gateway.progress("Checking the done-when items…")
+            job = asyncio.ensure_future((self.verifier or _verify)(self))
+            self._verifying = job
+            try:
+                await asyncio.wait({job})
+            finally:
+                if self._verifying is job:
+                    self._verifying = None
+            if job.cancelled():
+                return self._stopped()
+            error = job.exception()
+            if error is not None:
+                if not isinstance(error, (OSError, RuntimeError, ValueError)):
+                    raise error
+                results = [
+                    done_when.Result(
+                        c.id,
+                        c.text,
+                        "inconclusive",
+                        f"Joinery couldn't check it: {error}",
+                    )
+                    for c in todo.done_when
+                ]
+            else:
+                results = job.result()
+            self._done, self._done_print = results, printed
+            self.todo_event(
+                "checked",
+                results=[r.as_dict() for r in results],
+                summary=done_when.counts_line(results),
+            )
+        if self.state is not TurnState.SUBMITTING:
+            return self._stopped()
+        bad = done_when.failed(self._done)
+        if not bad or self.check_rounds >= MAX_CHECK_ROUNDS or self._last_chance:
+            return None
+        # A send-back costs no submit attempt: its rounds are bounded on their own.
+        self.check_rounds += 1
+        self.attempts -= 1
+        self._to(TurnState.WORKING)
+        self._send_back("done_when")
+        self.todo_event("fixing")
+        self.gateway.progress("Fixing what the done-when checks found…")
+        return self._result(
+            "failed",
+            False,
+            changes=changes,
+            problems=[Problem("done_when", f"{r.text}: {r.evidence}") for r in bad],
+            next=NEXT_DONE_WHEN,
+        )
 
     def edited_live(self, scene_path: str) -> bool:
         """``scene_path`` was changed live this turn, so it can't also be staged."""
@@ -459,6 +618,8 @@ class TurnController:
                 metrics.SENT_BACK_BY: by,
                 metrics.ROUND: self.review_rounds
                 if by == "reviewer"
+                else self.check_rounds
+                if by == "done_when"
                 else self.attempts,
             },
         )
@@ -560,6 +721,10 @@ class TurnController:
         if reviewing is not None and not reviewing.done():
             reviewing.cancel()
             await asyncio.wait({reviewing})
+        verifying, self._verifying = self._verifying, None
+        if verifying is not None and not verifying.done():
+            verifying.cancel()
+            await asyncio.wait({verifying})
 
     def _stopped(self) -> SubmitResult:
         return self._result(
@@ -662,6 +827,11 @@ class TurnController:
             self._to(TurnState.WORKING)
             self.attempts -= 1
             return self._result("nothing_to_review", False, next=NEXT_NOTHING)
+        sent = await self._check_done(changes)
+        if sent is not None or self.turn_id != turn:
+            return (
+                sent if self.turn_id == turn and sent is not None else self._stopped()
+            )
         peer = await self._peer_review(summary, found, skipped)
         if self.turn_id != turn or self.state is not TurnState.SUBMITTING:
             return self._stopped()
@@ -919,6 +1089,9 @@ class TurnController:
             preview["art_gate"] = {k: v for k, v in gate.items() if k != "kind"}
         preview["origin"] = origin
         preview["checks"] = self._passed
+        if self.todo is not None and self._done:
+            preview["done_when"] = [r.as_dict() for r in self._done]
+            preview["done_when_summary"] = done_when.counts_line(self._done)
         # Joinery's own measured facts ("Walkable: …") lead; the agent's follow.
         facts = list(dict.fromkeys([*preview.pop("joinery_facts", []), *self._facts]))
         if facts:
@@ -956,9 +1129,12 @@ class TurnController:
             if (
                 unchanged is not None
                 and last
-                and all(p.check == "reviewer" for p in unchanged.problems)
+                and all(
+                    p.check in {"reviewer", "done_when"} for p in unchanged.problems
+                )
             ):
-                # The reviewer's notes never drop a change: it opens with them.
+                # The reviewer's notes and the done-when results never drop a change:
+                # it opens with them.
                 unchanged = None
             self._last_chance = last
             try:
@@ -1015,3 +1191,18 @@ class TurnController:
         self.review_open = False
         self.review_id = ""
         self._to(TurnState.IDLE, reason)
+
+
+async def _verify(controller: TurnController) -> list[done_when.Result]:
+    """The to-do's done-when items against the change as staged (done_when.verify)."""
+    todo = controller.todo
+    assert todo is not None
+    tx = controller.gateway.transaction
+    staged = tx is not None and tx.state == "staging" and bool(tx.diff())
+    return await done_when.verify(
+        todo,
+        project=controller.gateway.project,
+        stage=tx.stage if staged and tx is not None else None,
+        ran=list(controller._passed.get("ran", [])),
+        skipped=list(controller._passed.get("skipped", [])),
+    )

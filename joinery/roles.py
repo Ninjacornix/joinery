@@ -83,8 +83,10 @@ PERF_CHECK = "perf_check"
 #: What the level is missing to sound like a game: read-only, so any role may.
 SOUND_AUDIT = "sound_audit"
 ROLE_ONLY = frozenset({REVIEW_REPORT, DIAGNOSIS_REPORT, REPRODUCE, DESIGN_REPORT})
-#: Only the lead starts more agents: parallel tasks and variants.
-LEAD_ONLY = frozenset({"start_task", "start_variants"})
+#: A request's to-do, shown to the user before the work (ADR 0060): the lead's alone.
+PROPOSE_TODO = "propose_todo"
+#: Only the lead starts more agents (parallel tasks and variants) or shows a to-do.
+LEAD_ONLY = frozenset({"start_task", "start_variants", PROPOSE_TODO})
 
 
 @dataclass(frozen=True)
@@ -209,6 +211,7 @@ REGISTRY_TOOLS: tuple[str, ...] = (
     "precheck",
     "start_task",
     "start_variants",
+    "propose_todo",
     "task_status",
     "playtest",
     "access_check",
@@ -408,7 +411,9 @@ def role_violation(
         if kind == "mcp" and registry and not registry_allowed(role, tool):
             return Verdict(
                 Severity.DENY,
-                "A task can't start further tasks; do this part yourself."
+                "A task works without a to-do of its own; do the work."
+                if tool == PROPOSE_TODO
+                else "A task can't start further tasks; do this part yourself."
                 if tool in LEAD_ONLY
                 else "That tool belongs to another agent role.",
             )
