@@ -25,6 +25,16 @@ def fingerprint(project: Path) -> str:
 
 
 def approved(project: Path) -> bool:
+    """The bible is approved as it is now, and no teammate's change to the bible
+    or the brief waits for the local user (``team.pending_documents``)."""
+    from joinery import team  # Late: team reads the timeline.
+
+    if team.documents_waiting(project):
+        return False
+    return _bible_approved(project)
+
+
+def _bible_approved(project: Path) -> bool:
     try:
         data = json.loads((project / ".joinery/art-approval.json").read_text())
         return data.get("bible_sha256") == fingerprint(project) and bool(
@@ -39,11 +49,23 @@ def status(project: Path) -> dict[str, str]:
 
     ``state`` is "missing" (no bible), "needs_approval" or "approved"; an
     approved bible also says ``by``: "creation" when it was drafted from the
-    user's answers as the project was made, otherwise "you".
+    user's answers as the project was made, otherwise "you". A bible a
+    teammate changed needs this user's approval again: ``by_teammate`` names who.
     """
+    from joinery import team  # Late: team reads the timeline.
+
     if not (project / "art/bible.md").is_file():
         return {"state": "missing"}
-    if not approved(project):
+    changed = next(
+        (d for d in team.pending_documents(project) if d["path"] == team.BIBLE), None
+    )
+    if changed is not None:
+        # A teammate changed it: approved again by this user, not by the file.
+        return {
+            "state": "needs_approval",
+            "by_teammate": str(changed.get("author", "")),
+        }
+    if not _bible_approved(project):
         return {"state": "needs_approval"}
     try:
         data = json.loads((project / ".joinery/art-approval.json").read_text())
@@ -65,7 +87,11 @@ def review(project: Path) -> dict[str, str | bool]:
 
 
 def approve(
-    project: Path, approved_by: str, expected_sha256: str = "", *, allow_open: bool = False
+    project: Path,
+    approved_by: str,
+    expected_sha256: str = "",
+    *,
+    allow_open: bool = False,
 ) -> None:
     """Called only by an explicit user approval action, not a model tool.
 
@@ -91,6 +117,10 @@ def approve(
             "approved_by": approved_by.strip(),
         },
     )
+    from joinery import team  # Late: team reads the timeline.
+
+    # A teammate's change to the bible is now approved by this user too.
+    team.clear_document(project, team.BIBLE)
 
 
 #: Who approved a bible drafted from the user's answers when the project was made.
