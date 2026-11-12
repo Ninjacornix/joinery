@@ -108,6 +108,11 @@ OP_APPS: dict[str, tuple[str, ...]] = {
     # Several of the Blender operations above on one model, in one Blender run.
     "blender_batch": ("blender",),
     "edit_image": ("krita",),
+    "operate_layer": ("krita",),
+    # Typed graph and vector edits.
+    "set_node_parameters": ("material-maker",),
+    "wrap_image": ("material-maker",),
+    "edit_vector_element": ("inkscape",),
     # Parametric kits run Blender. (scatter only writes a scene file.)
     "kit_make": ("blender",),
     "kit_batch": ("blender",),

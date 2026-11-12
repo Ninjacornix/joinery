@@ -60,6 +60,9 @@ FAMILIES = {
         "operate_vector",
         # Typed Krita operations on a painting (servers/paint/ops.py).
         "edit_image",
+        "operate_layer",
+        # A typed Inkscape operation (servers/paint/vector.py).
+        "edit_vector_element",
     },
     "joinery-sound": {
         "inspect_document",
@@ -83,6 +86,10 @@ FAMILIES = {
         "inspect_document",
         "document_capabilities",
         "operate_graph",
+        # Typed graph operations (servers/materialmaker/ops.py).
+        "list_graph",
+        "set_node_parameters",
+        "wrap_image",
     },
 }
 
@@ -118,6 +125,7 @@ def test_discovery_exposes_only_real_family_capabilities(
                 "kit_list",
                 "audit_animations",
                 "inspect_track",
+                "list_graph",
             }
             for name in readers & set(tools):
                 assert tools[name].annotations.read_only_hint is True
