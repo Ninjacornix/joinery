@@ -111,3 +111,69 @@ def test_url_check_uses_host_only() -> None:
     assert (
         url_violation("https://docs.godotengine.org/?q=elevenlabs.io", denylist) is None
     )
+
+
+def _claude_payload(project: Path, tool: str, server: object) -> dict[str, Any]:
+    """A PreToolUse payload as Claude Code sends it for a session MCP server."""
+    return {
+        "session_id": "0691144d-7c88-4c52-b387-a1b5d1473b37",
+        "cwd": str(project),
+        "permission_mode": "default",
+        "effort": {"level": "medium"},
+        "hook_event_name": "PreToolUse",
+        "tool_name": tool,
+        "tool_input": {},
+        "tool_use_id": "toolu_01NgKz7LXDCfVmCxZVaAAsvd",
+        "mcp_server": server,
+    }
+
+
+def test_claude_mcp_server_object_is_read_by_name(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    (tmp_path / "joinery.toml").write_text(
+        '[tools]\nenabled = ["blender", "godot", "krita", "supercollider"]\n'
+    )
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setenv("JOINERY_STAGE", "none")
+    event = _claude_payload(
+        tmp_path,
+        "mcp__joinery-registry__inspect_editor",
+        {"name": "joinery-registry", "source": "dynamic"},
+    )
+    monkeypatch.setattr("sys.stdin", io.StringIO(json.dumps(event)))
+    assert hook.main("claude") == 0
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize(
+    ("tool", "server", "expected"),
+    [
+        ("mcp__inkscape__x", {"name": "inkscape", "source": "project"}, 2),
+        ("mcp__meshy__text_to_3d", {"name": "meshy", "source": "project"}, 0),
+        ("mcp__inkscape__x", {"source": "project"}, 2),
+        ("mcp__godot__scene_create", {"source": "project"}, 0),
+    ],
+)
+def test_claude_mcp_server_object_keeps_the_gate(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    tool: str,
+    server: object,
+    expected: int,
+) -> None:
+    (tmp_path / "joinery.toml").write_text('[tools]\nenabled = ["godot"]\n')
+    monkeypatch.setenv("CLAUDE_PROJECT_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        "sys.stdin", io.StringIO(json.dumps(_claude_payload(tmp_path, tool, server)))
+    )
+    assert hook.main("claude") == expected
+    out = capsys.readouterr().out
+    if "meshy" in tool:
+        # A generative service still stops the turn (JSON on stdout, exit 0).
+        assert json.loads(out)["continue"] is False
+    else:
+        assert out == ""

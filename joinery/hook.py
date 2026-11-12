@@ -107,6 +107,19 @@ def _split_mcp(tool_name: str, explicit_server: str) -> tuple[str, str]:
     return "", tool_name
 
 
+def _explicit_server(value: object) -> str:
+    """The server name an agent states beside the tool name, in either shape.
+
+    opencode's bridge sends a plain string. Claude Code sends ``mcp_server`` as an
+    object, ``{"name": "joinery-registry", "source": "dynamic"}``; reading that
+    with ``str()`` judged the call against the dict's repr, which is never an
+    enabled server. Anything else reads as absent, so the tool name decides.
+    """
+    if isinstance(value, Mapping):
+        value = value.get("name")
+    return value if isinstance(value, str) else ""
+
+
 def _resolve_project_dir(cwd: str) -> Path:
     for env in _PROJECT_DIR_ENVS:
         value = os.environ.get(env)
@@ -140,7 +153,7 @@ def normalise_event(raw: dict[str, Any]) -> Event:
     tool_input = raw.get("tool_input") or raw.get("args") or {}
     if not isinstance(tool_input, dict):
         tool_input = {}
-    explicit_server = str(raw.get("server") or raw.get("mcp_server") or "")
+    explicit_server = _explicit_server(raw.get("server") or raw.get("mcp_server"))
     cwd = str(raw.get("cwd") or raw.get("project_dir") or raw.get("directory") or "")
     project_dir = _resolve_project_dir(cwd)
 
