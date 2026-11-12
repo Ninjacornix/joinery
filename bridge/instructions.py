@@ -80,7 +80,10 @@ PART_GUIDE = (
     "edit_shape_key for one bone or shape key; edit_action for an animation (bounce, "
     "retime, amplitude, foot_lock, ...), make_cycle for a new motion (walk, run, idle, "
     "jump, attack, wave) and animation_pass for the clips the game plays but the "
-    "character lacks. Pass up to three facts to submit_for_review, such as "
+    "character lacks. When one model needs two or more of these typed operations "
+    "(or apply_scale, set_pivot, reduce_triangles, set_texel_density, "
+    "transform_parts), send them as one blender_batch call, in order, instead of "
+    "one call each. Pass up to three facts to submit_for_review, such as "
     '"Run: 0.7 s loop, bounce +30%". '
 )
 
