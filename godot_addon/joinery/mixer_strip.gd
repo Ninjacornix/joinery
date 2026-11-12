@@ -93,6 +93,8 @@ func _init() -> void:
 	meter = Meter.new()
 	body.add_child(meter)
 	fader = VSlider.new()
+	# The wheel scrolls the panel; drag or arrow keys change the level.
+	fader.scrollable = false
 	fader.min_value = BUSES.MIN_DB
 	fader.max_value = BUSES.MAX_DB
 	fader.step = 0.5
@@ -176,6 +178,7 @@ func _check(text: String, key: String) -> CheckBox:
 
 func _amount(low: float, high: float, step: float, key: String, field: String) -> HSlider:
 	var slider := HSlider.new()
+	slider.scrollable = false
 	slider.min_value = low
 	slider.max_value = high
 	slider.step = step

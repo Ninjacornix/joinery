@@ -72,6 +72,8 @@ func _init() -> void:
 	intensity_title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_controls.add_child(intensity_title)
 	intensity_slider = HSlider.new()
+	# The wheel scrolls the panel; drag or arrow keys change the level.
+	intensity_slider.scrollable = false
 	intensity_slider.name = "Intensity"
 	intensity_slider.min_value = 0
 	intensity_slider.max_value = TRACK.STATES.size() - 1
@@ -264,6 +266,7 @@ func _layer_row(layer: String, role: String) -> HBoxContainer:
 	title.tooltip_text = role.capitalize() if not role.is_empty() else ""
 	row.add_child(title)
 	var fader := HSlider.new()
+	fader.scrollable = false
 	fader.name = "Fader"
 	fader.min_value = BUSES.MIN_DB
 	fader.max_value = BUSES.MAX_DB

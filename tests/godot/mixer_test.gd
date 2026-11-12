@@ -79,6 +79,7 @@ func _run() -> void:
 	_check(BUSES.ducking(tab.buses) == "Voice", "Music ducks under Voice by default")
 	_check_buses(tab)
 	await _check_music(tab)
+	await _check_short_panel(tab)
 	await _check_save(tab, bridge)
 	tab.queue_free()
 	bridge.queue_free()
@@ -168,6 +169,39 @@ func _check_music(tab: TAB) -> void:
 	_check(music.players.values().all(func(p: AudioStreamPlayer) -> bool: return p.playing), "")
 	music.stop()
 	_check(not music.is_playing(), "Stop stops every layer")
+
+
+## A short bottom panel: the buses and music scroll under a fixed Save bar, and the wheel over
+## a fader scrolls the panel instead of moving the level.
+func _check_short_panel(tab: TAB) -> void:
+	tab.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	tab.size = Vector2(900, 240)
+	await _frames(4)
+	var scroll: ScrollContainer = tab.find_child("Scroll", true, false)
+	var bar := scroll.get_v_scroll_bar()
+	_check(bar.visible and bar.max_value > bar.page, "A short panel scrolls")
+	_check(tab.get_global_rect().size.y <= 241.0, "and stays short: %s" % tab.size)
+	var strip := tab.strip("Master")
+	var level := strip.fader.value
+	var at := strip.fader.get_global_rect().get_center()
+	for pressed: bool in [true, false]:
+		var wheel := InputEventMouseButton.new()
+		wheel.button_index = MOUSE_BUTTON_WHEEL_DOWN
+		wheel.pressed = pressed
+		wheel.position = at
+		wheel.global_position = at
+		root.push_input(wheel)
+	await _frames(4)
+	_check(scroll.scroll_vertical > 0, "The wheel over a fader scrolls the panel")
+	_check(_near(strip.fader.value, level), "and leaves the level alone")
+	_check(tab.save_button.is_visible_in_tree(), "Save mix stays in view while scrolled")
+	_check(
+		tab.save_button.get_global_rect().position.y < scroll.get_global_rect().position.y,
+		"above the scrolled content"
+	)
+	scroll.scroll_vertical = 0
+	tab.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	await _frames()
 
 
 func _levels_match(music: Node, gains: Dictionary) -> bool:

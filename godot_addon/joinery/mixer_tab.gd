@@ -90,6 +90,11 @@ func _init() -> void:
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	# A short bottom panel scrolls: the wheel moves the panel even over a fader (the sliders
+	# leave it alone), and a control reached with Tab scrolls into view.
+	scroll.follow_focus = true
+	scroll.name = "Scroll"
+	scroll.accessibility_name = "Buses and music"
 	UI_MOTION.rubber_band(scroll)
 	add_child(scroll)
 	var gutter := MarginContainer.new()
