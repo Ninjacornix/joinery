@@ -115,6 +115,9 @@ class ModelRules(_Strict):
     max_triangles: dict[str, int] = {}
     #: Deform bones per armature (.blend) or joints per skin (.glb).
     max_bones: dict[str, int] = {}
+    #: Morph targets (shape keys the game gets) per mesh of a .glb; the export
+    #: bakes the rest into the mesh, so this is checked on the GLB only.
+    max_morph_targets: dict[str, int] = {}
     #: Every mesh (and armature) has scale 1 on all axes.
     applied_scale: bool = False
     pivot_tolerance_m: float = Field(default=0.02, ge=0)
@@ -669,6 +672,8 @@ class GlbMeasure(_Strict):
     triangles: int
     #: Largest joint count over the file's skins.
     bones: int = 0
+    #: Largest morph target count over the file's meshes.
+    morph_targets: int = 0
     nodes: list[GlbNode] = []
     meshes: list[str] = []
     materials: list[GlbMaterial] = []
@@ -871,6 +876,14 @@ def measure_glb(data: bytes) -> GlbMeasure:
         triangles=_triangles(document),
         bones=max(
             (len(s.get("joints", [])) for s in document.get("skins", [])), default=0
+        ),
+        morph_targets=max(
+            (
+                len(p.get("targets", []))
+                for m in meshes
+                for p in m.get("primitives", [])
+            ),
+            default=0,
         ),
         nodes=out_nodes,
         meshes=[str(m.get("name", f"mesh {i}")) for i, m in enumerate(meshes)],
@@ -1344,6 +1357,7 @@ def _glb_problems(path: str, data: bytes, rules: BibleRules) -> list[str]:
     models = rules.models
     budget = _folder_value(models.max_triangles, path)
     bones = _folder_value(models.max_bones, path)
+    morphs = _folder_value(models.max_morph_targets, path)
     pivot = _folder_value(models.pivot, path)
     texel = _folder_value(models.texel_density, path)
     names = _folder_value(rules.naming.nodes, path)
@@ -1356,6 +1370,7 @@ def _glb_problems(path: str, data: bytes, rules: BibleRules) -> list[str]:
     wanted = (
         budget is not None
         or bones is not None
+        or morphs is not None
         or models.applied_scale
         or (pivot is not None and pivot != "any")
         or texel is not None
@@ -1376,6 +1391,11 @@ def _glb_problems(path: str, data: bytes, rules: BibleRules) -> list[str]:
     if bones is not None and measured.bones > bones:
         problems.append(
             f"{path}: {measured.bones} bones in a skin, over the art bible's {bones} budget"
+        )
+    if morphs is not None and measured.morph_targets > morphs:
+        problems.append(
+            f"{path}: {measured.morph_targets} morph targets on a mesh, over the art "
+            f"bible's {morphs} budget; keep fewer shape keys for the game (bake_shape_keys)"
         )
     if models.applied_scale:
         scaled = [n.name for n in measured.nodes if n.mesh and _scale_off(n.scale)]
