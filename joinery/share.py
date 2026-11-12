@@ -3,6 +3,7 @@
     joinery share status --project P --json
     joinery share build  --project P [--targets web,windows,macos,linux] [--download-templates]
     joinery share media  --project P [--only screenshots,trailer,cover] [--seed N | --new-seed]
+    joinery share steam-art --project P
     joinery share page   --project P [--redraft]
     joinery share itch   --project P --target user/game [--channel web,windows] [--dry-run]
                          [--install-butler] [--yes]
@@ -22,7 +23,14 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from joinery import export_templates, share_build, share_itch, share_media, share_page
+from joinery import (
+    export_templates,
+    share_build,
+    share_itch,
+    share_media,
+    share_page,
+    share_steam,
+)
 from joinery.pinned import PinnedDownloadError
 
 DEFAULT_TARGETS = "web,windows,macos,linux"
@@ -44,6 +52,9 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
     seed = media.add_mutually_exclusive_group()
     seed.add_argument("--seed", type=int, default=0, help="replay this run")
     seed.add_argument("--new-seed", action="store_true", help="play a new run")
+    steam = actions.add_parser(
+        "steam-art", help="Steam capsules and library images from the screenshots"
+    )
     page = actions.add_parser("page", help="draft the itch.io page text")
     page.add_argument("--redraft", action="store_true", help="replace share/page.md")
     itch = actions.add_parser("itch", help="publish the builds to itch.io (you only)")
@@ -60,7 +71,7 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         help="allow installing the pinned butler",
     )
     itch.add_argument("--yes", action="store_true", help="don't ask before pushing")
-    for sub in (status, build, media, page, itch):
+    for sub in (status, build, media, steam, page, itch):
         sub.add_argument("--project", type=Path, required=True)
         sub.add_argument("--json", action="store_true")
 
@@ -84,6 +95,7 @@ def status(project: Path) -> dict[str, Any]:
         },
         "build": share_build.last_report(project),
         "media": share_media.listing(project),
+        "steam": share_steam.listing(project),
         "page": page.read_text(encoding="utf-8") if page.is_file() else None,
         "itch": {**share_itch.status(), **share_itch.settings(project)},
     }
@@ -145,6 +157,14 @@ def main(args: argparse.Namespace) -> int:
                 args,
                 {"recipe": recipe, "media": share_media.listing(project.resolve())},
             )
+        elif action == "steam-art":
+            entry = asyncio.run(share_steam.make(project, progress=say))
+            _emit(
+                args,
+                {"steam_art": entry, "steam": share_steam.listing(project.resolve())},
+            )
+            checks = entry.get("checks", [])
+            return 0 if all(c.get("status") != "failed" for c in checks) else 1
         elif action == "page":
             _emit(args, share_page.write(project, redraft=args.redraft))
         elif action == "itch":

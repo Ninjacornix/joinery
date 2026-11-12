@@ -1,0 +1,115 @@
+# Steam store and library art (`joinery share steam-art`): the sizes and rules
+# each image is composed and checked against.
+#
+# VERIFY AGAINST STEAMWORKS BEFORE UPLOAD. Valve changes these from time to
+# time and the partner site behind login is the authority. The sizes and rules
+# below were read from Valve's public Steamworks documentation on the date in
+# `checked`; values marked `assumed = true` are Joinery's own choices where the
+# documentation gives no number (a safe margin, the smallest size an image is
+# shown at, the smallest readable title).
+#
+# No generative tool takes part: every picture is a crop of the game's own
+# store screenshots, composed in Krita with the game's name as its only text.
+
+checked = "2026-11-12"
+sources = [
+  "https://partner.steamgames.com/doc/store/assets/standard",
+  "https://partner.steamgames.com/doc/store/assets/libraryassets",
+  "https://partner.steamgames.com/doc/store/assets/rules",
+]
+note = "Verify against Steamworks before upload."
+
+[readability]
+# The title's height in pixels where the image is shown smallest. Joinery's rule.
+min_title_px = 9
+# White title against the art behind it (WCAG contrast): on average, and at the
+# brightest tenth of that art.
+min_contrast = 4.5
+min_contrast_bright = 3.0
+assumed = true
+
+[[asset]]
+id = "header"
+label = "Header capsule"
+group = "store"
+width = 920
+height = 430
+text = "title"               # Only the game's title; no quotes or other text.
+# Kept inside this inset on every side (share of width and height).
+safe_inset = 0.06
+# Shown as small as this width (the store's older 460 px header slot).
+shown_width = 460
+assumed = ["safe_inset", "shown_width"]
+
+[[asset]]
+id = "small"
+label = "Small capsule"
+group = "store"
+width = 462
+height = 174
+text = "title"               # The logo should nearly fill it and stay readable.
+safe_inset = 0.06
+# Steam makes 184x69 and 120x45 versions from it.
+shown_width = 120
+assumed = ["safe_inset"]
+
+[[asset]]
+id = "main"
+label = "Main capsule"
+group = "store"
+width = 1232
+height = 706
+text = "title"
+safe_inset = 0.06
+shown_width = 616
+assumed = ["safe_inset", "shown_width"]
+
+[[asset]]
+id = "vertical"
+label = "Vertical capsule"
+group = "store"
+width = 748
+height = 896
+text = "title"
+safe_inset = 0.06
+shown_width = 374
+assumed = ["safe_inset", "shown_width"]
+
+[[asset]]
+id = "library_capsule"
+label = "Library capsule"
+group = "library"
+width = 600
+height = 900
+text = "title"
+safe_inset = 0.06
+# Steam makes a 300x450 version from it.
+shown_width = 300
+assumed = ["safe_inset"]
+
+[[asset]]
+id = "library_hero"
+label = "Library hero"
+group = "library"
+width = 3840
+height = 1240
+text = "none"                # The hero may carry no text; the logo sits on it.
+# Valve's 860x380 safe area on the 1920x620 template, centred; doubled here.
+safe_width = 1720
+safe_height = 760
+shown_width = 1920
+assumed = ["safe_width", "safe_height"]
+
+[[asset]]
+id = "library_logo"
+label = "Library logo"
+group = "library"
+# Valve asks for 1280 px wide and/or 720 px tall; Joinery makes it 1280 wide.
+width = 1280
+height = 360
+text = "logo"                # Only the logotype, on a transparent background.
+transparent = true
+safe_inset = 0.04
+# Steam shows it at half size over the hero.
+shown_width = 640
+assumed = ["height", "safe_inset"]
