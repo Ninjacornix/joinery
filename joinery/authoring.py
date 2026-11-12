@@ -27,7 +27,7 @@ from joinery.recipe import (
     record,
     store_preimage,
 )
-from joinery.runner import Result, SandboxRunner
+from joinery.runner import Result, Runner, SandboxRunner
 from joinery.tools import (
     blender,
     blender_anim,
@@ -578,6 +578,19 @@ def _replacements(project: Path, outputs: tuple[str, ...]) -> list[Path]:
     return replacements
 
 
+def _fingerprint_runner() -> Runner:
+    """Where the recipe's fingerprints are measured: the warm worker and its
+    running Blender when this server has one (joinery.warm_blender), else a
+    fresh container."""
+    from joinery import warm_blender
+
+    if os.environ.get("JOINERY_WORKER_SCOPE") and warm_blender.enabled():
+        from joinery.warm_workers import WarmRunner
+
+        return WarmRunner(asyncio.get_running_loop(), IMAGE)
+    return SandboxRunner(image=IMAGE)
+
+
 async def _record(project: Path, recipe: Recipe, path: Path) -> dict[str, Any]:
     replacements = [p for p in _replacements(project, recipe.outputs) if p != path]
     rows = [
@@ -589,7 +602,7 @@ async def _record(project: Path, recipe: Recipe, path: Path) -> dict[str, Any]:
         f"note = {json.dumps(recipe.note)}",
     ]
     path.write_text("\n".join(rows) + "\n")
-    await asyncio.to_thread(record, path, project, SandboxRunner(image=IMAGE))
+    await asyncio.to_thread(record, path, project, _fingerprint_runner())
     if replacements:
         history = project / "recipes/history"
         history.mkdir(exist_ok=True)

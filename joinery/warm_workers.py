@@ -1,4 +1,9 @@
-"""Reuse only a supervised MCP's project-bound offline container, never its app."""
+"""Reuse a supervised MCP's project-bound offline container.
+
+Commands run in a fresh process each, except Blender's typed operations and
+recipe fingerprints, which one Blender kept running per container serves
+(``joinery.warm_blender``); it falls back to a fresh process on any doubt.
+"""
 
 from __future__ import annotations
 
@@ -9,8 +14,10 @@ import os
 import subprocess
 import time
 import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
+from joinery import warm_blender
 from joinery.runner import Result
 from joinery.worker_identity import docker_owner_args
 
@@ -32,6 +39,8 @@ exit "$?"
 """
 _containers: dict[tuple[str, str, bool, str], str] = {}
 _locks: dict[tuple[str, str, bool, str], asyncio.Lock] = {}
+#: One Blender kept running per container (joinery.warm_blender).
+_blenders: dict[tuple[str, str, bool, str], warm_blender.WarmBlender] = {}
 
 
 def _cleanup() -> None:
@@ -122,6 +131,24 @@ async def execute(
                 _containers.pop(key, None)
                 await _command(["docker", "rm", "--force", name], 10)
                 raise
+        request = warm_blender.request_for(argv) if warm_blender.enabled() else None
+        if request is not None:
+            blender = _blenders.get(key)
+            if blender is None or blender.container != name:
+                blender = _blenders[key] = warm_blender.WarmBlender(name)
+            try:
+                warm = await blender.run(request, timeout)
+            except BaseException:
+                await _drop(key, name)
+                raise
+            if warm is not None:
+                if not warm.ok:
+                    # As a failed cold command: the next call starts clean.
+                    await _drop(key, name)
+                return Result(
+                    warm.ok, warm.stdout, warm.stderr, time.monotonic() - started
+                )
+            # The warm process could not answer: run it cold, as before.
         try:
             got = await _command(
                 [
@@ -141,10 +168,43 @@ async def execute(
                 timeout,
             )
             if not got.ok:
-                _containers.pop(key, None)
-                await _command(["docker", "rm", "--force", name], 10)
+                await _drop(key, name)
             return Result(got.ok, got.stdout, got.stderr, time.monotonic() - started)
         except BaseException:
-            _containers.pop(key, None)
-            await _command(["docker", "rm", "--force", name], 10)
+            await _drop(key, name)
             raise
+
+
+async def close_blenders() -> None:
+    """Stop every warm Blender (the containers stay): for a caller whose event
+    loop ends before the process does."""
+    for blender in list(_blenders.values()):
+        await blender.close()
+
+
+async def _drop(key: tuple[str, str, bool, str], name: str) -> None:
+    """Remove a container and the warm Blender in it."""
+    _containers.pop(key, None)
+    blender = _blenders.pop(key, None)
+    await _command(["docker", "rm", "--force", name], 10)
+    if blender is not None:
+        await blender.close()
+
+
+@dataclass(frozen=True)
+class WarmRunner:
+    """A :class:`joinery.runner.Runner` for code running in a thread (the recipe
+    fingerprints) that sends each command to the warm container on ``loop``."""
+
+    loop: asyncio.AbstractEventLoop
+    image: str
+    name: str = "warm"
+
+    def available(self) -> bool:
+        return True
+
+    def run(self, argv: list[str], project: Path, timeout: int = 900) -> Result:
+        future = asyncio.run_coroutine_threadsafe(
+            execute(argv, project, timeout, False, self.image), self.loop
+        )
+        return future.result()
