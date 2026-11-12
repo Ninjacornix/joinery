@@ -22,10 +22,11 @@ from joinery.tools.base import (
 )
 from joinery.tools.blender_export import (
     BAKE_FOR_EXPORT,
-    BAKE_MACRO_KEYS,
+    BAKE_SHAPE_KEYS,
     DROP_RIG_WIDGETS,
-    macro_call,
+    ExportShapeKeys,
 )
+from joinery.tools.blender_regions import REGION_CODE
 
 # Follows each image node's links forward to the shader socket it feeds, so a
 # map is known by its role: straight into the BSDF, through Normal Map (normal),
@@ -120,6 +121,7 @@ INSPECT_BLEND = (
     + """
 import bpy, json
 MAX_BONES = 256"""
+    + REGION_CODE
 )
 INSPECT_BLEND += """
 def bones(armature):
@@ -144,10 +146,22 @@ def describe(o):
         'vertices': len(o.data.vertices) if o.type == 'MESH' else 0,
         'modifiers': [{'name': m.name, 'type': m.type} for m in o.modifiers],
     }
+    role = _joinery_mpfb_role(o)
+    if role:
+        row['role'] = role
     if o.type == 'MESH':
         row['vertex_groups'] = len(o.vertex_groups)
         keys = o.data.shape_keys
         row['shape_keys'] = [k.name for k in keys.key_blocks] if keys else []
+        if keys:
+            row['shape_key_values'] = {k.name: round(k.value, 4) for k in keys.key_blocks[1:]}
+        regions = _joinery_mesh_regions(o)
+        if regions:
+            row['regions'] = regions
+            row['shape_key_regions'] = _joinery_key_regions(o)
+        macros = _joinery_mpfb_macros(o)
+        if macros:
+            row['mpfb_macros'] = macros
         faces = [0] * len(o.material_slots)
         for polygon in o.data.polygons:
             if polygon.material_index < len(faces):
@@ -161,6 +175,7 @@ def describe(o):
     if o.animation_data and o.animation_data.action:
         row['action'] = o.animation_data.action.name
     return row
+_joinery_enable_mpfb()
 _files = _joinery_texture_files()
 _fps = bpy.context.scene.render.fps / bpy.context.scene.render.fps_base
 def action_owner(a):
@@ -317,10 +332,22 @@ for _joinery_image in bpy.data.images:
 # Godot as the "extras" meta of the node and the material (export_extras).
 EXPORT_NAMES = (
     PART_WALK
+    + REGION_CODE
     + """
 def _joinery_name_parts():
+    _joinery_enable_mpfb()
     for obj in bpy.data.objects:
         obj['joinery_name'] = obj.name
+        # A character's body regions (bones per region) and what MPFB2 made
+        # the object as ("basemesh", "clothes"), for picking in the editor.
+        role = _joinery_mpfb_role(obj)
+        if role:
+            obj['joinery_role'] = role
+        regions = _joinery_mesh_regions(obj) if obj.type == 'MESH' else {}
+        if regions:
+            obj['joinery_regions'] = _joinery_json.dumps(
+                {k: v['bones'] for k, v in regions.items()}, sort_keys=True
+            )
     for material in bpy.data.materials:
         material['joinery_name'] = material.name
         material['joinery_maps'] = _joinery_json.dumps(_joinery_maps(material), sort_keys=True)
@@ -961,7 +988,10 @@ class Blender(ToolModule):
         exports: list[str],
         *,
         keep_macro_shape_keys: bool = False,
+        shape_keys: ExportShapeKeys | None = None,
     ) -> str:
+        if shape_keys is None:
+            shape_keys = ExportShapeKeys(keep_macros=keep_macro_shape_keys)
         lines = [
             "import bpy, os, math",
             FAIL_ON_ERROR,
@@ -996,10 +1026,10 @@ class Blender(ToolModule):
             # every bone, since non-deform bones there are often sockets.
             lines += [
                 "_joinery_deform_only = any('rig_id' in a for a in bpy.data.armatures)",
-                # MPFB2's body-shape macros go into the base mesh unless the
-                # model keeps them; the choice is part of this recipe.
-                BAKE_MACRO_KEYS,
-                macro_call(keep_macro_shape_keys),
+                # MPFB2's body-shape keys (and any key the game does not use)
+                # go into the base mesh; the choice is part of this recipe.
+                BAKE_SHAPE_KEYS,
+                shape_keys.call(),
                 BAKE_FOR_EXPORT,
                 "_joinery_bake_for_export()",
                 DROP_RIG_WIDGETS,

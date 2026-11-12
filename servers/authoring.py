@@ -26,6 +26,7 @@ from joinery.authoring import inspect_document as inspect_native
 from joinery.catalog import load_catalog, load_project_tools, selection_ids
 from joinery.recipe import load_recipe, recipe_paths
 from joinery.tools import blender
+from joinery.tools.blender_export import ExportShapeKeys
 from servers.errors import tool_errors
 
 
@@ -267,6 +268,8 @@ class Step:
     inputs: tuple[str, ...] = ()
     #: Turns the edit's result into the tool's result (notes, summaries).
     after: Callable[[dict[str, Any]], dict[str, Any]] | None = None
+    #: A new choice of the GLB's morph targets; None keeps the model's own.
+    shape_keys: ExportShapeKeys | None = None
 
 
 async def run_step(project: Path, step: Step) -> dict[str, Any]:
@@ -279,6 +282,7 @@ async def run_step(project: Path, step: Step) -> dict[str, Any]:
         _exports(project, step.source, step.exports),
         step.note,
         inputs=step.inputs,
+        shape_keys=step.shape_keys,
     )
     return step.after(result) if step.after is not None else result
 

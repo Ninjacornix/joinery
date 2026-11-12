@@ -173,7 +173,7 @@ async def main(stage: Path) -> dict[str, Any]:
         gltf["accessors"][primitive["attributes"]["POSITION"]]["min"] != position["min"]
     )
     assert (
-        "_joinery_bake_macro_keys(keep=True)"
+        "_joinery_bake_shape_keys(keep_macros=True, keep=None)"
         in (stage / kept["recipe"]).with_suffix(".py").read_text()
     )
     facts.update(

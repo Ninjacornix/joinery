@@ -130,7 +130,12 @@ def test_extensions_named_in_the_code_are_enabled_before_it(
 
 
 def test_plain_code_enables_no_extension() -> None:
-    assert "addon_utils" not in _script("bpy.ops.mesh.primitive_cube_add(size=1)")
+    code = "bpy.ops.mesh.primitive_cube_add(size=1)"
+    script = _script(code)
+    assert "addon_utils" not in script[: script.index(code)]
+    # The export turns MPFB2 on only for a file holding an MPFB2 human, to
+    # read what each object is (body, clothes) for picking in the editor.
+    assert "def _joinery_enable_mpfb():" in script
 
 
 def test_agents_are_told_how_to_enable_mpfb() -> None:

@@ -35,15 +35,12 @@ def test_macro_keys_are_the_mpfb2_body_shape_targets_only() -> None:
 
 def test_the_export_bakes_macros_by_default_and_records_the_choice() -> None:
     script = blender.MODULE.script(SOURCE, "", "pass", [MODEL])
-    assert "_joinery_bake_macro_keys(keep=False)" in script
+    assert "_joinery_bake_shape_keys(keep_macros=False, keep=None)" in script
     # After the save (the .blend keeps every key) and before the per-key
     # modifier bake, so fewer keys are baked.
-    assert script.index("save_as_mainfile") < script.index(
-        "_joinery_bake_macro_keys(keep="
-    )
-    assert script.index("_joinery_bake_macro_keys(keep=") < script.index(
-        "_joinery_bake_for_export()\n"
-    )
+    call = "_joinery_bake_shape_keys(keep_macros="
+    assert script.index("save_as_mainfile") < script.index(call)
+    assert script.index(call) < script.index("_joinery_bake_for_export()\n")
     assert "'$md-'" in script
     kept = blender.MODULE.script(
         SOURCE, "", "pass", [MODEL], keep_macro_shape_keys=True
@@ -51,7 +48,9 @@ def test_the_export_bakes_macros_by_default_and_records_the_choice() -> None:
     assert blender_export.recorded_keep(kept) is True
     assert blender_export.recorded_keep(script) is False
     assert blender_export.recorded_keep("print(1)") is None
-    assert "_joinery_bake_macro_keys" not in blender.MODULE.script(
+    # Recipes made before the game's keys could be chosen still read.
+    assert blender_export.recorded_keep("_joinery_bake_macro_keys(keep=True)") is True
+    assert "_joinery_bake_shape_keys(" not in blender.MODULE.script(
         SOURCE, "", "pass", []
     )
 
@@ -173,3 +172,55 @@ def test_operate_document_takes_the_macro_option_for_blender_only(
 
     result = asyncio.run(call())
     assert result.is_error and "Blender export option" in result.content[0].text
+
+
+def test_the_game_keys_are_recorded_and_read_back() -> None:
+    chosen = blender_export.ExportShapeKeys(keep=("smile", "viseme_aa"))
+    script = blender.MODULE.script(SOURCE, "", "pass", [MODEL], shape_keys=chosen)
+    assert (
+        "_joinery_bake_shape_keys(keep_macros=False, keep=('smile', 'viseme_aa'))"
+        in script
+    )
+    assert blender_export.recorded_shape_keys(script) == chosen
+    none = blender_export.ExportShapeKeys(keep=())
+    assert blender_export.recorded_shape_keys(none.call()) == none
+    # Detail targets are known from MPFB2's own target files, not guessed.
+    assert "_joinery_mpfb_targets()" in script and "'expression'" in script
+
+
+def test_a_model_keeps_its_game_keys_until_told_otherwise(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stage = _stage(tmp_path)
+    chosen = blender_export.ExportShapeKeys(keep=("smile",))
+    (stage / "recipes").mkdir()
+    (stage / "recipes/old.py").write_text(
+        blender.MODULE.script(SOURCE, "", "pass", [MODEL], shape_keys=chosen)
+    )
+    (stage / "recipes/old.toml").write_text(
+        'version = 1\ntool = "blender"\nscript = "recipes/old.py"\n'
+        f'outputs = ["{SOURCE}", "{MODEL}"]\n'
+    )
+    seen: list[str] = []
+
+    async def run(argv: list[str], project: Path, *_args: Any, **_kw: Any) -> Any:
+        seen.append((project / argv[-1]).read_text())
+        raise RuntimeError("stop before recording")
+
+    monkeypatch.setattr(authoring, "run_offline", run)
+    for keep in (None, True):
+        with pytest.raises(RuntimeError, match="stop"):
+            asyncio.run(
+                authoring.edit_document(
+                    stage,
+                    "blender",
+                    SOURCE,
+                    "pass",
+                    [MODEL],
+                    keep_macro_shape_keys=keep,
+                )
+            )
+    assert blender_export.recorded_shape_keys(seen[0]) == chosen
+    assert blender_export.recorded_shape_keys(
+        seen[1]
+    ) == blender_export.ExportShapeKeys(keep_macros=True, keep=("smile",))

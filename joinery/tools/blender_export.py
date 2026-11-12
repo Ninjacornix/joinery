@@ -6,9 +6,11 @@ the native model keeps every modifier and shape key.
 
 from __future__ import annotations
 
+import ast
 import json
 import re
 import struct
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -17,10 +19,39 @@ from typing import Any
 MACRO_PREFIX = "$md-"
 #: The export option a recipe carries, and its default for a new model.
 KEEP_MACROS = "keep_macro_shape_keys"
-#: The line of a recipe script that records the option.
+#: The line of a recipe script that records the option: the current form, and
+#: the form recipes made before the game's shape keys could be chosen.
+_SHAPES_CALL = re.compile(
+    r"^_joinery_bake_shape_keys\(keep_macros=(True|False), keep=(None|\(.*\))\)$",
+    re.MULTILINE,
+)
 _MACRO_CALL = re.compile(r"_joinery_bake_macro_keys\(keep=(True|False)\)")
 #: Printed once per mesh with shape keys, as JSON after the prefix.
 SHAPES_PREFIX = "JOINERY_EXPORT_SHAPES:"
+
+
+@dataclass(frozen=True)
+class ExportShapeKeys:
+    """Which shape keys of a model reach the game as morph targets.
+
+    Every other key is baked into the exported mesh at its current value, so
+    the game's mesh looks as the model does in Blender. By default the
+    body-shape keys of an MPFB2 human (its "$md-" macros and the detail targets
+    MPFB2 loads by name, such as "l-upperarm-shoulder-muscle-incr") are baked
+    and every other key (expressions, visemes, a dent) is kept. `keep` names
+    the game's keys instead: exactly those are kept. `keep_macros` keeps the
+    body-shape keys too. The .blend always keeps every key.
+    """
+
+    keep_macros: bool = False
+    keep: tuple[str, ...] | None = None
+
+    def call(self) -> str:
+        """The script line that bakes the export's shape keys this way."""
+        keep = None if self.keep is None else tuple(self.keep)
+        return (
+            f"_joinery_bake_shape_keys(keep_macros={self.keep_macros!r}, keep={keep!r})"
+        )
 
 
 def is_macro_key(name: str) -> bool:
@@ -35,43 +66,92 @@ def macro_split(names: list[str]) -> tuple[list[str], list[str]]:
 
 
 def macro_call(keep: bool) -> str:
-    """The script line that bakes (or keeps) macro keys for the export."""
-    return f"_joinery_bake_macro_keys(keep={keep!r})"
+    """The script line that bakes (or keeps) MPFB2's body-shape keys for the export."""
+    return ExportShapeKeys(keep_macros=keep).call()
+
+
+def recorded_shape_keys(script: str) -> ExportShapeKeys | None:
+    """The shape-key choice a recipe script was made with, or None if it predates it."""
+    found = _SHAPES_CALL.search(script)
+    if found is not None:
+        keep = ast.literal_eval(found.group(2))
+        return ExportShapeKeys(
+            keep_macros=found.group(1) == "True",
+            keep=None if keep is None else tuple(str(k) for k in keep),
+        )
+    old = _MACRO_CALL.search(script)
+    return None if old is None else ExportShapeKeys(keep_macros=old.group(1) == "True")
 
 
 def recorded_keep(script: str) -> bool | None:
     """The macro option a recipe script was made with, or None if it predates it."""
-    found = _MACRO_CALL.search(script)
-    return None if found is None else found.group(1) == "True"
+    found = recorded_shape_keys(script)
+    return None if found is None else found.keep_macros
 
 
-# Bakes the current mix of MPFB2's macro shape keys into the base mesh and
-# removes them, keeping every other key (expressions, a Dent) as its own morph
-# target. Each kept key gets the same offset as the base, so what it changes
-# stays the same. The mix comes from Blender itself (a key added from the mix of
-# the macro keys alone), so values, relative keys and vertex groups all count.
-BAKE_MACRO_KEYS = """
-def _joinery_bake_macro_keys(keep):
+# Bakes shape keys into the exported mesh (the .blend is already saved) and
+# keeps the game's as morph targets. The keys to bake are mixed by Blender
+# itself (a key added from the mix of those keys alone), so values, mutes,
+# relative keys and vertex groups all count; each kept key gets the same offset
+# as the base, so what it changes stays the same. MPFB2's detail targets are
+# known by name from its own target files, found without turning MPFB2 on.
+BAKE_SHAPE_KEYS = """
+def _joinery_mpfb_targets():
+    import os, importlib.util
+    roots = []
+    try:
+        import addon_utils
+        roots += [os.path.dirname(m.__file__) for m in addon_utils.modules()
+                  if m.__name__ == 'bl_ext.system.mpfb']
+    except Exception:
+        pass
+    if not roots:
+        try:
+            spec = importlib.util.find_spec('bl_ext.system.mpfb')
+            if spec is not None and spec.origin:
+                roots.append(os.path.dirname(spec.origin))
+        except Exception:
+            pass
+    names = set()
+    for root in roots[:1]:
+        for folder, _dirs, files in os.walk(os.path.join(root, 'data', 'targets')):
+            parts = folder.replace(os.sep, '/').split('/')
+            if 'expression' in parts or '_images' in parts:
+                continue
+            names.update(f[:-len('.target.gz')] for f in files if f.endswith('.target.gz'))
+    return names
+
+def _joinery_bake_shape_keys(keep_macros, keep, prefix='JOINERY_EXPORT_SHAPES:'):
     import json
     import numpy as _np
+    targets = _joinery_mpfb_targets() if keep is None and not keep_macros else set()
+    wanted = set(keep or ())
+    seen = set()
     for obj in [o for o in bpy.data.objects if o.type == 'MESH']:
         keys = obj.data.shape_keys
         if keys is None or len(keys.key_blocks) < 2:
             continue
         blocks = list(keys.key_blocks)
+        seen.update(k.name for k in blocks[1:])
         macros = [k for k in blocks[1:] if k.name.startswith(MACRO_PREFIX)]
+        if keep is not None:
+            bake = [k for k in blocks[1:] if k.name not in wanted]
+        elif keep_macros:
+            bake = []
+        else:
+            bake = [k for k in blocks[1:] if k.name.startswith(MACRO_PREFIX) or k.name in targets]
         row = {
             'object': obj.name, 'vertices': len(obj.data.vertices),
             'shape_keys': len(blocks) - 1, 'macro_keys': len(macros),
-            'baked': 0, 'kept': len(blocks) - 1,
+            'baked': 0, 'kept': len(blocks) - 1, 'kept_names': [k.name for k in blocks[1:]],
         }
-        if macros and not keep:
-            names = {k.name for k in macros}
+        if bake:
+            names = {k.name for k in bake}
             mutes = [(k, k.mute) for k in blocks]
             for k in blocks[1:]:
-                k.mute = k.name not in names
+                k.mute = k.mute or k.name not in names
             obj.show_only_shape_key = False
-            mix = obj.shape_key_add(name='joinery_macro_mix', from_mix=True)
+            mix = obj.shape_key_add(name='joinery_bake_mix', from_mix=True)
             for k, mute in mutes:
                 k.mute = mute
             count = len(obj.data.vertices) * 3
@@ -81,7 +161,7 @@ def _joinery_bake_macro_keys(keep):
             mix.data.foreach_get('co', mixed)
             offset = mixed - base
             obj.shape_key_remove(mix)
-            for k in macros:
+            for k in bake:
                 obj.shape_key_remove(k)
             for k in obj.data.shape_keys.key_blocks:
                 co = _np.empty(count, dtype=_np.float64)
@@ -89,11 +169,17 @@ def _joinery_bake_macro_keys(keep):
                 k.data.foreach_set('co', co + offset)
             obj.data.vertices.foreach_set('co', base + offset)
             obj.data.update()
-            row['baked'] = len(macros)
-            row['kept'] = len(obj.data.shape_keys.key_blocks) - 1
-            if row['kept'] == 0:
+            left = list(obj.data.shape_keys.key_blocks)[1:]
+            row['baked'] = len(bake)
+            row['kept'] = len(left)
+            row['kept_names'] = [k.name for k in left]
+            if not left:
                 obj.shape_key_clear()
-        print('JOINERY_EXPORT_SHAPES:' + json.dumps(row))
+        print(prefix + json.dumps(row))
+    missing = sorted(wanted - seen)
+    if missing:
+        raise RuntimeError('No mesh of this model has the shape key(s) ' + ', '.join(missing)
+                           + ' to keep for the game. Shape keys: ' + ', '.join(sorted(seen)))
 """.replace("MACRO_PREFIX", repr(MACRO_PREFIX))
 
 # Godot cannot run Blender modifiers, so the GLB is exported with them applied

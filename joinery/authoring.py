@@ -175,13 +175,15 @@ async def edit_document(
     note: str = "",
     *,
     keep_macro_shape_keys: bool | None = None,
+    shape_keys: blender_export.ExportShapeKeys | None = None,
     inputs: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     """Apply `code` to a native document, export it and record the recipe.
 
     `inputs` are further project files the code reads (a painted map), listed
-    as recipe sources. For Blender, `keep_macro_shape_keys` keeps MPFB2's
-    body-shape macros as morph targets; None keeps the model's recorded choice.
+    as recipe sources. For Blender, `shape_keys` chooses the GLB's morph
+    targets and `keep_macro_shape_keys` keeps MPFB2's body-shape keys as morph
+    targets; with neither, the model keeps its recorded choice.
     """
     module, source, exports, target = _checked_document(
         project, tool, source, exports, (code,)
@@ -207,12 +209,8 @@ async def edit_document(
             raise ValueError(f"{extra} is not a file in this project.")
     script = recipe_dir / (identifier + module.script_ext)
     if isinstance(module, blender.Blender):
-        keep = keep_macro_shape_keys
-        if keep is None:
-            keep = _recorded_keep(project, source)
-        script.write_text(
-            module.script(source, base, code, exports, keep_macro_shape_keys=keep)
-        )
+        chosen = _export_shape_keys(project, source, keep_macro_shape_keys, shape_keys)
+        script.write_text(module.script(source, base, code, exports, shape_keys=chosen))
     else:
         script.write_text(module.script(source, base, code, exports))
     if module.text_source:
@@ -326,6 +324,7 @@ async def edit_document_steps(
     exports: list[str],
     *,
     keep_macro_shape_keys: bool | None = None,
+    shape_keys: blender_export.ExportShapeKeys | None = None,
 ) -> StepsOutcome:
     """Apply several Blender edits to one document in one Blender process.
 
@@ -356,9 +355,7 @@ async def edit_document_steps(
     base = store_preimage(project, target) if target.is_file() else ""
     for output in [source, *exports]:
         confined(project, output).parent.mkdir(parents=True, exist_ok=True)
-    keep = keep_macro_shape_keys
-    if keep is None:
-        keep = _recorded_keep(project, source)
+    chosen = _export_shape_keys(project, source, keep_macro_shape_keys, shape_keys)
     batch = uuid.uuid4().hex
     ids = [uuid.uuid4().hex for _ in steps]
     scripts = [f"recipes/{identifier}{module.script_ext}" for identifier in ids]
@@ -380,7 +377,7 @@ async def edit_document_steps(
                     base if index == 0 else mark,
                     step.code,
                     exports,
-                    keep_macro_shape_keys=keep,
+                    shape_keys=chosen,
                 ),
             }
             for index, (step, script, mark) in enumerate(
@@ -504,14 +501,31 @@ def _undo_step(
         copy_file(png, folder / png.name)
 
 
-def _recorded_keep(project: Path, source: str) -> bool:
-    """The macro shape-key choice of the recipe that last made `source`."""
+def recorded_shape_keys(project: Path, source: str) -> blender_export.ExportShapeKeys:
+    """The shape-key choice of the recipe that last made `source` (the default if none)."""
     for path in recipe_paths(project):
         recipe = load_recipe(path)
         script = project / recipe.script
         if source in recipe.outputs and script.is_file():
-            return bool(blender_export.recorded_keep(script.read_text()))
-    return False
+            found = blender_export.recorded_shape_keys(script.read_text())
+            return found or blender_export.ExportShapeKeys()
+    return blender_export.ExportShapeKeys()
+
+
+def _export_shape_keys(
+    project: Path,
+    source: str,
+    keep_macros: bool | None,
+    chosen: blender_export.ExportShapeKeys | None,
+) -> blender_export.ExportShapeKeys:
+    """The export's shape-key choice: the one given, else the model's own, with
+    `keep_macros` changed when it is given."""
+    if chosen is not None:
+        return chosen
+    recorded = recorded_shape_keys(project, source)
+    if keep_macros is None:
+        return recorded
+    return blender_export.ExportShapeKeys(keep_macros=keep_macros, keep=recorded.keep)
 
 
 def _export_facts(project: Path, exports: list[str], output: str) -> dict[str, Any]:
@@ -520,6 +534,15 @@ def _export_facts(project: Path, exports: list[str], output: str) -> dict[str, A
     rows = blender_export.shape_rows(output)
     if rows:
         facts["shape_keys"] = rows
+    # What a typed operation reports of itself (a refitted rig, values set).
+    done = []
+    for line in output.splitlines():
+        for prefix in ("JOINERY_PART_OP:", "JOINERY_MODEL_OP:"):
+            if line.startswith(prefix):
+                with contextlib.suppress(ValueError):
+                    done.append(json.loads(line.removeprefix(prefix)))
+    if done:
+        facts["operation"] = done
     animations = blender_anim.animation_rows(output)
     if animations:
         facts["animations"] = animations
