@@ -16,6 +16,7 @@ extends VBoxContainer
 ## - Text: only the changed lines (review_diff.gd).
 ## - A scene variant (ADR 0066): its base and the variant as one split picture, with only
 ##   what it overrides listed under it (review_overrides.gd, which draws the pictures).
+## - Dialogue (.dlg): the conversation, played through Before or After (review_dialogue.gd).
 ## - A blockout (ADR 0043): the user's sketch (the item's `reference`) beside the plan of the
 ##   level built from it.
 ## - Animations: the original and the change as two looping clips side by side
@@ -24,19 +25,9 @@ extends VBoxContainer
 ##   (review_transport.gd); it floats over the foot of the stage (review_overlay.gd) and fades
 ##   out when the pointer leaves. Left and Right step a frame.
 ##
-## The one Before/After control is the pill floating in the stage's corner (review_sides.gd):
-## Before | After | Both; a change with no original has one badge, "New". It never covers the
-## media: when the picture would reach under it, the media gives up a strip at the top for it.
-##
-## Pictures fill the stage, keeping their shape: a pair shares its width. The stage fills with
-## the pictures' own background (review_glance.gd's ground); a picture without one (a texture
-## with busy edges) sits on the panel itself, so a picture of another shape than the stage
-## shows no empty bands. Pixel art and small or flat pictures are blown up crisp, photos and
-## renders smooth (picture_filter).
-##
-## A side whose file is not written yet shows a pulsing "Rendering preview…" frame until it
-## appears; the renders start when the change passes its checks, so the review is on screen
-## before they are done ([method update_media] brings their outcome).
+## Before | After | Both is the corner pill (review_sides.gd), never over the media. Pictures
+## keep their shape on their own background, with no empty bands; a side still rendering pulses
+## until [method update_media] brings it. ADR 0040 has the rest.
 
 ## The shown item changed (several items), so Before/After availability may differ.
 signal item_changed
@@ -62,6 +53,7 @@ const AUDIO_STAGE := preload("review_audio_stage.gd")
 const ITEMS := preload("review_items.gd")
 const OVERLAY := preload("review_overlay.gd")
 const OVERRIDES := preload("review_overrides.gd")
+const DIALOGUE := preload("review_dialogue.gd")
 ## Seconds to wait for a preview file before giving up.
 const LOAD_TIMEOUT := 120.0
 ## Seconds between checks for a preview file that is still being written.
@@ -87,6 +79,7 @@ var _front: View
 var _back: View
 var _swipe: SWIPE
 var _diff: DIFF
+var _dialogue: DIALOGUE
 ## Holds the audio preview with the side tags over it.
 var _audio_box: AUDIO_STAGE
 var _loading: PanelContainer
@@ -161,6 +154,9 @@ func _init() -> void:
 	_diff = DIFF.new()
 	_diff.hide()
 	_column.add_child(_diff)
+	_dialogue = DIALOGUE.new()
+	_dialogue.hide()
+	_column.add_child(_dialogue)
 	_audio_box = AUDIO_STAGE.new()
 	_column.add_child(_audio_box)
 	_loading = PanelContainer.new()
@@ -192,7 +188,7 @@ func _init() -> void:
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_THEME_CHANGED:
 		var tall := float(UI_THEME.control_h(self, "lg") * 2)
-		for area: Control in [_audio_box, _diff]:
+		for area: Control in [_audio_box, _diff, _dialogue]:
 			area.custom_minimum_size.y = tall
 		_size_frame()
 	elif what == NOTIFICATION_VISIBILITY_CHANGED:
@@ -311,6 +307,7 @@ func clear_media() -> void:
 	_swipe.hide()
 	_clip.stop()
 	_diff.hide()
+	_dialogue.hide()
 	_failure.hide()
 	_overrides.forget()
 	_files.hide()
@@ -470,7 +467,7 @@ func file_name() -> String:
 func thumbnail() -> Texture2D:
 	for item: Dictionary in _items:
 		var kind := kind_of(item)
-		if kind in ["audio", "text"]:
+		if kind in ["audio", "text", "dialogue"]:
 			continue
 		var picture := _tile_picture(item)
 		if picture != null:
@@ -573,6 +570,8 @@ func _row_specs(depths: Array[int]) -> Array:
 				spec["glyph"] = "sound"
 			"text":
 				spec["word"] = str(item.get("word", "Aa"))
+			"dialogue":
+				spec["word"] = ".dlg"
 			var kind:
 				spec["picture"] = _tile_picture(item)
 				spec["glyph"] = {"model": "model", "clip": "animation"}.get(kind, "image")
@@ -596,7 +595,7 @@ func _refresh_tiles() -> void:
 		return
 	for index: int in _items.size():
 		var item: Dictionary = _items[index]
-		if not kind_of(item) in ["audio", "text"]:
+		if not kind_of(item) in ["audio", "text", "dialogue"]:
 			_files.set_picture(index, _tile_picture(item))
 
 
@@ -649,13 +648,17 @@ func _show_item(swap: bool) -> void:
 	tooltip_text = "res://" + path if kind_of(item) != "text" else ""
 	_failure.hide()
 	_overrides.show_variant(item.get("variant", {}))
-	if kind_of(item) == "text":
+	var kind := kind_of(item)
+	_diff.visible = kind == "text"
+	_dialogue.visible = kind == "dialogue"
+	if _diff.visible or _dialogue.visible:
 		_stop_waiting()
 		_hide_stage()
-		_diff.show_diff(str(item.get("diff", "")))
-		_diff.show()
+		if _diff.visible:
+			_diff.show_diff(str(item.get("diff", "")))
+		else:
+			_dialogue.show_item(item, "after" if side == "compare" else side)
 		return
-	_diff.hide()
 	if not (item.has("before") or item.has("after")):
 		_stop_waiting()
 		_fail(str(item.get("error", "")))
@@ -929,7 +932,7 @@ func _place_sides() -> void:
 		_sides.hide()
 		return
 	var item: Dictionary = _items[_index]
-	if kind_of(item) == "text":
+	if kind_of(item) in ["text", "dialogue"]:
 		_sides.hide()
 		return
 	var host: Control = _audio_box if _audio_box.visible else _frame

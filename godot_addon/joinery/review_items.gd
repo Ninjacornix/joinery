@@ -9,10 +9,11 @@ const DETAILS := preload("review_details.gd")
 const GLANCE := preload("review_glance.gd")
 
 
-## "image", "model", "audio", "clip" (an animation) or "text" for a media [param item].
+## "image", "model", "audio", "clip" (an animation), "dialogue" (a .dlg file to play
+## through) or "text" for a media [param item].
 static func kind_of(item: Dictionary) -> String:
 	var media := str(item.get("media", "image"))
-	if media in ["audio", "text", "clip"]:
+	if media in ["audio", "text", "clip", "dialogue"]:
 		return media
 	if item.has("before_back") or item.has("after_back"):
 		return "model"

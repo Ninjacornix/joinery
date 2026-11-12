@@ -195,3 +195,31 @@ def test_an_unchanged_side_is_never_rendered_again(
     assert Path(second["after"]).read_bytes() == b"png of after, fixed"
     assert first["before"] == second["before"]
     assert list((tmp_path / review.CACHE_DIR).glob("*.png"))
+
+
+def test_a_dialogue_change_opens_with_its_text_and_a_play_through(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "project.godot").write_text("config_version=5\n")
+    (tmp_path / "game").mkdir()
+    (tmp_path / "game/guard.dlg").write_text("Guard: Halt!\n")
+    monkeypatch.setattr("joinery.gateway.configured", lambda _: ([], []))
+    gateway = ProjectGateway(tmp_path)
+    tx = FileTransaction(tmp_path)
+    tx.begin("Friendlier guard")
+    gateway.transaction = tx
+    (tx.stage / "game/guard.dlg").write_text("Guard: Welcome, traveller!\n")
+
+    async def go() -> dict[str, Any]:
+        try:
+            return gateway.open_review("Friendlier guard")
+        finally:
+            await gateway.close()
+
+    preview = asyncio.run(go())
+    assert "+Guard: Welcome, traveller!" in preview["diff"]
+    assert not preview["media_pending"]
+    [item] = preview["media"]
+    assert item["media"] == "dialogue"
+    assert item["before"].startswith(str(tx.snapshot))
+    assert item["after"].startswith(str(tx.stage))

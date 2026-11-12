@@ -34,6 +34,7 @@ CASES = {
     "review_tab_test.gd": "review tab: ok",
     "review_flow_test.gd": "review flow: ok",
     "review_glance_test.gd": "review glance: ok",
+    "review_dialogue_test.gd": "review dialogue: ok",
     "review_stacked_test.gd": "review stacked: ok",
     "asset_workspace_test.gd": "asset workspace: ok",
     "kits_panel_test.gd": "kits panel: ok",
@@ -130,6 +131,12 @@ def _run(selected: list[str], temporary: Path) -> int:
     shutil.copyfile(ROOT / "testbed/audio/sfx/door_creak.wav", audio)
     if "mixer_test.gd" in cases:
         plant_music(project)
+    if "review_dialogue_test.gd" in cases:
+        # The review plays a .dlg file through the game's own dialogue scripts.
+        shutil.copytree(
+            ROOT / "features/dialogue/overlay/features/dialogue",
+            project / "features/dialogue",
+        )
     game = _game(temporary / "game", env) if GAME_CASES & set(cases) else None
     binary = isolated_editor(engine_binary(), temporary)
 

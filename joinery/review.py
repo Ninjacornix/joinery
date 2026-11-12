@@ -190,6 +190,8 @@ else:
 #: Pictures per clip strip, and their side in pixels: large enough to stay crisp
 #: when a clip fills the review frame on a high-DPI screen.
 CLIP_FRAMES = 12
+#: Dialogue text files (the dialogue feature): the review plays them through.
+DIALOGUE_SUFFIXES = frozenset({".dlg"})
 CLIP_SIZE = 384
 #: Where an animation operation lists the actions it touched in the stage.
 ANIMATION_REVIEW = ".joinery/animation_review.json"
@@ -284,12 +286,21 @@ class Render:
         return self.output.with_name(self.output.stem + BACK_SUFFIX)
 
 
+def _dialogue_item(tx: FileTransaction, relative: str) -> dict[str, Any]:
+    """A changed dialogue file: each side's text file, which the review plays through."""
+    item: dict[str, Any] = {"path": relative, "media": "dialogue"}
+    for side, root in (("before", tx.original), ("after", tx.stage)):
+        if (root / relative).is_file():
+            item[side] = str(root / relative)
+    return item
+
+
 def plan(
     tx: FileTransaction,
     changes: list[dict[str, str]],
     parts: list[dict[str, str]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[Render]]:
-    """Before/after media for the changed art and audio, and the renders they need.
+    """Before/after media for the changed art, audio and dialogue, and the renders they need.
 
     Every item already names the file each side shows: an image or audio file
     as it is, or the render's output, which appears once :func:`render` has
@@ -303,6 +314,9 @@ def plan(
     for change in sorted(changes, key=lambda c: _order(c["path"])):
         relative = change["path"]
         suffix = Path(relative).suffix.lower()
+        if suffix in DIALOGUE_SUFFIXES:
+            media.append(_dialogue_item(tx, relative))
+            continue
         if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".wav", ".ogg", ".blend"}:
             continue
         # Recipe snapshots (recipes/inputs) and Joinery's own files are

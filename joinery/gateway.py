@@ -138,7 +138,7 @@ def op_apps(tool: str, arguments: dict[str, Any]) -> tuple[str, ...]:
 
 #: Files whose line-by-line diff the review's Details show.
 TEXT_SUFFIXES = frozenset(
-    {".gd", ".tscn", ".tres", ".json", ".toml", ".gdshader", ".md"}
+    {".gd", ".tscn", ".tres", ".json", ".toml", ".gdshader", ".md", ".dlg"}
 )
 LIVE_SCENE = (
     "This scene is on screen or has unsaved edits; change it live with edit_scene. "

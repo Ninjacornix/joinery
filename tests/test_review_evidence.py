@@ -23,6 +23,34 @@ def test_recipe_snapshots_are_not_reviewed_as_assets(tmp_path: Path) -> None:
     assert [item["path"] for item in media] == ["art/textures/hammer/Head.png"]
 
 
+def test_a_changed_dialogue_file_is_played_through_side_by_side(tmp_path: Path) -> None:
+    from joinery import review
+
+    (tmp_path / "project.godot").write_text("config_version=5\n")
+    (tmp_path / "game/dialogue").mkdir(parents=True)
+    (tmp_path / "game/dialogue/guard.dlg").write_text("Guard: Halt!\n")
+    tx = FileTransaction(tmp_path)
+    tx.begin("The guard is friendlier")
+    (tx.stage / "game/dialogue/guard.dlg").write_text("Guard: Welcome!\n")
+    (tx.stage / "game/dialogue/new.dlg").write_text("Hello.\n")
+    changes = [{"path": "game/dialogue/guard.dlg"}, {"path": "game/dialogue/new.dlg"}]
+    media, renders = review.plan(tx, changes)
+    assert renders == []
+    assert media == [
+        {
+            "path": "game/dialogue/guard.dlg",
+            "media": "dialogue",
+            "before": str(tx.original / "game/dialogue/guard.dlg"),
+            "after": str(tx.stage / "game/dialogue/guard.dlg"),
+        },
+        {
+            "path": "game/dialogue/new.dlg",
+            "media": "dialogue",
+            "after": str(tx.stage / "game/dialogue/new.dlg"),
+        },
+    ]
+
+
 def test_a_texture_target_adds_a_texture_view_before_the_full_model(
     tmp_path: Path, monkeypatch
 ) -> None:
