@@ -439,7 +439,10 @@ func _build_project() -> void:
 	# Known once `history usage` answers; until then there is nothing true to show.
 	_policy_picker.disabled = true
 	_policy_picker.item_selected.connect(_choose_policy)
-	_policy_row = UI.setting_row("Older versions", _policy_picker)
+	var policy_row := UI.setting_row("Older versions", _policy_picker)
+	# A long choice ("Last 50 changes") goes under the title when the sidebar is narrow.
+	STYLE.stack_when_narrow(policy_row, policy_row.title, _policy_picker)
+	_policy_row = policy_row
 	section.body.add_child(_policy_row)
 	_policy_panel = POLICY.panel()
 	_policy_panel.applied.connect(_apply_policy)

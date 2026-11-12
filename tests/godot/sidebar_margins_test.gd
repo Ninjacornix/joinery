@@ -5,7 +5,7 @@ extends SceneTree
 ## the composer share the same left and right edge; the transcript's scrollbar sits in the
 ## gutter, and the header row starts SPACE.1 under the top edge. Chips with long names end in an
 ## ellipsis inside the gutter instead of widening the sidebar, and Settings' reviewer Model field
-## shows "Same as Journeyman" uncut.
+## shows "Same as Journeyman" uncut, and "Older versions" beside or above its choice uncut.
 
 const WIDTHS: Array[int] = [340, 480, 1000]
 const HEIGHT := 760
@@ -245,5 +245,31 @@ func _model_field(chat: Control, width: int) -> void:
 			field.get_global_rect().end.x <= chat.get_global_rect().end.x + 0.5,
 			"The Model field stays inside the sidebar (%d px)" % width
 		)
+	await _policy_row(chat, settings, width)
 	settings.call("set_open", false)
+
+
+## Settings: "Older versions" is never cut short; its choice goes under it when both don't fit.
+func _policy_row(chat: Control, settings: Node, width: int) -> void:
+	var picker: OptionButton = settings.get("_policy_picker")
+	picker.select(0)
+	await _frames(4)
+	var title: Label = settings.get("_policy_row").get("title")
+	var font := title.get_theme_font("font")
+	var text := font.get_string_size(title.text, 0, -1, title.get_theme_font_size("font_size")).x
+	_measured += 1
+	_check(
+		title.size.x >= text - 0.5,
+		"Older versions has %.0f px for %.0f of text (%d px)" % [title.size.x, text, width]
+	)
+	var picked := picker.get_global_rect()
+	var row := title.get_global_rect()
+	_check(
+		picked.end.x <= chat.get_global_rect().end.x + 0.5 and picked.position.x >= row.position.x,
+		"The choice stays inside the sidebar (%d px)" % width
+	)
+	_check(
+		(picked.position.y >= row.end.y - 0.5) == (width < WIDTHS[1]),
+		"The choice is under the title only when narrow (%d px)" % width
+	)
 	await _frames(2)

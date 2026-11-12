@@ -264,6 +264,36 @@ static func on_theme_overrides(control: Control, apply: Callable) -> void:
 	on_theme(control, guarded)
 
 
+## A setting row ([param row], its [param title] and [param control]) whose control moves under
+## the title when both don't fit on one line, so the title is never cut short ("Older versions"
+## beside "Last 50 changes" in a narrow sidebar). Stacked, the control keeps the trailing edge
+## like every other setting's value. Decided from the row's width alone, so moving the control
+## never changes the answer.
+static func stack_when_narrow(row: Container, title: Label, control: Control) -> void:
+	var box := control.get_parent() as Container
+	var column := VBoxContainer.new()
+	column.theme_type_variation = "JoineryFlush"
+	row.remove_child(box)
+	row.add_child(column)
+	column.add_child(box)
+	var fit := func() -> void:
+		if not column.is_inside_tree() or column.size.x <= 0.0:
+			return
+		var font := title.get_theme_font("font")
+		var size := title.get_theme_font_size("font_size")
+		var wide := font.get_string_size(title.text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+		var gap := float(box.get_theme_constant("separation"))
+		var stacked := wide + gap + control.get_combined_minimum_size().x > column.size.x
+		if stacked != (control.get_parent() == column):
+			control.reparent(column if stacked else box, false)
+			control.size_flags_horizontal = (
+				Control.SIZE_SHRINK_END if stacked else Control.SIZE_FILL
+			)
+	column.resized.connect(fit, CONNECT_DEFERRED)
+	control.minimum_size_changed.connect(fit, CONNECT_DEFERRED)
+	title.theme_changed.connect(fit, CONNECT_DEFERRED)
+
+
 static func _apply_glyph(picture: TextureRect) -> void:
 	var icon_name := str(picture.get_meta("_joinery_glyph", ""))
 	if not icon_name.is_empty():
