@@ -52,6 +52,8 @@ class Host:
         self.policy_stop: Any = None
         self.prompts: list[Prompt] = []
         self.editor_results: list[dict[str, Any]] = []
+        #: Each provider session opened, by agent id.
+        self.agents: list[str] = []
         self.scripts: list[Script] = []
         self.user_prompts = 1
         #: The prompt lines the sidebar sends, by default "Make an ashtray".
@@ -67,9 +69,11 @@ class Host:
         class FakeBridge:
             handle = ""
 
-            def __init__(self, _agent: str) -> None:
+            def __init__(self, agent: str) -> None:
                 self.model_choices: list[Any] = []
                 self.host = host
+                self.agent = agent
+                host.agents.append(agent)
 
             async def resume(self, _handle: str) -> bool:
                 return False
@@ -517,3 +521,101 @@ def test_a_rule_zero_stop_ends_the_turn_without_a_submit(host: Host) -> None:
     assert "file_preview" not in kinds and "submitting" not in kinds
     stop = next(e for e in host.events if e.get("kind") == "message")
     assert stop["text"].startswith("Stopped by project policy: STOP, Rule Zero")
+
+
+QUOTA_WORDS = "You've hit your usage limit. Try again at 4:12 PM."
+
+
+def signed_in(monkeypatch: pytest.MonkeyPatch, *agents: str) -> None:
+    names = {"claude": "Claude Code", "gemini": "Gemini CLI"}
+    monkeypatch.setattr(
+        "bridge.provider_switch.candidates",
+        lambda current, _ready=None: [
+            {"id": a, "name": names[a]} for a in agents if a != current
+        ],
+    )
+
+
+def out_of_quota(host: Host) -> Script:
+    async def agent(bridge: Any) -> AsyncIterator[Any]:
+        host.stage({"a.gd": "extends Node\n"})
+        yield Message(text=QUOTA_WORDS, level="warn")
+        yield Done(ok=False)
+
+    return agent
+
+
+def carries_on(host: Host) -> Script:
+    async def agent(bridge: Any) -> AsyncIterator[Any]:
+        assert bridge.agent == "claude"
+        assert host.gateway is not None and host.gateway.turn is not None
+        result = await host.gateway.turn.submit("An ashtray", "agent")
+        assert result.status == "in_review"
+        yield Message(text="Finished the ashtray.")
+        yield Done(ok=True)
+
+    return agent
+
+
+def test_the_project_fallback_carries_a_quota_stop_on(
+    host: Host, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (host.root / "joinery.toml").write_text(
+        '[tools]\nenabled=["godot"]\n[agents]\nfallback_provider="claude"\n'
+    )
+    signed_in(monkeypatch, "claude", "gemini")
+    host.run(out_of_quota(host), carries_on(host))
+    assert host.agents == ["codex", "claude"]
+    carried = host.prompts[1]
+    assert "ran out of quota" in carried.text and "- a.gd (new)" in carried.text
+    assert "Make an ashtray" in carried.text
+    switched = next(e for e in host.events if e.get("kind") == "provider_switch")
+    assert switched["state"] == "switched" and switched["to"] == "claude"
+    assert "fallback agent" in switched["message"]
+    kinds = host.kinds()
+    assert "in_review" in kinds
+    assert host.events[[k for k in kinds].index("done")]["ok"] is True
+
+
+def test_the_user_is_asked_before_another_agent_carries_on(
+    host: Host, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    signed_in(monkeypatch, "claude")
+    host.replies.append(
+        (
+            lambda events: any(e.get("state") == "offer" for e in events),
+            {"kind": "provider_switch", "agent": "claude"},
+        )
+    )
+    host.run(out_of_quota(host), carries_on(host))
+    states = [e["state"] for e in host.events if e.get("kind") == "provider_switch"]
+    assert states == ["offer", "switched"]
+    assert host.agents == ["codex", "claude"]
+    assert "in_review" in host.kinds()
+
+
+def test_no_ends_the_request_and_nothing_else_starts(
+    host: Host, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    signed_in(monkeypatch, "claude")
+    host.replies.append(
+        (
+            lambda events: any(e.get("state") == "offer" for e in events),
+            {"kind": "provider_switch", "agent": ""},
+        )
+    )
+    host.run(out_of_quota(host))
+    states = [e["state"] for e in host.events if e.get("kind") == "provider_switch"]
+    assert states == ["offer", "declined"]
+    assert host.agents == ["codex"] and len(host.prompts) == 1
+
+
+def test_without_another_signed_in_agent_the_user_is_told(
+    host: Host, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    signed_in(monkeypatch)
+    host.run(out_of_quota(host))
+    assert host.agents == ["codex"]
+    told = [e for e in host.events if e.get("kind") == "notice"]
+    assert any("no other agent is signed in" in e["text"] for e in told)
+    assert "provider_switch" not in host.kinds()

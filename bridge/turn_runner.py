@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from bridge.instructions import CONTINUE_AFTER_FAILED_SUBMIT
+from bridge.models import Selection
 from bridge.protocol import (
     AgentEvent,
     Done,
@@ -29,6 +30,7 @@ from bridge.protocol import (
     Usage,
 )
 from joinery import done_when, metrics
+from joinery.fallback import is_quota
 from joinery.timing import TurnTiming
 from joinery.turn import MAX_CONTINUATIONS, Problem, SubmitResult, TurnController
 
@@ -45,6 +47,10 @@ Emit = Callable[[dict[str, Any]], None]
 Steps = Callable[
     [done_when.Todo, list[int]], Coroutine[Any, Any, list[done_when.StepOutcome]]
 ]
+#: Offers to carry a turn on with another agent after a quota error (given the
+#: provider's words); returns that agent's bridge and its first prompt's text, or
+#: None when the user said no or no other agent is signed in (ADR 0080).
+Fallback = Callable[[str], Coroutine[Any, Any, "tuple[AgentBridge, str] | None"]]
 
 
 #: Each check's failure in plain words; the raw output stays with the agent.
@@ -158,11 +164,36 @@ async def _stream(
     emit: Emit,
     timing: TurnTiming,
 ) -> tuple[bool, Usage | None]:
+    """The provider's events to the sidebar. A usage or quota limit it reports, in
+    its words or by failing outright, is kept in ``controller.quota`` (ADR 0080)."""
+    try:
+        return await _events(controller, bridge, prompt, emit, timing)
+    except RuntimeError as exc:
+        if not is_quota(str(exc)):
+            raise
+        controller.quota = str(exc)
+        emit(Message(text=str(exc), level="warn").model_dump())
+        return False, None
+
+
+async def _events(
+    controller: TurnController,
+    bridge: AgentBridge,
+    prompt: Prompt,
+    emit: Emit,
+    timing: TurnTiming,
+) -> tuple[bool, Usage | None]:
     gateway = controller.gateway
     ok = False
     usage: Usage | None = None
     event: AgentEvent
     async for event in bridge.send(prompt):
+        if (
+            isinstance(event, Message)
+            and event.level != "info"
+            and is_quota(event.text)
+        ):
+            controller.quota = event.text
         if isinstance(event, Execution):
             timing.model, timing.effort, timing.mode = (
                 event.model,
@@ -231,8 +262,12 @@ async def run_turn(
     chat_id: str = "",
     todo: done_when.Todo | None = None,
     steps: Steps | None = None,
+    fallback: Fallback | None = None,
 ) -> str:
     """Run one user request; returns its outcome ("done" or "failed").
+
+    ``fallback`` offers another agent when the provider stops on a usage or quota
+    limit; the staged change waits meanwhile and the other agent carries it on.
 
     ``todo`` is the to-do the user pressed Go on (ADR 0060): its done-when items are
     checked once the change passes Joinery's checks. ``steps`` runs a to-do's
@@ -266,6 +301,7 @@ async def run_turn(
             chat_id,
             todo,
             steps,
+            fallback,
         )
     except asyncio.CancelledError:
         outcome = "stopped"
@@ -388,6 +424,36 @@ async def _together(
     return await stream(controller, bridge, lead, emit, timing, 1)
 
 
+async def _carry_on(
+    controller: TurnController,
+    bridge: AgentBridge,
+    prompt: Prompt,
+    emit: Emit,
+    timing: TurnTiming,
+    fallback: Fallback | None,
+) -> tuple[bool, AgentBridge]:
+    """The provider stopped on a usage or quota limit: offer another agent and, if
+    the user takes it (or the project names one), let it carry the turn on with the
+    change staged so far. Returns its ``Done.ok`` and the bridge the turn now uses;
+    without a fallback the turn ends as it would have."""
+    while controller.quota and fallback is not None:
+        reason, controller.quota = controller.quota, ""
+        offered = await fallback(reason)
+        if offered is None:
+            return False, bridge
+        bridge, text = offered
+        # Token totals are per provider session; the new one starts from zero.
+        controller.usage_totals = (0, 0, 0)
+        carried = prompt.model_copy(
+            update={"text": text, "primer": "", "selection": Selection()}
+        )
+        ok = await stream(controller, bridge, carried, emit, timing)
+        if ok or not controller.quota:
+            return ok, bridge
+    controller.quota = ""
+    return False, bridge
+
+
 async def _run_turn(
     controller: TurnController,
     bridge: AgentBridge,
@@ -399,6 +465,7 @@ async def _run_turn(
     chat_id: str,
     todo: done_when.Todo | None = None,
     steps: Steps | None = None,
+    fallback: Fallback | None = None,
 ) -> str:
     # The session may be being summarised while the user reviewed; wait for it.
     await settle_compaction(controller)
@@ -423,6 +490,10 @@ async def _run_turn(
         )
     else:
         ok = await stream(controller, bridge, prompt, emit, timing)
+        if not ok and controller.quota:
+            ok, bridge = await _carry_on(
+                controller, bridge, prompt, emit, timing, fallback
+            )
         if controller.steps_together and controller.todo is not None and steps:
             # The agent's to-do ran on without Go: its steps run now, as tasks.
             together, controller.steps_together = controller.steps_together, []
@@ -448,6 +519,10 @@ async def _run_turn(
         ok = await stream(
             controller, bridge, continuation(prompt, result), emit, timing, asked
         )
+        if not ok and controller.quota:
+            ok, bridge = await _carry_on(
+                controller, bridge, prompt, emit, timing, fallback
+            )
     last = controller.last_result
     dropped = (
         last is not None and last.final and last.status in {"failed", "needs_user"}

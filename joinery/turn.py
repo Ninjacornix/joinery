@@ -303,6 +303,9 @@ class TurnController:
         self._last_chance = False
         #: The provider session's token totals as last reported (input, output, cached).
         self.usage_totals: metrics.Totals = (0, 0, 0)
+        #: The provider's words when a usage or quota limit stopped it this prompt
+        #: (ADR 0080); "" otherwise. The chat host may carry the turn on elsewhere.
+        self.quota = ""
         #: A change sent back to the agent, until it submits again: (since, by whom).
         self._sent_back: tuple[metrics.Clock, str] | None = None
         #: Prechecks this turn (they are not submit attempts).

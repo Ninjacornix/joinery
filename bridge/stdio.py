@@ -29,6 +29,7 @@ from bridge.match_runner import MatchRun
 from bridge.models import Selection
 from bridge.playtester import Playtester, gameplay_change
 from bridge.protocol import Done, EditorAction, Message, Prompt
+from bridge.provider_switch import ProviderSwitch
 from bridge.reviewer import Debugger, ReviewAgent
 from bridge.sound_pass import SoundPassRun
 from bridge.specialists import Specialists
@@ -45,6 +46,7 @@ from joinery import (
     done_when,
     idle_runs,
     playtest,
+    session_summary,
 )
 from joinery.art_approval import approve, review
 from joinery.authoring import run_offline
@@ -227,6 +229,8 @@ async def _serve(
     matcher: MatchRun | None = None
     checks: Checks | None = None
     sounder: SoundPassRun | None = None
+    #: Another agent carrying a request on after a quota error (ADR 0080).
+    switch: ProviderSwitch | None = None
     #: The last request's model choice, which the tasks it starts use too.
     selection: dict[str, Any] = {}
     try:
@@ -325,6 +329,8 @@ async def _serve(
             await playtester.stop()
         if designer is not None:
             await designer.stop()
+        if switch is not None:
+            await switch.cancel()
         if bridge is not None:
             with contextlib.suppress(Exception):
                 await bridge.cancel()
@@ -472,6 +478,7 @@ async def _serve(
                 chat_id=recorder.chat_id,
                 todo=todo,
                 steps=step_run.run if step_run is not None else None,
+                fallback=switch.offer if switch is not None else None,
             )
         except asyncio.CancelledError:
             outcome = "cancelled"
@@ -499,6 +506,9 @@ async def _serve(
         finally:
             if specialists is not None:
                 await specialists.close()
+            if switch is not None:
+                # Another agent served this request only; the next goes to the user's.
+                await switch.close()
             gateway.timing = None
             if crew is not None:
                 # The chat's own turn is over: a variant waiting for it may start.
@@ -519,6 +529,47 @@ async def _serve(
         connection_timing = TurnTiming()
         await bridge.connect(project, profile_id)
         specialists = Specialists(gateway, agent_id, profile_id, policy_stop)
+        rpc_path = rpc_server.path
+
+        def carry_bridge(agent: str) -> Bridge:
+            """Another signed-in agent's own session on the same project gateway."""
+            other = Bridge(agent)
+            other.bind_gateway(rpc_path)
+            return other
+
+        def carry_summary() -> str:
+            """What the other agent knows of the chat: Joinery's own record, since the
+            stopped provider can't be asked for a summary."""
+            try:
+                earlier = recorder.latest()
+            except (OSError, ValueError):
+                earlier = None
+            return session_summary.build(
+                earlier.text if earlier is not None else "",
+                session_summary.facts(project, session_start, controller.requests),
+                session_summary.pinned(
+                    project,
+                    controller.todo or controller.pending_todo,
+                    list(getattr(controller, "answers", []) or []),
+                    earlier,
+                ),
+            )
+
+        def carry_staged() -> list[dict[str, Any]]:
+            tx = gateway.transaction
+            if tx is None:
+                return []
+            return list(tx.diff() if tx.state == "staging" else tx.changes)
+
+        switch = ProviderSwitch(
+            project,
+            agent_id,
+            emit,
+            carry_bridge,
+            request=lambda: gateway.request_summary,
+            summary=carry_summary,
+            staged=carry_staged,
+        )
 
         def role_bridge(agent: str, role: str) -> Bridge:
             return Bridge(agent, role=role)
@@ -874,7 +925,7 @@ async def _serve(
         # The console errors kept from earlier sessions, for the sidebar's list.
         if fixer.book.listed():
             fixer.publish()
-        assert crew is not None and idle is not None
+        assert crew is not None and idle is not None and switch is not None
         quiet_waits: set[asyncio.Future[None]] = set()
 
         async def say_quiet() -> None:
@@ -984,6 +1035,7 @@ async def _serve(
                             request_id, bool(result.get("success", False))
                         )
                         bridge.editor_result(request_id, result)
+                        switch.editor_result(request_id, result)
                 elif data.get("kind") == "editor_view_result":
                     result = data.get("result")
                     if not isinstance(result, dict):
@@ -993,6 +1045,9 @@ async def _serve(
                         waiting.set_result(result)
                 elif data.get("kind") == "cancel" and data.get("task_id"):
                     await crew.stop(str(data["task_id"]))
+                elif data.get("kind") == "provider_switch":
+                    # The answer to "Continue with <agent>" (ADR 0080): an agent, or "".
+                    switch.answer(str(data.get("agent", "") or ""))
                 elif data.get("kind") == "cancel_tasks":
                     await crew.stop_all()
                 elif data.get("kind") == "cancel":
@@ -1001,6 +1056,7 @@ async def _serve(
                     if specialists is not None:
                         await specialists.close()
                     if active is not None and not active.done():
+                        await switch.cancel()
                         with contextlib.suppress(Exception):
                             await bridge.cancel()
                         active.cancel()
