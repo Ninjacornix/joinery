@@ -67,6 +67,10 @@ class Agent(BaseModel):
     blocking_hook: bool
     # Honest, documented limits of this agent's gate. Shown to the user.
     gate_limits: tuple[str, ...] = ()
+    # The instructions file this agent reads from the project root on its own
+    # (Claude Code: CLAUDE.md; Codex and opencode: AGENTS.md; Gemini CLI:
+    # GEMINI.md). Joinery writes a stub there pointing at JOURNEYMAN.md (ADR 0077).
+    memory_file: str = "AGENTS.md"
 
 
 CLAUDE = Agent(
@@ -81,6 +85,7 @@ CLAUDE = Agent(
     project_dir_env="CLAUDE_PROJECT_DIR",
     stop_mode="json",
     blocking_hook=True,
+    memory_file="CLAUDE.md",
     gate_limits=(
         "The hook is a guard rail, not a sandbox: offline workers are the real boundary.",
     ),
@@ -124,6 +129,7 @@ GEMINI = Agent(
     project_dir_env="",  # Uses the stdin "cwd" field.
     stop_mode="json",
     blocking_hook=True,
+    memory_file="GEMINI.md",
     gate_limits=(
         (
             "A Rule Zero hit stops the turn via `continue: false`; an ordinary "

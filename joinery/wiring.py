@@ -177,6 +177,39 @@ def _engine_ref(agent: Agent, portable: bool) -> str:
     return ""
 
 
+#: First line of every stub Joinery writes, so a later run can tell it is ours.
+STUB_MARK = "<!-- Written by Joinery: points at JOURNEYMAN.md. Yours to edit. -->"
+
+
+def memory_stub() -> str:
+    """The same short pointer for every agent. It names the file rather than
+    importing it, so inside a Joinery session (which already puts JOURNEYMAN.md in
+    the prompt) the agent doesn't read it twice."""
+    return (
+        f"{STUB_MARK}\n"
+        "# This project\n\n"
+        "Before starting, read `JOURNEYMAN.md` in this folder and follow it: it holds\n"
+        "the standing instructions and facts for this Godot game. To add to it, ask\n"
+        "the user; it changes only as a change they review.\n"
+    )
+
+
+def write_memory_stubs(
+    root: Path, agents: tuple[Agent, ...] = all_agents()
+) -> list[str]:
+    """Write each agent's own instructions file (CLAUDE.md, AGENTS.md, GEMINI.md)
+    pointing at JOURNEYMAN.md, where the project has none. Never overwrites a file
+    that is there, the user's own or an earlier stub. Returns the files written."""
+    written: list[str] = []
+    for name in dict.fromkeys(a.memory_file for a in agents):
+        target = root / name
+        if target.exists() or target.is_symlink():
+            continue
+        target.write_text(memory_stub(), encoding="utf-8")
+        written.append(name)
+    return written
+
+
 def write_agent_wiring(
     root: Path,
     agents: tuple[Agent, ...] = all_agents(),

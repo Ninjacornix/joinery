@@ -33,6 +33,7 @@ from joinery import (
     kit_share_cli,
     kits_cli,
     match_cli,
+    memory,
     metrics,
     playtest,
     project_map,
@@ -88,7 +89,7 @@ from joinery.transactions import (
     load_policy,
 )
 from joinery.vcs import ensure_lfs
-from joinery.wiring import unwireable, write_agent_wiring
+from joinery.wiring import unwireable, write_agent_wiring, write_memory_stubs
 from joinery.workspace import index, open_asset, watch_stamp
 
 #: `joinery mcp status` states that mean a server cannot work yet.
@@ -176,6 +177,10 @@ def _setup(
     # this it would have no creation-only hooks for any agent, which is the one
     # thing a Joinery project must not be missing.
     wired = write_agent_wiring(project)
+    # Project memory (ADR 0077): only where the project has none yet.
+    if memory.ensure(project):
+        print(f"Wrote {memory.FILE}: standing instructions every agent reads")
+    write_memory_stubs(project)
     # Git LFS before the first binary lands, because converting later means
     # rewriting history. Not an option at creation time, just how a project
     # starts: its sources are .blend, .kra, WAV and PNG files.
@@ -1312,6 +1317,7 @@ def _parser() -> argparse.ArgumentParser:
     metrics.register(commands)
     idle_runs.register(commands)
     project_map.register(commands)
+    memory.register(commands)
     skills.register(commands)
     chats.register(commands)
     parts = _parts()
@@ -1337,6 +1343,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "idle":
         return idle_runs.run(args)
+
+    if args.command == "memory":
+        return memory.run(args)
 
     if args.command == "map":
         return project_map.run(args)

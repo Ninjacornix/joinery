@@ -6,10 +6,10 @@ import shutil
 from collections.abc import Sequence
 from pathlib import Path
 
-from joinery import game_setup, setup_imports
+from joinery import game_setup, memory, setup_imports
 from joinery.catalog import ROOT, Catalog
 from joinery.installer import Selection, write_mcp_config, write_selection
-from joinery.wiring import write_agent_wiring
+from joinery.wiring import write_agent_wiring, write_memory_stubs
 
 TEMPLATE = ROOT / "templates" / "project"
 ASSET_DIRS = ("art", "audio", "recipes")
@@ -130,5 +130,8 @@ def _scaffold(path: Path, name: str, selection: Selection) -> None:
     (path / ".gitignore").write_text(".godot/\nout/\n")
     (path / ".gitattributes").write_text((ROOT / ".gitattributes").read_text())
     write_agent_wiring(path)
+    # Project memory every agent reads, and each agent's own file pointing at it.
+    memory.ensure(path)
+    write_memory_stubs(path)
     write_selection(selection, path / "joinery.toml")
     write_mcp_config(selection, path)

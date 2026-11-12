@@ -16,7 +16,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, BinaryIO, Protocol
 
-from bridge import compaction, mixer_save, scene_variant, tidy
+from bridge import compaction, mixer_save, remember, scene_variant, tidy
 from bridge.chat_record import ChatRecorder
 from bridge.check_runner import Checks
 from bridge.crew import Crew
@@ -1063,6 +1063,10 @@ async def _serve(
                     # /tidy's Remove: one reviewed change that takes out what the
                     # game never uses, with its sources (bridge/tidy.py).
                     await tidy.start(crew, project, data, task_prompt())
+                elif data.get("kind") == "remember":
+                    # /remember and Remember this: one line added to JOURNEYMAN.md
+                    # as a reviewed change (bridge/remember.py, ADR 0077).
+                    await remember.start(crew, project, data, task_prompt())
                 elif data.get("kind") == "variant_make":
                     # A bare /variant on the scene open in the editor: a reviewed
                     # inherited scene, no agent needed (bridge/scene_variant.py).

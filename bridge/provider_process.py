@@ -14,6 +14,7 @@ from typing import Any
 
 from bridge.instructions import GAME_GUIDE, REVIEW_GUIDE
 from bridge.protocol import Prompt
+from joinery import memory
 from joinery.agents import get
 from joinery.catalog import ROOT
 from joinery.chat_attachments import listed
@@ -99,12 +100,23 @@ def turn_part(prompt: Prompt, images_inline: bool = False) -> str:
     )
 
 
+def project_memory(prompt: Prompt) -> str:
+    """The project's JOURNEYMAN.md as a block (ADR 0077), "" without one: the same
+    bytes until the user accepts a change to it."""
+    if not prompt.project_dir:
+        return ""
+    found = memory.block(Path(prompt.project_dir))
+    return found + "\n\n" if found else ""
+
+
 def turn_text(prompt: Prompt, images_inline: bool = False) -> str:
     """The turn as every provider gets it, stable parts first: the role's rules
-    (with the art bible and brief), the project map, then the turn (ADR 0056)."""
+    (with the art bible and brief), the project memory, the project map, then the
+    turn (ADR 0056, ADR 0077)."""
     rules = prompt.rules.strip()
     return (
         (rules + "\n\n" if rules else "")
+        + project_memory(prompt)
         + project_map(prompt)
         + turn_part(prompt, images_inline)
     )
