@@ -9,6 +9,7 @@ dependencies = [
     "jsonschema==4.26.0",
     "mcp==2.3.0",
     "pydantic",
+    "sigstore==4.5.1",
 ]
 
 [project.scripts]
