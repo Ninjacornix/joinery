@@ -74,6 +74,7 @@ from joinery.lockfile import check_assets
 from joinery.locking import write_lock
 from joinery.policy import load_denylist, normalise
 from joinery.project import create_project
+from joinery.puzzle import command as puzzle_command
 from joinery.recipe import rebuild_all, recipe_paths, record
 from joinery.runner import pick
 from joinery.transactions import (
@@ -1083,9 +1084,15 @@ def _parser() -> argparse.ArgumentParser:
     )
     share.add_arguments(share_cmd)
     blockout_cmd = commands.add_parser(
-        "blockout", help="check, rebuild or walk a level blockout layout"
+        "blockout",
+        help="check, rebuild, walk or grow (from your own example) a level blockout",
     )
     blockout_command.add_arguments(blockout_cmd)
+    puzzle_command.add_arguments(
+        commands.add_parser(
+            "puzzle", help="check that grid puzzle levels and card deals can be won"
+        )
+    )
     kits_cmd = commands.add_parser(
         "kits", help="list kits, preview one, or make models from a kit for review"
     )
@@ -1512,6 +1519,8 @@ def main(argv: list[str] | None = None) -> int:
         return design_cli.main(args)
     if args.command == "blockout":
         return blockout_command.main(args)
+    if args.command == "puzzle":
+        return puzzle_command.main(args)
     if args.command == "kits":
         return kits_cli.main(args)
     if args.command == "kit":

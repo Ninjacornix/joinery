@@ -25,6 +25,7 @@ from joinery.catalog import load_catalog
 from joinery.deps import check_deps
 from joinery.lockfile import check_assets
 from joinery.policy import load_denylist
+from joinery.puzzle import check as puzzle_check
 from joinery.runner import Result
 from joinery.transactions import DIRECTORY, FileTransaction
 from joinery.turn import Problem, scene_route
@@ -231,6 +232,22 @@ async def validate(
                 items=[reasons.variant(line) for line in broken_variants],
             )
         )
+    # Grid puzzle levels and card deals must be winnable (ADR 0069).
+    puzzles = puzzle_check.staged(
+        tx.stage, [c["path"] for c in changes if c["after"] not in {"", DIRECTORY}]
+    )
+    if puzzles is not None:
+        found.ran.append("puzzles")
+        unsolvable = [f for f in puzzles.findings if f.severity == "error"]
+        if unsolvable:
+            found.problems.append(
+                Problem(
+                    "puzzles",
+                    "A puzzle can't be won: " + " ".join(f.text for f in unsolvable),
+                    list(dict.fromkeys(f.file for f in unsolvable)),
+                    items=[f.reason() for f in unsolvable],
+                )
+            )
     # Complex objects are Blender (or kit) models, not piles of placeholder shapes.
     if complex_models.setting(gateway.project) == complex_models.BLENDER and any(
         c["path"].endswith(".tscn") and c["after"] for c in changes
