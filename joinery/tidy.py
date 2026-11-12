@@ -116,6 +116,8 @@ TEXT = frozenset(
         ".gltf",
     }
 )
+#: Godot's binary scenes and resources: read for the path strings they keep.
+BINARY = frozenset({".scn", ".res"})
 #: Data a script may read by a path it builds (levels, dialogue, puzzles): a root.
 DATA = frozenset({".json", ".dlg", ".csv", ".cfg", ".toml", ".txt"})
 CODE = frozenset({".gd", ".cs"})
@@ -500,6 +502,29 @@ def _settings_refs(graph: Graph, rel: str) -> tuple[set[str], set[str]]:
     return strong, weak - strong
 
 
+def _binary_refs(graph: Graph, rel: str) -> Refs:
+    """The paths a binary scene or resource (.scn, .res) names: Godot keeps its
+    external resources as plain path and uid strings."""
+    try:
+        path = graph.project / rel
+        if path.stat().st_size > MAX_TEXT:
+            return Refs()
+        data = path.read_bytes().decode("latin-1")
+    except OSError:
+        return Refs()
+    found = Refs()
+    for match in re.finditer(
+        r"res://([\x21-\x7e]+?\.[A-Za-z0-9]+)(?![A-Za-z0-9])", data
+    ):
+        target = _clean(match.group(1))
+        if target in graph.present and target != rel:
+            found.files.add(target)
+    for uid in _UID.findall(data):
+        if graph.uids.get(uid, rel) != rel:
+            found.files.add(graph.uids[uid])
+    return found
+
+
 def owned(project: Path) -> tuple[str, ...]:
     """core/ and each applied feature's folder, from the ``[game]`` record."""
     try:
@@ -524,9 +549,21 @@ def build(project: Path) -> Graph:
     graph = Graph(project, files, present, ignored, folders, uid_map(project, files))
     graph.owned = owned(project)
     for rel in files:
-        if suffix(rel) not in TEXT or graph.in_ignored(rel):
+        if graph.in_ignored(rel) or rel.startswith(("recipes/", "kits/")):
             continue
-        if rel.startswith(("recipes/", "kits/")):
+        if suffix(rel) in BINARY:
+            graph.refs[rel] = _binary_refs(graph, rel)
+            continue
+        if rel.endswith(".import") and rel.removesuffix(".import") in present:
+            # Import settings can save an asset's materials or meshes to their own
+            # files: the asset uses them.
+            owner = rel.removesuffix(".import")
+            extracted = references(
+                project, rel, graph.text(rel), present, folders, graph.uids
+            ).files - {owner}
+            graph.refs.setdefault(owner, Refs()).files.update(extracted)
+            continue
+        if suffix(rel) not in TEXT:
             continue
         text = graph.text(rel)
         if rel in {"project.godot", "export_presets.cfg"}:

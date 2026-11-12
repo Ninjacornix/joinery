@@ -113,6 +113,7 @@ func _ready() -> void:
 \tvar side := "left"
 \tif Input.is_action_pressed("move_" + side):
 \t\tprint(side)
+\tprint(preload("res://art/models/hero.glb"), preload("res://data/used.res"))
 """
 
 PLAYER = """[gd_scene load_steps=3 format=3]
@@ -190,7 +191,20 @@ def make_fixture(root: Path) -> Path:
         "art/sources/.gdignore": "",
         "art/sources/crate.blend": b"BLENDER" + b"\0" * 5000,
         "art/models/crate.glb": b"glTF" + b"\0" * 20000,
-        "art/models/crate.glb.import": '[remap]\nuid="uid://crateglb"\n',
+        "art/models/crate.glb.import": (
+            '[remap]\nuid="uid://crateglb"\n\n[params]\n_subresources={"materials": '
+            '{"Body": {"use_external/enabled": true, '
+            '"use_external/path": "res://materials/crate_body.tres"}}}\n'
+        ),
+        "materials/crate_body.tres": '[gd_resource type="StandardMaterial3D" format=3]\n',
+        "art/models/hero.glb": b"glTF" + b"\0" * 3000,
+        "art/models/hero.glb.import": (
+            '[remap]\nuid="uid://heroglb"\n\n[params]\n_subresources={"materials": '
+            '{"Skin": {"use_external/path": "res://materials/hero_skin.tres"}}}\n'
+        ),
+        "materials/hero_skin.tres": '[gd_resource type="StandardMaterial3D" format=3]\n',
+        "data/used.res": b"RSRC\0\0\x10res://art/textures/from_res.png\0uid://none\0",
+        "art/textures/from_res.png": b"\x89PNG" + b"\0" * 300,
         "art/models/crate_lod1.glb": b"glTF" + b"\0" * 8000,
         "art/textures/crate.png": b"\x89PNG" + b"\0" * 4000,
         "art/textures/deco.png": b"\x89PNG" + b"\0" * 900,
@@ -288,6 +302,8 @@ def test_finds_unused_files_of_every_kind_with_evidence(project: Path) -> None:
     assert goes["art/textures/crate.png"] == "only it uses it"
     assert goes["game/crate.gd"] == "only it uses it"
     assert goes["art/models/crate.glb.import"] == "import settings"
+    # A material the model's import saved to its own file goes with the model.
+    assert goes["materials/crate_body.tres"] == "only it uses it"
     assert goes["recipes/crate.toml"] == "recipe"
     assert goes["recipes/crate.py"] == "recipe script"
     assert goes["art/sources/crate.blend"] == "native source"
@@ -306,6 +322,10 @@ def test_finds_unused_files_of_every_kind_with_evidence(project: Path) -> None:
         "audio/music/theme.ogg",
         "game/blockout_level.tscn",
         "art/textures/deco.png",
+        "art/models/hero.glb",
+        "materials/hero_skin.tres",
+        "data/used.res",
+        "art/textures/from_res.png",
         "art/textures/test_only.png",
         "fonts/kept.ttf",
         "art/textures/final.png",
