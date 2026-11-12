@@ -6,7 +6,13 @@ request (with its target chips and the paths of attached images, never the image
 Journeyman's replies and steps, the changes it proposed and how each turn ended.
 
 The chat host writes these files; the sidebar reads them to list and restore chats. The
-folder is kept out of git and out of Godot's import. Files are size-bounded: a chat that
+folder is kept out of git and out of Godot's import.
+
+A chat can be rewound to one of its requests (the later entries leave the file, a
+``rewind`` entry says what they were, and the chat's ``epoch`` goes up so the host
+starts a fresh provider session from a summary), or branched there into a new chat
+with the history up to and including that turn (ADR 0080). Neither touches the
+project: changes accepted in the dropped turns stay in the Timeline. Files are size-bounded: a chat that
 grows past :data:`MAX_BYTES` drops its oldest entries, and only the newest
 :data:`MAX_CHATS` chats are kept.
 """
@@ -41,6 +47,8 @@ TITLE_CHARS = 80
 SUMMARY_TURNS = 8
 #: What the sidebar says when a chat continues without the provider's own session.
 SUMMARY_NOTE = "Continued with a summary; the agent starts fresh."
+#: What it says when a rewound chat continues.
+REWOUND_NOTE = "Rewound; the agent starts fresh from a summary of the chat so far."
 _ID = re.compile(r"^[0-9]{8}-[0-9]{6}-[0-9a-f]{6}$")
 #: Entry types a chat file holds after its first line.
 ENTRY_TYPES = {
@@ -54,7 +62,10 @@ ENTRY_TYPES = {
     "summary",
     "task",
     "variants",
+    "rewind",
 }
+#: What a branched chat's title says after the original's.
+BRANCH_MARK = " (branch)"
 
 
 def now() -> str:
@@ -279,6 +290,100 @@ def listing(project: Path) -> list[dict[str, Any]]:
     return chats
 
 
+def _user_positions(entries: list[dict[str, Any]]) -> list[int]:
+    return [i for i, e in enumerate(entries) if e.get("type") == "user"]
+
+
+def _turn_at(entries: list[dict[str, Any]], turn: int) -> int:
+    """The position of the ``turn``th request (0-based). Raises ValueError."""
+    positions = _user_positions(entries)
+    if not 0 <= turn < len(positions):
+        raise ValueError("That message is no longer in the chat.")
+    return positions[turn]
+
+
+def _changes_in(entries: list[dict[str, Any]]) -> list[dict[str, str]]:
+    seen: dict[str, str] = {}
+    for entry in entries:
+        identifier = str(entry.get("transaction_id", ""))
+        if entry.get("type") in {"change", "task"} and identifier:
+            seen[identifier] = str(entry.get("summary", "")) or seen.get(identifier, "")
+        picked = entry.get("picked")
+        if (
+            entry.get("type") == "variants"
+            and isinstance(picked, dict)
+            and picked.get("transaction_id")
+        ):
+            seen[str(picked["transaction_id"])] = str(picked.get("direction", ""))
+    return [{"transaction_id": k, "summary": v} for k, v in seen.items()]
+
+
+def rewind(project: Path, chat_id: str, turn: int) -> dict[str, Any]:
+    """Rewind a chat to just before its ``turn``th request (0-based).
+
+    Returns {chat, request, targets, attachments, dropped, changes}: the request to
+    edit and resend, how many turns left the chat, and the changes made in them with
+    their state now. The project is untouched; the next prompt starts a fresh
+    provider session from a summary (the ``epoch`` changed)."""
+    path = path_for(project, chat_id)
+    with _locked(project):
+        if not path.is_file():
+            raise ValueError("That chat is no longer saved.")
+        records = _lines(path)
+        if not records or records[0].get("type") != "chat":
+            raise ValueError("That chat file is damaged.")
+        head, entries = records[0], records[1:]
+        cut = _turn_at(entries, turn)
+        request, dropped = entries[cut], entries[cut:]
+        changes = _changes_in(dropped)
+        turns_dropped = len(_user_positions(dropped))
+        mark = {
+            "type": "rewind",
+            "at": now(),
+            "dropped": turns_dropped,
+            "request": _clip(str(request.get("text", ""))),
+            "changes": changes,
+        }
+        head["epoch"] = int(head.get("epoch", 0) or 0) + 1
+        head["handle"] = ""
+        head["updated"] = now()
+        _write(path, [head, *entries[:cut], mark])
+    states = change_states(project, [c["transaction_id"] for c in changes])
+    return {
+        "chat": head,
+        "request": str(request.get("text", "")),
+        "targets": list(request.get("targets", []) or []),
+        "attachments": list(request.get("attachments", []) or []),
+        "dropped": turns_dropped,
+        "changes": [{**c, **states.get(c["transaction_id"], {})} for c in changes],
+    }
+
+
+def branch(project: Path, chat_id: str, turn: int) -> dict[str, Any]:
+    """A new chat with this one's history up to and including its ``turn``th
+    request and what followed it (0-based). Returns the new chat's first line.
+
+    The branch starts without a provider session: its first prompt carries a
+    summary, for every agent alike."""
+    head, entries = read(project, chat_id)
+    start = _turn_at(entries, turn)
+    following = _user_positions(entries)
+    end = next((p for p in following if p > start), len(entries))
+    title = str(head.get("title", "")) or "Chat"
+    if not title.endswith(BRANCH_MARK):
+        title = title[: TITLE_CHARS - len(BRANCH_MARK)] + BRANCH_MARK
+    new = create(
+        project, title, str(head.get("provider", "")), str(head.get("profile", ""))
+    )
+    path = path_for(project, new)
+    with _locked(project):
+        records = _lines(path)
+        records[0]["title"] = title
+        records[0]["branched_from"] = chat_id
+        _write(path, [records[0], *entries[:end]])
+    return records[0]
+
+
 def change_states(project: Path, ids: list[str]) -> dict[str, dict[str, Any]]:
     """Each change's state now, as `joinery transactions list` reports it.
 
@@ -465,22 +570,66 @@ def summary(project: Path, meta: dict[str, Any], entries: list[dict[str, Any]]) 
             lines.append(f"   {_variants_line(group)}")
         if turn["outcome"] and turn["outcome"] != "done":
             lines.append(f"   That turn {turn['outcome']}.")
+    lines += _rewind_lines(project, entries)
     lines.append("The user's new message follows.")
     return "\n".join(lines)
+
+
+def _rewind_lines(project: Path, entries: list[dict[str, Any]]) -> list[str]:
+    """What the last rewind left behind: the turns removed, and what became of the
+    changes made in them (they may still be in the project)."""
+    marks = [e for e in entries if e.get("type") == "rewind"]
+    if not marks:
+        return []
+    mark = marks[-1]
+    lines = [
+        (
+            "The user rewound this chat to an earlier message: "
+            f"{mark.get('dropped', 0)} later turns were removed from the "
+            f'conversation, starting with "{_short(str(mark.get("request", "")), 200)}".'
+        )
+    ]
+    changes = [c for c in mark.get("changes", []) if isinstance(c, dict)]
+    states = change_states(project, [str(c.get("transaction_id", "")) for c in changes])
+    for change in changes:
+        identifier = str(change.get("transaction_id", ""))
+        state = str(states.get(identifier, {}).get("state", "gone"))
+        words = (
+            "accepted, so its files are still in the project"
+            if state == "accepted"
+            else _STATE_WORDS.get(state, state)
+        )
+        label = str(change.get("summary", "")) or "a file change"
+        lines.append(f"   A removed turn's change {identifier[:8]} ({label}): {words}.")
+    return lines
 
 
 # --- CLI ------------------------------------------------------------------------------
 
 
 def register(subparsers: argparse._SubParsersAction[argparse.ArgumentParser]) -> None:
-    """Add ``chats list|show|rename|delete --project P [--id ID] [--title T]``."""
+    """Add ``chats list|show|rename|delete|rewind|branch|undo --project P [--id ID]
+    [--title T] [--turn N] [--changes ID,ID]``."""
     parser = subparsers.add_parser(
-        "chats", help="list, show, rename or delete a project's saved Journeyman chats"
+        "chats",
+        help="list, show, rename, delete, rewind or branch a project's saved "
+        "Journeyman chats",
     )
-    parser.add_argument("action", choices=["list", "show", "rename", "delete"])
+    parser.add_argument(
+        "action",
+        choices=["list", "show", "rename", "delete", "rewind", "branch", "undo"],
+    )
     parser.add_argument("--project", type=Path, required=True)
     parser.add_argument("--id", default="")
     parser.add_argument("--title", default="")
+    parser.add_argument(
+        "--turn", type=int, default=-1, help="the request to rewind or branch at"
+    )
+    parser.add_argument(
+        "--changes",
+        default="",
+        help="undo: the accepted changes to undo as one reviewed change (comma list)",
+    )
 
 
 def run(args: argparse.Namespace) -> int:
@@ -503,6 +652,15 @@ def run(args: argparse.Namespace) -> int:
             }
         elif args.action == "rename":
             data = {"chat": rename(project, args.id, args.title)}
+        elif args.action == "rewind":
+            data = rewind(project, args.id, args.turn)
+        elif args.action == "branch":
+            data = {"chat": branch(project, args.id, args.turn)}
+        elif args.action == "undo":
+            from joinery.undo_changes import stage_undo
+
+            ids = [i.strip() for i in args.changes.split(",") if i.strip()]
+            data = stage_undo(project, ids)
         else:
             delete(project, args.id)
             data = {"deleted": args.id}

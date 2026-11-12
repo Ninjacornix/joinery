@@ -244,10 +244,11 @@ class FakeRPC:
 def host(
     project: Path,
     monkeypatch: pytest.MonkeyPatch,
-    prompts: list[dict[str, Any]],
+    prompts: list[Any],
     agent: str = "codex",
 ) -> list[dict[str, Any]]:
-    """Run one chat host process over [prompts], one turn at a time; returns its events."""
+    """Run one chat host process over [prompts], one turn at a time; returns its events.
+    A callable among them runs between turns (the sidebar's CLI calls)."""
     events: list[dict[str, Any]] = []
 
     def capture(event: dict[str, Any]) -> None:
@@ -267,6 +268,9 @@ def host(
 
         async def feed() -> None:
             for data in prompts:
+                if callable(data):
+                    data()
+                    continue
                 seen = sum(1 for e in events if e.get("kind") == "timing")
                 stream.feed_data(
                     json.dumps({"kind": "prompt", **data}).encode() + b"\n"

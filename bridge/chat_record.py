@@ -4,7 +4,10 @@ The sidebar names the chat each prompt belongs to ("" for a new one). Before the
 :meth:`ChatRecorder.switch` makes it the open chat: the provider's own session is resumed
 when it is the same provider and connection that saved it and the provider still has
 it; otherwise a fresh session starts and the first prompt carries a compact summary of
-the old chat. Everything the host then shows the sidebar is recorded as it goes.
+the old chat. A chat rewound or branched from the sidebar (joinery.chats, ADR 0080)
+always continues in a fresh session from its summary: a rewound chat's ``epoch``
+changed, and a branch has no provider handle. Everything the host then shows the
+sidebar is recorded as it goes.
 Recording never stops a turn: a chat that can't be saved only stops being saved.
 """
 
@@ -56,16 +59,22 @@ class ChatRecorder:
         self._tasks: dict[str, str] = {}
         #: The last state recorded for each variant group.
         self._groups: dict[str, str] = {}
+        #: The open chat's rewind count when it was opened.
+        self._epoch = 0
 
     async def switch(self, chat_id: str, sessions: Sessions) -> dict[str, Any] | None:
         """Open [chat_id] before a prompt ("" starts a new chat). Returns the event that
         tells the sidebar how it continued, or None when nothing changed."""
-        if chat_id == self.chat_id and (chat_id or not self._used):
+        if chat_id == self.chat_id and not chat_id and not self._used:
             return None
         try:
             meta = chats.read(self.project, chat_id)[0] if chat_id else None
         except (OSError, ValueError):
             meta = None
+        epoch = int((meta or {}).get("epoch", 0) or 0)
+        rewound = chat_id == self.chat_id and meta is not None
+        if rewound and epoch == self._epoch:
+            return None
         if meta is None:
             # A new chat, or one that is gone: the provider starts over.
             if self._used:
@@ -79,7 +88,7 @@ class ChatRecorder:
             and str(meta.get("profile", "")) == self.profile
         )
         handle = str(meta.get("handle", ""))
-        if same and handle and await sessions.resume(handle):
+        if not rewound and same and handle and await sessions.resume(handle):
             mode = "resumed"
         else:
             if self._used:
@@ -87,6 +96,7 @@ class ChatRecorder:
             _, entries = chats.read(self.project, chat_id)
             self._prime = chats.summary(self.project, meta, entries)
         self.chat_id = chat_id
+        self._epoch = epoch
         self._used = mode == "resumed"
         self._broken = False
         self._save(
@@ -110,7 +120,9 @@ class ChatRecorder:
             "kind": "chat",
             "chat_id": chat_id,
             "mode": mode,
-            "message": chats.SUMMARY_NOTE if mode == "summary" else "",
+            "message": (chats.REWOUND_NOTE if rewound else chats.SUMMARY_NOTE)
+            if mode == "summary"
+            else "",
         }
 
     def begin(
@@ -125,6 +137,7 @@ class ChatRecorder:
                 self.chat_id = chats.create(
                     self.project, text, self.provider, self.profile
                 )
+                self._epoch = 0
                 event = {"kind": "chat", "chat_id": self.chat_id, "mode": "new"}
             except (OSError, ValueError):
                 self._broken = True
