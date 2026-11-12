@@ -344,6 +344,17 @@ def check(*, force: bool = False, now: float | None = None) -> dict[str, Any]:
             "cached": True,
             "dismissed": state.get("dismissed", ""),
         }
+    if not force and not summary["can_install"]:
+        # A source checkout (CI, a developer's editor) never asks GitHub on its own; only an
+        # explicit check (Help ▸ Check for Joinery updates…, --force) does.
+        return {
+            **summary,
+            "available": False,
+            "offline": False,
+            "skipped": "source",
+            "cached": False,
+            "dismissed": state.get("dismissed", ""),
+        }
     target = platform_target()
     result: dict[str, Any] = {**summary, "available": False, "offline": False}
     try:

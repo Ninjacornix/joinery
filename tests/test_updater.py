@@ -319,6 +319,21 @@ def test_source_checkout_never_installs(
         updater.install(verifier=fake_verifier, start=_started([]))
 
 
+def test_source_checkout_daily_check_stays_offline(
+    github: FakeGitHub, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """CI and developers' editors run from a checkout: the quiet check never asks GitHub."""
+    monkeypatch.delenv("JOINERY_INSTALL_ROOT")
+    github.publish("0.6.0")
+    quiet = updater.check(now=1000.0)
+    assert github.requests == [], "no request without --force"
+    assert quiet["skipped"] == "source" and not quiet["available"]
+    assert not quiet["offline"] and quiet["can_install"] is False
+    assert "last_check" not in updater.load_state(), "a skipped check isn't a check"
+    asked = updater.check(force=True, now=1000.0)
+    assert len(github.requests) == 1 and asked["release"]["version"] == "0.6.0"
+
+
 def _run_helper(plan_path: Path, tmp_path: Path) -> dict[str, Any]:
     """The helper exactly as installed: a copy outside the install, isolated, no Joinery."""
     copy = tmp_path / "helper/update_swap.py"
