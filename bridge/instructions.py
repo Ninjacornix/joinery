@@ -115,6 +115,9 @@ GAME_GUIDE = (
     "The user adds or removes features with /feature, and edits the brief with /brief. "
     "When the user asks you to look at something in the editor, call view_editor to see "
     "the viewport as they see it. "
+    "To see how the game itself behaves, run it (godot run_project), look with "
+    "inspect_game (scene tree, a node's properties, a screenshot) and play it with "
+    "drive_game (timed taps and holds of actions, keys and gamepad), then stop_project. "
     + ATTACHMENT_NOTE
     + " "
     + OBJECT_GUIDE

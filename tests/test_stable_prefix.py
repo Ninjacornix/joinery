@@ -223,11 +223,14 @@ def test_the_proxy_serves_exactly_the_known_tools() -> None:
 def test_each_role_is_offered_what_it_may_call(role: str) -> None:
     names = set(listed(role))
     assert names == offered_tools(role)
-    for tool in names - {"call_tool"}:
+    # drive_game is judged against the project's own setting (joinery.roles.may_drive).
+    for tool in names - {"call_tool", "drive_game"}:
         assert registry_allowed(role, tool), tool
     if role in READ_ONLY_ROLES:
         assert not names & WRITERS
         assert {"discover_tools", "tool_schema", "inspect_editor", "call_tool"} <= names
+        assert "inspect_game" in names
+        assert ("drive_game" in names) == (role in {"playtester", "debugger"})
 
 
 def test_read_only_roles_carry_far_fewer_schema_bytes() -> None:

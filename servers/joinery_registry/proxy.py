@@ -59,6 +59,30 @@ class DesignFindingArgument(BaseModel):
     fix: Annotated[str, Field(max_length=600)] = ""
 
 
+class InputStepArgument(BaseModel):
+    """One timed input to the running game."""
+
+    do: Literal["tap", "hold", "release", "wait"]
+    action: Annotated[str, Field(max_length=80)] | None = None
+    key: Annotated[str, Field(max_length=32)] | None = None
+    button: Annotated[int, Field(ge=0, le=20)] | None = None
+    axis: Annotated[int, Field(ge=0, le=9)] | None = None
+    value: Annotated[float, Field(ge=-1, le=1)] = 1.0
+    device: Annotated[int, Field(ge=0, le=7)] = 0
+    seconds: Annotated[float, Field(ge=0, le=10)] | None = None
+
+
+def _with_picture(data: dict[str, Any], path: str) -> CallToolResult:
+    result = CallToolResult(content=[TextContent(type="text", text=json.dumps(data))])
+    if path:
+        try:
+            media, encoded = chat_attachments.encoded(Path(path))
+        except (OSError, ValueError):
+            return result
+        result.content.append(ImageContent(type="image", data=encoded, mime_type=media))
+    return result
+
+
 #: The server's instructions: the same bytes for every agent of a role.
 WRITER_INSTRUCTIONS = (
     "Use discover_tools to check real connected capabilities, then tool_schema before calling a tool. "
@@ -139,6 +163,44 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
                 TextContent(type="text", text=json.dumps(data)),
             ]
         )
+
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True))
+    @tool_errors
+    async def inspect_game(
+        node: Annotated[str, Field(max_length=300)] = "",
+        properties: Annotated[list[str], Field(max_length=12)] | None = None,
+        tree: bool | None = None,
+        ui: bool = False,
+        screenshot: bool = False,
+    ) -> CallToolResult:
+        """Look into the game running for this agent (started with godot run_project): its scene tree (tree, the default without a node), one node's details (node, a path like /root/Main/Player) and properties of it (properties: names like position, health), the visible UI (ui) and a screenshot (screenshot). Only reads; the running game is not the project, nothing is saved, and a screenshot is context only, never an asset."""
+        params: dict[str, Any] = {
+            "node": node,
+            "properties": properties or [],
+            "ui": ui,
+            "screenshot": screenshot,
+        }
+        if tree is not None:
+            params["tree"] = tree
+        data = await rpc(socket, "inspect_game", params)
+        return _with_picture(data, str(data.get("screenshot", "") or ""))
+
+    @server.tool()
+    @tool_errors
+    async def drive_game(
+        steps: Annotated[list[InputStepArgument], Field(min_length=1, max_length=64)],
+        screenshot_after: bool = False,
+    ) -> CallToolResult:
+        """Play the game running for this agent with timed input, in order: each step names one input (action: an input-map action like jump; key: a key like Space; button: a gamepad button index; axis: a stick axis index with value -1..1; device: the gamepad) and does tap (press, hold for seconds, default 0.1, release), hold (press and keep it down, then wait seconds; a later release lets go), release, or wait (seconds). Up to 64 steps and 30 seconds; whatever is still held at the end is released. Returns when each input landed against its plan. screenshot_after: a picture once it's done (context only). Changes no file."""
+        data = await rpc(
+            socket,
+            "drive_game",
+            {
+                "steps": [s.model_dump(exclude_none=True) for s in steps],
+                "screenshot_after": screenshot_after,
+            },
+        )
+        return _with_picture(data, str(data.get("screenshot", "") or ""))
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
@@ -253,7 +315,7 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors
     async def access_check(areas: list[str] | None = None) -> dict[str, Any]:
-        """Check the game's accessibility (not the editor's): stock Godot plays it headless and reads every text and control on the HUD and menus. Returns scores per area (contrast, colour, text size, subtitles, controls, motion, pause, assists, screen readers) and findings, each with what was measured, what it should be, where it was seen (scene, node, seed) and how it gets fixed (typed, agent or feature). areas: only these. Changes nothing."""
+        """Check the game's accessibility (not the editor's): stock Godot plays it headless and reads every text and control on the HUD and menus. Returns scores per area (contrast, colour, text size, subtitles, controls, motion, pause, assists, screen readers, and translations: every screen again with text 30% longer and right-to-left) and findings, each with what was measured, what it should be, where it was seen (scene, node, seed) and how it gets fixed (typed, agent or feature); facts.xag names the Xbox Accessibility Guidelines with findings. areas: only these. Changes nothing."""
         return await rpc(socket, "access_check", {"areas": areas or []})
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
