@@ -20,6 +20,10 @@ Every agent Joinery runs has one role:
   report of what is missing and what the sound pass makes. Read-only; the sounds
   themselves are made by scripted tasks, each a reviewed change.
 
+Every role may ask what the game never uses (``tidy_check``); taking it out
+(``tidy_remove``) stages a change like any other write, so it is the lead's and the
+workers', and the user reviews it (ADR 0074).
+
 Every role may look into the game its gateway is running (``inspect_game``). Playing it
 with timed input (``drive_game``) is the lead's and workers'; the playtester and the
 debugger may too where the project says so (``[agents] game_input_roles``), and no other
@@ -83,6 +87,7 @@ REGISTRY_READS = frozenset(
         "view_editor",
         "details",
         INSPECT_GAME,
+        "tidy_check",
     }
 )
 #: Read-only roles a project may let drive the running game; the rest never may.
@@ -99,6 +104,10 @@ ACCESS_CHECK = "access_check"
 PERF_CHECK = "perf_check"
 #: What the level is missing to sound like a game: read-only, so any role may.
 SOUND_AUDIT = "sound_audit"
+#: What the game never uses (/tidy): reading it is open to every role; removing it
+#: stages a change like any write, so only the lead and workers may.
+TIDY_CHECK = "tidy_check"
+TIDY_REMOVE = "tidy_remove"
 ROLE_ONLY = frozenset({REVIEW_REPORT, DIAGNOSIS_REPORT, REPRODUCE, DESIGN_REPORT})
 #: A request's to-do, shown to the user before the work (ADR 0060): the lead's alone.
 PROPOSE_TODO = "propose_todo"
@@ -241,6 +250,8 @@ REGISTRY_TOOLS: tuple[str, ...] = (
     "grow_level",
     "make_variant",
     "sound_audit",
+    TIDY_CHECK,
+    TIDY_REMOVE,
     "report_review",
     "report_design",
     "report_diagnosis",

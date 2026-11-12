@@ -15,7 +15,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, Literal
 
-from joinery import compact, design, live_game, scene_variants, skills
+from joinery import compact, design, live_game, scene_variants, skills, tidy_tool
 from joinery.blockout import stage as blockout_stage
 from joinery.debugging import diagnosis_from
 from joinery.gateway import ProjectGateway
@@ -49,6 +49,7 @@ COMPACTED = frozenset(
         "access_check",
         "perf_check",
         "sound_audit",
+        "tidy_check",
         "task_status",
     }
 )
@@ -546,13 +547,26 @@ class GatewayRPC:
                 if self.sound_audit is None:
                     raise ValueError("The sound pass is not available here.")
                 data = await self.sound_audit(params)
+            elif method == "tidy_check":
+                # Reads only, so every role may.
+                data = await tidy_tool.check(self.gateway, params)
+            elif method == "tidy_remove":
+                if self.inspection_only or (
+                    self.role and not registry_allowed(self.role, method)
+                ):
+                    raise ValueError(
+                        refusal(self.role)
+                        if self.role
+                        else "Specialists cannot remove content; the main thread does."
+                    )
+                data = await tidy_tool.remove(self.gateway, params)
             elif method == "task_status":
                 if self.task_status is None:
                     raise ValueError("Parallel tasks are not available here.")
                 data = self.task_status(str(params.get("id", "")))
             else:
                 raise ValueError(
-                    "The model interface supports inventory, schema, call, submit, propose_todo, blockout, grow_level, make_variant, playtest, the checks, sound_audit and the running game's inspect_game and drive_game; no approval methods."
+                    "The model interface supports inventory, schema, call, submit, propose_todo, blockout, grow_level, make_variant, playtest, the checks, sound_audit, tidy_check, tidy_remove and the running game's inspect_game and drive_game; no approval methods."
                 )
             project = getattr(self.gateway, "project", None)
             if method in COMPACTED and isinstance(project, Path):

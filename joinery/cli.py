@@ -44,6 +44,7 @@ from joinery import (
     skills,
     sound_pass,
     team,
+    tidy_cli,
     timeline,
 )
 from joinery.agents import all_agents
@@ -1050,6 +1051,10 @@ def _parser() -> argparse.ArgumentParser:
         "design", help="check the game design against its brief; list what breaks it"
     )
     design_cli.add_arguments(design_cmd)
+    tidy_cmd = commands.add_parser(
+        "tidy", help="find what the game never uses; remove it as one reviewed change"
+    )
+    tidy_cli.add_arguments(tidy_cmd)
     steam_cmd = commands.add_parser(
         "steam", help="show or set the Steam app ID (it can be added any time)"
     )
@@ -1542,6 +1547,8 @@ def main(argv: list[str] | None = None) -> int:
         return checks_cli.main(args)
     if args.command == "design":
         return design_cli.main(args)
+    if args.command == "tidy":
+        return tidy_cli.main(args)
     if args.command == "blockout":
         return blockout_command.main(args)
     if args.command == "puzzle":

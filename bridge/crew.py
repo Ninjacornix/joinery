@@ -26,6 +26,7 @@ import time
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Literal, Protocol
 
 from bridge.instructions import DEBUG_FIX_PROMPT, TASK_PROMPT
@@ -309,14 +310,18 @@ class Crew:
         prompt: Prompt,
         targets: list[str] | tuple[str, ...] = (),
         facts: list[str] | tuple[str, ...] = (),
+        edit: Callable[[Path], object] | None = None,
     ) -> Task:
         """Start a task that makes its change with known typed calls, no agent of its
         own. Its claims on ``targets`` come first; a held file refuses it in plain
-        words. The caller decides how many run at once."""
+        words. The caller decides how many run at once. ``edit`` is Joinery's own work
+        on the staged copy before the calls (/tidy's removal), as a write like any."""
         task = self._open(title, request, "match", prompt, targets)
         task.step = "Waiting for its apps…"
         task.job = asyncio.create_task(
-            self._scripted(task, calls, list(facts), prompt.selection.model_dump())
+            self._scripted(
+                task, calls, list(facts), prompt.selection.model_dump(), edit
+            )
         )
         return task
 
@@ -326,6 +331,7 @@ class Crew:
         calls: list[ScriptedCall],
         facts: list[str],
         selection: dict[str, Any],
+        edit: Callable[[Path], object] | None = None,
     ) -> None:
         lane = task.gateway
         controller = task.controller
@@ -335,6 +341,16 @@ class Crew:
         try:
             controller.selection = selection
             controller.begin(task.request)
+            if edit is not None:
+                lane.progress(task.title + "…")
+                async with lane.call_lock:
+                    if lane.turn is not None:
+                        lane.turn.admit_mutation()
+                    staged = lane.staging()
+                    staged.note_tool("joinery")
+                    edit(staged.stage)
+                    if lane.claims.contended():
+                        lane.claim_stage(strict=True)
             for call in calls:
                 lane.progress(call.label + "…")
                 result = await lane.call(call.server, call.tool, call.arguments)

@@ -437,6 +437,23 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
         """Listen to the game without playing it: which sounds the level and its player are missing (footsteps per floor surface, jump and land, pickups, hits, doors and switches, ambience, UI clicks), what is already there, the sound Joinery's kit would make for each and where it would go, ranked by the latest playtest. scene: a level as res://…, default the project's level. Changes nothing."""
         return await rpc(socket, "sound_audit", {"scene": scene})
 
+    @server.tool(annotations=ToolAnnotations(read_only_hint=True))
+    @tool_errors
+    async def tidy_check() -> dict[str, Any]:
+        """What the game never uses: models, textures, materials, sounds, music, scripts, scenes, resources, fonts, shaders, input actions, autoloads, and nodes in scenes that do nothing (hidden and never shown, disabled, empty) or attached scripts that add nothing. Each finding has an id, why Joinery thinks it is unused, its size with what goes with it (sidecars, textures only it uses, native source, recipe, joinery.lock entry), and a confidence: 'unused', or 'maybe' when a script builds a path that could name it. Files only tests load, files a game feature owns and the user's keep list are left out. Changes nothing."""
+        return await rpc(socket, "tidy_check", {})
+
+    @server.tool()
+    @tool_errors
+    async def tidy_remove(
+        ids: Annotated[
+            list[Annotated[str, Field(min_length=1, max_length=40)]],
+            Field(min_length=1, max_length=200),
+        ],
+    ) -> dict[str, Any]:
+        """Only when the user asked to clean up: stage the removal of tidy_check findings (by id) in your change, as one reviewed change: the files go with their .import, .uid, native sources, recipes and joinery.lock entries; an unused input action or autoload leaves project.godot; a dead node leaves its scene; an empty script is taken off its nodes. Refused when a file that stays would still load one that goes. Never remove a 'maybe' finding without the user's word. Then call submit_for_review; the user reviews what goes and the space it frees."""
+        return await rpc(socket, "tidy_remove", {"ids": ids})
+
     @server.tool()
     @tool_errors
     async def report_review(notes: list[ReviewNoteArgument]) -> dict[str, Any]:

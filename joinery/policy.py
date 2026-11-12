@@ -124,9 +124,25 @@ _USER_KITS = re.compile(
 )
 
 
+#: `joinery tidy` reads freely; removing (or accepting a removal at once), the keep
+#: list and clearing caches are the user's. An agent removes with tidy_remove, which
+#: stages a reviewed change.
+_USER_TIDY = re.compile(
+    r"\bjoinery\b(?:\s+\S+)*?\s+tidy\b(?:\s+\S+)*?\s+"
+    r"--(?:remove|yes|keep|unkeep|clear-caches)\b"
+)
+
+
 def user_only_violation(command: str) -> Verdict | None:
     """Refuse commands only the user runs, from the editor."""
     for segment in _SEGMENTS.split(command):
+        if _USER_TIDY.search(segment):
+            return Verdict(
+                Severity.DENY,
+                "Removing unused content is a reviewed change: call tidy_remove with "
+                "the findings' ids (tidy_check lists them), and the user reviews it. "
+                "The keep list and Joinery's caches are the user's, in /tidy.",
+            )
         if _USER_PUBLISH.search(segment):
             return Verdict(
                 Severity.DENY,
