@@ -16,7 +16,12 @@ from bridge.instructions import SUMMARY_REQUEST
 from bridge.protocol import Done, EditorAction, Message, MessageDelta, Prompt, Usage
 from bridge.provider_process import prompt_text
 from bridge.turn_runner import run_turn
-from joinery.session_summary import KEEP, FileSummaryStore, SessionSummary
+from joinery.session_summary import (
+    KEEP,
+    PINNED_HEADING,
+    FileSummaryStore,
+    SessionSummary,
+)
 from joinery.timing import TurnTiming
 from joinery.transactions import FileTransaction
 from joinery.turn import TurnController, TurnState
@@ -143,7 +148,7 @@ def test_a_failed_summary_turn_falls_back_to_joinerys_facts(tmp_path: Path) -> N
     summary = asyncio.run(
         compaction.compact(controller, bridge, store, tmp_path, events.append)
     )
-    assert summary.text.startswith("What Joinery recorded:")
+    assert summary.text.startswith(PINNED_HEADING)
     assert bridge.fresh == 1 and controller.state is TurnState.IDLE
 
 

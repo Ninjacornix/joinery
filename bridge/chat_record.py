@@ -311,6 +311,7 @@ class ChatRecorder:
             "agent": summary.agent,
             "text": summary.text,
             "facts": summary.facts,
+            "pinned": summary.pinned,
         }
         self._save(lambda: chats.append(self.project, self.chat_id, entry))
         self._save(lambda: chats.update(self.project, self.chat_id, handle=""))
@@ -330,6 +331,7 @@ class ChatRecorder:
                     agent=str(entry.get("agent", "")),
                     text=str(entry.get("text", "")),
                     facts=[str(f) for f in entry.get("facts", [])],
+                    pinned=[str(f) for f in entry.get("pinned", [])],
                 )
         return None
 

@@ -113,10 +113,21 @@ async def compact(
                 bridge, project, "", seconds / 2 if light else seconds
             )
         recorded = session_summary.facts(project, since, controller.requests)
+        try:
+            earlier = store.latest()
+        except (OSError, ValueError):
+            earlier = None
+        held = session_summary.pinned(
+            project,
+            controller.todo or controller.pending_todo,
+            list(getattr(controller, "answers", []) or []),
+            earlier,
+        )
         summary = SessionSummary(
             agent=controller.agent_id,
-            text=session_summary.build(text, recorded),
+            text=session_summary.build(text, recorded, held),
             facts=recorded,
+            pinned=held,
         )
         store.save(summary)
         await bridge.new_session()

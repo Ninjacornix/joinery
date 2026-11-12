@@ -408,6 +408,18 @@ def _variants_line(group: dict[str, Any]) -> str:
     return f"{head}: none was picked."
 
 
+def _summary_text(text: str) -> str:
+    """A saved session summary for a fresh session: the agent's part cut short, its
+    pinned facts kept word for word (ADR 0080)."""
+    from joinery.session_summary import PINNED_HEADING
+
+    head, mark, pinned = text.partition(PINNED_HEADING)
+    shown = _short(head, 4000) if head.strip() else ""
+    if not mark:
+        return shown
+    return (shown + "\n" if shown else "") + mark + pinned.rstrip()
+
+
 def summary(project: Path, meta: dict[str, Any], entries: list[dict[str, Any]]) -> str:
     """A compact account of an earlier chat for an agent that starts fresh: its last
     turns, what Journeyman said, and what became of each change it proposed."""
@@ -426,7 +438,7 @@ def summary(project: Path, meta: dict[str, Any], entries: list[dict[str, Any]]) 
     if earlier:
         lines.append(
             "Joinery's summary of the earlier conversation:\n"
-            + _short(str(earlier[-1].get("text", "")), 4000)
+            + _summary_text(str(earlier[-1].get("text", "")))
         )
     skipped = len(turns(entries)) - len(recent)
     if skipped > 0:
