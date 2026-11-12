@@ -177,6 +177,9 @@ class Playtester:
         self.runner: Runner = runner or playtest.run_async
         self.current: Run | None = None
         self._playing = False
+        #: Told each report's items as it is made: its console errors join the
+        #: sidebar's Errors list (bridge.error_fixer, ADR 0075).
+        self.on_report: Callable[[list[dict[str, Any]]], Awaitable[None]] | None = None
 
     def busy(self) -> bool:
         return self.current is not None and self.current.state not in {
@@ -252,6 +255,10 @@ class Playtester:
         if heat:
             run.report["heatmap"] = heat
         run.elapsed = float(report.get("played_seconds", run.seconds))
+        if self.on_report is not None:
+            # The error list must never fail a playtest.
+            with contextlib.suppress(OSError, ValueError, TypeError, RuntimeError):
+                await self.on_report(list(report.get("items", [])))
         run.state = "writing"
         self.emit(run.event())
         return report

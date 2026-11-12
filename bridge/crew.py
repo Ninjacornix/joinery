@@ -93,6 +93,8 @@ class Task:
     #: The error a debug task is about, and the cause its debugger found.
     error: str = ""
     cause: str = ""
+    #: The title its card takes once its change waits for review ("Fixed: …").
+    review_title: str = ""
     state: str = WORKING
     step: str = ""
     #: Joinery's or the agent's last line, shown on the task's card.
@@ -489,16 +491,24 @@ class Crew:
             None,
         )
 
-    async def debug(self, request: DebugRequest, prompt: Prompt) -> Task:
+    async def debug(
+        self,
+        request: DebugRequest,
+        prompt: Prompt,
+        *,
+        title: str = "",
+        at_once: int = 1,
+    ) -> Task:
         """Debug one error: a debugger finds the cause, then a worker makes the fix
         as a normal staged change, checked and reviewed like any other. One card
-        follows both ("Debugging: <error>")."""
+        follows both ("Debugging: <error>", or ``title``). ``at_once`` debug tasks may
+        work together (console error fixes, ADR 0075); one by default."""
         if self._debugger is None:
             raise ValueError("Debugging isn't available with this agent.")
-        if self.debugging() is not None:
+        if sum(1 for t in self.working() if t.origin == "debug") >= max(1, at_once):
             raise ValueError("Journeyman is already debugging an error; wait for it.")
         task = self._open(
-            request.title, request.error, "debug", prompt, error=request.error
+            title or request.title, request.error, "debug", prompt, error=request.error
         )
         task.job = asyncio.create_task(self._debug(task, request, prompt))
         return task
@@ -621,6 +631,8 @@ class Crew:
         elif controller.review_open and (controller.review_id or controller.live_edits):
             task.transaction_id = task.controller.review_id
             task.state = IN_REVIEW
+            if task.review_title:
+                task.title = task.review_title
         else:
             if outcome == "done" and not task.message:
                 task.message = "Nothing needed changing."

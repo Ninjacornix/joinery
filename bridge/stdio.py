@@ -21,6 +21,7 @@ from bridge.chat_record import ChatRecorder
 from bridge.check_runner import Checks
 from bridge.crew import Crew
 from bridge.designer import Designer
+from bridge.error_fixer import ErrorFixer
 from bridge.host import Bridge
 from bridge.idle_queue import IdleQueue
 from bridge.instructions import expand_command
@@ -212,6 +213,7 @@ async def _serve(
     variants: Variants | None = None
     playtester: Playtester | None = None
     designer: Designer | None = None
+    fixer: ErrorFixer | None = None
     matcher: MatchRun | None = None
     checks: Checks | None = None
     sounder: SoundPassRun | None = None
@@ -576,6 +578,9 @@ async def _serve(
             design check's ``design_check_every``."""
             if checks is not None:
                 checks.after_decision(decision)
+            if fixer is not None:
+                # Errors that came with the change settle with it (ADR 0075).
+                fixer.decided(decision)
             if designer is not None:
                 designer.after_decision(decision)
             if (
@@ -608,6 +613,27 @@ async def _serve(
         # Steps, then run (ADR 0072): a to-do's independent steps as tasks.
         step_run = StepRun(crew, task_prompt, emit, gateway.progress)
         controller.runs_steps = True
+
+        def pending_changes() -> dict[str, list[str]]:
+            """Changes waiting for review now, and their files: no console error in
+            one of them is fixed while it waits."""
+            assert crew is not None
+            found: dict[str, list[str]] = {}
+            turns = [(t.transaction_id, t.controller) for t in crew.tasks.values()]
+            turns.append((controller.review_id, controller))
+            for transaction_id, turn_controller in turns:
+                last = turn_controller.last_result
+                if transaction_id and turn_controller.review_open and last is not None:
+                    found[transaction_id] = [
+                        str(c.get("path", "")) for c in last.changes if c.get("path")
+                    ]
+            return found
+
+        # Console errors: grouped, listed, offered or fixed as reviewed changes.
+        fixer = ErrorFixer(project, crew, emit, task_prompt, pending=pending_changes)
+        # A playtest's script and engine errors join the list too.
+        playtester.on_report = fixer.take_playtest
+        fixer.publish()
 
         async def lead_decide(transaction_id: str, accept: bool) -> dict[str, Any]:
             """The chat's own change as one of a group's ways (Try other ways)."""
@@ -1060,7 +1086,35 @@ async def _serve(
                 elif data.get("kind") == "debug_start":
                     # /debug, Debug on the offer after a new error in Output, or
                     # /debug report <id> for a player's bug report.
-                    await crew.debug(debug_request(data, project), task_prompt(data))
+                    task = await crew.debug(
+                        debug_request(data, project), task_prompt(data)
+                    )
+                    if data.get("group_id") and fixer is not None:
+                        fixer.adopt(task, str(data["group_id"]))
+                elif data.get("kind") == "errors_seen":
+                    assert fixer is not None
+                    # New console text: the editor's Output, the game's log, GUT.
+                    await fixer.take_text(
+                        str(data.get("source", "output")), str(data.get("text", ""))
+                    )
+                elif data.get("kind") == "errors_fix":
+                    assert fixer is not None
+                    # Fix on a row of the Errors list, or Fix all (no ids).
+                    ids = data.get("ids")
+                    await fixer.fix(
+                        [str(i) for i in ids] if isinstance(ids, list) else None
+                    )
+                elif data.get("kind") == "errors_ignore":
+                    assert fixer is not None
+                    fixer.ignore(
+                        str(data.get("id", "")), bool(data.get("ignore", True))
+                    )
+                elif data.get("kind") == "errors_mode":
+                    assert fixer is not None
+                    # The Settings switch, or "Always fix errors like this".
+                    await fixer.set_mode(
+                        str(data.get("mode", "")), str(data.get("group_id", ""))
+                    )
                 elif data.get("kind") == "prompt":
                     if active is not None and not active.done():
                         emit(
