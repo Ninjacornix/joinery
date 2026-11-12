@@ -9,6 +9,7 @@ where the game can. The longer runs, two minutes with every feature, are marked
 
 from __future__ import annotations
 
+import asyncio
 import os
 import shutil
 from pathlib import Path
@@ -16,7 +17,7 @@ from typing import Any
 
 import pytest
 
-from joinery import blueprints, playtest
+from joinery import blueprints, done_when, playtest
 from tests.blueprints.godot_run import import_project, make_project, needs_godot
 
 FIXTURE = Path(__file__).resolve().parents[1] / "fixtures" / "playtest_game"
@@ -193,6 +194,41 @@ def test_the_bot_heads_for_places_named_to_reach(tmp_path: Path) -> None:
         "closest": None,
         "node": "",
     }
+
+
+@needs_godot
+def test_done_when_items_are_checked_by_a_real_seeded_run(tmp_path: Path) -> None:
+    """A to-do's playing items (ADR 0060) against a real game: one seeded run of the
+    stage reaches the place it names, finds no errors, and says when a place doesn't exist."""
+    project = make_project(
+        tmp_path,
+        "third-person-3d",
+        blueprints.describe("third-person-3d")["default_features"],
+    )
+    import_project(project)
+    todo = done_when.proposal(
+        {
+            "steps": ["Build the pen"],
+            "done_when": [
+                {
+                    "text": "The player can reach the pen",
+                    "kind": "reach",
+                    "target": "pen floor",
+                },
+                {"text": "No errors in 30 s", "kind": "no_errors", "seconds": 30},
+                {"text": "The vault is reachable", "kind": "reach", "target": "vault"},
+            ],
+        }
+    )
+    results = asyncio.run(
+        done_when.verify(todo, project=project, stage=project, ran=[], skipped=[])
+    )
+    pen, errors, vault = results
+    assert pen.status == "pass", pen
+    assert pen.evidence.startswith("The bot reached PenFloor at "), pen
+    assert pen.evidence.endswith(", seed 4242.")
+    assert errors.status == "pass", errors
+    assert vault.status == "inconclusive" and "named like" in vault.evidence
 
 
 @SLOW

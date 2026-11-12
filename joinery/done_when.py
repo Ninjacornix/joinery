@@ -264,8 +264,10 @@ async def verify(
     report: dict[str, Any] | None = None
     failure = ""
     if playing and stage is not None and (stage / "project.godot").is_file():
+        # As long as the longest no_errors asks; a place to reach gets a minute at least.
         seconds = max(
-            [c.seconds for c in playing if c.kind == "no_errors"] or [DEFAULT_SECONDS]
+            [c.seconds for c in playing if c.kind == "no_errors"]
+            + [DEFAULT_SECONDS for c in playing if c.kind == "reach"]
         )
         try:
             report = await play(
