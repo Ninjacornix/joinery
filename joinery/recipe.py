@@ -37,7 +37,7 @@ import tempfile
 import tomllib
 import zipfile
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -336,7 +336,20 @@ def run_recipe(
     recipe: Recipe, project: Path, runner: Runner, timeout: int = DEFAULT_TIMEOUT
 ) -> Result:
     """Run a recipe's script in its tool, producing its outputs."""
-    return runner.run(_tool_argv(recipe), project, timeout=timeout)
+    return _runner_for(recipe, runner).run(_tool_argv(recipe), project, timeout=timeout)
+
+
+def _runner_for(recipe: Recipe, runner: Runner) -> Runner:
+    """The runner in the tool's own worker image, for tools that have one."""
+    from joinery.runner import SandboxRunner
+
+    try:
+        image = tools.get(recipe.tool).replay_image
+    except ValueError:
+        return runner
+    if image and isinstance(runner, SandboxRunner):
+        return replace(runner, image=image)
+    return runner
 
 
 def rebuild_one(

@@ -62,12 +62,17 @@ def confined(project: Path, relative: str) -> Path:
 
 
 async def run_offline(
-    argv: list[str], project: Path, timeout: int = 600, *, readonly: bool = False
+    argv: list[str],
+    project: Path,
+    timeout: int = 600,
+    *,
+    readonly: bool = False,
+    image: str = IMAGE,
 ) -> Result:
     if os.environ.get("JOINERY_WORKER_SCOPE"):
         from joinery.warm_workers import execute
 
-        return await execute(argv, project, timeout, readonly, IMAGE)
+        return await execute(argv, project, timeout, readonly, image)
     name = "joinery-mcp-" + uuid.uuid4().hex
     start = asyncio.get_running_loop().time()
     process = await asyncio.create_subprocess_exec(
@@ -92,7 +97,7 @@ async def run_offline(
         f"{project.resolve()}:/work" + (":ro" if readonly else ""),
         "-w",
         "/work",
-        IMAGE,
+        image,
         *argv,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
@@ -193,6 +198,7 @@ async def edit_document(
     module, source, exports, target = _checked_document(
         project, tool, source, exports, (code,)
     )
+    inputs = tuple(dict.fromkeys((*inputs, *module.script_inputs(code))))
     textures: tuple[str, ...] = ()
     if tool == "blender":
         # Texture files are regenerated on every edit; clear the old set so an
@@ -206,7 +212,8 @@ async def edit_document(
     # An immutable preimage makes an incremental edit replayable without
     # depending on the future version of the very document it modifies.
     # Named by content, so edits from the same state share one copy.
-    base = store_preimage(project, target) if target.is_file() else ""
+    keep = target.is_file() and module.uses_preimage
+    base = store_preimage(project, target) if keep else ""
     for output in [source, *exports]:
         confined(project, output).parent.mkdir(parents=True, exist_ok=True)
     for extra in inputs:
@@ -233,7 +240,12 @@ async def edit_document(
     for old in textures:
         (project / old).unlink(missing_ok=True)
     try:
-        result = await run_offline(module.replay_argv(recipe.script), project)
+        argv = module.replay_argv(recipe.script)
+        if module.replay_image:
+            # A tool with its own worker image (Audacity) replays there.
+            result = await run_offline(argv, project, image=module.replay_image)
+        else:
+            result = await run_offline(argv, project)
     except BaseException:
         _restore(project, kept)
         raise

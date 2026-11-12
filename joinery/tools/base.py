@@ -17,6 +17,7 @@ CREATIVE_WORKER = "joinery-creative-worker"
 MCP_WORKER = "joinery-mcp-worker"
 BLENDER_WORKER = "joinery-blender-worker"
 INKSCAPE_WORKER = "joinery-inkscape-worker"
+AUDACITY_WORKER = "joinery-audacity-worker"
 
 #: The worker images' shared entrypoint (starts a virtual display, then runs
 #: the command). Images whose own entrypoint starts a server are probed through
@@ -187,6 +188,18 @@ class ToolModule:
     def replay_argv(self, script: str) -> list[str]:
         """The worker command that replays a recipe script."""
         raise ValueError(f"No replay command for tool {self.id!r}.")
+
+    #: False when a recipe rebuilds the source from its inputs alone, so an
+    #: edit keeps no copy of the old source (an Audacity project).
+    uses_preimage: bool = True
+
+    #: The worker image a recipe replays in when the tool has its own image;
+    #: "" uses the runner's image (the creative worker for document edits).
+    replay_image: str = ""
+
+    def script_inputs(self, code: str) -> tuple[str, ...]:
+        """Project files the code reads, recorded as the recipe's sources."""
+        return ()
 
     def check_destinations(self, source: str, exports: list[str]) -> None:
         """Refuse a source or export location this tool cannot write."""

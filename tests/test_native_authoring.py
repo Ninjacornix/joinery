@@ -72,7 +72,7 @@ def test_unselected_owner_cannot_author(stage: Path, tool: str) -> None:
 
 # Removed from the catalog; they must never come back through an old project's
 # tool list.
-@pytest.mark.parametrize("tool", ["aseprite", "audacity", "reaper", "musescore"])
+@pytest.mark.parametrize("tool", ["aseprite", "reaper", "musescore"])
 def test_desktop_only_or_planned_tools_do_not_claim_native_authoring(
     stage: Path, tool: str
 ) -> None:

@@ -8,6 +8,7 @@ ids, so adding a tool means adding a module here and a catalog entry.
 from __future__ import annotations
 
 from joinery.tools import (
+    audacity,
     blender,
     gimp,
     godot,
@@ -30,6 +31,7 @@ REGISTRY: dict[str, ToolModule] = {
         material_maker.MODULE,
         supercollider.MODULE,
         surge_xt.MODULE,
+        audacity.MODULE,
     )
 }
 

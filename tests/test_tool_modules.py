@@ -8,6 +8,7 @@ from joinery import authoring, tools
 from joinery.catalog import REMOVED_TOOLS, load_catalog
 from joinery.recipe import Recipe, _tool_argv
 from joinery.tools.base import (
+    AUDACITY_WORKER,
     BLENDER_WORKER,
     CREATIVE_WORKER,
     INKSCAPE_WORKER,
@@ -18,7 +19,7 @@ from joinery.tools.base import (
     WorkerExec,
 )
 
-WORKERS = {CREATIVE_WORKER, MCP_WORKER, BLENDER_WORKER, INKSCAPE_WORKER}
+WORKERS = {CREATIVE_WORKER, MCP_WORKER, BLENDER_WORKER, INKSCAPE_WORKER, AUDACITY_WORKER}
 
 
 def test_registry_covers_exactly_the_catalog() -> None:
@@ -94,14 +95,16 @@ def test_authoring_tables_come_from_the_modules() -> None:
         "material-maker",
         "supercollider",
         "surge-xt",
+        "audacity",
     }
     assert authoring.SUFFIXES["krita"] == ".kra"
+    assert authoring.SUFFIXES["audacity"] == ".aup3"
     assert authoring.SUFFIXES["surge-xt"] == ".json"
 
 
 def test_family_maps_follow_the_registry() -> None:
     assert tools.script_tools("joinery-paint") == {"krita", "gimp"}
-    assert tools.script_tools("joinery-sound") == {"supercollider", "surge-xt"}
+    assert tools.script_tools("joinery-sound") == {"supercollider", "surge-xt", "audacity"}
     assert tools.script_tools("joinery-materialmaker") == set()
     assert tools.families_for({"surge-xt"}) == ["joinery-sound"]
     assert tools.families_for({"gimp", "blender"}) == [
@@ -113,6 +116,7 @@ def test_family_maps_follow_the_registry() -> None:
         for module in tools.family_tools("joinery-sound")
         for key, value in module.capability_programs().items()
     }
+    # Audacity has its own worker, which readiness checks instead.
     assert programs == {"supercollider": "sclang", "surge-xt": "joinery-surge"}
 
 
