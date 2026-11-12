@@ -50,6 +50,7 @@ CASES = {
     "usage_meter_test.gd": "usage meter: ok",
     "chat_sessions_test.gd": "chat sessions: ok",
     "chat_rewind_test.gd": "chat rewind: ok",
+    "composer_recall_test.gd": "composer recall: ok",
     "provider_switch_test.gd": "provider switch: ok",
     "parallel_tasks_test.gd": "parallel tasks: ok",
     "agent_roles_test.gd": "agent roles: ok",

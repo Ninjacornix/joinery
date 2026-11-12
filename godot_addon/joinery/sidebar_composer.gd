@@ -27,6 +27,10 @@ extends PanelContainer
 ## composer that would turn a reference into a project file, so while the composer is in the
 ## editor it takes the window's file drops first ([method _guard_drops]): drops on the composer
 ## become attachments, and every other drop goes on to the editor as before.
+##
+## Up and Down bring back the messages sent in this chat (composer_recall.gd, from the
+## transcript set with [method recall_from]). While a menu over the composer is open (the `/`
+## commands, which register with [method add_menu], or the options) the arrows stay its own.
 
 signal submitted(text: String)
 signal stop_pressed
@@ -48,6 +52,7 @@ const CHIP_SCRIPT := preload("target_chip.gd")
 const ATTACHMENTS := preload("chat_attachments.gd")
 const ATTACHMENT_ROW := preload("sidebar_attachments.gd")
 const EDITOR_VIEW := preload("editor_view.gd")
+const RECALL := preload("composer_recall.gd")
 
 var chips: HFlowContainer
 ## Holds [member chips] without passing their width up: a long name ends in an ellipsis inside
@@ -85,6 +90,8 @@ var _dialog: FileDialog
 var _editor_drops: Array[Callable] = []
 ## The row under the field: attach, view, the model picker, Run alongside, Send/Stop.
 var _controls: HBoxContainer
+## Menus shown over the composer that take the arrow keys while open ([method add_menu]).
+var _menus: Array[Control] = []
 
 
 func _init() -> void:
@@ -175,6 +182,8 @@ func _init() -> void:
 	UI_MOTION.press_feedback(stop)
 	stop.pressed.connect(func() -> void: stop_pressed.emit())
 	slot.add_child(stop)
+	var recall: RECALL = prompt.get("recall")
+	recall.blocked = menu_open
 	set_placeholder()
 	_sync_send()
 
@@ -469,6 +478,32 @@ func restore(text: String, targets: Array) -> bool:
 	prompt.set_caret_column(text.length())
 	prompt.grab_focus()
 	return true
+
+
+# --- History -----------------------------------------------------------------------------------
+
+
+## Up and Down recall the requests in [param transcript] (chat_history.gd): the chat on screen,
+## a saved one opened again included.
+func recall_from(transcript: Control) -> void:
+	var recall: RECALL = prompt.get("recall")
+	recall.source = Callable(RECALL, "sent_in").bind(transcript)
+
+
+## [param menu] opens over the composer and takes the arrow keys while it shows.
+func add_menu(menu: Control) -> void:
+	if not _menus.has(menu):
+		_menus.append(menu)
+
+
+## A menu over the composer is open: the arrows are its own, not the history's.
+func menu_open() -> bool:
+	if options.get_popup().visible:
+		return true
+	for menu: Control in _menus:
+		if is_instance_valid(menu) and menu.visible:
+			return true
+	return false
 
 
 # --- Targets -----------------------------------------------------------------------------------

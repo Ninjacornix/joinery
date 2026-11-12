@@ -7,6 +7,9 @@ extends TextEdit
 ##
 ## Pasting (Cmd/Ctrl+V) an image, or image files copied in the file manager, attaches them
 ## instead of inserting text: [signal image_pasted] or [signal files_pasted].
+##
+## Up and Down at the first and last rows go through the messages sent in this chat
+## ([member recall], composer_recall.gd).
 
 signal text_submitted(value: String)
 ## An image was pasted from the clipboard.
@@ -15,6 +18,7 @@ signal image_pasted(image: Image)
 signal files_pasted(paths: PackedStringArray)
 
 const UI_THEME := preload("ui_theme.gd")
+const RECALL := preload("composer_recall.gd")
 const IMAGE_EXTENSIONS: Array[String] = ["png", "jpg", "jpeg", "webp"]
 const MIN_LINES := 2
 const MAX_LINES := 5
@@ -25,6 +29,8 @@ var caret_column: int:
 	set(value):
 		set_caret_column(value)
 
+## The sent-message history Up and Down go through.
+var recall := RECALL.new(self)
 var _restyling := false
 
 
@@ -52,6 +58,10 @@ func _gui_input(event: InputEvent) -> void:
 		if paste_clipboard(DisplayServer.clipboard_get(), image):
 			accept_event()
 			return
+	# After the gui_input signal: a menu open over the field has had its arrow keys first.
+	if recall.handle(event):
+		accept_event()
+		return
 	if event is InputEventKey and event.pressed and not event.echo:
 		if event.keycode in [KEY_ENTER, KEY_KP_ENTER]:
 			if event.shift_pressed:

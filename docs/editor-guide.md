@@ -33,7 +33,12 @@ is `interface/joinery/editor_layout` in Editor Settings
 Journeyman shows the selected object, audio, or resource in a compact context line above the input and
 attaches that target to submitted prompts. Type `/` for a command menu, which
 opens upward and supports filtering and arrow keys. Tab or a click completes a
-command; Enter sends it in chat. `/help` replies with the command list. System and CLI
+command; Enter sends it in chat. `/help` replies with the command list.
+Up in the message box brings back the messages you sent in this chat (a saved
+chat opened again included), Down comes forward, and Down past the newest or
+Escape puts your draft back; commands that run in the sidebar are not recalled.
+In a message of several lines the arrows move the caret until the first or last
+line, and while the `/` menu is open they move its highlight. System and CLI
 diagnostics go to Output. The sidebar starts wide enough for chat and connects the agent selected at startup.
 
 Changes open in a separate **Review** panel below the viewport: the change itself

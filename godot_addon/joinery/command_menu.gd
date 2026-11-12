@@ -17,7 +17,13 @@ const MAX_HEIGHT := 0.4
 
 ## Commands in the order they are shown.
 var matches: Array[String] = []
-var anchor: Control
+## The composer it opens over. A composer that takes arrow keys itself (its message history)
+## learns of the menu, so the arrows stay the menu's while it shows.
+var anchor: Control:
+	set(value):
+		anchor = value
+		if anchor != null and anchor.has_method("add_menu"):
+			anchor.call("add_menu", self)
 var _scroll: ScrollContainer
 var _list: VBoxContainer
 var _rows: Array[PanelContainer] = []

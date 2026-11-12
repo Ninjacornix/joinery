@@ -82,6 +82,8 @@ static func attach(sidebar: Control, header_row: Control, content: Control) -> N
 func _build(header_row: Control, content: Control) -> void:
 	_transcript = dock.get("_transcript")
 	_composer = dock.get("_composer")
+	# Up in the message box recalls this chat's requests, a reopened chat's too.
+	_composer.call("recall_from", _transcript)
 	chats_button = UI.icon_button("chats", "Chats")
 	chats_button.accessibility_name = "Show saved chats"
 	chats_button.pressed.connect(open_list)
