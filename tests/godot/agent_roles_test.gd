@@ -140,38 +140,132 @@ func _debugging() -> void:
 	_check(str(transcript.get("_log")).contains("No error to debug yet"), "/debug needs an error")
 	_check(_sent(job, "debug_start").is_empty(), "…and starts nothing")
 
-	# Errors already in Output when the sidebar opened are not offered.
+	# Errors already in Output when the sidebar opened are not sent or offered.
 	_output = "Godot Engine v4.7\n" + _error + "\n"
 	watcher.call("poll")
+	_check(_sent(job, "errors_seen").is_empty(), "Old errors aren't sent")
 	_check(str(watcher.call("offer_text")).is_empty(), "Old errors aren't offered")
-	_output += "res://addons/joinery/plugin.gd:3 - Parse Error: x\n"
-	watcher.call("poll")
-	_check(str(watcher.call("offer_text")).is_empty(), "Joinery's own errors aren't offered")
 
-	# A new error: one quiet offer.
+	# New Output goes to the host, which groups it; nothing is offered before it answers.
 	_output += "Running the game\n" + _error + "\n   at: _process (res://player.gd:12)\n"
 	watcher.call("poll")
+	var seen := _sent(job, "errors_seen")
+	_check(
+		(
+			str(seen.get("source", "")) == "output"
+			and str(seen.get("text", "")).contains("player.gd:12")
+		),
+		"New Output goes to the host: %s" % seen
+	)
+	_check(str(watcher.call("offer_text")).is_empty(), "The host decides what is offered")
+
+	# The game's log is read too, from where it stood when the sidebar opened.
+	var game_log: Array[String] = ["old run\n"]
+	watcher.set("game_log_source", func() -> String: return "".join(PackedStringArray(game_log)))
+	watcher.set("_log_read", -1)
+	watcher.call("poll")
+	game_log.append("USER ERROR: Out of ammo\n")
+	watcher.call("poll")
+	seen = _sent(job, "errors_seen")
+	_check(
+		(
+			str(seen.get("source", "")) == "game"
+			and str(seen.get("text", "")) == "USER ERROR: Out of ammo\n"
+		),
+		"Only what the game's log gained: %s" % seen
+	)
+
+	# The host's list: one quiet offer for its new error, and the Errors card.
+	var group := {
+		"id": "g1",
+		"kind": "error",
+		"message": "Invalid call. Nonexistent function 'jump' in base 'Node2D'.",
+		"label": "Invalid call. Nonexistent function 'jump' in base 'Node2D'. (player.gd:12)",
+		"place": "player.gd:12",
+		"count": 2,
+		"status": "open",
+		"line": _error,
+	}
+	var listed := {"kind": "errors", "mode": "ask", "groups": [group], "offer": group}
+	backend.call("_handle", listed)
 	_check(
 		str(watcher.call("offer_text")).begins_with("Godot reported an error: Invalid call."),
 		"A new error is offered: %s" % watcher.call("offer_text")
 	)
-	_output += _error + "\n"
-	watcher.call("poll")
+	backend.call("_handle", listed)
 	_check(
 		(transcript.call("offer_texts") as PackedStringArray).size() == 1,
 		"One offer at a time, each error once"
 	)
+	var list_card: Control = tasks.get("errors_card")
+	_check(list_card != null and list_card.visible, "The Errors card lists it")
+	if list_card != null:
+		_check((list_card.call("row_texts") as PackedStringArray).size() == 1, "One row per error")
+		_check(str(list_card.get("headline").text) == "1 console error", "Its headline counts")
+	_check(_button(dock, "Always fix errors like this") != null, "The offer can turn on auto")
 	var debug := _button(dock, "Debug")
 	_check(debug != null, "Debug starts it")
 	if debug != null:
 		debug.pressed.emit()
 	var started := _sent(job, "debug_start")
 	_check(str(started.get("error", "")) == _error, "The error line goes to the host")
+	_check(str(started.get("group_id", "")) == "g1", "With the error it fixes")
 	_check(
 		str(started.get("output", "")).contains("res://player.gd:12"), "With the Output around it"
 	)
 	_check(str(started.get("log", "")) == "game log tail", "And the game's log")
 	_check(str(watcher.call("offer_text")).is_empty(), "The offer steps out")
+
+	# "Always fix errors like this": the project switches to auto, starting with this one.
+	var second := group.duplicate()
+	second.merge({"id": "g2", "label": "Node not found (hud.gd:7)", "place": "hud.gd:7"}, true)
+	backend.call(
+		"_handle", {"kind": "errors", "mode": "ask", "groups": [group, second], "offer": second}
+	)
+	var always := _button(dock, "Always fix errors like this")
+	_check(always != null, "Each new error is offered")
+	if always != null:
+		always.pressed.emit()
+	var mode := _sent(job, "errors_mode")
+	_check(
+		str(mode.get("mode", "")) == "auto" and str(mode.get("group_id", "")) == "g2",
+		"Auto is saved and this error fixed: %s" % mode
+	)
+	# In auto nothing is offered; Fix on a row, Ignore and Fix all go to the host.
+	second["status"] = "fixing"
+	var third := group.duplicate()
+	third.merge({"id": "g3", "label": "Out of ammo", "place": "", "status": "open"}, true)
+	backend.call(
+		"_handle",
+		{"kind": "errors", "mode": "auto", "groups": [second, group, third], "offer": third}
+	)
+	_check(str(watcher.call("offer_text")).is_empty(), "Auto offers nothing")
+	if list_card != null:
+		_check(not (list_card.get("fix_all") as Button).visible, "Fix all is for ask")
+		_check(str(list_card.get("headline").text) == "3 console errors", "Three rows")
+		var fix := _button(list_card, "Fix")
+		if fix != null:
+			fix.pressed.emit()
+		_check(_sent(job, "errors_fix").get("ids", []) == ["g1"], "Fix sends its row")
+		backend.call("_handle", {"kind": "errors", "mode": "ask", "groups": [group, third]})
+		var all := list_card.get("fix_all") as Button
+		_check(all.visible, "Ask: Fix all with two to fix")
+		all.pressed.emit()
+		_check(
+			_sent(job, "errors_fix").get("ids", []) == ["g1", "g3"], "Fix all sends the open ones"
+		)
+		var ignore: Button = null
+		for found: Node in list_card.find_children("", "Button", true, false):
+			if (found as Button).tooltip_text == "Ignore this error":
+				ignore = found as Button
+				break
+		_check(ignore != null, "Each open row can be ignored")
+		if ignore != null:
+			ignore.pressed.emit()
+		var ignored := _sent(job, "errors_ignore")
+		_check(str(ignored.get("id", "")) == "g1" and bool(ignored.get("ignore")), "Ignore goes")
+		backend.call("_handle", {"kind": "errors", "mode": "ask", "groups": []})
+		_check(not list_card.visible, "No errors: no card")
 
 	# "/debug what goes wrong" sends the last error with the user's words.
 	dock.call("run_command", "/debug the player can't jump")

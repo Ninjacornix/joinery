@@ -59,6 +59,8 @@ var bridge: Object:
 			variants.call("follow", bridge)
 		if todo != null:
 			todo.call("listen", bridge)
+		if debug != null:
+			debug.call("listen", bridge)
 ## The playtest card, while there is one.
 var playtest: Control
 ## The match card (match_card.gd), while there is one.
@@ -75,6 +77,9 @@ var sound_card: Control
 ## A request's to-do (sidebar_todo.gd) and its card (todo_card.gd), while there is one.
 var todo: Node
 var todo_card: Control
+## Console errors (sidebar_debug.gd) and their list (errors_card.gd), once there is one.
+var debug: Node
+var errors_card: Control
 var _cards: Dictionary = {}
 var _main_busy := false
 var _offer: Control
@@ -89,7 +94,9 @@ static func attach(sidebar: Control, content: Control, before: Control) -> VBoxC
 	if composer != null and composer.has_signal("alongside"):
 		composer.connect("alongside", tasks.run_alongside)
 	# "/debug" and the offer after a new error in Output start a debugging task.
-	DEBUG.attach(sidebar, tasks)
+	tasks.debug = DEBUG.attach(sidebar, tasks)
+	if tasks.bridge != null:
+		tasks.debug.call("listen", tasks.bridge)
 	# "/match" and Make it match: the project against the art bible.
 	MATCH.attach(sidebar, tasks)
 	# "/access" and "/perf": the game's accessibility and performance.
@@ -386,6 +393,7 @@ func sync_visible() -> void:
 		or is_instance_valid(design_card)
 		or is_instance_valid(sound_card)
 		or is_instance_valid(todo_card)
+		or (is_instance_valid(errors_card) and errors_card.visible)
 		or _has_variants()
 	)
 

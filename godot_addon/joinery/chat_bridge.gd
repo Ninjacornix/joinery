@@ -69,6 +69,9 @@ signal todo_event(event: Dictionary)
 ## The sound pass: {state: auditing|making|done|failed|stopped, audit?, tasks: [{key, title,
 ## category, categories, apps, sounds, facts, task_id, state, message}], summary?, message?}.
 signal sound_pass_event(event: Dictionary)
+## The console errors the host is watching (ADR 0075): {mode: ask|auto|off, warnings, groups:
+## [{id, label, message, place, count, status, note, transaction_id, line}], totals, offer?}.
+signal errors_event(event: Dictionary)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 const ATTACHMENTS := preload("chat_attachments.gd")
@@ -222,7 +225,8 @@ func start_debug_report(report_id: String) -> bool:
 
 ## Debug [param error] (one Output line) with the Output [param output] and game [param log]
 ## around it: a debugger agent finds the cause and a worker stages the fix (sidebar_debug.gd).
-func start_debug(error: String, output: String, log: String, scene := "") -> bool:
+## [param group_id] names the console error group it fixes, when it came from an offer.
+func start_debug(error: String, output: String, log: String, scene := "", group_id := "") -> bool:
 	if _job == null or not _connected:
 		return false
 	var line := {
@@ -234,6 +238,39 @@ func start_debug(error: String, output: String, log: String, scene := "") -> boo
 		"selection": _selection.duplicate(),
 		"editor_context": context_provider.call([]) if context_provider.is_valid() else {},
 	}
+	if not group_id.is_empty():
+		line["group_id"] = group_id
+	_job.send_line(JSON.stringify(line))
+	return true
+
+
+## New console text ([param source]: "output", "game" or "test") for the host to read for
+## errors (ADR 0075). False while not connected.
+func report_errors(source: String, text: String) -> bool:
+	return _send_line({"kind": "errors_seen", "source": source, "text": text})
+
+
+## Fix the console error groups [param ids]; empty fixes every open one ("Fix all").
+func fix_errors(ids: Array = []) -> bool:
+	var line := {"kind": "errors_fix"}
+	if not ids.is_empty():
+		line["ids"] = ids
+	return _send_line(line)
+
+
+## Ignore (or stop ignoring) one console error group.
+func ignore_error(id: String, ignore := true) -> bool:
+	return _send_line({"kind": "errors_ignore", "id": id, "ignore": ignore})
+
+
+## "ask", "auto" or "off" for console errors; with [param group_id], fix that one too.
+func set_fix_errors(mode: String, group_id := "") -> bool:
+	return _send_line({"kind": "errors_mode", "mode": mode, "group_id": group_id})
+
+
+func _send_line(line: Dictionary) -> bool:
+	if _job == null or not _connected:
+		return false
 	_job.send_line(JSON.stringify(line))
 	return true
 
@@ -474,6 +511,8 @@ func _handle(event: Dictionary) -> void:
 			check_event.emit(event)
 		"sound_pass":
 			sound_pass_event.emit(event)
+		"errors":
+			errors_event.emit(event)
 		"chat":
 			chat_id = str(event.get("chat_id", ""))
 			chat_changed.emit(event)

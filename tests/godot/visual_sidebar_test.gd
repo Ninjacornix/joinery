@@ -440,7 +440,8 @@ func _parallel(light: bool, width: int, chat: Control) -> void:
 	composer.get("stop").disabled = false
 
 
-## Debugging: the offer after a new error in Output, and the "Debugging: <error>" card.
+## Debugging: the offer after a new error in Output with the Errors list, and the
+## "Debugging: <error>" card; then the list while fixes run on their own.
 func _debugging(light: bool, width: int, chat: Control, tasks: Node, backend: Node) -> void:
 	for id: String in ["t1", "t2"]:
 		tasks.call("_remove", id)
@@ -448,15 +449,47 @@ func _debugging(light: bool, width: int, chat: Control, tasks: Node, backend: No
 	var watcher: Node = tasks.find_child("Debugging", false, false)
 	var error := "SCRIPT" + " ERROR: Invalid call. Nonexistent function 'jump' in base 'Player'."
 	watcher.call("take_output", error + "\n   at: _physics_process (res://player.gd:42)\n")
-	var debug := {"kind": "task", "task_id": "d1", "title": "Debugging: " + error.substr(14)}
+	var jump := _error_row("g1", "Invalid call. Nonexistent function 'jump' in base 'Player'.")
+	jump.merge({"place": "player.gd:42", "count": 3, "line": error}, true)
+	var score := _error_row("g2", 'Node not found: "Score" (relative to "/root/HUD").')
+	score["place"] = "hud.gd:7"
+	watcher.call("on_errors", {"kind": "errors", "mode": "ask", "groups": [jump, score]})
+	watcher.call(
+		"on_errors", {"kind": "errors", "mode": "ask", "groups": [jump, score], "offer": jump}
+	)
+	await _shot("debugging", light, width, chat)
+	watcher.call("_drop_offer")
+	# Automatic: each new error starts a fix; a fix waits for review; one gave up.
+	jump.merge({"status": "in_review", "transaction_id": "tx1"}, true)
+	score["status"] = "fixing"
+	var health := _error_row("g3", "Invalid get index 'health' (on base: 'null instance').")
+	health.merge({"place": "enemy.gd:18", "count": 12, "status": "stopped"}, true)
+	var ammo := _error_row("g4", "Out of ammo: magazine is empty")
+	ammo.merge({"place": "gun.gd:31", "status": "ignored"}, true)
+	var groups := [score, jump, health, ammo]
+	watcher.call("on_errors", {"kind": "errors", "mode": "auto", "groups": groups})
+	var title := 'Fixing: Node not found: "Score" (relative to "/root/HUD"). (hud.gd:7)'
+	var debug := {"kind": "task", "task_id": "d1", "title": title}
 	debug.merge({"role": "debugger", "error": error, "state": "working", "origin": "debug"})
 	debug["step"] = "Reproducing the error offline…"
 	tasks.call("on_event", debug)
 	tasks.call("card", "d1").call("set_elapsed", 21)
-	await _shot("debugging", light, width, chat)
-	watcher.call("_drop_offer")
+	await _shot("errors-auto", light, width, chat)
+	watcher.call("on_errors", {"kind": "errors", "mode": "ask", "groups": []})
 	tasks.call("_remove", "d1")
 	backend.set("_connected", false)
+
+
+func _error_row(id: String, message: String) -> Dictionary:
+	return {
+		"id": id,
+		"kind": "error",
+		"message": message,
+		"label": message,
+		"place": "",
+		"count": 1,
+		"status": "open",
+	}
 
 
 ## The playtester: its card while the bot plays, then the findings with one opened.

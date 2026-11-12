@@ -66,6 +66,7 @@ SIDEBAR_STATES = (
     "parallel",
     "parallel-stop",
     "debugging",
+    "errors-auto",
     "playtest",
     "playtest-report",
     "playtest-heat",

@@ -714,8 +714,14 @@ func add_offer(text: String, actions: Array = []) -> Control:
 	column.add_child(label)
 	_scale(label, "caption")
 	if not actions.is_empty():
-		var links := HBoxContainer.new()
-		links.theme_type_variation = "JoineryRow"
+		# In a narrow sidebar the links flow onto the next line.
+		var links := HFlowContainer.new()
+		STYLE.on_theme_overrides(
+			links,
+			func() -> void:
+				links.add_theme_constant_override("h_separation", UI_THEME.space(links, 2))
+				links.add_theme_constant_override("v_separation", UI_THEME.space(links, 1))
+		)
 		column.add_child(links)
 		for action: Array in actions:
 			var button := UI.link(str(action[0]))
