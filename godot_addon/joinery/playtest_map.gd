@@ -8,7 +8,9 @@ extends Control
 const UI_THEME := preload("ui_theme.gd")
 ## Widest the map draws, in theme units, and tallest.
 const WIDTH_UNITS := 240.0
-const HEIGHT_UNITS := 132.0
+const HEIGHT_UNITS := 96.0
+## How strong the unreached cells are: marked, without drowning the map in alarm.
+const MISSED_ALPHA := 0.72
 
 var _grid: PackedStringArray = PackedStringArray()
 var _cols := 0
@@ -78,6 +80,7 @@ func _draw() -> void:
 	var reached := UI_THEME.color(self, "text_muted")
 	reached.a = 0.32
 	var missed := UI_THEME.color(self, "danger")
+	missed.a = MISSED_ALPHA
 	var gap := 1.0 if side >= 4.0 else 0.0
 	for row: int in _rows:
 		var line := _grid[row]

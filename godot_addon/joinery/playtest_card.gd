@@ -53,6 +53,7 @@ var _timer: Label
 var _counts: HBoxContainer
 var _items: VBoxContainer
 var _scroll: ScrollContainer
+var _body: VBoxContainer
 var _more: Button
 var _coverage: VBoxContainer
 var _coverage_text: Label
@@ -116,32 +117,42 @@ func _init(identifier := "") -> void:
 	_counts.accessibility_name = "Findings by severity"
 	_counts.hide()
 	column.add_child(_counts)
-	_coverage = VBoxContainer.new()
-	_coverage.theme_type_variation = "JoineryTight"
-	_coverage.accessibility_name = "How much of the level was reached"
-	_coverage.hide()
-	column.add_child(_coverage)
-	var legend := HBoxContainer.new()
-	legend.theme_type_variation = "JoineryRowTight"
-	_coverage.add_child(legend)
-	_coverage_text = UI.label("", "JoineryCaption")
-	_coverage_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_coverage_text.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	legend.add_child(_coverage_text)
-	legend.add_child(_swatch("danger", 1.0))
-	legend.add_child(UI.label("Not reached", "JoineryCaption"))
-	_map = MAP.new()
-	_coverage.add_child(_map)
+	# The map and the findings scroll together, so the card never grows past its share.
 	_scroll = ScrollContainer.new()
 	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_scroll.hide()
 	column.add_child(_scroll)
+	_body = VBoxContainer.new()
+	_body.theme_type_variation = "JoineryTight"
+	_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_body.minimum_size_changed.connect(_fit_list)
+	_scroll.add_child(_body)
+	_coverage = VBoxContainer.new()
+	_coverage.theme_type_variation = "JoineryTight"
+	_coverage.accessibility_name = "How much of the level was reached"
+	_coverage.hide()
+	_body.add_child(_coverage)
+	var legend := HBoxContainer.new()
+	legend.theme_type_variation = "JoineryRowTight"
+	_coverage.add_child(legend)
+	_coverage_text = UI.label("", "JoineryCaption")
+	_coverage_text.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	legend.add_child(_coverage_text)
+	# The key sits with the words it explains, not at the far edge.
+	var gap := Control.new()
+	STYLE.on_theme(gap, func() -> void: gap.custom_minimum_size.x = float(UI_THEME.space(gap, 1)))
+	legend.add_child(gap)
+	legend.add_child(_swatch("danger", MAP.MISSED_ALPHA))
+	var key := UI.label("not reached", "JoineryCaption")
+	key.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	legend.add_child(key)
+	_map = MAP.new()
+	_coverage.add_child(_map)
 	_items = VBoxContainer.new()
 	_items.theme_type_variation = "JoineryTight"
 	_items.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_items.minimum_size_changed.connect(_fit_list)
-	_scroll.add_child(_items)
+	_body.add_child(_items)
 	_more = UI.link("")
 	UI.bind_height(_more, "xs")
 	STYLE.hug_left(_more)
@@ -271,7 +282,7 @@ func _show_report() -> void:
 		_items.add_child(row)
 		if row.visible:
 			rows.append(row)
-	_scroll.visible = not items.is_empty()
+	_scroll.visible = not items.is_empty() or _coverage.visible
 	_fit_list()
 	if items.size() > FIRST_ITEMS:
 		_more.text = "Show all %d" % items.size()
@@ -396,7 +407,7 @@ func _fit_list() -> void:
 	if _scroll == null or not is_inside_tree():
 		return
 	var limit := get_viewport_rect().size.y * MAX_LIST_SHARE
-	_scroll.custom_minimum_size.y = minf(_items.get_combined_minimum_size().y, limit)
+	_scroll.custom_minimum_size.y = minf(_body.get_combined_minimum_size().y, limit)
 
 
 func _notification(what: int) -> void:
