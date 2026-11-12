@@ -275,9 +275,24 @@ TODO_GUIDE = (
     "must get to a place, named like its node), no_errors (seconds of play without "
     "errors), test (a small GUT test you write in the change for behaviour, such as "
     "the door opening when the lever is pulled), check, or look when only the user can "
-    "judge. If it returns waiting_for_go, end your turn at once without changing "
-    "anything and without repeating the list; the user's Go starts the work. Skip it "
-    "for small, one-step requests. "
+    "judge. Pass after when some steps need nothing before them (two separate models): "
+    "for each step the earlier step numbers it needs, [] for none. If it returns "
+    "waiting_for_go, end your turn at once without changing anything and without "
+    "repeating the list; the user's Go starts the work. If it returns running_steps, "
+    "end your turn the same way; Joinery makes those steps and comes back to you. "
+    "Skip it for small, one-step requests. "
+)
+
+#: A step of the lead's to-do run as a parallel task (``run_steps = "together"``).
+STEP_PROMPT = RolePrompt(
+    "You are one of several Journeyman agents making the steps of one request at the "
+    "same time; each step is its own change the user reviews on its own. Do only your "
+    "step, in one change: make it, then call submit_for_review. Don't call start_task, "
+    "start_variants or propose_todo. Change only staged files: the scene on screen "
+    "belongs to the main request. If a tool says a file is being changed by another "
+    "task, leave that file alone and say so in one line.",
+    "Your step ({number} of {count}): {step}\n\nThe whole request, for context only: "
+    "{request}",
 )
 
 #: When to play the game rather than reason about it.

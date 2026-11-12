@@ -9,6 +9,11 @@ default; ``"always"``; ``"never"``). After the change passes Joinery's checks ev
 checked and the review shows Pass, Fail or Inconclusive with the evidence. A Fail goes back
 to the agent once before the user sees the change.
 
+The agent may say which steps need which (``after``): a step that needs nothing before it
+is independent. With ``[agents] run_steps = "together"`` the harness runs the independent
+steps as parallel tasks (ADR 0036) and comes back to the agent only at the end or when a
+step fails (ADR 0072); ``"one_by_one"``, the default, leaves every step to the agent.
+
 Kinds of "done when" item and how each is checked:
 
 - ``reach`` (target: a place, named like its node): the playtest bot heads there in a seeded
@@ -41,6 +46,8 @@ KINDS: tuple[str, ...] = ("reach", "no_errors", "test", "check", "look")
 Status = Literal["pass", "fail", "inconclusive"]
 #: ``[agents] todo_go``: when the agent waits for the user's Go.
 GO_MODES = ("multi", "always", "never")
+#: ``[agents] run_steps``: whether independent steps run as parallel tasks.
+RUN_STEPS = ("one_by_one", "together")
 MAX_STEPS = 8
 MAX_DONE_WHEN = 6
 #: The seed every check run plays with, so a result replays exactly.
@@ -89,11 +96,21 @@ class Todo:
     request: str
     steps: list[str]
     done_when: list[Criterion] = field(default_factory=list)
+    #: For each step, the numbers (1-based) of the earlier steps it needs done first. A
+    #: step the agent said nothing about needs the one before it.
+    after: list[list[int]] = field(default_factory=list)
+
+    def needs(self, index: int) -> list[int]:
+        """The step numbers step ``index`` (0-based) needs first."""
+        if index < len(self.after):
+            return list(self.after[index])
+        return [index] if index > 0 else []
 
     def as_dict(self) -> dict[str, Any]:
         return {
             "todo_id": self.id,
             "steps": list(self.steps),
+            "after": [self.needs(i) for i in range(len(self.steps))],
             "done_when": [c.as_dict() for c in self.done_when],
         }
 
@@ -175,7 +192,31 @@ def proposal(params: dict[str, Any], request: str = "") -> Todo:
         request=request.strip()[:4000],
         steps=[_line(step, "step", 200) for step in steps],
         done_when=criteria,
+        after=_after(params.get("after"), len(steps)),
     )
+
+
+def _after(value: Any, count: int) -> list[list[int]]:
+    """``after``: for each step, the earlier step numbers it needs (``[]`` for none).
+    Omitted, each step needs the one before it. Only earlier steps may be named, so the
+    order can never loop."""
+    if value is None:
+        return [[n] if n else [] for n in range(count)]
+    if not isinstance(value, list) or len(value) != count:
+        raise ValueError(
+            "after has one list per step: the earlier step numbers it needs."
+        )
+    after: list[list[int]] = []
+    for number, needs in enumerate(value, 1):
+        if not isinstance(needs, list) or any(
+            not isinstance(n, int) or isinstance(n, bool) or not 1 <= n < number
+            for n in needs
+        ):
+            raise ValueError(
+                f"after[{number - 1}] names earlier step numbers only (1 to {number - 1})."
+            )
+        after.append(sorted(set(needs)))
+    return after
 
 
 def edited(todo: Todo, data: dict[str, Any]) -> Todo:
@@ -198,7 +239,10 @@ def edited(todo: Todo, data: dict[str, Any]) -> Todo:
         text = " ".join(str(item.get("text", "")).split())[:160]
         if text:
             kept.append(replace(by_id[str(item["id"])], text=text))
-    return replace(todo, steps=kept_steps[:MAX_STEPS], done_when=kept)
+    kept_steps = kept_steps[:MAX_STEPS]
+    # Steps removed or added: the numbers no longer line up, so each needs the one before.
+    after = todo.after if len(kept_steps) == len(todo.steps) else []
+    return replace(todo, steps=kept_steps, done_when=kept, after=after)
 
 
 def go_mode(project: Path) -> str:
@@ -210,6 +254,39 @@ def go_mode(project: Path) -> str:
     agents = raw.get("agents", {})
     value = agents.get("todo_go", "multi") if isinstance(agents, dict) else "multi"
     return value if value in GO_MODES else "multi"
+
+
+def run_steps_mode(project: Path) -> str:
+    """``[agents] run_steps``: "one_by_one" (the default) or "together"."""
+    try:
+        raw = tomllib.loads((project / "joinery.toml").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return "one_by_one"
+    agents = raw.get("agents", {})
+    value = agents.get("run_steps", "one_by_one") if isinstance(agents, dict) else ""
+    return value if value in RUN_STEPS else "one_by_one"
+
+
+def independent(todo: Todo) -> list[int]:
+    """The steps (0-based) that need nothing first, so they can start together."""
+    return [i for i in range(len(todo.steps)) if not todo.needs(i)]
+
+
+def runs_together(todo: Todo, mode: str) -> list[int]:
+    """The steps the harness runs as parallel tasks: the independent ones, when the
+    project asks for that and there are two or more; otherwise none."""
+    ready = independent(todo)
+    return ready if mode == "together" and len(ready) >= 2 else []
+
+
+def step_words(numbers: list[int]) -> str:
+    """'step 2', 'steps 1 and 3', 'steps 1, 2 and 4' (1-based numbers)."""
+    if not numbers:
+        return "no steps"
+    if len(numbers) == 1:
+        return f"step {numbers[0]}"
+    head = ", ".join(str(n) for n in numbers[:-1])
+    return f"steps {head} and {numbers[-1]}"
 
 
 def waits_for_go(todo: Todo, mode: str) -> bool:
@@ -232,6 +309,62 @@ def go_prompt(todo: Todo) -> str:
         "Work through the steps now as one change and submit it with submit_for_review. "
         "Joinery checks each done-when item after the change passes its checks; don't "
         "propose the to-do again.\n\n"
+        f"The request was: {todo.request}"
+    )
+
+
+@dataclass
+class StepOutcome:
+    """How one step run as a parallel task came out (``run_steps = "together"``)."""
+
+    number: int
+    text: str
+    #: The task's state: in_review, accepted, discarded, done, failed or stopped.
+    state: str
+    message: str = ""
+    task_id: str = ""
+    seconds: float = 0.0
+    #: When the step's task started (Unix seconds; 0 when unknown).
+    started: float = 0.0
+
+    @property
+    def made(self) -> bool:
+        """The step's change exists (waiting or accepted), or nothing needed changing."""
+        return self.state in {"in_review", "accepted", "done"}
+
+    def line(self) -> str:
+        words = {
+            "in_review": "made, waiting for the user's review",
+            "accepted": "made and accepted",
+            "done": "nothing needed changing",
+            "discarded": "made, but the user discarded it",
+            "failed": "failed",
+            "stopped": "stopped",
+        }.get(self.state, self.state)
+        why = f": {self.message}" if self.message and not self.made else ""
+        return f"- Step {self.number} ({self.text}): {words}{why}"
+
+
+def remaining(todo: Todo, outcomes: list[StepOutcome]) -> list[int]:
+    """The steps (0-based) left for the agent: those no task made."""
+    made = {o.number - 1 for o in outcomes if o.made}
+    return [i for i in range(len(todo.steps)) if i not in made]
+
+
+def steps_prompt(todo: Todo, outcomes: list[StepOutcome]) -> str:
+    """What the agent hears after the independent steps ran as parallel tasks."""
+    ran = step_words([o.number for o in outcomes])
+    left = remaining(todo, outcomes)
+    steps = "\n".join(f"{i + 1}. {todo.steps[i]}" for i in left) or "(none)"
+    done = "\n".join(f"- {c.text}" for c in todo.done_when) or "- (none)"
+    return (
+        f"Joinery ran {ran} of your to-do as parallel tasks, each its own change the "
+        "user reviews on its own:\n"
+        + "\n".join(o.line() for o in outcomes)
+        + "\nDo the steps left now as one change, on top of what was accepted, and "
+        "submit it with submit_for_review. Don't redo a step that was made. If a step "
+        "failed, make it yourself if you can; otherwise tell the user plainly why not.\n"
+        f"Steps left:\n{steps}\nDone when:\n{done}\n\n"
         f"The request was: {todo.request}"
     )
 

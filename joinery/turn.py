@@ -222,6 +222,11 @@ WAITING_FOR_GO = (
     "The user hasn't pressed Go on your to-do yet. End your turn now without changing "
     "anything; Go starts the work as a new request."
 )
+#: The to-do's independent steps run as parallel tasks (``run_steps = "together"``).
+STEPS_RUNNING = (
+    "Joinery runs your to-do's independent steps as parallel tasks. End your turn now "
+    "without changing anything; you hear back when they are done or one fails."
+)
 #: The checks a change passed before the reviewer reads it, in plain words.
 PASSED = (
     "Joinery's checks passed: protected files, missing files, asset provenance, "
@@ -307,6 +312,13 @@ class TurnController:
         self.todo: done_when.Todo | None = None
         #: A to-do proposed and waiting for the user's Go (nothing may change meanwhile).
         self.pending_todo: done_when.Todo | None = None
+        #: Steps the harness runs as parallel tasks once the agent ends this prompt
+        #: (0-based, ``[agents] run_steps = "together"``); nothing may change meanwhile.
+        self.steps_together: list[int] = []
+        #: The steps are running as tasks now: the lead's turn takes no turn of its own.
+        self.stepping = False
+        #: The chat host can run steps as parallel tasks (a task's own turn can't).
+        self.runs_steps = False
         #: Times the done-when checks sent the change back this turn.
         self.check_rounds = 0
         #: Checks the to-do's items against the change (default: done_when.verify).
@@ -346,6 +358,8 @@ class TurnController:
         if waiting is not None and (todo is None or todo.id != waiting.id):
             self.emit({"kind": "todo", "todo_id": waiting.id, "state": "dropped"})
         self.todo = todo
+        self.steps_together = []
+        self.stepping = False
         self.check_rounds = 0
         self._done, self._done_print = [], None
         self.turn_id = uuid.uuid4().hex
@@ -396,6 +410,8 @@ class TurnController:
             raise ValueError("Accept or reject the change on screen first.")
         if self.pending_todo is not None:
             raise ValueError(WAITING_FOR_GO)
+        if self.steps_together or self.stepping:
+            raise ValueError(STEPS_RUNNING)
 
     # --- The to-do -----------------------------------------------------------------------
 
@@ -419,10 +435,18 @@ class TurnController:
         wait = done_when.waits_for_go(
             todo, done_when.go_mode(self.gateway.project)
         ) and not (self._staged() or self.live_edits)
+        together = (
+            []
+            if wait or not self.runs_steps or self._staged() or self.live_edits
+            else done_when.runs_together(
+                todo, done_when.run_steps_mode(self.gateway.project)
+            )
+        )
         if wait:
             self.pending_todo = todo
         else:
             self.todo = todo
+            self.steps_together = together
         self.emit(
             {"kind": "todo", **todo.as_dict(), "state": "waiting" if wait else "going"}
         )
@@ -431,6 +455,13 @@ class TurnController:
                 "status": "waiting_for_go",
                 "todo_id": todo.id,
                 "next": "The user sees your to-do and may edit it. " + WAITING_FOR_GO,
+            }
+        if together:
+            return {
+                "status": "running_steps",
+                "todo_id": todo.id,
+                "steps": [i + 1 for i in together],
+                "next": STEPS_RUNNING,
             }
         return {
             "status": "go",

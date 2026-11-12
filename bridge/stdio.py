@@ -30,6 +30,7 @@ from bridge.protocol import Done, EditorAction, Message, Prompt
 from bridge.reviewer import Debugger, ReviewAgent
 from bridge.sound_pass import SoundPassRun
 from bridge.specialists import Specialists
+from bridge.steps import StepRun
 from bridge.turn_runner import run_turn, settle_compaction
 from bridge.variants import Variants, parse_command
 from joinery import (
@@ -199,6 +200,7 @@ async def _serve(
     active: asyncio.Task[None] | None = None
     specialists: Specialists | None = None
     crew: Crew | None = None
+    step_run: StepRun | None = None
     variants: Variants | None = None
     playtester: Playtester | None = None
     designer: Designer | None = None
@@ -448,6 +450,7 @@ async def _serve(
                 request=request,
                 chat_id=recorder.chat_id,
                 todo=todo,
+                steps=step_run.run if step_run is not None else None,
             )
         except asyncio.CancelledError:
             outcome = "cancelled"
@@ -589,8 +592,14 @@ async def _serve(
             live=live_edit,
             reviewer=reviewer_for,
             debugger=debugger.diagnose,
-            lead_busy=lambda: active is not None and not active.done(),
+            # While the lead's steps run as tasks it takes no turn of its own.
+            lead_busy=lambda: (
+                active is not None and not active.done() and not controller.stepping
+            ),
         )
+        # Steps, then run (ADR 0072): a to-do's independent steps as tasks.
+        step_run = StepRun(crew, task_prompt, emit, gateway.progress)
+        controller.runs_steps = True
 
         async def lead_decide(transaction_id: str, accept: bool) -> dict[str, Any]:
             """The chat's own change as one of a group's ways (Try other ways)."""

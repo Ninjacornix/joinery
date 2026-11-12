@@ -59,6 +59,18 @@ REVIEW_ROUTE = "joinery.review.route"
 REVIEW_ESCALATED = "joinery.review.escalated"
 #: A findings span: who found them, whether the change was dropped, and the rule
 #: ids (``joinery.reasons``), comma-separated, one per item.
+#: A request with a to-do (ADR 0072): how its steps ran ("one_by_one" or "together"),
+#: how many ran as parallel tasks, how many of those failed, and whether the agent got
+#: the request back afterwards. Each step run as a task is a ``step`` span.
+STEPS_MODE = "joinery.steps.mode"
+STEPS_TOGETHER = "joinery.steps.together"
+STEPS_FAILED = "joinery.steps.failed"
+STEPS_BACK = "joinery.steps.back_to_lead"
+STEP_NUMBER = "joinery.step.number"
+STEP_STATE = "joinery.step.state"
+#: A run queued for when the user is away (ADR 0072): what it was and how long it waited.
+IDLE_KIND = "joinery.idle.kind"
+IDLE_WAITED_S = "joinery.idle.waited_s"
 FOUND_BY = "joinery.findings.by"
 FINAL = "joinery.findings.final"
 RULES = "joinery.findings.rules"
@@ -72,6 +84,7 @@ CHECKS = "checks"
 REVIEWER = "reviewer"
 REVIEW_RENDER = "review_render"
 SEND_BACK = "send_back"
+STEP = "step"
 PRECHECK = "precheck"
 FINDINGS = "findings"
 DECIDED = "decision"
@@ -84,6 +97,7 @@ KINDS = (
     REVIEWER,
     REVIEW_RENDER,
     SEND_BACK,
+    STEP,
 )
 
 #: The latency phases' names (joinery.timing) as span kinds.
@@ -409,6 +423,14 @@ def summarise(identifier: str, spans: list[dict[str, Any]]) -> dict[str, Any]:
     for root in roots:
         root_attrs.update(root["attributes"])
     send_backs = sum(int(r["attributes"].get(SEND_BACKS, 0) or 0) for r in roots)
+    steps: dict[str, Any] | None = None
+    if root_attrs.get(STEPS_MODE):
+        steps = {
+            "mode": str(root_attrs[STEPS_MODE]),
+            "together": int(root_attrs.get(STEPS_TOGETHER, 0) or 0),
+            "failed": int(root_attrs.get(STEPS_FAILED, 0) or 0),
+            "back_to_lead": bool(root_attrs.get(STEPS_BACK, False)),
+        }
     return {
         "id": identifier,
         "transaction_id": str(root_attrs.get(TRANSACTION, "")),
@@ -428,6 +450,8 @@ def summarise(identifier: str, spans: list[dict[str, Any]]) -> dict[str, Any]:
         ],
         "review_routes": dict(sorted(routes.items())),
         "escalations": escalations,
+        "steps": steps,
+        "idle": str(root_attrs.get(IDLE_KIND, "")),
         "rounds": {
             "agent_turns": turns,
             "submits": sum(int(r["attributes"].get(SUBMITS, 0) or 0) for r in roots),
@@ -606,6 +630,21 @@ def render(summaries: list[dict[str, Any]]) -> str:
             if change.get("escalations"):
                 parts.append(f"escalated ×{change['escalations']}")
             lines.append("  models: " + ", ".join(parts))
+        steps = change.get("steps")
+        if steps:
+            line = "  steps:  " + steps["mode"].replace("_", " ")
+            if steps["together"]:
+                line += f", {steps['together']} as parallel tasks"
+                if steps["failed"]:
+                    line += f", {steps['failed']} failed"
+                line += (
+                    ", back to the agent after"
+                    if steps["back_to_lead"]
+                    else ", no agent turn after"
+                )
+            lines.append(line)
+        if change.get("idle"):
+            lines.append(f"  ran when idle: {change['idle']}")
         rounds = change["rounds"]
         lines.append(
             f"  rounds: {rounds['agent_turns']} agent turns, {rounds['submits']} submits,"

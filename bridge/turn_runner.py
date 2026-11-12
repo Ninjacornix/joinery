@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
 from collections.abc import Callable, Coroutine
 from pathlib import Path
 from typing import Any, Protocol
@@ -39,6 +40,11 @@ class AgentBridge(Protocol):
 
 
 Emit = Callable[[dict[str, Any]], None]
+#: Runs a to-do's steps (0-based) as parallel tasks and returns how each came out
+#: (bridge.steps.StepRun.run); raises ValueError when they can't run that way.
+Steps = Callable[
+    [done_when.Todo, list[int]], Coroutine[Any, Any, list[done_when.StepOutcome]]
+]
 
 
 #: Each check's failure in plain words; the raw output stays with the agent.
@@ -224,11 +230,14 @@ async def run_turn(
     request: str = "",
     chat_id: str = "",
     todo: done_when.Todo | None = None,
+    steps: Steps | None = None,
 ) -> str:
     """Run one user request; returns its outcome ("done" or "failed").
 
     ``todo`` is the to-do the user pressed Go on (ADR 0060): its done-when items are
-    checked once the change passes Joinery's checks.
+    checked once the change passes Joinery's checks. ``steps`` runs a to-do's
+    independent steps as parallel tasks when the project asks for that (ADR 0072);
+    the agent then hears back once, at the end or when a step fails.
 
     A turn whose change was dropped (it failed its checks, or needs the user
     first) is "failed" even when the provider finished well. The session
@@ -247,7 +256,16 @@ async def run_turn(
     outcome = "failed"
     try:
         outcome = await _run_turn(
-            controller, bridge, prompt, emit, timing, compact, request, chat_id, todo
+            controller,
+            bridge,
+            prompt,
+            emit,
+            timing,
+            compact,
+            request,
+            chat_id,
+            todo,
+            steps,
         )
     except asyncio.CancelledError:
         outcome = "stopped"
@@ -269,6 +287,8 @@ def _save_metrics(controller: TurnController, timing: TurnTiming, outcome: str) 
     trace = timing.trace
     if trace.path is not None:
         return
+    if getattr(controller, "todo", None) is not None:
+        trace.attributes.setdefault(metrics.STEPS_MODE, "one_by_one")
     trace.attributes.update(
         {
             metrics.OUTCOME: outcome,
@@ -291,6 +311,83 @@ def _save_metrics(controller: TurnController, timing: TurnTiming, outcome: str) 
         trace.save(project)
 
 
+async def _together(
+    controller: TurnController,
+    bridge: AgentBridge,
+    prompt: Prompt,
+    emit: Emit,
+    timing: TurnTiming,
+    steps: Steps,
+    todo: done_when.Todo,
+    together: list[int],
+) -> bool:
+    """Run ``together`` as parallel tasks, then hand the agent what is left, once.
+
+    Returns the agent's ``Done.ok``, or True when nothing was left for it."""
+    from bridge.steps import made_note, unchecked
+
+    trace = timing.trace
+    trace.attributes[metrics.STEPS_MODE] = "together"
+    trace.attributes[metrics.STEPS_TOGETHER] = len(together)
+    controller.stepping = True
+    try:
+        outcomes = await steps(todo, together)
+    except ValueError as exc:
+        # Tasks are off: the agent makes every step itself, as before.
+        trace.attributes[metrics.STEPS_MODE] = "one_by_one"
+        trace.attributes[metrics.STEPS_TOGETHER] = 0
+        emit({"kind": "notice", "level": "info", "text": str(exc)})
+        controller.stepping = False
+        lead = prompt.model_copy(
+            update={"text": done_when.go_prompt(todo), "attachments": (), "primer": ""}
+        )
+        return await stream(controller, bridge, lead, emit, timing)
+    finally:
+        controller.stepping = False
+    failed = [o for o in outcomes if not o.made]
+    trace.attributes[metrics.STEPS_FAILED] = len(failed)
+    for outcome in outcomes:
+        start = int(outcome.started * 1e9) if outcome.started else time.time_ns()
+        end = start + int(outcome.seconds * 1e9)
+        trace.add(
+            metrics.STEP,
+            f"step {outcome.number}",
+            start,
+            end,
+            {
+                metrics.STEP_NUMBER: outcome.number,
+                metrics.STEP_STATE: outcome.state,
+                metrics.TASK: outcome.task_id,
+            },
+            failed=not outcome.made,
+        )
+    if not done_when.remaining(todo, outcomes):
+        trace.attributes[metrics.STEPS_BACK] = False
+        if todo.done_when:
+            results = unchecked(todo, len(outcomes))
+            emit(
+                {
+                    "kind": "todo",
+                    "todo_id": todo.id,
+                    "state": "checked",
+                    "results": [r.as_dict() for r in results],
+                    "summary": done_when.counts_line(results),
+                }
+            )
+        emit(Message(text=made_note(outcomes)).model_dump())
+        return True
+    trace.attributes[metrics.STEPS_BACK] = True
+    controller.gateway.progress("Going on with the steps left…")
+    lead = prompt.model_copy(
+        update={
+            "text": done_when.steps_prompt(todo, outcomes),
+            "attachments": (),
+            "primer": "",
+        }
+    )
+    return await stream(controller, bridge, lead, emit, timing, 1)
+
+
 async def _run_turn(
     controller: TurnController,
     bridge: AgentBridge,
@@ -301,6 +398,7 @@ async def _run_turn(
     request: str,
     chat_id: str,
     todo: done_when.Todo | None = None,
+    steps: Steps | None = None,
 ) -> str:
     # The session may be being summarised while the user reviewed; wait for it.
     await settle_compaction(controller)
@@ -311,7 +409,33 @@ async def _run_turn(
     controller.selection = prompt.selection.model_dump()
     controller.begin(request or prompt.text, todo)
     controller.gateway.progress("Thinking through your request…")
-    ok = await stream(controller, bridge, prompt, emit, timing)
+    project = getattr(controller.gateway, "project", None)
+    together = (
+        done_when.runs_together(todo, done_when.run_steps_mode(project))
+        if todo is not None and steps is not None and project is not None
+        else []
+    )
+    if together:
+        # Go on a to-do whose steps run together: the steps first, then the agent.
+        assert todo is not None and steps is not None
+        ok = await _together(
+            controller, bridge, prompt, emit, timing, steps, todo, together
+        )
+    else:
+        ok = await stream(controller, bridge, prompt, emit, timing)
+        if controller.steps_together and controller.todo is not None and steps:
+            # The agent's to-do ran on without Go: its steps run now, as tasks.
+            together, controller.steps_together = controller.steps_together, []
+            ok = await _together(
+                controller,
+                bridge,
+                prompt,
+                emit,
+                timing,
+                steps,
+                controller.todo,
+                together,
+            )
     asked = 0
     while True:
         result = await controller.end(ok, last=asked >= MAX_CONTINUATIONS)

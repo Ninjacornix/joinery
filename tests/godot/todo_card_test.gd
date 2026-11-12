@@ -143,6 +143,10 @@ func _run() -> void:
 	_check(card.find_children("Words", "LineEdit", true, false).is_empty(), "Read-only now")
 	_check(not (card.get("go") as Button).is_visible_in_tree(), "No Go while working")
 	_check(card.call("step_text") == "Working through the steps…", card.call("step_text"))
+	# Steps that need nothing first run at once as tasks (run_steps = "together").
+	backend.call("_handle", {"kind": "todo", "todo_id": "t1", "state": "steps", "together": [1, 3]})
+	_check(card.call("step_text") == "Making steps 1 and 3 at once…", card.call("step_text"))
+	_check(card.call("working"), "Still working while the steps run")
 	backend.call("_handle", {"kind": "todo", "todo_id": "t1", "state": "checking"})
 	_check(card.call("step_text") == "Checking what done means…", "It says it is checking")
 	(

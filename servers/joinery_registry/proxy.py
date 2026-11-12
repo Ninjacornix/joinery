@@ -236,8 +236,9 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
     async def propose_todo(
         steps: Annotated[list[str], Field(min_length=1, max_length=8)],
         done_when: Annotated[list[DoneWhenArgument], Field(max_length=6)] | None = None,
+        after: Annotated[list[list[int]], Field(max_length=8)] | None = None,
     ) -> dict[str, Any]:
-        """For a request that takes several steps, before changing anything: show the user your to-do. steps: 1 to 8 short lines in the user's words. done_when: up to 6 items that say when the request is done, each checked by Joinery after your change passes its checks, with its result shown in the review; a failed item comes back to you once to fix. Each item is {text, kind, target?, seconds?}: kind 'reach' (target: a place named like its node, 'key room'; the playtest bot must get there), 'no_errors' (seconds of play with no crash or script error, default 60), 'test' (target: the res:// GUT test you write in the change, e.g. that the door opens when the lever is pulled), 'check' (target: tests, godot_import, art_bible, references, provenance or dependencies), or 'look' (only the user can judge). status 'waiting_for_go': end your turn now without changing anything; the user's Go starts the work. status 'go': carry on. Skip it for small, one-step requests."""
+        """For a request that takes several steps, before changing anything: show the user your to-do. steps: 1 to 8 short lines in the user's words. done_when: up to 6 items that say when the request is done, each checked by Joinery after your change passes its checks, with its result shown in the review; a failed item comes back to you once to fix. Each item is {text, kind, target?, seconds?}: kind 'reach' (target: a place named like its node, 'key room'; the playtest bot must get there), 'no_errors' (seconds of play with no crash or script error, default 60), 'test' (target: the res:// GUT test you write in the change, e.g. that the door opens when the lever is pulled), 'check' (target: tests, godot_import, art_bible, references, provenance or dependencies), or 'look' (only the user can judge). after: optional, one list per step of the earlier step numbers it needs done first ([] for a step that needs nothing, such as a second separate model); omitted, each step needs the one before. status 'waiting_for_go': end your turn now without changing anything; the user's Go starts the work. status 'running_steps': Joinery runs the independent steps as parallel tasks; end your turn now, you hear back when they are done. status 'go': carry on. Skip it for small, one-step requests."""
         return await rpc(
             socket,
             "propose_todo",
@@ -246,6 +247,7 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
                 "done_when": [
                     item.model_dump(exclude_none=True) for item in done_when or []
                 ],
+                **({"after": after} if after is not None else {}),
             },
         )
 

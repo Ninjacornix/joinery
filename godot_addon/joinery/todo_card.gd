@@ -21,6 +21,7 @@ const INDICATOR := preload("activity_indicator.gd")
 const WORDS := {
 	"waiting": "Edit anything, then press Go.",
 	"going": "Working through the steps…",
+	"steps": "Making the steps that need nothing first at once…",
 	"checking": "Checking what done means…",
 	"fixing": "Fixing what didn't pass…",
 	"cancelled": "Cancelled",
@@ -167,10 +168,12 @@ func apply(event: Dictionary) -> void:
 		"cancelled", "dropped":
 			_settle("stopped", str(WORDS[state]))
 		_:
-			_dots.visible = state in ["going", "checking", "fixing"]
+			_dots.visible = state in ["going", "steps", "checking", "fixing"]
 			_dots.set("running", _dots.visible)
 			_status.hide()
 			_step.text = str(WORDS.get(state, ""))
+			if state == "steps" and event.get("together") is Array:
+				_step.text = "Making %s at once…" % _step_list(event["together"] as Array)
 			close.visible = false
 	_footer.visible = state == "waiting"
 	if state == "waiting":
@@ -180,7 +183,19 @@ func apply(event: Dictionary) -> void:
 
 ## Still waiting for Go, or working.
 func working() -> bool:
-	return state in ["waiting", "going", "checking", "fixing"]
+	return state in ["waiting", "going", "steps", "checking", "fixing"]
+
+
+## "step 2", "steps 1 and 3", "steps 1, 2 and 4".
+static func _step_list(numbers: Array) -> String:
+	var words := PackedStringArray()
+	for number: Variant in numbers:
+		words.append(str(int(number)))
+	if words.size() == 1:
+		return "step " + words[0]
+	var last := words[words.size() - 1]
+	words.resize(words.size() - 1)
+	return "steps %s and %s" % [", ".join(words), last]
 
 
 func step_text() -> String:
