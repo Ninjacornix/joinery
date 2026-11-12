@@ -48,6 +48,7 @@ class PolicyPanel:
 	func show_custom(policy: Dictionary) -> void:
 		custom.show()
 		text.text = ""
+		text.hide()
 		apply.text = "Apply"
 		apply.accessibility_name = "Apply these numbers"
 		(keep.control as LineEdit).text = str(int(policy.get("keep", 50)))
@@ -59,6 +60,7 @@ class PolicyPanel:
 	func show_check(message: String) -> void:
 		custom.hide()
 		text.text = message
+		text.show()
 		apply.text = "Keep fewer"
 		apply.accessibility_name = "Keep fewer older versions"
 
@@ -108,13 +110,16 @@ static func panel(with_buttons := true) -> PolicyPanel:
 				result.keep.set_error("")
 				result.space.set_error("")
 		)
+	# What a smaller choice removes reads across the whole row, the buttons under it at the
+	# trailing edge: beside them, a narrow sidebar would squeeze it to a word per line.
+	result.text = UI.label("", "JoineryCaption", true)
+	result.text.hide()
+	stack.add_child(result.text)
 	result.buttons = HBoxContainer.new()
 	result.buttons.theme_type_variation = "JoineryRow"
+	result.buttons.alignment = BoxContainer.ALIGNMENT_END
 	result.buttons.visible = with_buttons
 	stack.add_child(result.buttons)
-	result.text = UI.label("", "JoineryCaption", true)
-	result.text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	result.buttons.add_child(result.text)
 	var cancel := UI.secondary("Cancel")
 	cancel.accessibility_name = "Keep the history setting as it is"
 	cancel.size_flags_vertical = Control.SIZE_SHRINK_CENTER

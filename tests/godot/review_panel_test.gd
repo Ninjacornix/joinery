@@ -778,6 +778,11 @@ func _check_history_policy() -> void:
 		"The question says what it removes and frees"
 	)
 	_check((panel.get("apply") as Button).text == "Keep fewer", "The action says what it does")
+	var question := (panel.get("text") as Label).get_global_rect()
+	_check(
+		question.end.y <= (panel.get("apply") as Button).get_global_rect().position.y + 0.5,
+		"The question reads across the row, its buttons under it"
+	)
 	_check(page.find_children("*", "ConfirmationDialog", true, false).is_empty(), "No dialog")
 	panel.emit_signal("cancelled")
 	_check(not panel.visible and page._history_job == null, "Cancel changes nothing")
