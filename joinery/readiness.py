@@ -272,7 +272,12 @@ def sandbox_revision(root: Path | None = None) -> str:
 def mark_setup(phase: str, image: str = "") -> None:
     """Record that setup is building `image` now, so readiness says preparing."""
     path = cache_dir() / "setup.json"
-    record = {"phase": phase, "image": image, "started": time.time(), "pid": os.getpid()}
+    record = {
+        "phase": phase,
+        "image": image,
+        "started": time.time(),
+        "pid": os.getpid(),
+    }
     with contextlib.suppress(OSError):
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(f".{os.getpid()}.tmp")
@@ -487,6 +492,8 @@ class Outcome:
     install: bool = False
     #: The detail is the check's own user-facing wording, not raw output.
     explicit: bool = False
+    #: The image exists but was built from older sources (an update changed them).
+    stale: bool = False
 
 
 @dataclass
@@ -610,7 +617,7 @@ def _image_gate(ctx: _Context, image: str) -> Outcome | None:
         return Outcome("needs_image", f"{image} is not built")
     expected = ctx.host.expected_revision()
     if expected and found.revision and found.revision != expected:
-        return Outcome("needs_image", f"{image} is out of date")
+        return Outcome("needs_image", f"{image} is out of date", stale=True)
     return None
 
 
@@ -751,6 +758,9 @@ def _worst(outcomes: Iterable[Outcome]) -> Outcome:
     return worst
 
 
+_STALE = "its offline worker is out of date after an update. Rebuild the worker."
+
+
 def _feature_text(feature: Feature, outcome: Outcome, name: str) -> str:
     if outcome.state == "ready":
         return feature.label
@@ -759,6 +769,8 @@ def _feature_text(feature: Feature, outcome: Outcome, name: str) -> str:
     if outcome.state == "downloading":
         return f"{feature.label}: setting up the offline worker…"
     if outcome.state == "needs_image":
+        if outcome.stale:
+            return f"{feature.label}: {_STALE}"
         text = (feature.needs_install if outcome.install else "") or feature.needs_image
         return text or f"{feature.label} unavailable: run Joinery setup."
     prefix = feature.broken or f"{feature.label} failed"
@@ -777,6 +789,9 @@ def _tool_text(module: ToolModule, outcome: Outcome) -> str:
     if outcome.state == "downloading":
         return f"{name}: setting up the offline worker…"
     if outcome.state == "needs_image":
+        # The image is there but older than Joinery's sources: say so, not "missing".
+        if outcome.stale:
+            return f"{name}: {_STALE}"
         # A check that names what is missing says it better than the default.
         if outcome.explicit:
             return outcome.detail
@@ -956,7 +971,9 @@ def _scope(
             raise ValueError(f"Unknown tool {tool!r}.")
         ids = [tool]
         custom = []
-    return _Scope([i for i in ids if i in tool_modules.REGISTRY], selected, notices, custom)
+    return _Scope(
+        [i for i in ids if i in tool_modules.REGISTRY], selected, notices, custom
+    )
 
 
 def status(
@@ -1017,7 +1034,9 @@ def load_snapshot() -> dict[str, Any]:
     return data
 
 
-def _save_snapshot(entries: Sequence[Mapping[str, Any]], docker: str, now: float) -> None:
+def _save_snapshot(
+    entries: Sequence[Mapping[str, Any]], docker: str, now: float
+) -> None:
     if not entries:
         return
     snapshot = load_snapshot() or {"tools": {}}

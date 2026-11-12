@@ -184,7 +184,9 @@ def test_every_catalog_tool_is_ready_in_healthy_workers(host: FakeHost) -> None:
         "loudness, loops)."
     )
     surge = features(tools["surge-xt"])
-    assert surge["music"]["status"] == "ready" and surge["audio-edit"]["status"] == "ready"
+    assert (
+        surge["music"]["status"] == "ready" and surge["audio-edit"]["status"] == "ready"
+    )
     assert all(entry["status"] == "ready" for entry in tools.values())
     assert all(entry["action"] is None for entry in tools.values())
     assert all(entry["status_reason"] == "" for entry in tools.values())
@@ -201,7 +203,10 @@ def test_docker_down_is_needs_docker_and_runs_nothing(host: FakeHost) -> None:
     for tool_id in ("blender", "krita", "gimp", "surge-xt", "godot"):
         assert tools[tool_id]["state"] == "needs_docker"
         assert tools[tool_id]["status"] == "needs_docker"
-        assert tools[tool_id]["action"] == {"id": "start_docker", "label": "Start Docker"}
+        assert tools[tool_id]["action"] == {
+            "id": "start_docker",
+            "label": "Start Docker",
+        }
     assert tools["krita"]["summary"] == (
         "Krita runs offline in Docker. Start Docker Desktop, then check again."
     )
@@ -298,7 +303,9 @@ def test_missing_pinned_install_needs_setup(host: FakeHost) -> None:
     host.missing_installs["blender"] = "not installed"
     tools = by_id(status(catalog=True, refresh=True, host=host))
     assert tools["godot"]["state"] == "needs_image"
-    assert tools["godot"]["summary"] == "Godot tools: not installed. Rebuild the worker."
+    assert (
+        tools["godot"]["summary"] == "Godot tools: not installed. Rebuild the worker."
+    )
     mcp = features(tools["blender"])["mcp"]
     assert mcp["state"] == "needs_image"
     assert mcp["detail"].startswith("Blender MCP not installed. Rebuild the worker.")
@@ -320,9 +327,13 @@ def test_setup_in_progress_is_downloading(host: FakeHost) -> None:
 def test_stale_image_revision_needs_setup(host: FakeHost) -> None:
     host.revision = "rev-2"
     host.images[CREATIVE_WORKER] = Image("sha256:old", revision="rev-1")
-    assert by_id(status(tool="krita", refresh=True, host=host))["krita"]["state"] == (
-        "needs_image"
+    krita = by_id(status(tool="krita", refresh=True, host=host))["krita"]
+    assert krita["state"] == "needs_image"
+    # The image is there, only older: say "out of date", never "isn't built" or "missing".
+    assert krita["summary"] == (
+        "Krita: its offline worker is out of date after an update. Rebuild the worker."
     )
+    assert krita["action"] == {"id": "rebuild", "label": "Rebuild"}
 
 
 def test_cache_miss_reports_checking_without_running_a_worker(host: FakeHost) -> None:
@@ -701,7 +712,9 @@ def test_sandbox_revision_follows_the_build_sources(tmp_path: Path) -> None:
     assert len(first) == 16
     (sources / "mcp.Dockerfile").write_text("FROM base\nRUN true\n")
     assert readiness.sandbox_revision(sources) != first
-    assert readiness.sandbox_revision() == readiness.sandbox_revision(readiness.SANDBOX_DIR)
+    assert readiness.sandbox_revision() == readiness.sandbox_revision(
+        readiness.SANDBOX_DIR
+    )
 
 
 def test_setup_marks_progress_labels_images_and_refreshes(
@@ -768,7 +781,10 @@ def test_mcp_probes_come_from_the_tool_modules() -> None:
     assert readiness.mcp_probes("joinery-materialmaker")
     (krita,) = only_krita
     missing = json.dumps(
-        {"runtime_available": True, "tools": [{"id": "krita", "application_installed": False}]}
+        {
+            "runtime_available": True,
+            "tools": [{"id": "krita", "application_installed": False}],
+        }
     )
     assert readiness.judge_probe(krita, True, missing)[0] == "needs_image"
     assert readiness.judge_probe(krita, False, "boom")[0] == "broken"
