@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from joinery.catalog import blocked_tools, load_catalog
+from joinery.catalog import blocked_tools, generative_tools, load_catalog
 from joinery.hook import mcp_violation
-from joinery.mcp_runtime import MCPConnection, ServerSpec
+from joinery.mcp_runtime import MCPConnection, PolicyStop, ServerSpec
 from joinery.policy import Severity
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,14 +51,17 @@ def project(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def test_catalog_blocks_every_transcription_tool() -> None:
-    assert set(TRANSCRIPTION_TOOLS) <= set(blocked_tools(load_catalog(), "audacity"))
+def test_catalog_marks_every_transcription_tool_generative() -> None:
+    catalog = load_catalog()
+    assert set(TRANSCRIPTION_TOOLS) <= set(generative_tools(catalog, "audacity"))
+    assert not set(TRANSCRIPTION_TOOLS) & set(blocked_tools(catalog, "audacity"))
 
 
 @pytest.mark.parametrize("tool", TRANSCRIPTION_TOOLS)
-def test_transcription_is_denied_for_every_agent(project: Path, tool: str) -> None:
+def test_transcription_stops_the_turn(project: Path, tool: str) -> None:
     verdict = mcp_violation("audacity", tool, project)
-    assert verdict is not None and verdict.severity is Severity.DENY
+    assert verdict is not None and verdict.severity is Severity.STOP
+    assert "Rule Zero" in verdict.reason
 
 
 def test_editing_tools_stay_usable(project: Path) -> None:
@@ -74,7 +77,7 @@ def test_gateway_refuses_transcription_before_starting_the_worker(
     async def call() -> None:
         await connection.call("transcribe_audio", {})
 
-    with pytest.raises(PermissionError, match="transcribe_audio"):
+    with pytest.raises(PolicyStop, match="transcribe_audio"):
         asyncio.run(call())
     assert connection._task is None
 

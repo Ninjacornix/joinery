@@ -29,7 +29,12 @@ from joinery import parts as part_targets
 from joinery import tools as tool_modules
 from joinery.art_approval import approved, review
 from joinery.authoring import run_offline
-from joinery.catalog import blocked_tools, load_catalog, load_project_tools
+from joinery.catalog import (
+    blocked_tools,
+    generative_tools,
+    load_catalog,
+    load_project_tools,
+)
 from joinery.claims import (
     FEATURES,
     MAIN,
@@ -192,7 +197,8 @@ def _upstream_presentation(server: str) -> tuple[frozenset[str], dict[str, str]]
             and entry.id in tool_modules.REGISTRY
         ):
             notes.update(tool_modules.get(entry.id).mcp_notes)
-    return frozenset(blocked_tools(catalog, server)), notes
+    hidden = blocked_tools(catalog, server) + generative_tools(catalog, server)
+    return frozenset(hidden), notes
 
 
 def _with_note(tool: dict[str, Any], note: str) -> dict[str, Any]:

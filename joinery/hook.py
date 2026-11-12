@@ -38,6 +38,7 @@ from joinery.catalog import (
     allowed_servers,
     blocked_operation,
     blocked_tools,
+    generative_tools,
     load_catalog,
 )
 from joinery.policy import (
@@ -180,6 +181,11 @@ def mcp_violation(
             return Verdict(Severity.STOP, f"{server} is a generative asset service")
         return Verdict(
             Severity.DENY, f"MCP server {server!r} is not enabled for this project"
+        )
+    if tool in generative_tools(catalog, server):
+        return Verdict(
+            Severity.STOP,
+            f"{tool} on {server} runs a generative model (Rule Zero)",
         )
     if tool in blocked_tools(catalog, server):
         return Verdict(

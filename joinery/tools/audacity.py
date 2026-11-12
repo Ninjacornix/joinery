@@ -13,7 +13,8 @@ reason, refused for file, preference, playback and Nyquist commands, and
 listed in the replay report as raw.
 
 The pinned upstream Audacity MCP runs in the same worker for inspection only;
-its transcription tools are blocked by policy and no speech model is installed.
+a call to its transcription tools stops the turn (Rule Zero), and no speech
+model is installed.
 """
 
 from __future__ import annotations

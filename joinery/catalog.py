@@ -47,6 +47,10 @@ class McpSource(_Strict):
     last_push: date
     licence: str
     blocked_tools: tuple[str, ...] = ()
+    #: Tools that run a generative or learned model (speech-to-text, for one).
+    #: A call to one is a Rule Zero violation and stops the turn, where a
+    #: blocked tool is only denied for that call.
+    generative_tools: tuple[str, ...] = ()
     #: "tool:operation" pairs refused when a call's `operation` argument names
     #: them, for multi-operation tools that are only partly usable offline.
     blocked_operations: tuple[str, ...] = ()
@@ -115,7 +119,9 @@ class Catalog(_Strict):
         banned = {_repo_key(r.repo): r.reason for r in self.rejected}
         for tool in self.tool:
             if tool.builtin_server and tool.builtin_server not in self.builtin_servers:
-                raise ValueError(f"{tool.id}: first-party server is not in the builtin allowlist")
+                raise ValueError(
+                    f"{tool.id}: first-party server is not in the builtin allowlist"
+                )
             if tool.mcp is None:
                 continue
             reason = banned.get(_repo_key(tool.mcp.repo))
@@ -270,6 +276,13 @@ def blocked_tools(catalog: Catalog, server: str) -> tuple[str, ...]:
     for tool in catalog.tool:
         if tool.mcp is not None and tool.mcp.server == server:
             return tool.mcp.blocked_tools
+    return ()
+
+
+def generative_tools(catalog: Catalog, server: str) -> tuple[str, ...]:
+    for tool in catalog.tool:
+        if tool.mcp is not None and tool.mcp.server == server:
+            return tool.mcp.generative_tools
     return ()
 
 

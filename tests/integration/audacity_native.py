@@ -31,7 +31,7 @@ from pathlib import Path
 from joinery.authoring import IMAGE, edit_document, inspect_document
 from joinery.hook import mcp_violation
 from joinery.lockfile import HumanImport, record_imports
-from joinery.mcp_runtime import MCPConnection
+from joinery.mcp_runtime import MCPConnection, PolicyStop
 from joinery.policy import Severity
 from joinery.recipe import rebuild_one, recipe_paths
 from joinery.runner import SandboxRunner
@@ -165,7 +165,7 @@ async def upstream_mcp(stage: Path) -> str:
         assert not info.is_error, info
         try:
             await connection.call("transcribe_audio", {}, timeout=30)
-        except PermissionError:
+        except PolicyStop:
             pass
         else:
             raise AssertionError("transcribe_audio was not refused")
@@ -258,7 +258,7 @@ async def main(stage: Path) -> dict[str, object]:
     project = stage
     for tool in ("transcribe_audio", "transcribe_to_labels", "transcription_set_model"):
         verdict = mcp_violation("audacity", tool, project)
-        assert verdict is not None and verdict.severity is Severity.DENY, tool
+        assert verdict is not None and verdict.severity is Severity.STOP, tool
     mcp = await upstream_mcp(stage)
     return {
         "lead_in_rms": [

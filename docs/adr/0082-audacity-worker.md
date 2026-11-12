@@ -80,8 +80,10 @@ Finding why it stalled took three causes, each confirmed in the worker:
    manifest also names faster-whisper, a speech model: Joinery never installs
    it, the build fails if faster-whisper, whisper, ctranslate2, onnxruntime,
    torch, transformers, huggingface_hub or tokenizers can be imported, and its
-   seven transcription tools are `blocked_tools` in the catalog, refused for
-   every agent by the shared hook and by the gateway before a worker starts.
+   seven transcription tools are `generative_tools` in the catalog. They are
+   hidden from discovery, and a call to one is a Rule Zero violation that
+   stops the turn for every agent, in the shared hook and in the gateway
+   before a worker starts.
    Its own writes have no recipe, so review refuses them; agents are told to
    keep edits with `operate_document`.
 

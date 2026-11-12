@@ -144,8 +144,9 @@ stars = 133
 last_push = 2026-10-31
 licence = "Apache-2.0"
 # Speech-to-text runs a downloaded model (faster-whisper), which Rule Zero
-# keeps out: the worker never installs it and these tools are refused.
-blocked_tools = [
+# keeps out: the worker never installs it, and a call to one of these tools
+# stops the turn so the user is told.
+generative_tools = [
   "transcribe_audio",
   "transcribe_selection",
   "transcribe_to_file",
@@ -154,7 +155,7 @@ blocked_tools = [
   "check_transcription_status",
   "get_default_transcription_folder",
 ]
-notes = "Audacity 3.7.3 in its own offline worker (docs/adr/0082-audacity-worker.md). Kept edits go through joinery-sound operate_document, whose typed steps are recorded and replayed exactly. This MCP is for inspection; its transcription tools need a speech model and are blocked."
+notes = "Audacity 3.7.3 in its own offline worker (docs/adr/0082-audacity-worker.md). Kept edits go through joinery-sound operate_document, whose typed steps are recorded and replayed exactly. This MCP is for inspection; its transcription tools need a speech model, and calling one stops the turn (Rule Zero)."
 
 [[tool]]
 id = "material-maker"
