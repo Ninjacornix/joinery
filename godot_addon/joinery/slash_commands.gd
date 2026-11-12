@@ -44,6 +44,8 @@ signal design_requested
 signal variants_requested(words: String)
 ## "/sound-pass [focus]": make the sounds the level lacks; [param focus] is the words after it.
 signal sound_pass_requested(focus: String)
+## A bare "/variant": a variant of the scene open in the editor (sidebar_scene_variant.gd).
+signal scene_variant_requested
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 const REPLAY_RECORD := preload("replay_record.gd")
@@ -56,6 +58,7 @@ const COMMANDS := {
 	"/art": ["Review the art direction", "ui"],
 	"/brief": ["Read the game brief", "ui"],
 	"/blockout": ["Build a level from a sketch", "prompt"],
+	"/variant": ["Make a variant of this scene", "prompt"],
 	"/feature": ["Add or remove a game feature", "cli"],
 	"/playtest": ["Play the game and report bugs", "ui"],
 	"/match": ["Match the art bible", "ui"],
@@ -146,7 +149,8 @@ func run(entry: String) -> bool:
 	var command := resolve(entry)
 	if command.is_empty():
 		return false
-	if COMMANDS[command][1] in ["ui", "debug"]:
+	# A bare "/variant" runs here (sidebar_scene_variant.gd); with words it is a request.
+	if COMMANDS[command][1] in ["ui", "debug"] or command == "/variant":
 		if command == "/debug":
 			debug_requested.emit(" ".join(arguments(entry)))
 		elif command == "/playtest":
@@ -161,6 +165,8 @@ func run(entry: String) -> bool:
 			design_requested.emit()
 		elif command == "/variants":
 			variants_requested.emit(" ".join(arguments(entry)))
+		elif command == "/variant":
+			scene_variant_requested.emit()
 		elif command == "/sound-pass":
 			sound_pass_requested.emit(" ".join(arguments(entry)))
 		elif command == "/record":
@@ -628,7 +634,11 @@ static func _first_error(output: String) -> String:
 ## while Journeyman is busy with a request.
 ## True for a command sent to Journeyman as a message with its words and attachments:
 ## "/blockout [words]" builds a level from the attached sketch (ADR 0043).
+## True when [param entry] is a request in words for the agent ("/blockout …",
+## "/variant <what differs>"); a bare "/variant" runs here instead.
 static func is_prompt(entry: String) -> bool:
+	if entry.strip_edges().to_lower() == "/variant":
+		return false
 	var found: Array = COMMANDS.get(entry.strip_edges().split(" ")[0].to_lower(), [])
 	return found.size() > 1 and found[1] == "prompt"
 

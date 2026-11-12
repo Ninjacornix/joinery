@@ -384,6 +384,7 @@ func _glance_reviews(
 	dock.hide_edit_review()
 	await _frames()
 	await _review.blockout(self, dock, panel)
+	await _review.variant(self, dock, panel)
 	await _clip_review(dock, panel, cache)
 
 

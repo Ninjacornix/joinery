@@ -14,6 +14,8 @@ extends VBoxContainer
 ## - Sounds: one compact audio_preview with its waveform, so Before and After play A/B at the
 ##   same position.
 ## - Text: only the changed lines (review_diff.gd).
+## - A scene variant (ADR 0066): its base and the variant as one split picture, with only
+##   what it overrides listed under it (review_overrides.gd, which draws the pictures).
 ## - A blockout (ADR 0043): the user's sketch (the item's `reference`) beside the plan of the
 ##   level built from it.
 ## - Animations: the original and the change as two looping clips side by side
@@ -59,6 +61,7 @@ const View := preload("review_view.gd")
 const AUDIO_STAGE := preload("review_audio_stage.gd")
 const ITEMS := preload("review_items.gd")
 const OVERLAY := preload("review_overlay.gd")
+const OVERRIDES := preload("review_overrides.gd")
 ## Seconds to wait for a preview file before giving up.
 const LOAD_TIMEOUT := 120.0
 ## Seconds between checks for a preview file that is still being written.
@@ -95,6 +98,7 @@ var _sides: SIDES
 var _model: MODEL_VIEW
 var _transport: TRANSPORT
 var _overlay: OVERLAY
+var _overrides: OVERRIDES
 ## Which item the live models were loaded for.
 var _live_key := ""
 ## True once the user picked a side for the item on show.
@@ -180,6 +184,9 @@ func _init() -> void:
 	_failure.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_failure.hide()
 	_column.add_child(_failure)
+	_overrides = OVERRIDES.new()
+	_overrides.pictures_failed.connect(func() -> void: _show_current(false))
+	_column.add_child(_overrides)
 
 
 func _notification(what: int) -> void:
@@ -261,6 +268,7 @@ func show_media(media: Array) -> void:
 	side = "compare" if swipes(_items[0]) else "after"
 	_files.visible = _items.size() > 1
 	_files.show_items(_row_specs(depths))
+	_overrides.draw_pictures(_items)
 	_show_current(false)
 
 
@@ -277,6 +285,7 @@ func update_media(media: Array) -> void:
 			var shown: Dictionary = _items[index]
 			if shown.get("path") == item.get("path") and shown.get("part") == item.get("part"):
 				_items[index] = (item as Dictionary).duplicate()
+	_overrides.draw_pictures(_items)
 	_show_current(false)
 	_refresh_tiles()
 
@@ -303,6 +312,7 @@ func clear_media() -> void:
 	_clip.stop()
 	_diff.hide()
 	_failure.hide()
+	_overrides.forget()
 	_files.hide()
 	_set_reserve(0.0)
 
@@ -638,6 +648,7 @@ func _show_item(swap: bool) -> void:
 	var path := str(item.get("path", ""))
 	tooltip_text = "res://" + path if kind_of(item) != "text" else ""
 	_failure.hide()
+	_overrides.show_variant(item.get("variant", {}))
 	if kind_of(item) == "text":
 		_stop_waiting()
 		_hide_stage()

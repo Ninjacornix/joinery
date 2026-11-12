@@ -147,6 +147,7 @@ EDITOR_SCREENS = (
     "review-scene",
     "review-files",
     "review-blockout",
+    "review-variant",
     "review-clip",
     "timeline-list",
     "timeline-entry",

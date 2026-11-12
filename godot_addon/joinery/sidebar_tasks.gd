@@ -32,6 +32,7 @@ const MATCH := preload("sidebar_match.gd")
 const SOUND_PASS := preload("sidebar_sound_pass.gd")
 const PLAYTEST_CARD := preload("playtest_card.gd")
 const VARIANTS := preload("sidebar_variants.gd")
+const SCENE_VARIANT := preload("sidebar_scene_variant.gd")
 const UI_MOTION := preload("ui_motion.gd")
 ## Seconds a finished task's card stays before it steps out.
 const LINGER := 4.0
@@ -96,6 +97,8 @@ static func attach(sidebar: Control, content: Control, before: Control) -> VBoxC
 	# "/design": the game against its own brief.
 	DESIGN.attach(sidebar, tasks)
 	tasks.variants = VARIANTS.attach(sidebar, tasks)
+	# A bare "/variant": an inherited scene of the scene open in the editor.
+	SCENE_VARIANT.attach(sidebar, tasks)
 	# "/sound-pass": the sounds the level lacks.
 	SOUND_PASS.attach(sidebar, tasks)
 	# A request's to-do: its steps, Go, and what "done" means, checked.
