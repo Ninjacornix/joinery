@@ -300,3 +300,6 @@ func _fit() -> void:
 		columns = 2
 	if _grid.columns != columns:
 		_grid.columns = columns
+	var wrapped := columns < _order.size()
+	for each: Control in ways():
+		each.set("aspect", WAY.ASPECT_WRAPPED if wrapped else WAY.ASPECT)

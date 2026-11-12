@@ -20,6 +20,9 @@ const ROW := preload("sidebar_review_row.gd")
 const GLANCE := preload("review_glance.gd")
 ## Width : height of the picture.
 const ASPECT := 0.75
+## The same when the ways wrap onto two rows (a narrow sidebar): wider pictures, so both rows
+## stay inside the panel.
+const ASPECT_WRAPPED := 0.5
 ## The picture's tallest, in large control heights: a glance, not a full review.
 const PICTURE_MAX := 4.0
 ## Lines of text a text change shows on its tile.
@@ -43,6 +46,12 @@ var state := "queued"
 var chosen := false
 ## The picture's tallest, in large control heights (smaller above a full review).
 var picture_max := PICTURE_MAX
+## Width : height of the picture ([constant ASPECT], or [constant ASPECT_WRAPPED]).
+var aspect := ASPECT:
+	set(value):
+		if not is_equal_approx(aspect, value):
+			aspect = value
+			_fit()
 ## False hides the facts line (a dense strip; the way's review shows them).
 var facts_shown := true:
 	set(value):
@@ -309,7 +318,7 @@ func _fit() -> void:
 			_frame.custom_minimum_size = Vector2(side, side)
 		return
 	var tallest := float(UI_THEME.control_h(self, "lg")) * picture_max if is_inside_tree() else INF
-	var height := ceilf(minf(size.x * ASPECT, tallest))
+	var height := ceilf(minf(size.x * aspect, tallest))
 	if absf(_frame.custom_minimum_size.y - height) >= 1.0:
 		_frame.custom_minimum_size.y = height
 

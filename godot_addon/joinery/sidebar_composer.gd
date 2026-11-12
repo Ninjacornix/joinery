@@ -83,6 +83,8 @@ var _waiting := ""
 var _dialog: FileDialog
 ## The editor's own handlers of the window's file drops, while the composer takes them first.
 var _editor_drops: Array[Callable] = []
+## The row under the field: attach, view, the model picker, Run alongside, Send/Stop.
+var _controls: HBoxContainer
 
 
 func _init() -> void:
@@ -114,7 +116,9 @@ func _init() -> void:
 	body.add_child(prompt)
 	var controls := HBoxContainer.new()
 	controls.theme_type_variation = "JoineryRowTight"
+	controls.resized.connect(_fit_controls, CONNECT_DEFERRED)
 	body.add_child(controls)
+	_controls = controls
 	attach = UI.icon_button(
 		"attach", "Attach images (PNG, JPEG or WebP). You can also paste or drop them here."
 	)
@@ -381,9 +385,32 @@ func _sync_send() -> void:
 			UI_MOTION.enter(alongside_button)
 		else:
 			alongside_button.hide()
+		_fit_controls()
 	send.disabled = _locked or _connection != "connected" or prompt.text.strip_edges().is_empty()
 	options.disabled = _busy or _connection != "connected"
 	options.focus_mode = Control.FOCUS_NONE if options.disabled else Control.FOCUS_ALL
+
+
+## In a narrow sidebar Run alongside takes the model picker's place while it is offered; the
+## picker is disabled while Journeyman works, and it comes back with the room or the offer's
+## end. Strictly less than the row's width: a row that pushed the composer wider measures
+## exactly its own width, so it gives the picker up rather than keeping the overflow.
+func _fit_controls() -> void:
+	if _controls == null:
+		return
+	var keep := true
+	if alongside_button.visible and _controls.size.x > 0.0:
+		var need := 0.0
+		var count := 0
+		for child: Node in _controls.get_children():
+			var part := child as Control
+			if part != null and (part.visible or part == options):
+				need += part.get_combined_minimum_size().x
+				count += 1
+		need += float(_controls.get_theme_constant("separation")) * maxf(0.0, count - 1.0)
+		keep = need + 0.5 < _controls.size.x
+	if options.visible != keep:
+		options.visible = keep
 
 
 func _set_focus(on: bool) -> void:
