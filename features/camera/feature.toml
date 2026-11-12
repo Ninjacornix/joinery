@@ -1,0 +1,24 @@
+# Camera rigs, in our own GDScript (MIT, see GUIDE.md):
+#
+# - `CameraRig2D` (a Camera2D) and `CameraRig3D` (a Camera3D): follow a target
+#   with a dead zone and smoothing, look ahead of where it is going, frame a
+#   group of targets (zoom out in 2D, pull back in 3D), and shake.
+# - `Cameras` autoload: `Cameras.shake(strength)` shakes every rig. Shake is
+#   scaled by the Screen shake setting and is off with reduced motion, the same
+#   settings the Accessibility page shows.
+#
+# The blueprints keep their own cameras; a rig replaces one when the user asks.
+# Phantom Camera (MIT, an addon) is a larger alternative; Joinery does not ship
+# or install it.
+id = "camera"
+name = "Camera rig"
+summary = "Cameras that follow with a dead zone and smoothing, look ahead, frame groups and shake within the player's screen shake setting, in 2D and 3D."
+version = 1
+requires = []
+conflicts = []
+enhances = ["accessibility"]
+blueprints = ["*"]
+extra_roots = []
+
+[autoload]
+Cameras = "res://features/camera/cameras.gd"
