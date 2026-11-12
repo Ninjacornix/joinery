@@ -93,6 +93,8 @@ OP_APPS: dict[str, tuple[str, ...]] = {
     "set_pivot": ("blender",),
     "reduce_triangles": ("blender",),
     "set_texel_density": ("blender",),
+    # Several of the Blender operations above on one model, in one Blender run.
+    "blender_batch": ("blender",),
     "edit_image": ("krita",),
     # Parametric kits run Blender. (scatter only writes a scene file.)
     "kit_make": ("blender",),

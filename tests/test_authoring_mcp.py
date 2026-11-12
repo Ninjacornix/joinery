@@ -41,6 +41,7 @@ FAMILIES = {
         "kit_list",
         "kit_make",
         "kit_batch",
+        "blender_batch",
         "kit_edit",
         "scatter",
         # Animations (servers/blender_ops/animation.py).
