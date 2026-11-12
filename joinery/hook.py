@@ -306,26 +306,48 @@ _RULE_ZERO = (
 )
 
 
+# Claude Code validates hook output per event. PreToolUse takes its verdict in
+# hookSpecificOutput.permissionDecision ("allow" | "deny" | "ask"); a top-level
+# `decision` there only accepts the deprecated "approve" | "block", so "deny"
+# fails validation. Stop, SubagentStop, PostToolUse and UserPromptSubmit take a
+# top-level `decision: "block"` with `reason`.
+_CLAUDE_BLOCK_EVENTS = frozenset(
+    {"Stop", "SubagentStop", "PostToolUse", "UserPromptSubmit"}
+)
+
+
+def _deny(event_name: str, message: str) -> dict[str, Any]:
+    return {
+        "hookSpecificOutput": {
+            "hookEventName": event_name,
+            "permissionDecision": "deny",
+            "permissionDecisionReason": message,
+        }
+    }
+
+
 def _stop_payload(verdict: Verdict, event_name: str) -> dict[str, Any]:
     """A decision that halts the turn *and* denies the call.
 
     Both signals go in one payload on purpose. `continue: false` is the stop;
     the deny fields are the floor, so an agent that does not honour `continue`
-    still refuses the call rather than letting it through.
+    still refuses the call rather than letting it through. The deny fields take
+    the shape the firing event documents.
     """
     message = f"Blocked by Joinery policy: {verdict.reason}. {_RULE_ZERO}"
-    return {
+    payload: dict[str, Any] = {
         "continue": False,
         "stopReason": message,
-        "decision": "deny",
-        "reason": message,
         "systemMessage": message,
-        "hookSpecificOutput": {
-            "hookEventName": event_name,
-            "permissionDecision": "deny",
-            "permissionDecisionReason": message,
-        },
     }
+    if event_name == "PreToolUse":
+        payload.update(_deny(event_name, message))
+    elif event_name in _CLAUDE_BLOCK_EVENTS:
+        payload.update(decision="block", reason=message)
+    else:
+        # Gemini CLI's BeforeTool reads a top-level `decision: "deny"`.
+        payload.update(decision="deny", reason=message, **_deny(event_name, message))
+    return payload
 
 
 def _emit(verdict: Verdict, stop_mode: StopMode, event_name: str) -> int:
@@ -371,9 +393,12 @@ def main(agent_id: str | None = None) -> int:
             except (OSError, RuntimeError, TimeoutError):
                 pass  # The original hook verdict still stops/denies the child.
         stop_mode: StopMode = "exit"
+        event_name = "PreToolUse"
         if agent_id:
-            stop_mode = get_agent(agent_id).stop_mode
-        event_name = str(raw.get("hook_event_name") or "PreToolUse")
+            agent = get_agent(agent_id)
+            stop_mode = agent.stop_mode
+            event_name = agent.pre_tool_event
+        event_name = str(raw.get("hook_event_name") or event_name)
         return _emit(verdict, stop_mode, event_name)
     except Exception as exc:  # noqa: BLE001 - a broken policy check must block, not pass.
         print(f"Joinery policy check failed: {exc}", file=sys.stderr)

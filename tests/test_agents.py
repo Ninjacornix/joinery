@@ -125,8 +125,54 @@ def test_generative_attempt_stops_the_turn(
     assert payload["continue"] is False
     assert "diffusers" in payload["stopReason"]
     # The deny fields are the floor, so it cannot fail open.
-    assert payload["decision"] == "deny"
     assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"
+    if agent == "claude":
+        # Claude Code's PreToolUse schema only allows "approve" | "block" for a
+        # top-level decision; "deny" there fails validation.
+        assert "decision" not in payload
+        assert payload["hookSpecificOutput"]["hookEventName"] == "PreToolUse"
+    else:
+        # Gemini CLI's BeforeTool reads the top-level decision.
+        assert payload["decision"] == "deny"
+        assert payload["hookSpecificOutput"]["hookEventName"] == "BeforeTool"
+
+
+@pytest.mark.parametrize(
+    ("event_name", "expected"),
+    [
+        ("PreToolUse", None),
+        ("Stop", "block"),
+        ("SubagentStop", "block"),
+        ("BeforeTool", "deny"),
+    ],
+)
+def test_stop_payload_matches_each_event_schema(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    event_name: str,
+    expected: str | None,
+) -> None:
+    event = {
+        "hook_event_name": event_name,
+        "tool_name": "Bash",
+        "tool_input": {"command": "pip install diffusers"},
+    }
+    agent = "gemini" if event_name == "BeforeTool" else "claude"
+    code, out, _ = run_with_agent(monkeypatch, capsys, event, agent)
+    assert code == 0
+    payload = json.loads(out)
+    assert payload["continue"] is False
+    assert payload.get("decision") == expected
+    if expected is None:
+        assert payload["hookSpecificOutput"]["permissionDecision"] == "deny"
+        assert set(payload) == {
+            "continue",
+            "stopReason",
+            "systemMessage",
+            "hookSpecificOutput",
+        }
+    else:
+        assert "diffusers" in payload["reason"]
 
 
 @pytest.mark.parametrize("agent", ["codex", "opencode"])
