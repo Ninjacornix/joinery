@@ -69,7 +69,7 @@ for the chat and for parallel tasks.
   Without `--live` it only lists the cases. Tests drive it with fake agents.
 - **History.** `joinery transactions list` gives each change a `cost`
   (total time, tokens, agent turns) when it was measured, for the editor to
-  show later. No editor UI shows it yet.
+  show later. The Review tab shows it under each decided change.
 
 ## Consequences
 
