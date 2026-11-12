@@ -269,6 +269,19 @@ def test_for_agent_trims_the_report() -> None:
         "shot",
     }
     assert "bot" in data["note"]
+    assert "states" not in data
+
+
+def test_nodes_that_report_their_state_reach_the_agent() -> None:
+    tree = {"kind": "behaviour", "running": "selector > sequence > action chase"}
+    report = playtest_report.build(
+        _bot(states={"/root/Level/Enemy/Behaviour": tree, "/root/Bad": "not a dict"}),
+        "",
+        0,
+        options=OPTIONS,
+    )
+    assert report["states"] == {"/root/Level/Enemy/Behaviour": tree}
+    assert playtest.for_agent(report)["states"] == report["states"]
 
 
 def test_cli_prints_the_report(

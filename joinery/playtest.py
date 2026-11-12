@@ -497,6 +497,9 @@ def for_agent(report: dict[str, Any], limit: int = 25) -> dict[str, Any]:
             "deaths": [d["at"] for d in heat.get("deaths", [])][:10],
             "stuck": [s["at"] for s in heat.get("stuck", [])][:10],
         }
+    if report.get("states"):
+        # Nodes that report themselves (behaviour trees, dialogue): node path -> state.
+        data["states"] = report["states"]
     data["screenshots"] = report.get("screenshots", [])
     data["note"] = (
         "Timings and deaths come from a bot pressing keys with some aim, not a person; "

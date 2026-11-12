@@ -489,8 +489,16 @@ def build(
         "route": (bot or {}).get("route", []) or [],
         "coverage": coverage,
         "reach": [r for r in (bot or {}).get("reach", []) or [] if isinstance(r, dict)],
+        "states": _states((bot or {}).get("states")),
         "screenshots": [],
     }
+
+
+def _states(raw: object) -> dict[str, Any]:
+    """What game nodes said about themselves at the end (group `playtest_state`)."""
+    if not isinstance(raw, dict):
+        return {}
+    return {str(path): state for path, state in raw.items() if isinstance(state, dict)}
 
 
 def _item(index: int, entry: dict[str, Any], options: dict[str, Any]) -> dict[str, Any]:

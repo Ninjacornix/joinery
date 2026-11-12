@@ -30,6 +30,9 @@ const SCRIPTS := [
 const SAVE_SLOT := 2
 const SHOT_WIDTH := 480
 const LIMIT_EVENTS := 300
+## Nodes that report their own state to the playtester (see _states()).
+const STATE_GROUP := &"playtest_state"
+const STATES_MAX := 20
 
 var out_dir: String = ""
 var seed_value: int = 1
@@ -706,11 +709,27 @@ func _write(done: bool) -> void:
 		"probe": probe.call(&"result") if probe != null and done else {},
 		"log": logger.call(&"entries"),
 		"log_dropped": int(logger.get(&"dropped")),
+		"states": _states(),
 	}
 	var file := FileAccess.open(out_dir.path_join("bot.json"), FileAccess.WRITE)
 	if file != null:
 		file.store_string(JSON.stringify(report))
 		file.close()
+
+
+## What game nodes report about themselves: every node in the `playtest_state`
+## group with a `playtest_state() -> Dictionary` (an enemy's behaviour tree, the
+## open conversation), keyed by node path. At most STATES_MAX nodes.
+func _states() -> Dictionary:
+	var found := {}
+	for node: Node in get_nodes_in_group(STATE_GROUP):
+		if found.size() >= STATES_MAX:
+			break
+		if is_instance_valid(node) and node.has_method(&"playtest_state"):
+			var state: Variant = node.call(&"playtest_state")
+			if state is Dictionary:
+				found[str(node.get_path())] = state
+	return found
 
 
 func _parse_args() -> void:
