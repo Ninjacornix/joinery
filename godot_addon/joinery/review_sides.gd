@@ -9,7 +9,8 @@ extends Control
 ## While both sides show, a tiny label sits in the top leading corner of each, so the halves
 ## are never ambiguous; with one side in focus the pill alone says which.
 ##
-## Lies over the media and takes no input outside its pill.
+## Lies over the media and takes no input outside its pill; the media keeps clear of the pill
+## ([method clearance]).
 
 ## The user picked [param side]: "before", "after" or "compare" (both alike).
 signal chosen(side: String)
@@ -124,6 +125,22 @@ func tag(key: String) -> Button:
 ## The pill (the switch, or the lone badge).
 func pill() -> Control:
 	return _pill
+
+
+## How much of the top of a frame of [param frame] size the media must leave free so the pill
+## never covers it: the pill's foot and a margin when the media, fitted to the whole frame in
+## the shape it has now ([param shown]), would reach under the pill; else 0. Decided from the
+## media's shape alone, so the strip does not come and go as the media shrinks into it.
+func clearance(shown: Rect2, frame: Vector2) -> float:
+	if not visible or not shown.has_area() or frame.y <= 0.0:
+		return 0.0
+	var margin := float(UI_THEME.space(self, 1)) if is_inside_tree() else 0.0
+	var corner := Rect2(_pill.position, _pill.size).grow(margin)
+	var aspect := shown.size.x / shown.size.y
+	var fitted := Vector2(minf(frame.x, frame.y * aspect), 0.0)
+	fitted.y = fitted.x / aspect
+	var free := Rect2((frame - fitted) / 2.0, fitted)
+	return corner.end.y if free.intersects(corner) else 0.0
 
 
 ## The side labels on screen, in this control's coordinates (empty with one side in view).

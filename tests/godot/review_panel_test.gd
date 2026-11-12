@@ -54,6 +54,8 @@ func _run() -> void:
 	await _check_loading(panel)
 	await _check_renders_arrive(panel)
 	await _check_details(panel)
+	await _check_files(panel)
+	await _check_shapes(panel)
 	await _check_scene(panel)
 	await _check_applying(panel)
 	await _check_optimistic(panel)
@@ -211,7 +213,11 @@ func _check_new_asset(panel: PANEL) -> void:
 	)
 	_check(not _tag(panel, "after").toggle_mode, "New names the side; it switches nothing")
 	_check(panel._media.texture() != null, "A new model render shows")
-	_check(not panel._media.filmstrip().visible, "One item has no filmstrip")
+	_check(not panel._media.files().visible, "One item has no file list")
+	_check(
+		panel._media.frame_height() >= panel._stage_area.size.y * 0.8,
+		"One file keeps the whole stage"
+	)
 	var facts: String = panel._summary.facts_text()
 	_check(facts == "1 model", "Counts without changes: " + facts)
 
@@ -473,12 +479,12 @@ func _check_details(panel: PANEL) -> void:
 	)
 	await _frames()
 	_check(not panel.details_open(), "Details stay closed with media")
-	_check(panel._media.filmstrip().visible, "A picture and text make a filmstrip")
-	_check(panel._media.filmstrip().tiles().size() == 2, "One tile per item")
+	_check(panel._media.files().visible, "A picture and text make a file list")
+	_check(panel._media.files().rows().size() == 2, "One row per item")
 	_check(panel._media.current_kind() == "image", "The picture comes first")
 	panel._media.select_item(1)
 	await _frames()
-	_check(panel._media.current_kind() == "text", "A tile shows its item")
+	_check(panel._media.current_kind() == "text", "A row shows its item")
 	panel.show_file_review("Only a model went", "", [], [{"path": "a.glb", "change": "deleted"}])
 	await _frames()
 	_check(not panel._media.visible, "Nothing to preview hides the media")
@@ -787,3 +793,178 @@ func _check_history_policy() -> void:
 	page._cancel_history()
 	page.queue_free()
 	await _frames()
+
+
+## A picture whose edges are all different, like a real texture: it has no ground of its own.
+func _busy(name: String, size: Vector2i, salt := 0) -> String:
+	var image := Image.create(size.x, size.y, false, Image.FORMAT_RGB8)
+	var noise := RandomNumberGenerator.new()
+	noise.seed = 11 + salt
+	for y: int in size.y:
+		for x: int in size.x:
+			image.set_pixel(x, y, Color(noise.randf(), noise.randf(), noise.randf()))
+	var path := _cache.path_join(name)
+	image.save_png(path)
+	return path
+
+
+## A model with its textures: one row per file down the leading side of the stage, the model
+## first with its textures under it, whole names, a mark each, the shown row filled; Up and Down
+## move through them once the review has the focus, and a long list scrolls. Narrow, the list
+## folds above the preview.
+func _check_files(panel: PANEL) -> void:
+	var media: Array = []
+	for index: int in 16:
+		(
+			media
+			. append(
+				{
+					"path": "art/textures/agedgreytrim_albedo_%02d.png" % index,
+					"media": "image",
+					"before": _busy("tex-%d-a.png" % index, Vector2i(32, 32), index),
+					"after": _busy("tex-%d-b.png" % index, Vector2i(32, 32), index + 40),
+				}
+			)
+		)
+	(
+		media
+		. append(
+			{
+				"path": "art/sources/crate.blend",
+				"media": "image",
+				"before": _image("crate-a.png", Color(0.3, 0.3, 0.32)),
+				"before_back": _image("crate-a-back.png", Color(0.3, 0.3, 0.32)),
+				"after": _image("crate-b.png", Color(0.4, 0.35, 0.3)),
+				"after_back": _image("crate-b-back.png", Color(0.4, 0.35, 0.3)),
+			}
+		)
+	)
+	(
+		media
+		. append(
+			{
+				"path": "art/textures/crate_decal.png",
+				"media": "image",
+				"after": _image("decal.png", Color(0.8, 0.2, 0.1)),
+			}
+		)
+	)
+	panel.show_file_review("Weather the crate", "", media, [])
+	await _frames(4)
+	var files: ScrollContainer = panel._media.files()
+	var rows: Array = files.rows()
+	_check(files.visible and rows.size() == 18, "One row per file: %d" % rows.size())
+	_check(rows[0].name_label.text == "crate.blend" and rows[0].depth == 0, "The model comes first")
+	_check(
+		rows.slice(1).all(func(row: Control) -> bool: return row.get("depth") == 1),
+		"Its textures are grouped under it"
+	)
+	_check(panel._media.current_kind() == "model", "The model shows first")
+	var label: Label = rows[1].name_label
+	var whole: String = rows[1].plain_name()
+	_check(whole == "agedgreytrim_albedo_00.png", "A row has the whole name: " + whole)
+	_check(
+		(
+			label.text_overrun_behavior == TextServer.OVERRUN_NO_TRIMMING
+			and label.get_visible_line_count() >= label.get_line_count()
+		),
+		"…never cut short"
+	)
+	_check(rows[1].mark_label.text == "Changed", "A changed file is marked Changed")
+	_check(rows[17].mark_label.text == "New", "A new file is marked New")
+	_check(rows[1].picture != null, "A texture's row shows its picture")
+	_check(rows[0].button_pressed and not rows[1].button_pressed, "The shown row is selected")
+	var list := files.get_global_rect()
+	var frame: Rect2 = panel._media._frame.get_global_rect()
+	_check(list.end.x <= frame.position.x, "The list runs down the left, the preview on the right")
+	_check(frame.size.x > list.size.x, "The preview takes the larger part of the stage")
+	_check(absf(list.size.y - panel._stage_area.size.y) <= 1.0, "The list takes the stage's height")
+	_check(files.get_v_scroll_bar().max_value > files.size.y, "A long list scrolls")
+	var down := InputEventKey.new()
+	down.keycode = KEY_DOWN
+	down.pressed = true
+	var up := down.duplicate() as InputEventKey
+	up.keycode = KEY_UP
+	var focus := root.gui_get_focus_owner()
+	if focus != null:
+		focus.release_focus()
+	panel._input(down)
+	_check(panel._media.current_index() == 0, "Down does nothing until the review is clicked")
+	panel.grab_focus()
+	panel._input(down)
+	await _frames()
+	_check(panel._media.current_index() == 1, "Down shows the next file")
+	_check(rows[1].button_pressed and not rows[0].button_pressed, "…and selects its row")
+	_check(panel._media.current_kind() == "image", "The texture shows")
+	panel._input(up)
+	_check(panel._media.current_index() == 0, "Up goes back")
+	for step: int in 20:
+		panel._input(down)
+	await _frames(3)
+	_check(panel._media.current_index() == 17, "Down stops at the last file")
+	_check(files.scroll_vertical > 0, "The shown row scrolls into view")
+	panel.release_focus()
+	_host.size = Vector2(380, 520)
+	await _frames(4)
+	list = files.get_global_rect()
+	frame = panel._media._frame.get_global_rect()
+	_check(panel._media.split().stacked, "Narrow, the list folds")
+	_check(list.end.y <= frame.position.y, "…above the preview")
+	_check(
+		list.size.y <= panel._stage_area.size.y * 0.35 and list.size.y >= rows[0].size.y - 1.0,
+		"…to a few rows: %s of %s" % [list.size.y, panel._stage_area.size.y]
+	)
+	_host.size = Vector2(900, 520)
+	await _frames(4)
+	_check(not panel._media.split().stacked, "Wide again, the list is beside the preview")
+
+
+## A picture of another shape than the stage shows no empty bands: one with a background of its
+## own fills the frame with it, one without sits on the panel. The Before/After pill never lies
+## over the picture, square, tall or wide.
+func _check_shapes(panel: PANEL) -> void:
+	var cases := [
+		["square", Vector2i(64, 64)],
+		["tall", Vector2i(40, 120)],
+		["wide", Vector2i(160, 90)],
+		["new tall", Vector2i(30, 120)],
+	]
+	for spec: Array in cases:
+		var size: Vector2i = spec[1]
+		var item := {
+			"path": "art/textures/%s.png" % str(spec[0]).replace(" ", "_"),
+			"media": "image",
+			"after": _busy("shape-%s-b.png" % spec[0], size, 3),
+		}
+		if not str(spec[0]).begins_with("new"):
+			item["before"] = _busy("shape-%s-a.png" % spec[0], size, 5)
+		panel.show_file_review("Retexture", "", [item], [])
+		await _frames(6)
+		var swipe: Control = panel._media.swipe()
+		var picture: Rect2 = swipe.call("picture_rect")
+		picture.position += swipe.get_global_rect().position
+		var pill: Rect2 = panel._media.sides().pill().get_global_rect()
+		_check(
+			panel._media.frame_ground().a <= 0.0,
+			"%s: a picture without a ground leaves the frame unfilled" % spec[0]
+		)
+		_check(
+			not picture.grow(-0.5).intersects(pill),
+			"%s: the pill keeps off the picture: %s and %s" % [spec[0], pill, picture]
+		)
+		_check(
+			picture.size.y >= panel._stage_area.size.y * 0.5,
+			"%s: the picture still fills the stage: %s" % [spec[0], picture]
+		)
+		if spec[0] == "wide":
+			_check(panel._media.pill_reserve() == 0.0, "A wide picture leaves room: no strip")
+	var ground := Color8(51, 102, 77)
+	var flat := _image("flat.png", ground, Vector2i(48, 48))
+	panel.show_file_review(
+		"Retint", "", [{"path": "art/textures/flat.png", "media": "image", "after": flat}], []
+	)
+	await _frames(4)
+	_check(
+		panel._media.frame_ground().to_html(false) == ground.to_html(false),
+		"A picture on a flat background fills the frame with it"
+	)

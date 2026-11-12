@@ -1,11 +1,11 @@
 extends SceneTree
 ## The review at a glance, headless: the facts line (the agent's words, what the media
 ## measures, the counts), the checks as chips, the reviewer's notes as one line with the rest
-## in Details, the keyboard (A, D, B, Escape) only once the review has the focus, a filmstrip
-## for several items with the most important first, a model from two angles, a blockout's plan
-## beside the sketch it was built from, the rail stacked under the stage at a narrow width with
-## Accept on screen, and the chat card's row that decides a small change and offers Review for
-## a big one.
+## in Details, the keyboard (A, D, B, Escape) only once the review has the focus, a file list
+## for several items with the model first and its textures under it, a model from two angles,
+## a blockout's plan beside the sketch it was built from, the rail stacked under the stage at a
+## narrow width with Accept on screen, and the chat card's row that decides a small change and
+## offers Review for a big one.
 
 const PANEL := preload("res://addons/joinery/review_panel.gd")
 const GLANCE := preload("res://addons/joinery/review_glance.gd")
@@ -326,16 +326,21 @@ func _check_filmstrip(panel: PANEL) -> void:
 	var diff := "--- scripts/door.gd\n+++ scripts/door.gd\n@@ -1 +1 @@\n-var w := 1.0\n+var w := 1.2"
 	panel.show_file_review("Widen the door", diff, media, [])
 	await _frames()
-	var strip: Control = panel._media.filmstrip()
-	_check(strip.visible, "Several items show a filmstrip")
-	_check(strip.tiles().size() == 4, "One tile each, text last: %d" % strip.tiles().size())
-	_check(strip.selected() == 0 and panel._media.current_index() == 0, "The first item shows")
-	_check(strip.tiles()[0].picture != null, "A picture tile shows the change")
-	_check(strip.tiles()[2].glyph == "sound", "A sound tile shows its glyph")
-	_check(strip.tiles()[3].word == ".gd", "The text tile names its file type")
-	strip.tiles()[1].pressed.emit()
+	var files: Control = panel._media.files()
+	var rows: Array = files.rows()
+	_check(files.visible, "Several items show a file list")
+	_check(rows.size() == 4, "One row each, text last: %d" % rows.size())
+	_check(files.selected() == 0 and panel._media.current_index() == 0, "The first item shows")
+	_check(rows[0].name_label.text == "door.blend", "The model comes first")
+	_check(rows[1].depth == 1, "Its texture is grouped under it")
+	_check(rows[1].picture != null, "A picture row shows the change")
+	_check(rows[2].glyph == "sound", "A sound row shows its glyph")
+	_check(rows[3].word == ".gd", "The text row names its file type")
+	rows[1].pressed.emit()
 	await _frames()
-	_check(panel._media.current_index() == 1, "Pressing a tile shows its item")
+	_check(panel._media.current_index() == 1, "Pressing a row shows its file")
+	rows[0].pressed.emit()
+	await _frames()
 	var sides: Control = panel._media.sides()
 	_check(
 		sides.tag("after").text == "New" and not sides.tag("before").is_visible_in_tree(),
@@ -499,12 +504,17 @@ func _check_scaling(panel: PANEL) -> void:
 	)
 	var shown: Rect2 = swipe.call("fit", Vector2(16, 16))
 	_check(
-		shown.size.y >= swipe.size.y - 1.0 and shown.size.y > 16.0 * 4.0,
-		"A 16 px texture fills the frame's height: %s in %s" % [shown.size, swipe.size]
+		(
+			(shown.size.y >= swipe.size.y - 1.0 or shown.size.x >= swipe.size.x - 1.0)
+			and shown.size.y > 16.0 * 4.0
+		),
+		"A 16 px texture fills the frame: %s in %s" % [shown.size, swipe.size]
 	)
 	_check(swipe.texture_filter == CanvasItem.TEXTURE_FILTER_NEAREST, "…and stays crisp")
-	var tiles: Array = panel._media.filmstrip().tiles()
-	_check(tiles[0].texture_filter == CanvasItem.TEXTURE_FILTER_NEAREST, "Its tile is crisp too")
+	var rows: Array = panel._media.files().rows()
+	_check(
+		rows[0].thumb.texture_filter == CanvasItem.TEXTURE_FILTER_NEAREST, "Its row is crisp too"
+	)
 	await _check_zoom(swipe)
 	panel._media.select_item(1)
 	await _frames(3)
@@ -536,10 +546,9 @@ func _check_scaling(panel: PANEL) -> void:
 	)
 	_check(absf(plan.size.x - sketch.size.x) <= 1.0, "The plan shares the space equally")
 	_check(sketch.texture_filter == CanvasItem.TEXTURE_FILTER_NEAREST, "A small sketch is crisp")
-	var sunken: Color = panel._media.get_theme_color("surface_sunken", "Joinery")
 	_check(
-		panel._media.frame_ground().is_equal_approx(sunken),
-		"A sketch and a plan with different grounds keep the frame's own"
+		panel._media.frame_ground().a <= 0.0,
+		"A sketch and a plan with different grounds leave the frame unfilled: no bands"
 	)
 	var backdrop := Color8(56, 59, 66)
 	var model := [

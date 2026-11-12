@@ -137,7 +137,7 @@ EDITOR_SCREENS = (
     "review-music",
     "review-text",
     "review-scene",
-    "review-filmstrip",
+    "review-files",
     "review-blockout",
     "review-clip",
     "timeline-list",

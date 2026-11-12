@@ -287,7 +287,7 @@ func _reviews(dock: Control) -> void:
 
 
 ## The other kinds at a glance: text as changed lines, a scene edit as viewport frames, and a
-## change with several items as a filmstrip with the agent's facts and the reviewer's notes.
+## change with several items as a file list with the agent's facts and the reviewer's notes.
 func _glance_reviews(
 	dock: Control, panel: Control, cache: String, before: String, after: String, still: String
 ) -> void:
@@ -379,7 +379,7 @@ func _glance_reviews(
 			}
 		)
 	)
-	await _shot("review-filmstrip", [panel, dock])
+	await _shot("review-files", [panel, dock])
 	dock.hide_edit_review()
 	await _frames()
 	await _review.blockout(self, dock, panel)

@@ -1,7 +1,8 @@
 extends SceneTree
 ## A short, narrow Review panel (the bottom panel of a 1024 × 768 editor) stacks the rail
 ## under the stage and still keeps Accept and Discard inside the panel, for a long diff and
-## for a model picture with its filmstrip. The stage gives up height; the actions never do.
+## for a model picture, and for a model with many textures in its file list. The stage gives up
+## height; the actions never do.
 
 const PANEL := preload("res://addons/joinery/review_panel.gd")
 
@@ -48,6 +49,21 @@ func _run() -> void:
 	var lines := PackedStringArray()
 	for index: int in 250:
 		lines.append("+ Long reviewed scene change %d with properties and source context" % index)
+	var textures: Array = [
+		{"path": "art/models/crate.glb", "media": "image", "after": still_path},
+	]
+	for index: int in 16:
+		(
+			textures
+			. append(
+				{
+					"path": "art/textures/agedgreytrim_albedo_%02d.png" % index,
+					"media": "image",
+					"before": still_path,
+					"after": still_path,
+				}
+			)
+		)
 	var cases := [
 		["long diff", "Large technical fixture import", "\n".join(lines), [], []],
 		[
@@ -57,6 +73,7 @@ func _run() -> void:
 			[{"path": "art/models/hammer.glb", "media": "image", "after": still_path}],
 			[{"path": "art/models/hammer.glb", "change": "created"}],
 		],
+		["model with textures", "Weather the crate", "", textures, []],
 	]
 	for size: Vector2 in [Vector2(580, 460), Vector2(580, 380), Vector2(420, 340)]:
 		_host.size = size

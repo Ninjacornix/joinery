@@ -4,7 +4,8 @@ extends VBoxContainer
 ##
 ## - The stage, about 70% on the leading side at the full height: the change itself, edge to
 ##   edge on its own background (review_media.gd: a split picture, the model in live 3D,
-##   clips, A/B audio, the changed lines; a filmstrip when there are several items), with the
+##   clips, A/B audio, the changed lines; the list of files beside it when there are several),
+##   with the
 ##   Before | After | Both pill in its corner and an animation's transport floating over its
 ##   foot. Music layers sit under a track's waveform (review_music.gd).
 ## - The rail on the trailing side (review_rail.gd): "2 of 5" with previous and next and All
@@ -19,8 +20,8 @@ extends VBoxContainer
 ##
 ## Keyboard, once the review has the focus (a click in it; it never takes the focus itself): A
 ## accepts, D discards, B flips between before and after, Left and Right go to the previous or
-## next change waiting, Escape closes Details. With the media clicked, an animation takes Space
-## (play/pause) and Left/Right (a frame) instead.
+## next change waiting, Up and Down move through a change's files, Escape closes Details. With
+## the media clicked, an animation takes Space (play/pause) and Left/Right (a frame) instead.
 ##
 ## Deciding is optimistic: pressing Accept or Discard collapses the review into one line
 ## ("Change accepted", with dots while the commit runs) at once. [method show_result] confirms
@@ -431,15 +432,17 @@ func _on_key(code: Key) -> bool:
 				return false
 			_set_details(false, true)
 		KEY_LEFT, KEY_RIGHT:
-			# A clicked animation steps a frame instead (review_transport.gd), the filmstrip
-			# moves between its tiles.
+			# A clicked animation steps a frame instead (review_transport.gd).
 			var focused := get_viewport().gui_get_focus_owner()
-			var strip := _media.filmstrip()
 			var stepping := _media.transport().visible and _media.is_ancestor_of(focused)
-			stepping = stepping or focused == strip or strip.is_ancestor_of(focused)
 			if stepping or not _rail.has_queue():
 				return false
 			step_requested.emit(-1 if code == KEY_LEFT else 1)
+		KEY_UP, KEY_DOWN:
+			# The files of the change; Details keep their own keys.
+			if _drawer.is_ancestor_of(get_viewport().gui_get_focus_owner()):
+				return false
+			return _media.step_item(-1 if code == KEY_UP else 1)
 		_:
 			return false
 	return true
@@ -650,7 +653,7 @@ func _clear_if_current(serial: int) -> void:
 
 
 ## A text item for the preview: the changed lines of the text files in [param diff], named
-## "2 text files" (or the one file), shown with its file type on the filmstrip.
+## "2 text files" (or the one file), shown with its file type in the file list.
 static func _text_item(diff: String, changes: Array) -> Dictionary:
 	var files := DETAILS.split_diff(diff).keys().filter(
 		func(path: String) -> bool: return path != DETAILS.LOOSE_GROUP

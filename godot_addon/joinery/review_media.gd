@@ -1,9 +1,9 @@
 # gdlint: disable=max-public-methods
 @tool
 extends VBoxContainer
-## The Review panel's stage: one before/after view that fills the stage edge to edge, and a
-## filmstrip under it when the change has several items. Each kind shows the way it is judged
-## fastest:
+## The Review panel's stage: one before/after view that fills the stage edge to edge, and the
+## list of files beside it when the change has several (review_files.gd, review_split.gd): the
+## model or source first, its textures under it. Each kind shows the way it is judged fastest:
 ##
 ## - Textures, part views and scene snapshots: one frame split by a line you can drag
 ##   (review_swipe.gd), the original left, the change right. Before and After slide the line
@@ -23,12 +23,14 @@ extends VBoxContainer
 ##   out when the pointer leaves. Left and Right step a frame.
 ##
 ## The one Before/After control is the pill floating in the stage's corner (review_sides.gd):
-## Before | After | Both; a change with no original has one badge, "New".
+## Before | After | Both; a change with no original has one badge, "New". It never covers the
+## media: when the picture would reach under it, the media gives up a strip at the top for it.
 ##
 ## Pictures fill the stage, keeping their shape: a pair shares its width. The stage fills with
-## the pictures' own background (review_glance.gd's ground), so a picture narrower than the
-## stage shows no empty bands; pixel art and small or flat pictures are blown up crisp, photos
-## and renders smooth (picture_filter).
+## the pictures' own background (review_glance.gd's ground); a picture without one (a texture
+## with busy edges) sits on the panel itself, so a picture of another shape than the stage
+## shows no empty bands. Pixel art and small or flat pictures are blown up crisp, photos and
+## renders smooth (picture_filter).
 ##
 ## A side whose file is not written yet shows a pulsing "Rendering preview…" frame until it
 ## appears; the renders start when the change passes its checks, so the review is on screen
@@ -47,7 +49,8 @@ const DETAILS := preload("review_details.gd")
 const GLANCE := preload("review_glance.gd")
 const SWIPE := preload("review_swipe.gd")
 const DIFF := preload("review_diff.gd")
-const FILMSTRIP := preload("review_filmstrip.gd")
+const FILES := preload("review_files.gd")
+const SPLIT := preload("review_split.gd")
 const CLIP := preload("review_clip.gd")
 const SIDES := preload("review_sides.gd")
 const MODEL_VIEW := preload("review_model_view.gd")
@@ -72,6 +75,11 @@ var _items: Array = []
 var _index := 0
 var _textures := {}
 var _frame: PanelContainer
+## Holds the media inside the frame, under the strip kept free for the pill.
+var _body: MarginContainer
+## The previews (frame, changed lines, sound, loading, failure) beside the file list.
+var _column: VBoxContainer
+var _split: SPLIT
 var _front: View
 var _back: View
 var _swipe: SWIPE
@@ -81,7 +89,7 @@ var _audio_box: AUDIO_STAGE
 var _loading: PanelContainer
 var _loading_dots: INDICATOR
 var _failure: Label
-var _strip: FILMSTRIP
+var _files: FILES
 var _clip: CLIP
 var _sides: SIDES
 var _model: MODEL_VIEW
@@ -103,25 +111,36 @@ func _init() -> void:
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	accessibility_name = "Preview of the proposed change"
 	set_process(false)
+	_column = VBoxContainer.new()
+	_column.theme_type_variation = "JoineryStack"
+	_column.mouse_filter = Control.MOUSE_FILTER_PASS
+	_files = FILES.new()
+	_files.hide()
+	_files.chosen.connect(_on_item_selected)
+	_split = SPLIT.new(_files, _column)
+	add_child(_split)
 	_frame = PanelContainer.new()
 	_frame.theme_type_variation = "JoineryMediaFrame"
 	_frame.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_frame.clip_contents = true
-	add_child(_frame)
+	_column.add_child(_frame)
+	_body = MarginContainer.new()
+	_body.mouse_filter = Control.MOUSE_FILTER_PASS
+	_frame.add_child(_body)
 	_front = View.new()
 	_back = View.new()
-	_frame.add_child(_front)
-	_frame.add_child(_back)
+	_body.add_child(_front)
+	_body.add_child(_back)
 	_swipe = SWIPE.new()
 	_swipe.hide()
 	_swipe.dragged.connect(_on_dragged)
-	_frame.add_child(_swipe)
+	_body.add_child(_swipe)
 	_clip = CLIP.new()
 	_clip.side_clicked.connect(func(index: int) -> void: _on_side_clicked(index))
-	_frame.add_child(_clip)
+	_body.add_child(_clip)
 	_model = MODEL_VIEW.new()
 	_model.loaded.connect(_on_live)
-	_frame.add_child(_model)
+	_body.add_child(_model)
 	_transport = TRANSPORT.new()
 	_transport.attach(_clip, _model)
 	_overlay = OVERLAY.new(_transport)
@@ -137,14 +156,14 @@ func _init() -> void:
 		row.sort_children.connect(_queue_place)
 	_diff = DIFF.new()
 	_diff.hide()
-	add_child(_diff)
+	_column.add_child(_diff)
 	_audio_box = AUDIO_STAGE.new()
-	add_child(_audio_box)
+	_column.add_child(_audio_box)
 	_loading = PanelContainer.new()
 	_loading.theme_type_variation = "JoineryLoadingFrame"
 	_loading.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	_loading.hide()
-	add_child(_loading)
+	_column.add_child(_loading)
 	var waiting := HBoxContainer.new()
 	waiting.theme_type_variation = "JoineryRow"
 	waiting.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -160,11 +179,7 @@ func _init() -> void:
 	_failure.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_failure.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_failure.hide()
-	add_child(_failure)
-	_strip = FILMSTRIP.new()
-	_strip.hide()
-	_strip.chosen.connect(_on_item_selected)
-	add_child(_strip)
+	_column.add_child(_failure)
 
 
 func _notification(what: int) -> void:
@@ -240,9 +255,12 @@ func show_media(media: Array) -> void:
 	visible = not _items.is_empty()
 	if _items.is_empty():
 		return
+	# The model or source first, its textures and parts under it, text last.
+	var depths: Array[int] = []
+	_items = ITEMS.grouped(_items, depths)
 	side = "compare" if swipes(_items[0]) else "after"
-	_strip.visible = _items.size() > 1
-	_strip.show_items(_tile_specs())
+	_files.visible = _items.size() > 1
+	_files.show_items(_row_specs(depths))
 	_show_current(false)
 
 
@@ -285,7 +303,8 @@ func clear_media() -> void:
 	_clip.stop()
 	_diff.hide()
 	_failure.hide()
-	_strip.hide()
+	_files.hide()
+	_set_reserve(0.0)
 
 
 ## True when there is something to preview.
@@ -347,10 +366,15 @@ func flip() -> String:
 	return side
 
 
-## Show the item at [param index] (the filmstrip's order).
+## Show the item at [param index] (the file list's order).
 func select_item(index: int) -> void:
-	_strip.select(index)
+	_files.select(index)
 	_on_item_selected(index)
+
+
+## Show the file [param by] rows away in the list (Up and Down). True when it moved.
+func step_item(by: int) -> bool:
+	return _files.visible and _files.step(by)
 
 
 ## The index of the item on show.
@@ -358,9 +382,14 @@ func current_index() -> int:
 	return _index
 
 
-## The filmstrip under the preview.
-func filmstrip() -> FILMSTRIP:
-	return _strip
+## The list of files beside the preview (several files only).
+func files() -> FILES:
+	return _files
+
+
+## The file list and the preview beside it.
+func split() -> SPLIT:
+	return _split
 
 
 ## The split picture (texture pairs).
@@ -380,9 +409,10 @@ func sides() -> SIDES:
 
 ## Size the pictures, clips and live views from [param area] (the review's stage), so the
 ## stage can shrink as well as grow.
-func set_room(area: Control) -> void:
+func set_room(_area: Control) -> void:
+	# The preview's own rectangle beside the list, which the list's width never holds open.
 	for part: Control in [_front, _back, _clip, _model]:
-		part.set("room", area)
+		part.set("room", _split.room)
 
 
 ## The live 3D view of models.
@@ -422,7 +452,7 @@ func far_texture() -> Texture2D:
 
 ## The shown file name.
 func file_name() -> String:
-	return _item_name(_items[_index]) if not _items.is_empty() else ""
+	return ITEMS.name_of(_items[_index]) if not _items.is_empty() else ""
 
 
 ## A small picture of the change for the chat card: the first item's After (or its only
@@ -522,21 +552,20 @@ static func _live_key_of(item: Dictionary) -> String:
 	return ITEMS.live_key(item)
 
 
-static func _item_name(item: Dictionary) -> String:
-	return ITEMS.name_of(item)
-
-
-func _tile_specs() -> Array:
+func _row_specs(depths: Array[int]) -> Array:
 	var specs: Array = []
-	for item: Dictionary in _items:
-		var spec := {"name": _item_name(item)}
+	for index: int in _items.size():
+		var item: Dictionary = _items[index]
+		var spec := {"name": ITEMS.name_of(item), "depth": depths[index], "mark": ITEMS.mark(item)}
+		spec["tooltip"] = str(item.get("path", "")) if kind_of(item) != "text" else spec["name"]
 		match kind_of(item):
 			"audio":
 				spec["glyph"] = "sound"
 			"text":
 				spec["word"] = str(item.get("word", "Aa"))
-			_:
+			var kind:
 				spec["picture"] = _tile_picture(item)
+				spec["glyph"] = {"model": "model", "clip": "animation"}.get(kind, "image")
 		specs.append(spec)
 	return specs
 
@@ -551,12 +580,12 @@ func _tile_picture(item: Dictionary) -> Texture2D:
 
 
 func _refresh_tiles() -> void:
-	if not _strip.visible:
+	if not _files.visible:
 		return
 	for index: int in _items.size():
 		var item: Dictionary = _items[index]
 		if not kind_of(item) in ["audio", "text"]:
-			_strip.set_picture(index, _tile_picture(item))
+			_files.set_picture(index, _tile_picture(item))
 
 
 func _on_item_selected(index: int) -> void:
@@ -731,7 +760,7 @@ func _show_both(item: Dictionary, swap: bool) -> void:
 		return
 	_frame.show()
 	# The clips' own background fills the frame, like a model's two renders.
-	_set_ground(_common_ground(before if before != null else after, after if before else null))
+	_set_ground(ITEMS.common_ground(before if before != null else after, after if before else null))
 	if not _clip.visible or _clip.get_meta("item", {}) != item:
 		_clip.show_clip(item, before, after)
 		_clip.set_meta("item", item)
@@ -751,7 +780,8 @@ func _show_swipe(old: Texture2D, new: Texture2D, swap: bool) -> void:
 		_fail()
 		return
 	_frame.show()
-	_set_ground(Color.TRANSPARENT)
+	# Both sides on one background fill the frame with it; else the picture sits on the panel.
+	_set_ground(ITEMS.common_ground(old if old != null else new, new if old != null else null))
 	for view: View in [_front, _back]:
 		view.hide()
 	var fresh := not _swipe.visible or _swipe.after != new or _swipe.before != old
@@ -777,7 +807,7 @@ func _show_image(source: String, far: String, swap: bool) -> void:
 	if not far.is_empty() and FileAccess.file_exists(far):
 		back = _texture(far)
 	_frame.show()
-	_set_ground(_common_ground(picture, back))
+	_set_ground(ITEMS.common_ground(picture, back))
 	var changed := _front.main.texture != picture or _front.far.texture != back
 	if swap and _front.visible and _front.main.texture != null and changed:
 		_back.set_pictures(picture, back)
@@ -792,26 +822,20 @@ func _show_image(source: String, far: String, swap: bool) -> void:
 	_front.show()
 
 
-static func _common_ground(picture: Texture2D, back: Texture2D) -> Color:
-	return ITEMS.common_ground(picture, back)
-
-
-## Fill the frame with [param colour] (the pictures' own background); clear: the theme's.
+## Fill the frame with [param colour] (the pictures' own background). Clear: no fill at all, so
+## the picture sits on the panel and a picture of another shape shows no bands beside it.
 func _set_ground(colour: Color) -> void:
-	if colour.a <= 0.0:
-		_frame.remove_theme_stylebox_override("panel")
-		return
 	var box := get_theme_stylebox("panel", "JoineryMediaFrame").duplicate() as StyleBoxFlat
 	if box == null:
 		return
-	box.bg_color = colour
+	box.bg_color = colour if colour.a > 0.0 else Color.TRANSPARENT
 	_frame.add_theme_stylebox_override("panel", box)
 
 
 ## The frame's background now (the pictures' own, or the theme's).
 func frame_ground() -> Color:
 	var box := _frame.get_theme_stylebox("panel") as StyleBoxFlat
-	return box.bg_color if box != null else Color.TRANSPARENT
+	return box.bg_color if box != null and box.bg_color.a > 0.0 else Color.TRANSPARENT
 
 
 func _show_audio(source: String, swap: bool) -> void:
@@ -906,6 +930,22 @@ func _place_sides() -> void:
 	_sides.set_side(side)
 	var rects := _side_rects(host)
 	_sides.place(rects[0], rects[1])
+	if host == _frame:
+		var shown := rects[0].merge(rects[1]) if rects[0].has_area() else rects[1]
+		_set_reserve(_sides.clearance(shown, _frame.size))
+
+
+## Keep [param top] pixels free at the top of the frame, so the pill never covers the media.
+func _set_reserve(top: float) -> void:
+	if absf(float(_body.get_theme_constant("margin_top")) - top) < 1.0:
+		return
+	_body.add_theme_constant_override("margin_top", ceili(top))
+	_queue_place()
+
+
+## The strip at the top of the frame kept free for the pill (0 when the media leaves room).
+func pill_reserve() -> float:
+	return float(_body.get_theme_constant("margin_top"))
 
 
 ## Where each side is drawn in [param host] (before, after); the same rectangle twice when one
@@ -914,13 +954,14 @@ func _side_rects(host: Control) -> Array[Rect2]:
 	if host == _audio_box:
 		var band := Rect2(Vector2.ZERO, Vector2(host.size.x, UI_THEME.control_h(self, "md")))
 		return [band, band]
+	var inset := _body.position
 	if _model.visible and _model.is_live():
-		return _moved(_model.side_rects(), _model.position)
+		return _moved(_model.side_rects(), _model.position + inset)
 	if _clip.visible:
-		return _moved(_clip.drawn_rects(), _clip.position)
+		return _moved(_clip.drawn_rects(), _clip.position + inset)
 	if _swipe.visible:
 		var shown := _swipe.picture_rect()
-		shown.position += _swipe.position
+		shown.position += _swipe.position + inset
 		if not _swipe.paired():
 			return [shown, shown]
 		var half := Rect2(shown.position, Vector2(shown.size.x / 2.0, shown.size.y))
@@ -930,7 +971,7 @@ func _side_rects(host: Control) -> Array[Rect2]:
 	var plan_only: bool = _items[_index].has("reference")
 	for picture: TextureRect in [_front.main, _front.far]:
 		if picture.visible and picture.texture != null:
-			var rect := Rect2(_front.position + picture.position, picture.size)
+			var rect := Rect2(inset + _front.position + picture.position, picture.size)
 			var alone := not pictures.has_area() or (plan_only and picture == _front.far)
 			pictures = rect if alone else pictures.merge(rect)
 	return [pictures, pictures]

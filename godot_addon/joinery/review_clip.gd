@@ -257,7 +257,7 @@ func _on_side_input(event: InputEvent, index: int) -> void:
 		side_clicked.emit(index)
 
 
-## The middle frame of a strip, for the filmstrip tile and the chat card.
+## The middle frame of a strip, for the file list's thumbnail and the chat card.
 static func middle_frame(strip: Texture2D, meta: Dictionary) -> Texture2D:
 	if strip == null:
 		return null
