@@ -2,7 +2,7 @@
 
 **Made in the Joinery, not generated.**
 
-![The Joinery editor in its dark theme. The level of the third-person starting point is open in the 3D view, with the crate selected. The scene tree is below it and an icon rail on the left switches between Godot, the asset list and Blender. On the right, the Journeyman sidebar shows a plan card for adding translations, listing the files and settings it would add, with Cancel and Apply. Below the card, the message box holds the selected crate as a chip and a typed request to make the crate look older.](docs/images/joinery-editor.jpg)
+![The Joinery editor in its dark theme. The level of the third-person starting point is open in the 3D view, with the crate selected and its move and rotate handles showing. The scene tree is below it, above tabs for Files, Inspector, Output, Review, Timeline, Share and Mixer, and an icon rail on the left switches between Godot, the asset list and Blender. On the right, the Journeyman sidebar shows a plan card for adding translations, listing the files and settings it would add, with Cancel and Apply. Below the card, the message box holds the selected crate as a chip and a typed request to make the crate look older.](docs/images/joinery-editor.jpg)
 
 *A new third-person game in Joinery: the plan for adding translations waits for
 Apply, and a request about the selected crate is typed but not sent yet.*
@@ -17,25 +17,8 @@ Joinery does not use image, 3D, music or voice generators. Every asset is made
 in a real tool, kept as an editable source file, and has a recipe that rebuilds
 it. Games made with Joinery are plain Godot projects and open in stock Godot.
 
-## Status
-
-Version 0.5. Early software, unsigned builds.
-
-- Tested: the 0.4.0 builds for macOS (Apple Silicon), Linux and Windows passed
-  their editor, review, undo and exported-game checks on native machines, and
-  0.5 runs the same checks when its tag is pushed. On 2026-11-10 every built-in
-  tool passed a real create, edit and export run with networking off, and the
-  recipes from those runs rebuilt their assets
-  ([results](evals/results/tools-working.md)).
-- Tested with a live agent: the full path from a chat request to an accepted
-  Blender model in a Godot scene, with Codex, for 0.1, and day-to-day use with
-  Codex while 0.3 was built. The new parts (submit_for_review, saved chats,
-  images, the Review and Timeline tabs) are tested with fake agents.
-- Not yet verified live: Claude Code, Gemini CLI and opencode. On Windows only
-  Codex is supported.
-
 What changed in this version, and what is still missing:
-[0.5.0 release notes](docs/releases/0.5.0.md).
+[0.6.0 release notes](docs/releases/0.6.0.md).
 
 ## How a change works
 
