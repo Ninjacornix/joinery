@@ -293,10 +293,7 @@ class Crew:
             )
         task = self._open(title, request, origin, prompt, targets)
         work = prompt.model_copy(
-            update={
-                "text": TASK_PROMPT.format(request=request),
-                "primer": "",
-            }
+            update={**TASK_PROMPT.fill(request=request), "primer": ""}
         )
         task.job = asyncio.create_task(self._run(task, work))
         return task
@@ -382,13 +379,15 @@ class Crew:
         origin: Literal["user", "lead"],
         prompt: Prompt,
         text: str,
+        rules: str = "",
         targets: list[str] | tuple[str, ...] = (),
         group: str = "",
         direction: str = "",
         variant: int = 0,
     ) -> Task:
         """A task that waits its turn: it starts at once when a turn is free
-        (:meth:`pump`), otherwise when one is. ``text`` is what its agent is told."""
+        (:meth:`pump`), otherwise when one is. ``text`` is what its agent is told,
+        after its fixed ``rules`` (ADR 0056)."""
         if self.limit <= 1:
             raise ValueError(
                 "Parallel tasks are off for this project ([agents] parallel = 1 in "
@@ -397,7 +396,9 @@ class Crew:
         task = self._prepare(title, request, origin, prompt, targets, group=group)
         task.direction, task.variant = direction, variant
         task.state, task.step = QUEUED, "Waiting for a free agent…"
-        task.work = prompt.model_copy(update={"text": text, "primer": ""})
+        task.work = prompt.model_copy(
+            update={"text": text, "rules": rules, "primer": ""}
+        )
         self.tasks[task.id] = task
         self.emit(task.event())
         return task
@@ -543,7 +544,7 @@ class Crew:
         self.emit(task.event())
         work = prompt.model_copy(
             update={
-                "text": DEBUG_FIX_PROMPT.format(
+                **DEBUG_FIX_PROMPT.fill(
                     error=request.error, cause=found.cause, fix=found.fix
                 ),
                 "primer": "",

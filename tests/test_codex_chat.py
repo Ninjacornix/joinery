@@ -74,7 +74,8 @@ for line in sys.stdin:
  elif method=='turn/interrupt':result={}
  print(json.dumps({'id':r['id'],'result':result}),flush=True)
  if method=='turn/start':
-  text=r['params']['input'][0]['text']
+  # The user's words end the turn's text, after the project map (ADR 0056).
+  text=r['params']['input'][0]['text'].split('\\nUser:\\n',1)[-1]
   if text.startswith('edit'):
    print(json.dumps({'id':'edit-call','method':'item/tool/call','params':{'tool':'joinery_edit_scene','threadId':'thread1','turnId':str(turn),'callId':'box-call','arguments':{'summary':'Create a one metre box','operations':[{'operation':'create_box','name':'Box','size':[1,1,1]}]}}}),flush=True)
    continue
@@ -109,7 +110,8 @@ def test_submit_for_review_runs_without_an_approval_prompt(game: Path) -> None:
         'mcp_servers.joinery-registry.tools.submit_for_review.approval_mode="approve"'
         in argv
     )
-    # The reviewer's and debugger's reports are approved too; the hook limits who calls them.
+    # The lead isn't offered the read-only roles' reports, so no approval line for
+    # them; a role's own session approves its report (ADR 0056).
     for tool in (
         "report_review",
         "report_diagnosis",
@@ -117,8 +119,27 @@ def test_submit_for_review_runs_without_an_approval_prompt(game: Path) -> None:
         "report_design",
     ):
         assert (
-            f'mcp_servers.joinery-registry.tools.{tool}.approval_mode="approve"' in argv
+            f'mcp_servers.joinery-registry.tools.{tool}.approval_mode="approve"'
+            not in argv
         )
+    assert any('"--role", "lead"' in arg for arg in argv)
+
+    async def reviewer() -> None:
+        session = CodexSession()
+        session.gateway_socket = game / "gateway.sock"
+        session.role, session.inspection_only = "reviewer", True
+        try:
+            await session.connect(game)
+        finally:
+            await session.close()
+
+    asyncio.run(reviewer())
+    argv = json.loads((game / "argv.json").read_text())
+    assert (
+        'mcp_servers.joinery-registry.tools.report_review.approval_mode="approve"'
+        in argv
+    )
+    assert not any("tools.edit_scene.approval_mode" in arg for arg in argv)
 
 
 def test_missing_gate_refuses_launch(tmp_path: Path) -> None:

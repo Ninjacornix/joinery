@@ -201,7 +201,9 @@ def test_the_primer_reaches_the_prompt_once() -> None:
     primed = plain.model_copy(update={"primer": "- Harbour at dusk"})
     text = prompt_text(primed)
     assert text.count("Earlier in this chat (summary):\n- Harbour at dusk") == 1
-    assert text.index("Earlier in this chat") < text.index("Editor context:")
+    # After the project map, so a fresh session shares the map with the last one.
+    assert text.index("Editor context:") < text.index("Earlier in this chat")
+    assert text.index("Earlier in this chat") < text.index("User:")
     assert "Earlier in this chat" not in prompt_text(plain)
 
 

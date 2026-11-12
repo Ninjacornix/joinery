@@ -281,7 +281,7 @@ class Variants:
                     base,
                     index,
                     note,
-                    VARIANT_PROMPT.format(
+                    VARIANT_PROMPT.fill(
                         index=index,
                         count=len(notes) + (1 if lead_tx else 0),
                         direction=note,
@@ -321,7 +321,7 @@ class Variants:
             _staged_view(prompt),
             index,
             "Mix: " + note[:72],
-            VARIANT_MIX_PROMPT.format(
+            VARIANT_MIX_PROMPT.fill(
                 note=note, ways="\n".join(ways), request=group.request
             ),
         )
@@ -330,14 +330,20 @@ class Variants:
         return task
 
     def _add(
-        self, group: Group, prompt: Prompt, index: int, note: str, text: str
+        self,
+        group: Group,
+        prompt: Prompt,
+        index: int,
+        note: str,
+        parts: dict[str, str],
     ) -> Task:
         task = self.crew.add(
             f"{group.title} · {index}",
             group.request,
             origin=group.origin,
             prompt=prompt,
-            text=text,
+            text=parts["text"],
+            rules=parts["rules"],
             targets=group.targets,
             group=group.id,
             direction=note,

@@ -244,11 +244,12 @@ class Playtester:
             child.bind_gateway(endpoint.path)
             await child.connect(self.project, self.profile)
             minutes = run.seconds / 60
+            parts = PLAYTEST_PROMPT.fill(
+                minutes=f"{minutes:g}", focus=run.focus or "the whole game"
+            )
             prompt = Prompt(
-                text=PLAYTEST_PROMPT.format(
-                    minutes=f"{minutes:g}",
-                    focus=run.focus or "the whole game",
-                ),
+                text=parts["text"],
+                rules=parts["rules"],
                 project_dir=str(self.project),
             )
             # Only the last message is the report; earlier ones narrate the run.

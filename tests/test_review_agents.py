@@ -326,7 +326,8 @@ def test_the_reviewer_agent_reads_the_change_and_reports_through_its_tool(
     run(go)
     assert len(refused) == 3
     (prompt,) = prompts
-    assert "Make a lamp" in prompt.text and "Lamps are 1.5 m tall." in prompt.text
+    # The art bible is part of the reviewer's fixed rules, ahead of the change.
+    assert "Make a lamp" in prompt.text and "Lamps are 1.5 m tall." in prompt.rules
     assert "+lamp" in prompt.text and "notes/lamp.md (created)" in prompt.text
     assert prompt.attachments
     assert Path(prompt.attachments[0]).as_posix().endswith("art/lamp.png")
@@ -498,7 +499,7 @@ def test_a_debugger_finds_the_cause_and_a_worker_stages_the_fix(project: Path) -
         )
         (prompt,) = test.prompts
         assert "call move() instead of jump()" in prompt.text and ERROR in prompt.text
-        assert "submit_for_review" in prompt.text
+        assert "submit_for_review" in prompt.rules
         await crew.decide(task.transaction_id, True)
         assert (project / "notes/player.txt").read_text() == "move()"
         await crew.close()

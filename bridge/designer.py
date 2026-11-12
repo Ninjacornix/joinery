@@ -215,8 +215,10 @@ class Designer:
             await endpoint.start()
             child.bind_gateway(endpoint.path)
             await child.connect(self.project, self.profile)
+            parts = DESIGN_PROMPT.fill(found=told(report))
             prompt = Prompt(
-                text=DESIGN_PROMPT.format(found=told(report)),
+                text=parts["text"],
+                rules=parts["rules"],
                 project_dir=str(self.project),
             )
             async for event in child.send(prompt):

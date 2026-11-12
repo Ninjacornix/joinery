@@ -41,26 +41,66 @@ INSTRUCTIONS = (
 
 PRIMER = "Earlier in this chat (summary):\n"
 
+#: Editor-context keys that change on every turn (the editor's revision counter, live
+#: instance ids). They go with the turn, after the project map (ADR 0056).
+TURN_KEYS = ("scene_revision", "selection_instances")
+
 
 def primed(prompt: Prompt) -> str:
     """The summary a fresh session starts from, as a block before the turn ("" without)."""
     return PRIMER + prompt.primer.strip() + "\n\n" if prompt.primer.strip() else ""
 
 
-def prompt_text(prompt: Prompt, images_inline: bool = False) -> str:
-    """The turn as text. Attached images are listed by path unless the provider takes
-    them inline (`images_inline`)."""
+def _json(value: object) -> str:
+    """One fixed spelling: the same value is always the same bytes."""
+    return json.dumps(value, sort_keys=True, ensure_ascii=False)
+
+
+def project_map(prompt: Prompt) -> str:
+    """The editor context without its per-turn keys: the same bytes while the scene
+    on screen is unchanged."""
+    stable = {k: v for k, v in prompt.editor_context.items() if k not in TURN_KEYS}
+    return "Editor context:\n" + _json(stable) + "\n\n"
+
+
+def turn_part(prompt: Prompt, images_inline: bool = False) -> str:
+    """What only this turn has: the summary, the editor's per-turn keys, the
+    selection, the request and the attached images (listed by path unless the
+    provider takes them inline)."""
+    volatile = {
+        k: prompt.editor_context[k] for k in TURN_KEYS if k in prompt.editor_context
+    }
     return (
-        INSTRUCTIONS
-        + "\n\n"
-        + primed(prompt)
-        + "Editor context:\n"
-        + json.dumps(prompt.editor_context)
+        primed(prompt)
+        + "This turn:\n"
+        + _json(volatile)
         + "\nSelection:\n"
-        + json.dumps(prompt.target_context)
+        + _json(prompt.target_context)
         + "\n\nUser:\n"
         + prompt.text
         + ("" if images_inline else listed(prompt.attachments))
+    )
+
+
+def turn_text(prompt: Prompt, images_inline: bool = False) -> str:
+    """The turn as every provider gets it, stable parts first: the role's rules
+    (with the art bible and brief), the project map, then the turn (ADR 0056)."""
+    rules = prompt.rules.strip()
+    return (
+        (rules + "\n\n" if rules else "")
+        + project_map(prompt)
+        + turn_part(prompt, images_inline)
+    )
+
+
+def prompt_text(
+    prompt: Prompt, images_inline: bool = False, instructions: bool = True
+) -> str:
+    """The turn with Joinery's instructions ahead of it, for a provider without a
+    system prompt of its own; ``instructions=False`` when the session already holds
+    them."""
+    return (INSTRUCTIONS + "\n\n" if instructions else "") + turn_text(
+        prompt, images_inline
     )
 
 
@@ -146,10 +186,24 @@ def readonly_command(argv: list[str], project: Path) -> list[str]:
     )
 
 
-def proxy_config(socket: Path) -> dict[str, Any]:
+def offered_role(role: str, inspection_only: bool) -> str | None:
+    """The role whose tools the proxy lists: the session's role, the lead when it has
+    none, and None (every tool, judged per call) for an inspection specialist."""
+    if role:
+        return role
+    return None if inspection_only else "lead"
+
+
+def proxy_args(socket: Path, role: str | None) -> list[str]:
+    """How the joinery-registry proxy runs for one agent (``python <args>``)."""
+    args = ["-m", "servers.joinery_registry.proxy", "--socket", str(socket)]
+    return args + ["--role", role] if role else args
+
+
+def proxy_config(socket: Path, role: str | None = None) -> dict[str, Any]:
     return {
         "command": sys.executable,
-        "args": ["-m", "servers.joinery_registry.proxy", "--socket", str(socket)],
+        "args": proxy_args(socket, role),
         "env": {"PYTHONPATH": str(ROOT)},
     }
 

@@ -22,6 +22,7 @@ from bridge.protocol import (
     Usage,
 )
 from bridge.provider_process import (
+    offered_role,
     prompt_text,
     proxy_config,
     readonly_command,
@@ -107,6 +108,28 @@ class ACPSession:
         self.image_input = False
         self.load_session = False
         self.usage = ACPUsage()
+        #: The session's history holds Joinery's instructions (ACP has no system
+        #: prompt, so they ride on a prompt).
+        self.instructed = False
+        #: The agent reports how full its context is, so Joinery sees it compact.
+        self.context_reported = False
+
+    def needs_instructions(self) -> bool:
+        """Send the instructions with this prompt: the session's first, after the
+        agent compacted its history, and every time when it never reports its context
+        (Joinery can't tell whether they are still there) (ADR 0056)."""
+        return not self.instructed or not self.context_reported
+
+    def _context(self, update: dict[str, Any]) -> Usage | None:
+        """Take a usage_update; a context that shrank means the agent compacted its
+        history, which may have dropped the instructions."""
+        before = self.usage.used
+        usage = self.usage.context(update)
+        if usage is not None:
+            self.context_reported = True
+            if before and self.usage.used < before:
+                self.instructed = False
+        return usage
 
     async def connect(self, project: Path, profile_id: str = "") -> None:
         executable = (
@@ -182,7 +205,9 @@ class ACPSession:
 
     def _mcp_servers(self) -> list[dict[str, Any]]:
         assert self.gateway_socket is not None
-        config = proxy_config(self.gateway_socket)
+        config = proxy_config(
+            self.gateway_socket, offered_role(self.role, self.inspection_only)
+        )
         config["name"] = "joinery-registry"
         config["env"] = [
             {"name": key, "value": value} for key, value in config["env"].items()
@@ -212,6 +237,7 @@ class ACPSession:
         )
         self.session_id = str(session["sessionId"])
         self._adopt(session)
+        self.instructed = self.context_reported = False
 
     @property
     def handle(self) -> str:
@@ -241,6 +267,8 @@ class ACPSession:
                 self.events.get_nowait()
         self.session_id = handle
         self._adopt(session if isinstance(session, dict) else {})
+        # Its history holds them; until the agent reports its context they go again.
+        self.instructed, self.context_reported = True, False
         return True
 
     async def models(self) -> list[ModelChoice]:
@@ -441,9 +469,10 @@ class ACPSession:
     def prompt_blocks(self, prompt: Prompt) -> list[dict[str, Any]]:
         """The ACP prompt: the text, then each attached image when the agent takes images."""
         inline = self.image_input and bool(prompt.attachments)
-        blocks: list[dict[str, Any]] = [
-            {"type": "text", "text": prompt_text(prompt, images_inline=inline)}
-        ]
+        text = prompt_text(
+            prompt, images_inline=inline, instructions=self.needs_instructions()
+        )
+        blocks: list[dict[str, Any]] = [{"type": "text", "text": text}]
         if inline:
             for path in prompt.attachments:
                 media, data = encoded(Path(path))
@@ -474,16 +503,15 @@ class ACPSession:
                 await self.set_config(thought, effort)
             yield Models(models=self.model_choices)
             yield Execution(model=choice.id, name=choice.name, effort=effort, mode=mode)
+        blocks = self.prompt_blocks(prompt)
         task = asyncio.create_task(
             self.request(
                 "session/prompt",
-                {
-                    "sessionId": self.session_id,
-                    "prompt": self.prompt_blocks(prompt),
-                },
+                {"sessionId": self.session_id, "prompt": blocks},
                 1800,
             )
         )
+        self.instructed = True
         streamed = False
         try:
             while not task.done() or not self.events.empty():
@@ -517,7 +545,7 @@ class ACPSession:
                     )
                 elif (
                     update.get("sessionUpdate") == "usage_update"
-                    and (usage := self.usage.context(update)) is not None
+                    and (usage := self._context(update)) is not None
                 ):
                     yield usage
             response = await task

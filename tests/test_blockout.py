@@ -471,8 +471,10 @@ def test_every_provider_and_role_judges_blockout_the_same(
         assert violation(event) is not None, role
     monkeypatch.delenv("JOINERY_AGENT_ROLE")
     # Codex asks before every MCP call unless the tool is pre-approved.
-    source = Path("bridge/codex_session.py").read_text()
-    assert 'tools.blockout.approval_mode="approve"' in source
+    from bridge.codex_session import registry_config
+
+    argv = registry_config(tmp_path / "gateway.sock", "lead")
+    assert 'mcp_servers.joinery-registry.tools.blockout.approval_mode="approve"' in argv
 
 
 def test_agents_are_told_and_slash_blockout_becomes_a_request() -> None:

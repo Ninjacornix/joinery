@@ -46,6 +46,10 @@ class Prompt(_Msg):
     attachments: tuple[str, ...] = ()
     # A summary of the conversation so far, on the first prompt of a fresh session.
     primer: str = ""
+    # The fixed rules of the role this turn runs (its brief, the art bible, the game
+    # brief): the same bytes on every run of the role, so they go ahead of the
+    # project map and the turn (ADR 0056). "" for the chat's own turns.
+    rules: str = ""
 
 
 class Decision(_Msg):

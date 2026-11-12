@@ -47,7 +47,7 @@ class Keyed:
     async def send(self, prompt: Prompt) -> AsyncIterator[Any]:
         assert self.lane is not None
         self.test.prompts.append(prompt)
-        key = next(k for k in self.test.keyed if k in prompt.text)
+        key = next(k for k in self.test.keyed if k in prompt.rules + prompt.text)
         async for event in self.test.keyed[key](wire(self.lane)):
             yield event
 

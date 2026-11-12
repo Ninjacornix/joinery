@@ -204,10 +204,12 @@ class Checks:
             await point.start()
             child.bind_gateway(point.path)
             await child.connect(self.project, self.profile)
+            parts = CHECK_PROMPT.fill(
+                role=role, tool=f"{kind}_check", findings=task.request
+            )
             prompt = Prompt(
-                text=CHECK_PROMPT.format(
-                    role=role, tool=f"{kind}_check", findings=task.request
-                ),
+                text=parts["text"],
+                rules=parts["rules"],
                 project_dir=str(self.project),
             )
             messages: list[str] = []

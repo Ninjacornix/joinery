@@ -309,12 +309,14 @@ class SoundPassRun:
                 f"- {row['title']}: {', '.join(row['sounds']) or 'placement only'}"
                 for row in self.rows
             )
+            parts = SOUND_DESIGNER_PROMPT.fill(
+                level=audit.level,
+                focus=self.focus or "the whole level",
+                making=making or "- nothing: every sound has its place",
+            )
             prompt = Prompt(
-                text=SOUND_DESIGNER_PROMPT.format(
-                    level=audit.level,
-                    focus=self.focus or "the whole level",
-                    making=making or "- nothing: every sound has its place",
-                ),
+                text=parts["text"],
+                rules=parts["rules"],
                 project_dir=str(self.project),
             )
             messages: list[str] = []

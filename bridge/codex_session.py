@@ -25,12 +25,12 @@ from bridge.protocol import (
     Prompt,
     Usage,
 )
-from bridge.provider_process import primed, stop_process
+from bridge.provider_process import offered_role, proxy_args, stop_process, turn_text
 from joinery.api_profiles import list_public, runtime
 from joinery.catalog import ROOT
 from joinery.editor_ops import SCENE_TOOL, validate_edit
 from joinery.platform_support import launch_argv
-from joinery.roles import ROLE_ENV
+from joinery.roles import REGISTRY_TOOLS, ROLE_ENV, offered_tools
 from joinery.stage_access import NO_STAGE, STAGE_ENV
 from joinery.wiring import _command_str
 
@@ -54,6 +54,48 @@ def require_gate(project: Path) -> None:
         raise ValueError(
             "Codex policy hook is not configured for this Joinery install."
         )
+
+
+#: joinery-registry tools Codex runs without asking (the policy hook and the gateway
+#: judge each call); the rest of its tools are read-only and run anyway.
+APPROVED_TOOLS = (
+    "call_tool",
+    "edit_scene",
+    "submit_for_review",
+    "start_task",
+    "start_variants",
+    "task_status",
+    "playtest",
+    "blockout",
+    "access_check",
+    "perf_check",
+    "sound_audit",
+    "report_review",
+    "report_diagnosis",
+    "reproduce_error",
+    "report_design",
+)
+
+
+def registry_config(socket: Path, role: str | None) -> list[str]:
+    """Codex's ``-c`` overrides for the joinery-registry proxy serving ``role``: only
+    the tools the role is offered get an approval line (ADR 0056)."""
+    offered = set(REGISTRY_TOOLS) if role is None else offered_tools(role)
+    args = [
+        "-c",
+        f"mcp_servers.joinery-registry.command={json.dumps(sys.executable)}",
+        "-c",
+        f"mcp_servers.joinery-registry.args={json.dumps(proxy_args(socket, role))}",
+        "-c",
+        "mcp_servers.joinery-registry.tool_timeout_sec=900",
+    ]
+    for tool in APPROVED_TOOLS:
+        if tool in offered:
+            args += [
+                "-c",
+                f'mcp_servers.joinery-registry.tools.{tool}.approval_mode="approve"',
+            ]
+    return args
 
 
 def token_usage(data: object, model: str = "") -> Usage | None:
@@ -137,53 +179,9 @@ class CodexSession:
             f"command={json.dumps(command)},timeout=30" + "}]}]",
         ]
         if self.gateway_socket is not None:
-            proxy_args = [
-                "-m",
-                "servers.joinery_registry.proxy",
-                "--socket",
-                str(self.gateway_socket),
-            ]
-            args += [
-                "-c",
-                f"mcp_servers.joinery-registry.command={json.dumps(sys.executable)}",
-                "-c",
-                f"mcp_servers.joinery-registry.args={json.dumps(proxy_args)}",
-                "-c",
-                "mcp_servers.joinery-registry.tool_timeout_sec=900",
-                "-c",
-                'mcp_servers.joinery-registry.tools.call_tool.approval_mode="approve"',
-                "-c",
-                'mcp_servers.joinery-registry.tools.edit_scene.approval_mode="approve"',
-                "-c",
-                'mcp_servers.joinery-registry.tools.submit_for_review.approval_mode="approve"',
-                "-c",
-                'mcp_servers.joinery-registry.tools.start_task.approval_mode="approve"',
-                "-c",
-                'mcp_servers.joinery-registry.tools.start_variants.approval_mode="approve"',
-                "-c",
-                'mcp_servers.joinery-registry.tools.task_status.approval_mode="approve"',
-                "-c",
-                'mcp_servers.joinery-registry.tools.playtest.approval_mode="approve"',
-                "-c",
-                'mcp_servers.joinery-registry.tools.blockout.approval_mode="approve"',
-                "-c",
-                'mcp_servers.joinery-registry.tools.access_check.approval_mode="approve"',
-                "-c",
-                'mcp_servers.joinery-registry.tools.perf_check.approval_mode="approve"',
-                "-c",
-                'mcp_servers.joinery-registry.tools.sound_audit.approval_mode="approve"',
-            ]
-            # The read-only roles' reports; the policy hook lets only each role call its own.
-            for tool in (
-                "report_review",
-                "report_diagnosis",
-                "reproduce_error",
-                "report_design",
-            ):
-                args += [
-                    "-c",
-                    f'mcp_servers.joinery-registry.tools.{tool}.approval_mode="approve"',
-                ]
+            args += registry_config(
+                self.gateway_socket, offered_role(self.role, self.inspection_only)
+            )
         self._secrets = [
             env[key]
             for key in ("OPENAI_API_KEY", "JOINERY_MODEL_API_KEY")
@@ -481,15 +479,6 @@ class CodexSession:
             pass
 
     async def send(self, prompt: Prompt) -> AsyncIterator[AgentEvent]:
-        context = json.dumps(
-            {
-                "project_dir": prompt.project_dir,
-                "targets": prompt.targets,
-                "selection": prompt.target_context,
-                "scene": prompt.editor_context,
-            },
-            ensure_ascii=False,
-        )
         self._active_prompt = prompt
         self._turn_ready.clear()
         try:
@@ -500,13 +489,9 @@ class CodexSession:
                     **({"model": prompt.model} if prompt.model else {}),
                     **({"effort": prompt.effort} if prompt.effort else {}),
                     "input": [
-                        {
-                            "type": "text",
-                            "text": primed(prompt)
-                            + prompt.text
-                            + "\n\nEditor context:\n"
-                            + context,
-                        },
+                        # The developer instructions hold Joinery's rules; the turn's
+                        # text is laid out like every provider's (ADR 0056).
+                        {"type": "text", "text": turn_text(prompt, images_inline=True)},
                         # Attached images go in as the app server's local image input.
                         *(
                             {"type": "localImage", "path": path}

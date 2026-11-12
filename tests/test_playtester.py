@@ -206,8 +206,9 @@ def test_the_playtester_plays_then_writes_a_report_with_followups(
         assert (
             options.seconds == 30 and options.focus == "coins" and options.screenshots
         )
-        prompt = agents[0].prompts[0].text
-        assert "minutes=2" in prompt and "the lever" in prompt and "Fix: " in prompt
+        told = agents[0].prompts[0]
+        assert "minutes=2" in told.text and "the lever" in told.text
+        assert "Fix: " in told.rules
         assert agents[0].closed and not tester.busy()
 
     asyncio.run(go())
@@ -355,8 +356,10 @@ def test_the_tool_returns_the_report_and_screenshots(
 
 def test_agents_are_told_about_playtest() -> None:
     assert "playtest(" in REVIEW_GUIDE
-    assert "{minutes}" in PLAYTEST_PROMPT and "{focus}" in PLAYTEST_PROMPT
-    assert "never change it" in PLAYTEST_PROMPT
+    # The run's values are the turn's; the rules are the same on every run.
+    assert "{minutes}" in PLAYTEST_PROMPT.turn and "{focus}" in PLAYTEST_PROMPT.turn
+    assert "{" not in PLAYTEST_PROMPT.rules
+    assert "never change it" in PLAYTEST_PROMPT.rules
 
 
 # --- The chat host ---------------------------------------------------------------

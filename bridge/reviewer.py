@@ -186,7 +186,7 @@ class ReviewAgent:
             if request.previous
             else ""
         )
-        text = REVIEWER_PROMPT.format(
+        parts = REVIEWER_PROMPT.fill(
             request=request.request or "(none given)",
             summary=request.summary or "(none given)",
             round=request.round,
@@ -203,7 +203,8 @@ class ReviewAgent:
         if settings.model:
             selection["model"] = settings.model
         return Prompt(
-            text=text,
+            text=parts["text"],
+            rules=parts["rules"],
             project_dir=str(self.gateway.project),
             editor_context=dict(self.gateway.editor_context),
             selection=Selection.model_validate(
@@ -286,14 +287,15 @@ class Debugger:
     def prompt(
         self, gateway: ProjectGateway, request: DebugRequest, selection: Selection
     ) -> Prompt:
-        text = DEBUGGER_PROMPT.format(
+        parts = DEBUGGER_PROMPT.fill(
             error=request.error,
             locations=", ".join(request.locations()) or "(no file named)",
             output=request.output or "(none sent)",
             log=request.log or "(none)",
         )
         return Prompt(
-            text=text,
+            text=parts["text"],
+            rules=parts["rules"],
             project_dir=str(gateway.project),
             editor_context=dict(gateway.editor_context),
             selection=selection,

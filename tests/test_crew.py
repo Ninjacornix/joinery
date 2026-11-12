@@ -937,7 +937,8 @@ def test_tasks_run_at_the_same_time_and_each_change_is_reviewed_alone(
         assert one.state == two.state == "in_review"
         assert one.transaction_id != two.transaction_id
         assert "Make a chair" in test.prompts[0].text
-        assert "Don't call start_task" in test.prompts[0].text
+        # The task's fixed rules travel ahead of its own words (ADR 0056).
+        assert "Don't call start_task" in test.prompts[0].rules
         # Accept one; the other's change stays in review untouched.
         decided = await crew.decide(one.transaction_id, True)
         assert decided["accepted"] and decided["task_id"] == one.id

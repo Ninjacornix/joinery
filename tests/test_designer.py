@@ -149,9 +149,9 @@ def test_the_agent_pass_adds_findings_that_hold_and_drops_the_rest(
     assert any(f["source"] == "check" for f in findings), "Joinery's findings stay"
     assert final["report"]["summary"] == f"{len(findings)} design problems"
     # The agent was told what Joinery already found, and its own role closed.
-    prompt = agents[0].prompts[0].text
-    assert prompt.startswith(DESIGN_PROMPT.split("{found}")[0])
-    assert "isn't in the input map" in prompt
+    told = agents[0].prompts[0]
+    assert told.rules == DESIGN_PROMPT.rules
+    assert "isn't in the input map" in told.text
     assert endpoint.started and endpoint.closed and agents[0].closed
 
 

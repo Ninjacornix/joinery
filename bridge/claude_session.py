@@ -23,16 +23,17 @@ from bridge.protocol import (
 )
 from bridge.provider_process import (
     INSTRUCTIONS,
-    prompt_text,
+    offered_role,
     proxy_config,
     readonly_command,
     require_provider,
     stop_process,
+    turn_text,
 )
 from joinery.catalog import ROOT
 from joinery.chat_attachments import encoded
 from joinery.platform_support import launch_argv
-from joinery.roles import ROLE_ENV
+from joinery.roles import CLAUDE_READ_TOOLS, ROLE_ENV, spec
 from joinery.stage_access import NO_STAGE, STAGE_ENV
 
 #: The tools a Joinery-run Claude session's policy hook judges: the project's own
@@ -43,14 +44,32 @@ SESSION_MATCHER = (
 )
 from joinery.wiring import _command_str
 
+#: Claude Code's flag that keeps its system prompt the same bytes on every machine and
+#: in every working tree: the per-machine sections (cwd, env, repository state) move
+#: into the first user message, so the cached prefix is shared (ADR 0056).
+DYNAMIC_SECTIONS_FLAG = "--exclude-dynamic-system-prompt-sections"
+
+
+def cache_flags(role: str, stable_system_prompt: bool, tools_flag: bool) -> list[str]:
+    """The flags that keep a session's prefix stable and small, where this CLI has
+    them: the per-machine system-prompt sections move to the first user message, and
+    a read-only role is offered only Claude's read tools (the hook still judges every
+    call)."""
+    flags = [DYNAMIC_SECTIONS_FLAG] if stable_system_prompt else []
+    if tools_flag and role and spec(role).read_only:
+        flags += ["--tools", ",".join(CLAUDE_READ_TOOLS)]
+    return flags
+
 
 def user_input(prompt: Prompt) -> bytes:
     """What goes to Claude's stdin: plain text, or with attached images one stream-json
-    user message whose content is the text and each image as a base64 block."""
+    user message whose content is the text and each image as a base64 block. Joinery's
+    instructions are the session's system prompt (``--append-system-prompt``), so the
+    turn carries only its own text (ADR 0056)."""
     if not prompt.attachments:
-        return prompt_text(prompt).encode()
+        return turn_text(prompt).encode()
     content: list[dict[str, Any]] = [
-        {"type": "text", "text": prompt_text(prompt, images_inline=True)}
+        {"type": "text", "text": turn_text(prompt, images_inline=True)}
     ]
     for path in prompt.attachments:
         media, data = encoded(Path(path))
@@ -161,6 +180,11 @@ class ClaudeSession:
         #: The one staged change its own shell and file tools may reach ("" = none).
         self.stage = ""
         self.effort_supported = False
+        #: This CLI moves its per-machine system-prompt sections into the first user
+        #: message (DYNAMIC_SECTIONS_FLAG).
+        self.stable_system_prompt = False
+        #: This CLI takes ``--tools``, the built-in tools a session is offered.
+        self.tools_flag = False
 
     async def connect(self, project: Path, profile_id: str = "") -> None:
         if profile_id:
@@ -179,6 +203,8 @@ class ClaudeSession:
         try:
             output, _ = await asyncio.wait_for(probe.communicate(), 5)
             self.effort_supported = b"--effort" in output
+            self.stable_system_prompt = DYNAMIC_SECTIONS_FLAG.encode() in output
+            self.tools_flag = re.search(rb"(?m)^\s*--tools\b", output) is not None
         finally:
             await stop_process(probe)
 
@@ -251,11 +277,19 @@ class ClaudeSession:
             json.dumps(settings),
             "--mcp-config",
             json.dumps(
-                {"mcpServers": {"joinery-registry": proxy_config(self.gateway_socket)}}
+                {
+                    "mcpServers": {
+                        "joinery-registry": proxy_config(
+                            self.gateway_socket,
+                            offered_role(self.role, self.inspection_only),
+                        )
+                    }
+                }
             ),
             "--resume" if self.started else "--session-id",
             self.session_id,
         ]
+        args += cache_flags(self.role, self.stable_system_prompt, self.tools_flag)
         env = dict(os.environ, DISABLE_TELEMETRY="1", DISABLE_ERROR_REPORTING="1")
         if prompt.effort:
             args += ["--effort", prompt.effort]
