@@ -96,8 +96,13 @@ func last_error() -> String:
 	return _last_error
 
 
-## "/debug [what goes wrong]", or Debug on the offer.
+## "/debug [what goes wrong]", "/debug report <id>" (a player's bug report, read by
+## `joinery reports`), or Debug on the offer.
 func debug(details := "") -> void:
+	var words := details.strip_edges().split(" ", false)
+	if words.size() == 2 and words[0] == "report":
+		debug_report(words[1])
+		return
 	var error := _last_error if not _last_error.is_empty() else details.strip_edges()
 	var transcript: Object = dock.get("_transcript") if dock != null else null
 	if error.is_empty():
@@ -116,6 +121,18 @@ func debug(details := "") -> void:
 		return
 	_offered[error] = true
 	dock.call("show_status", "Debugging…", 2.0)
+
+
+## Hands a player's bug report to the debugger: the chat host reads its note, log and
+## replay, and a worker stages the fix for review like any other.
+func debug_report(report_id: String) -> void:
+	var bridge: Object = tasks.get("bridge") if tasks != null else null
+	if bridge == null or not bridge.has_method("start_debug_report"):
+		return
+	if not bridge.call("start_debug_report", report_id):
+		dock.call("show_status", "Journeyman isn't connected.", 3.0)
+		return
+	dock.call("show_status", "Debugging report %s…" % report_id, 2.0)
 
 
 func offer_text() -> String:

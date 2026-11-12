@@ -205,6 +205,21 @@ func start_task(text: String, targets: Array, extra := {}) -> bool:
 	return true
 
 
+## Debug a player's bug report [param report_id] ("/debug report <id>"): the chat host
+## finds it (`joinery reports`) and starts the debugger from its note, log and replay.
+func start_debug_report(report_id: String) -> bool:
+	if _job == null or not _connected:
+		return false
+	var line := {
+		"kind": "debug_start",
+		"report": report_id,
+		"selection": _selection.duplicate(),
+		"editor_context": context_provider.call([]) if context_provider.is_valid() else {},
+	}
+	_job.send_line(JSON.stringify(line))
+	return true
+
+
 ## Debug [param error] (one Output line) with the Output [param output] and game [param log]
 ## around it: a debugger agent finds the cause and a worker stages the fix (sidebar_debug.gd).
 func start_debug(error: String, output: String, log: String, scene := "") -> bool:

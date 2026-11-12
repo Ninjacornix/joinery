@@ -178,6 +178,27 @@ func _debugging() -> void:
 	started = _sent(job, "debug_start")
 	_check(str(started.get("output", "")).contains("The user says: the player can't jump"), "Words")
 
+	# "/debug report <id>" hands a player's bug report to the host, nothing else.
+	dock.call("run_command", "/debug report 20261112-153012-a3f9")
+	started = _sent(job, "debug_start")
+	_check(str(started.get("report", "")) == "20261112-153012-a3f9", "A report goes by its id")
+	_check(not started.has("error"), "…without the last Output error")
+
+	# "/record" runs the game once with a fixed frame rate and recording on, keeping the
+	# user's own run arguments on both sides of "--".
+	var record: Script = load("res://addons/joinery/replay_record.gd")
+	_check(
+		str(record.call("run_args", "", 60)) == "--fixed-fps 60 -- --joinery-record --joinery-pace",
+		"Recording arguments: %s" % record.call("run_args", "", 60)
+	)
+	_check(
+		(
+			str(record.call("run_args", "--verbose -- --autostart", 120))
+			== "--verbose --fixed-fps 120 -- --autostart --joinery-record --joinery-pace"
+		),
+		"The user's arguments stay: %s" % record.call("run_args", "--verbose -- --autostart", 120)
+	)
+
 	# The host's debugging task: a card titled with the error, then the cause.
 	var title := "Debugging: " + _error.left(60)
 	(

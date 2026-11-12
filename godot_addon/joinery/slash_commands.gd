@@ -46,6 +46,11 @@ signal variants_requested(words: String)
 signal sound_pass_requested(focus: String)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
+const REPLAY_RECORD := preload("replay_record.gd")
+const RECORDING := (
+	"Recording this play to user://joinery_replays/. "
+	+ "Keep it as a test with: joinery replay add <file>"
+)
 ## Everyday commands first; descriptions stay at 32 characters or fewer.
 const COMMANDS := {
 	"/art": ["Review the art direction", "ui"],
@@ -69,6 +74,7 @@ const COMMANDS := {
 	"/rebuild": ["Verify assets can be rebuilt", "cli"],
 	"/agents": ["Accounts Journeyman can use", "cli"],
 	"/models": ["Refresh the model list", "ui"],
+	"/record": ["Record a play as a replay test", "ui"],
 	"/debug": ["Debug the last error", "debug"],
 }
 
@@ -157,6 +163,10 @@ func run(entry: String) -> bool:
 			variants_requested.emit(" ".join(arguments(entry)))
 		elif command == "/sound-pass":
 			sound_pass_requested.emit(" ".join(arguments(entry)))
+		elif command == "/record":
+			if is_inside_tree() and Engine.is_editor_hint():
+				REPLAY_RECORD.record_play(get_tree())
+			finished.emit(command, RECORDING, "success")
 		else:
 			requested.emit(command)
 		return true
