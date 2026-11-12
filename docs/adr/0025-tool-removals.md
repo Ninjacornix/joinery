@@ -1,7 +1,9 @@
 # 0025: Remove Aseprite, REAPER, MuseScore and Audacity; drop the gimp-mcp pin
 
 Status: accepted, 2026-11-09. Amends the tool table of ADR 0003 and the
-user-licensed tool notes in ADR 0008 and ADR 0017.
+user-licensed tool notes in ADR 0008 and ADR 0017. The Audacity part is
+reversed by ADR 0082 (2026-11-12): the dedicated image was built, and the
+stall turned out to be a plugin check replacing the script pipes.
 
 ## Context
 Every catalog tool must do its work inside Joinery's offline workers: the
