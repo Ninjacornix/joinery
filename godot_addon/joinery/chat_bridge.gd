@@ -72,6 +72,9 @@ signal sound_pass_event(event: Dictionary)
 ## The console errors the host is watching (ADR 0075): {mode: ask|auto|off, warnings, groups:
 ## [{id, label, message, place, count, status, note, transaction_id, line}], totals, offer?}.
 signal errors_event(event: Dictionary)
+## The provider hit a usage or quota limit mid-request (ADR 0080): {state: offer|switched|
+## declined, from, to, to_name, message}. An offer waits for [method switch_provider].
+signal provider_switch(event: Dictionary)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 const ATTACHMENTS := preload("chat_attachments.gd")
@@ -291,6 +294,12 @@ func cancel_todo(todo_id: String) -> void:
 func cancel_task(task_id: String) -> void:
 	if _job != null and _connected:
 		_job.send_line(JSON.stringify({"kind": "cancel", "task_id": task_id}))
+
+
+## Answer a quota offer: carry the request on with [param agent], or "" to let it end.
+func switch_provider(agent: String) -> void:
+	if _job != null and _connected:
+		_job.send_line(JSON.stringify({"kind": "provider_switch", "agent": agent}))
 
 
 ## Stop every parallel task (Journeyman's own request is stopped with [method cancel_turn]).
@@ -535,6 +544,8 @@ func _handle(event: Dictionary) -> void:
 		"chat":
 			chat_id = str(event.get("chat_id", ""))
 			chat_changed.emit(event)
+		"provider_switch":
+			provider_switch.emit(event)
 		"file_decision":
 			file_decision.emit(event)
 		"editor_action":

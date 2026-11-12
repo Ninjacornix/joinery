@@ -141,7 +141,32 @@ func _on_dock_child(node: Node) -> void:
 	if node.has_signal("chat_changed") and node != _bridge:
 		_bridge = node
 		_bridge.connect("chat_changed", _on_chat_changed)
+		if node.has_signal("provider_switch"):
+			_bridge.connect("provider_switch", _on_provider_switch)
 		_bridge.set("chat_id", _current_id)
+
+
+## The agent ran out of quota mid-request (ADR 0080): one action under the transcript carries
+## the request on with another signed-in agent; Stop, or leaving it, lets the request end.
+## The project's own [agents] fallback_provider switches without asking, and says so.
+func _on_provider_switch(event: Dictionary) -> void:
+	var message := str(event.get("message", ""))
+	match str(event.get("state", "")):
+		"offer":
+			var to := str(event.get("to", ""))
+			var action := "Continue with " + str(event.get("to_name", to))
+			# A weak reference: the chat may have closed by the time the user answers.
+			var bridge := weakref(_bridge)
+			var answer := func() -> void:
+				var live: Object = bridge.get_ref()
+				if live != null:
+					live.call("switch_provider", to)
+			dock.call("show_status", message, 600.0, action, answer)
+		"switched":
+			dock.call("show_status", "")
+			_transcript.call("add_notice", message, "info")
+		_:
+			dock.call("show_status", "")
 
 
 ## The chat the next message continues ("" for a new one).
