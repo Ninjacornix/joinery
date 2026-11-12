@@ -17,6 +17,7 @@ from joinery import (
     __version__,
     blueprints,
     brief,
+    bug_reports,
     chats,
     checks_cli,
     claims,
@@ -33,6 +34,7 @@ from joinery import (
     metrics,
     playtest,
     references,
+    replays,
     setup_imports,
     share,
     sound_pass,
@@ -1037,6 +1039,14 @@ def _parser() -> argparse.ArgumentParser:
         "playtest", help="play the game headless with a bot and report what goes wrong"
     )
     playtest.add_arguments(playtest_cmd)
+    replays.add_arguments(
+        commands.add_parser(
+            "replay", help="keep recorded plays as tests and replay them headless"
+        )
+    )
+    bug_reports.add_arguments(
+        commands.add_parser("reports", help="list and read bug reports players saved")
+    )
     share_cmd = commands.add_parser(
         "share", help="build the game for players, make store media, publish"
     )
@@ -1429,6 +1439,10 @@ def main(argv: list[str] | None = None) -> int:
         return _features(args.json)
     if args.command == "playtest":
         return playtest.main(args)
+    if args.command == "replay":
+        return replays.main(args)
+    if args.command == "reports":
+        return bug_reports.main(args)
     if args.command == "share":
         return share.main(args)
     if args.command == "match":

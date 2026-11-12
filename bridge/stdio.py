@@ -955,8 +955,9 @@ async def _serve(
                     assert sounder is not None
                     await sounder.stop()
                 elif data.get("kind") == "debug_start":
-                    # /debug, or Debug on the offer after a new error in Output.
-                    await crew.debug(debug_request(data), task_prompt(data))
+                    # /debug, Debug on the offer after a new error in Output, or
+                    # /debug report <id> for a player's bug report.
+                    await crew.debug(debug_request(data, project), task_prompt(data))
                 elif data.get("kind") == "prompt":
                     if active is not None and not active.done():
                         emit(

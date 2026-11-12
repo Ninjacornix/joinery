@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from joinery import bug_reports
 from joinery.authoring import run_offline
 from joinery.transactions import clone_tree
 
@@ -57,8 +58,16 @@ class DebugRequest:
         return list(dict.fromkeys(found))[:12]
 
 
-def debug_request(data: dict[str, Any]) -> DebugRequest:
-    """The sidebar's ``debug_start``, checked: {error, output?, log?, scene?}."""
+def debug_request(data: dict[str, Any], project: Path | None = None) -> DebugRequest:
+    """The sidebar's ``debug_start``, checked: {error, output?, log?, scene?}, or
+    {report: <id>} for a player's bug report ("/debug report <id>", ADR 0059): its note,
+    versions, log and replay become what the debugger starts from."""
+    report_id = str(data.get("report", "") or "").strip()
+    if report_id:
+        if project is None:
+            raise ValueError("A bug report is debugged from inside a project.")
+        found = bug_reports.debug_text(bug_reports.find(project, report_id))
+        data = {**found, "scene": data.get("scene") or found["scene"]}
     error = " ".join(str(data.get("error", "")).split())
     output = str(data.get("output", ""))
     log = str(data.get("log", ""))

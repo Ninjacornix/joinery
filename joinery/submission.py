@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from joinery import complex_models, reasons, references
+from joinery import complex_models, reasons, references, replays
 from joinery.art_approval import approved
 from joinery.art_approval import fingerprint as bible_fingerprint
 from joinery.authoring import run_offline
@@ -279,12 +279,15 @@ async def validate(
     if godot and not tests:
         found.skipped.append("tests")
     importing = godot and not gateway.import_current(tx)
+    # Recorded play sessions replay on a change to the game (ADR 0059).
+    replaying = godot and replays.config(tx.stage)["replays"]
     found.ran += [
         name
         for name, on in (
             ("art bible", rules),
             ("Godot import", importing or bool(tests)),
             ("tests", bool(tests)),
+            ("replays", replaying),
         )
         if on
     ]
@@ -296,6 +299,7 @@ async def validate(
         tests=tests,
         span=gateway.span,
         imported=lambda: gateway.mark_imported(tx),
+        replays_on=replaying,
     )
     return found
 
@@ -309,11 +313,13 @@ async def checks(
     tests: list[str] | None = None,
     span: Any = None,
     imported: Callable[[], None] | None = None,
+    replays_on: bool = False,
 ) -> list[Problem]:
-    """The art bible's measured rules beside Godot's import check and the project's tests.
+    """The art bible's measured rules beside Godot's import check, the project's tests
+    and its recorded replays.
 
     Each runs in the offline worker and takes seconds. The rules mount the stage
-    read-only and run alongside; the tests need the import, so they follow it.
+    read-only and run alongside; the tests and replays need the import, so they follow it.
     ``imported`` is told when Godot imported the stage cleanly, so the next check
     of the same stage (a submit after a precheck) can skip that import.
     """
@@ -368,6 +374,8 @@ async def checks(
                 imported()
         if tests:
             found += await run_tests(tx.stage, tests, timed)
+        if replays_on:
+            found += await run_replays(tx, imported=godot or bool(tests), timed=timed)
         return found
 
     outcomes = await asyncio.gather(measured(), godot_checks(), return_exceptions=True)
@@ -420,6 +428,33 @@ async def run_tests(
             "The project's tests failed: "
             + (got.output[-4000:] or "GUT exited with an error."),
             items=reasons.tests(got.output),
+        )
+    ]
+
+
+async def run_replays(
+    tx: FileTransaction, *, imported: bool, timed: Any = None
+) -> list[Problem]:
+    """Replay ``tests/replays/`` on the stage; one that now diverges or errors is a
+    problem naming the frame and what differed (ADR 0059)."""
+
+    async def offline(argv: list[str], root: Path, seconds: int) -> Result:
+        got = await run_offline(argv, root, seconds)
+        worker_ready(got)
+        return got
+
+    with timed("review_replays") if timed is not None else nullcontext():
+        outcomes = await replays.check_stage(
+            tx.project, tx.stage, offline, OFFLINE_SECONDS * 2, imported=imported
+        )
+    failed = [o for o in outcomes if not o.ok]
+    if not failed:
+        return []
+    return [
+        Problem(
+            "replays",
+            replays.problems_text(outcomes),
+            [f"{replays.FOLDER.as_posix()}/{o.name}{replays.SUFFIX}" for o in failed],
         )
     ]
 
