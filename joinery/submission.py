@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Any
 
-from joinery import complex_models, reasons, references, replays
+from joinery import complex_models, reasons, references, replays, saves, scene_variants
 from joinery.art_approval import approved
 from joinery.art_approval import fingerprint as bible_fingerprint
 from joinery.authoring import run_offline
@@ -218,6 +218,19 @@ async def validate(
             )
         )
     found.ran.append("references")
+    # Scene variants (inherited scenes) set properties only on nodes their base has.
+    broken_variants = scene_variants.check(
+        tx.stage, [c["path"] for c in changes if c["after"] not in {"", DIRECTORY}]
+    )
+    if broken_variants:
+        found.problems.append(
+            Problem(
+                "variants",
+                "A scene variant doesn't fit its base: " + " ".join(broken_variants),
+                _paths(broken_variants),
+                items=[reasons.variant(line) for line in broken_variants],
+            )
+        )
     # Complex objects are Blender (or kit) models, not piles of placeholder shapes.
     if complex_models.setting(gateway.project) == complex_models.BLENDER and any(
         c["path"].endswith(".tscn") and c["after"] for c in changes
@@ -281,6 +294,12 @@ async def validate(
     importing = godot and not gateway.import_current(tx)
     # Recorded play sessions replay on a change to the game (ADR 0059).
     replaying = godot and replays.config(tx.stage)["replays"]
+    # Kept saves load in a change that touches what saves are made of (ADR 0066).
+    saving = (
+        godot
+        and saves.config(tx.stage)["saves"]
+        and saves.relevant(tx.stage, tx.original, changes)
+    )
     found.ran += [
         name
         for name, on in (
@@ -288,6 +307,7 @@ async def validate(
             ("Godot import", importing or bool(tests)),
             ("tests", bool(tests)),
             ("replays", replaying),
+            ("saves", saving),
         )
         if on
     ]
@@ -300,6 +320,7 @@ async def validate(
         span=gateway.span,
         imported=lambda: gateway.mark_imported(tx),
         replays_on=replaying,
+        saves_on=saving,
     )
     return found
 
@@ -314,9 +335,10 @@ async def checks(
     span: Any = None,
     imported: Callable[[], None] | None = None,
     replays_on: bool = False,
+    saves_on: bool = False,
 ) -> list[Problem]:
-    """The art bible's measured rules beside Godot's import check, the project's tests
-    and its recorded replays.
+    """The art bible's measured rules beside Godot's import check, the project's tests,
+    its recorded replays and its kept saves.
 
     Each runs in the offline worker and takes seconds. The rules mount the stage
     read-only and run alongside; the tests and replays need the import, so they follow it.
@@ -376,6 +398,10 @@ async def checks(
             found += await run_tests(tx.stage, tests, timed)
         if replays_on:
             found += await run_replays(tx, imported=godot or bool(tests), timed=timed)
+        if saves_on:
+            found += await run_saves(
+                tx, imported=godot or bool(tests) or replays_on, timed=timed
+            )
         return found
 
     outcomes = await asyncio.gather(measured(), godot_checks(), return_exceptions=True)
@@ -455,6 +481,42 @@ async def run_replays(
             "replays",
             replays.problems_text(outcomes),
             [f"{replays.FOLDER.as_posix()}/{o.name}{replays.SUFFIX}" for o in failed],
+        )
+    ]
+
+
+async def run_saves(
+    tx: FileTransaction, *, imported: bool, timed: Any = None
+) -> list[Problem]:
+    """Load ``tests/saves/`` in the staged game; a save that no longer loads, or loses
+    data it loaded with before the change, is a problem naming it (ADR 0066)."""
+
+    async def offline(argv: list[str], root: Path, seconds: int) -> Result:
+        got = await run_offline(argv, root, seconds)
+        worker_ready(got)
+        return got
+
+    with timed("review_saves") if timed is not None else nullcontext():
+        outcomes = await saves.check_stage(
+            tx.project, tx.stage, offline, OFFLINE_SECONDS * 2, imported=imported
+        )
+    failed = [o for o in outcomes if not o.ok]
+    if not failed:
+        return []
+    return [
+        Problem(
+            "saves",
+            saves.problems_text(outcomes),
+            [o.path for o in failed],
+            items=[
+                reasons.saves(
+                    o.path,
+                    "load_failed" if o.status == "failed" else "data_lost",
+                    o.detail + (" " + "; ".join(o.lost[:6]) if o.lost else ""),
+                    o.data_version,
+                )
+                for o in failed
+            ],
         )
     ]
 

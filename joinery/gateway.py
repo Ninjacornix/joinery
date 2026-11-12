@@ -14,7 +14,15 @@ from typing import TYPE_CHECKING, Any, cast
 
 from mcp.types import CallToolResult, TextContent
 
-from joinery import live_game, metrics, references, sound_kit, staged_assets, submission
+from joinery import (
+    live_game,
+    metrics,
+    references,
+    scene_variants,
+    sound_kit,
+    staged_assets,
+    submission,
+)
 from joinery import parts as part_targets
 from joinery import tools as tool_modules
 from joinery.art_approval import approved, review
@@ -1093,14 +1101,18 @@ class ProjectGateway:
         self._media_jobs = (tx.id, media, jobs)
         extras = self.review_extras.pop(tx.id, {})
         self.review_extras.clear()
+        # A changed scene variant shows only what it overrides, beside its picture.
+        variants, variant_facts = scene_variants.review_items(
+            tx.stage, tx.original, reviewed
+        )
         return {
-            "joinery_facts": list(extras.get("facts", [])),
+            "joinery_facts": [*extras.get("facts", []), *variant_facts],
             "kind": "file_preview",
             "diff": "\n".join(text_diffs[:400]),
             "transaction_id": tx.id,
             "summary": tx.summary,
             "changes": reviewed,
-            "media": [*extras.get("media", []), *media],
+            "media": [*extras.get("media", []), *variants, *media],
             "media_pending": bool(jobs),
         }
 

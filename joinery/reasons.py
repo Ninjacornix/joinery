@@ -456,6 +456,52 @@ def generic(check: str, message: str, paths: Iterable[str]) -> list[Reason]:
     ]
 
 
+def variant(line: str) -> Reason:
+    """A scene variant that doesn't fit its base (``joinery.scene_variants.check``)."""
+    file, what = _split(line)
+    node = re.search(r"node (\S+) isn't in", what)
+    if "doesn't exist" in what:
+        return Reason(
+            "variants.missing_base",
+            file,
+            measured=_clip(what),
+            expected="a base scene in the project",
+            fix="Point the variant at an existing scene, or add the base in this change.",
+        )
+    if "inherit from itself" in what:
+        return Reason(
+            "variants.cycle",
+            file,
+            measured=_clip(what),
+            expected="a base that doesn't inherit the variant",
+            fix="Inherit from another scene.",
+        )
+    return Reason(
+        "variants.unknown_node",
+        file,
+        node=node.group(1) if node else "",
+        measured=_clip(what),
+        expected="a node the base scene has",
+        fix="Name a node the base has, or give the new node a type.",
+    )
+
+
+def saves(save: str, kind: str, what: str, version: int) -> Reason:
+    """A kept save that no longer loads (``load_failed``) or loses data (``data_lost``)
+    in the changed game (``joinery.saves``)."""
+    return Reason(
+        "saves." + kind,
+        save,
+        measured=_clip(what),
+        expected="the save loads with all its data",
+        fix=(
+            f"Raise save/data_version in project.godot to {version + 1} and add step "
+            f"{version} in res://game/save_migrations.gd that turns the old save into "
+            "the new shape, in this change."
+        ),
+    )
+
+
 #: The reviewer's categories for a blocking note (``report_review``'s ``rule``).
 REVIEW_RULES = ("request", "art_bible", "brief", "broken", "work_lost", "other")
 
