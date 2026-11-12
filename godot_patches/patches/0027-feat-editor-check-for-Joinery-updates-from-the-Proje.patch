@@ -1,0 +1,85 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Thu, 12 Nov 2026 18:45:36 +0100
+Subject: [PATCH] feat(editor): check for Joinery updates from the Project
+ Manager
+
+Joinery-only, not meant for upstream: it loads the Joinery addon's update
+dialog from JOINERY_HOME, as the connect screen is loaded, and adds a
+"Check for updates" link to the project list's top bar whose text follows
+the dialog ("Joinery 0.6.0 is available", "Restart to finish updating").
+---
+ editor/project_manager/project_manager.cpp | 41 ++++++++++++++++++++++
+ editor/project_manager/project_manager.h   |  7 ++++
+ 2 files changed, 48 insertions(+)
+
+diff --git a/editor/project_manager/project_manager.cpp b/editor/project_manager/project_manager.cpp
+index 966455f..efe7ee9 100644
+--- a/editor/project_manager/project_manager.cpp
++++ b/editor/project_manager/project_manager.cpp
+@@ -2159,6 +2159,47 @@ void ProjectManager::_joinery_show_connection() {
+ 		local_projects_vb->add_child(joinery_agent_row);
+ 	}
+ 	_joinery_update_agent_chip();
++	_joinery_add_updates();
++}
++
++void ProjectManager::_joinery_add_updates() {
++	if (joinery_updates || joinery_home.is_empty()) {
++		return;
++	}
++	Ref<Script> script = ResourceLoader::load(joinery_home.path_join("godot_addon/joinery/update_dialog.gd"));
++	if (script.is_null() || !script->is_valid()) {
++		return;
++	}
++	Object *instance = ClassDB::instantiate(script->get_instance_base_type());
++	joinery_updates = Object::cast_to<Window>(instance);
++	if (!joinery_updates) {
++		memdelete(instance);
++		return;
++	}
++	joinery_updates->set_script(script);
++	joinery_updates->set("engine_home", joinery_home);
++	add_child(joinery_updates);
++
++	joinery_update_link = memnew(Button);
++	joinery_update_link->set_theme_type_variation(SNAME("JoineryLinkButton"));
++	joinery_update_link->set_text(TTR("Check for updates"));
++	joinery_update_link->set_v_size_flags(Control::SIZE_SHRINK_CENTER);
++	joinery_update_link->connect(SceneStringName(pressed), callable_mp(this, &ProjectManager::_joinery_open_updates));
++	joinery_updates->connect(SNAME("label_changed"), callable_mp(joinery_update_link, &Button::set_text));
++	if (joinery_top_bar) {
++		joinery_top_bar->add_child(joinery_update_link);
++	} else {
++		local_projects_vb->add_child(joinery_update_link);
++	}
++	// At most once a day, and only from an installed Joinery: a new signed
++	// version opens the dialog; anything else only changes the link's text.
++	joinery_updates->call_deferred(SNAME("check_daily"));
++}
++
++void ProjectManager::_joinery_open_updates() {
++	if (joinery_updates) {
++		joinery_updates->call(SNAME("open"));
++	}
+ }
+ 
+ void ProjectManager::_joinery_update_agent_chip() {
+diff --git a/editor/project_manager/project_manager.h b/editor/project_manager/project_manager.h
+index d8739e2..dcc4db0 100644
+--- a/editor/project_manager/project_manager.h
++++ b/editor/project_manager/project_manager.h
+@@ -191,6 +191,13 @@ class ProjectManager : public Control {
+ 	void _joinery_fit_header();
+ 	String joinery_home;
+ 	void _joinery_update_agent_chip();
++	// "Check for updates" in the top bar: the addon's update dialog (ADR 0083),
++	// loaded from JOINERY_HOME like the connect screen. Its text follows the
++	// dialog ("Joinery 0.6.0 is available", "Restart to finish updating").
++	Window *joinery_updates = nullptr;
++	Button *joinery_update_link = nullptr;
++	void _joinery_add_updates();
++	void _joinery_open_updates();
+ 
+ 	HBoxContainer *open_btn_container = nullptr;
+ 	PopupMenu *open_options_popup = nullptr;

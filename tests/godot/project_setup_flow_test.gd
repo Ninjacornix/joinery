@@ -226,6 +226,7 @@ func _run() -> void:
 		if (node as Button).text == "Change" and (node as Button).is_visible_in_tree():
 			chip = node as Button
 	_check(chip != null, "The project list shows the agent in use with a Change link")
+	await _check_updates_link()
 	if chip != null:
 		chip.pressed.emit()
 		_check(connect.is_visible_in_tree(), "The agent chip reopens the connect screen")
@@ -244,6 +245,26 @@ func _run() -> void:
 	await _wizard(create)
 	print("project setup flow: ", "FAILED" if _failed else "ok")
 	quit(1 if _failed else 0)
+
+
+## "Check for updates" in the project list's top bar: the addon's update dialog, loaded from
+## JOINERY_HOME (ADR 0083). From a checkout the daily check opens nothing; the link's text
+## follows the dialog.
+func _check_updates_link() -> void:
+	var updates := root.find_child("JoineryUpdates", true, false) as AcceptDialog
+	_check(updates != null, "The Project Manager loads the update dialog")
+	var link: Button = null
+	for node: Node in root.find_children("*", "Button", true, false):
+		if (node as Button).text == "Check for updates" and (node as Button).is_visible_in_tree():
+			link = node as Button
+	_check(link != null, "The project list offers Check for updates")
+	if updates == null or link == null:
+		return
+	_check(not updates.visible, "The daily check from a checkout opens nothing")
+	updates.emit_signal("label_changed", "Joinery 0.6.0 is available")
+	_check(link.text == "Joinery 0.6.0 is available", "The link follows the dialog")
+	await _capture(root, "startup-project-list.png")
+	updates.emit_signal("label_changed", "Check for updates")
 
 
 func _wizard(create: Button) -> void:

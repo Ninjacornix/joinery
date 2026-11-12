@@ -24,6 +24,7 @@ from joinery.distribution import engine_binary
 CAPTURES = (
     "startup-agent-connect.png",
     "startup-api-submenu.png",
+    "startup-project-list.png",
     "startup-setup-details.png",
     "startup-setup-tools.png",
     "startup-setup-history.png",
