@@ -153,6 +153,19 @@ def test_patches_target_only_expected_areas() -> None:
         "0022-test-windows-trace-fail-fast-exits-in-test-editors.patch": {
             "platform/windows/godot_windows.cpp": "docs/adr/0032-background-test-editors.md",
         },
+        "0027-feat-editor-wear-Joinery-s-icon-in-the-editor.patch": {
+            path: "docs/adr/0084-joinery-icon.md"
+            for path in (
+                "SConstruct",
+                "main/SCsub",
+                "main/main.cpp",
+                "main/main_builders.py",
+                "main/app_icon_editor.png",
+                "main/app_icon_editor_macos.png",
+                "main/splash_editor.png",
+                "platform/windows/godot.ico",
+            )
+        },
     }
     for patch in patches():
         for match in re.findall(r"^\+\+\+ b/(.+)$", patch.read_text(), re.MULTILINE):
