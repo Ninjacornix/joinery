@@ -175,11 +175,11 @@ func _value(box: HBoxContainer, raw: String, text: String, variation: String) ->
 		var swatch := Panel.new()
 		var style := StyleBoxFlat.new()
 		style.bg_color = colour
-		style.set_corner_radius_all(3)
+		style.set_corner_radius_all(UI_THEME.radius(self, "xs"))
 		style.border_color = Color(0.5, 0.5, 0.5, 0.5)
 		style.set_border_width_all(1)
 		swatch.add_theme_stylebox_override("panel", style)
-		swatch.custom_minimum_size = Vector2(12, 12)
+		swatch.custom_minimum_size = Vector2.ONE * UI_THEME.dot_px(self) * 1.5
 		swatch.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		box.add_child(swatch)
 	var shown := text if text.length() <= VALUE_CHARS else text.left(VALUE_CHARS - 1) + "…"
