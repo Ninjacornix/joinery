@@ -243,3 +243,39 @@ def test_a_new_project_asks_the_editor_for_the_tour_once(tmp_path: Path) -> None
     path = tmp_path / "Lighthouse"
     assert cli.main(["new", str(path), "--name", "Lighthouse", "--tools", "godot"]) == 0
     assert (path / TOUR_PENDING).is_file()
+
+
+# --- The benchmark -------------------------------------------------------------------
+
+
+def test_the_benchmark_waits_for_off_peak_and_runs_on_the_light_model(
+    tmp_path: Path,
+) -> None:
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "evals_run", Path(__file__).resolve().parents[1] / "evals/run.py"
+    )
+    assert spec is not None and spec.loader is not None
+    run = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(run)
+    toml(tmp_path, 'idle_hours = "01:00-05:00"\nlight_model = { claude = "haiku" }\n')
+    times = iter(
+        [datetime(2026, 11, 12, 23, 0)] * 2 + [datetime(2026, 11, 13, 1, 0)] * 2
+    )
+    slept: list[float] = []
+    pin = run.off_peak(
+        run.benchmark.Pin(agent="claude", model="opus"),
+        tmp_path,
+        explicit_model=False,
+        now=lambda: next(times),
+        sleep=slept.append,
+    )
+    assert pin.model == "haiku" and slept == [60]
+    kept = run.off_peak(
+        run.benchmark.Pin(agent="claude", model="opus"),
+        tmp_path,
+        explicit_model=True,
+        now=lambda: datetime(2026, 11, 13, 2, 0),
+    )
+    assert kept.model == "opus"

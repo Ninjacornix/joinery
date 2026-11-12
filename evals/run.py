@@ -16,14 +16,41 @@ import asyncio
 import json
 import sys
 import tempfile
+import time
+from collections.abc import Callable
+from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
-from joinery import benchmark
+from joinery import benchmark, idle_runs
+from joinery.routing import routing_settings
 
 SUITES = {"benchmark": ROOT / "evals/benchmark.toml"}
+
+
+def off_peak(
+    pin: benchmark.Pin,
+    project: Path,
+    *,
+    explicit_model: bool,
+    now: Callable[[], datetime] = datetime.now,
+    sleep: Callable[[float], None] = time.sleep,
+) -> benchmark.Pin:
+    """Wait until ``[agents] idle_hours`` of ``project``, and run on its light model
+    (ADR 0061) unless a model was pinned on the command line."""
+    config = idle_runs.settings(project)
+    if not idle_runs.in_hours(now(), config.hours):
+        print(f"Waiting for off-peak hours ({config.hours})…", flush=True)
+        while not idle_runs.in_hours(now(), config.hours):
+            sleep(60)
+    light = routing_settings(project).light_model(pin.agent)
+    if light and not explicit_model:
+        print(f"Running on the light model: {light}", flush=True)
+        return replace(pin, model=light)
+    return pin
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -37,6 +64,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repeats", type=int, default=0)
     parser.add_argument("--case", action="append", default=[], help="only this case")
     parser.add_argument("--out", type=Path, help="write the Markdown report here")
+    parser.add_argument(
+        "--off-peak",
+        action="store_true",
+        help="wait for the testbed's idle_hours, then run on its light model "
+        "unless --model pins one (no agent CLI offers a batch API: ADR 0072)",
+    )
     args = parser.parse_args(argv)
     suite = benchmark.load(SUITES[args.suite])
     if args.list or not args.live:
@@ -53,6 +86,8 @@ def main(argv: list[str] | None = None) -> int:
     if not pin.agent:
         print("Pin an agent with --agent for a live run.", file=sys.stderr)
         return 2
+    if args.off_peak:
+        pin = off_peak(pin, ROOT / "testbed", explicit_model=bool(args.model))
     with tempfile.TemporaryDirectory(prefix="joinery-benchmark-") as folder:
         report = asyncio.run(
             benchmark.run(
