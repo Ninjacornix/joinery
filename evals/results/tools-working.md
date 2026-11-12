@@ -1,5 +1,16 @@
 # Every catalog tool, end to end (2026-11-10)
 
+> Update (2026-11-12): Audacity is back in the catalog in its own offline
+> worker ([ADR 0082](../../docs/adr/0082-audacity-worker.md)). The stall below
+> was a plugin check in a child `audacity --host` process that replaced the
+> script pipes under the running Audacity, plus a stale X lock left in the
+> image. Measured on macOS arm64 under amd64 emulation: the worker's own layers
+> build in 42 s (no cache, warm base) and add about 37 MB (compressed content)
+> to `joinery-mcp-worker`; 26 of 26 fresh starts answered within 5.8 s;
+> `tests/integration/audacity_native.py` passes in 30 s, with the `.aup3`, WAV
+> mixdown and label file identical across recipe rebuilds, separate runs and
+> image rebuilds. Native amd64 CI has not run it yet.
+
 One real run per remaining catalog tool against disposable projects: create a
 native source, edit it, export, replay every recipe from scratch, and read the
 tool's readiness from the shared core (`joinery/readiness.py`). No model calls,

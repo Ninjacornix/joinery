@@ -27,7 +27,8 @@ Bar for preferred MCPs, enforced in `joinery/catalog.py`:
 
 Aseprite, REAPER, MuseScore and Audacity were later removed, and GIMP's
 community pin was dropped for Joinery's own server
-([ADR 0025](0025-tool-removals.md)).
+([ADR 0025](0025-tool-removals.md)). Audacity returned in its own worker
+([ADR 0082](0082-audacity-worker.md)).
 
 Godot's popular options failed the bar: hi-godot/godot-ai sends telemetry by default and
 routes vision requests to cloud models, tomyud1/godot-mcp has a `generate_2d_asset` tool,

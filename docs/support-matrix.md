@@ -82,12 +82,13 @@ audit ran on macOS.
 | Music (MIDI) | Songs written as MIDI sources (`compose_music`, `edit_music`, `render_music` in `joinery-sound`), rendered offline through FluidSynth (Debian FluidR3_GM SoundFont) and Surge XT patches | Piano and drums through FluidSynth with a Surge XT bass: exact sample count, loop tags, −16 LUFS; transpose and program edits; an imported `.mid` renders unchanged; four recipes replay byte-identically |
 | Adaptive music | Tracks composed by rule as layered MIDI (`compose_track`, `edit_track`, `inspect_track` in `joinery-sound`), each layer rendered to its own Ogg stem; the game core's `Music` autoload plays them by intensity state | 3 layers × 2 sections and a stinger: 384000 frames per stem after decoding, seamless loops, both section mixes −16.0 LUFS; stock Godot switches to combat on the bar with 0.00 ms layer drift; an edit keeps the mix; 10 files replay byte-identically |
 | Sound kit and sound pass | `make_sound` (SuperCollider NRT with `RandSeed`, Surge XT) and `/sound-pass` placing `Footsteps`, `SoundCue`, `AmbienceZone` and UI sounds | A third-person level: 11 sounds made and placed in 5 parallel reviewed changes, every sound within 0.2 LU of its target, stock Godot loads every scene, 11 recipes replay byte-identically |
+| Audacity 3.7.3 | `.aup3` projects from the user's own recordings through `joinery-sound operate_document`, in its own offline worker (`joinery-audacity-worker`, [ADR 0082](adr/0082-audacity-worker.md)): typed import, noise reduction from a noise profile, spectral delete or EQ, labels, track gain/pan/mute, clip moves; a logged raw `macro` fallback; WAV mixdowns and a label file | A recording with a noise lead-in: 12 dB of reduction takes the lead-in from 0.0289 to 0.0073 RMS (24 dB: 0.0018); a spectral delete removes a 4.4 kHz whistle inside its box while the hum and the whistle outside keep 99.6%; the `.aup3`, WAV and label file replay byte for byte, run after run (`tests/integration/audacity_native.py`). The pinned Audacity MCP answers beside Audacity for inspection; its transcription tools are refused and no speech model is installed. Measured under amd64 emulation only. No MIDI, no recording, no other typed effects |
 | Audio edits | Typed ffmpeg operations (`process_audio`): trim silence, fade, loudness, loop points, format | On SuperCollider and Surge XT renders: trim, fade from silence, −18 LUFS under −1 dBTP, then a looping stereo 44.1 kHz Ogg with loop tags; edits chain, replay byte-identically, and refusals (imported file, empty fade, outside `audio/`, escaping path) change nothing |
 | Custom tools | Explicit project MCP/desktop configuration | Readiness and provenance remain tool-specific; never inferred from a catalog entry |
 
 ### Removed tools
 
-Aseprite, REAPER, MuseScore and Audacity are no longer catalog tools
+Aseprite, REAPER and MuseScore are no longer catalog tools
 ([ADR 0025](adr/0025-tool-removals.md)). A project that still lists one keeps
 opening; the id is skipped and a notice says what replaced it:
 
@@ -98,9 +99,9 @@ opening; the id is skipped and a notice says what replaced it:
   `[desktop.reaper]` command for "Open in".
 - **MuseScore**: no headless mode. Music is written as MIDI sources rendered
   through FluidSynth and Surge XT.
-- **Audacity**: no reliable headless worker. Sound edits (trim, fade,
-  normalise, loop points, format) move to Joinery's sound server; "Open in
-  Audacity" still works when it is installed.
+
+Audacity was removed in 0.2 too and has returned in its own worker
+([ADR 0082](adr/0082-audacity-worker.md)).
 
 Application versions here identify the evaluated worker, not guaranteed future
 apt package resolution. Direct-download versions/hashes are recorded; Debian's

@@ -61,12 +61,13 @@ changes.
 | 3D models | Blender 5.2 (MPFB2 humans, Rigify) |
 | Materials | Material Maker 1.8, Blender shader nodes |
 | 2D, UI and pixel art | Krita 5.2, GIMP 3.0, Inkscape 1.4 |
-| Sound | Surge XT 1.3, SuperCollider 3.13; sound edits (trim, fade, loudness, loops) |
+| Sound | Surge XT 1.3, SuperCollider 3.13, Audacity 3.7 (your own recordings: noise reduction, spectral edits, labels, mixdowns); sound edits (trim, fade, loudness, loops) |
 | Music | MIDI rendered through FluidSynth and Surge XT |
 | The game | Godot scenes, scripts and settings |
 
-Aseprite, REAPER, MuseScore and Audacity were removed as built-in tools in 0.2
-([why, and what to use instead](docs/adr/0025-tool-removals.md)). You can add
+Aseprite, REAPER and MuseScore were removed as built-in tools in 0.2
+([why, and what to use instead](docs/adr/0025-tool-removals.md)); Audacity came
+back in its own offline worker ([ADR 0082](docs/adr/0082-audacity-worker.md)). You can add
 them, or any other program, to a project as your own custom tool. The
 [support matrix](docs/support-matrix.md) lists what each tool can do.
 

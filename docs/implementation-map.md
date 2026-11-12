@@ -34,7 +34,7 @@ implemented. See [ADR 0017](adr/0017-project-mcp-gateway.md) and the
 | Part selection | `joinery parts` from Blender's own inspection; names mapped back through export extras; typed per-part edits (`set_material_value`, `adjust_map`, `bake_height_to_normal`, `make_map_editable`, `paint_map`, `replace_map`, `split_material`, `edit_bone`, `edit_shape_key`) ([ADR 0028](adr/0028-part-selection.md)); a character's body regions, MPFB2 body settings and the game's shape keys (`set_body_shape`, `bake_shape_keys`), picked on the asset page and in review ([ADR 0073](adr/0073-character-parts-and-shape-keys.md)) | Blender only; Alt+click on stock Godot needs the model root selected |
 | Change history | Copy-on-write stage, originals of changed files only, retention under `[history]`, `history usage\|compact` ([ADR 0026](adr/0026-change-history-storage.md)) | Compact gives up older reverts |
 | Tool readiness | One core (`joinery/readiness.py`) for CLI, wizard, rail, sidebar and agents; 21 of 21 tool probes pass offline ([results](../evals/results/tools-working.md)) | No authoring round trip in `status` or `doctor` |
-| Removed tools | Aseprite, REAPER, MuseScore and Audacity left the catalog; projects that list them keep opening with a notice ([ADR 0025](adr/0025-tool-removals.md)) | They can return only as user-added custom tools |
+| Removed tools | Aseprite, REAPER and MuseScore left the catalog (Audacity returned in its own worker, [ADR 0082](adr/0082-audacity-worker.md)); projects that list them keep opening with a notice ([ADR 0025](adr/0025-tool-removals.md)) | They can return only as user-added custom tools |
 | Classic Godot view | One editor setting, `interface/joinery/editor_layout` (Joinery or Classic Godot), switched from Editor > Switch to classic Godot view (or Switch to Joinery view), the command palette or Journeyman settings > Appearance > Layout; each layout keeps its own docks in `editor_layout.cfg`; `tests/godot/run_classic_view_test.py` checks docks, title bar, run bar, menu item and settings row in both layouts ([ADR 0031](adr/0031-classic-godot-view.md)) | Applies after a restart; nothing switches live |
 | Writing guidance | Bible, brief and agent instructions share `joinery/bible_writing.py`; bible lint and the brief check suggest plainer words for filler | A suggestion only, never a blocker |
 
@@ -236,7 +236,8 @@ Material Maker, Krita (pixel art included) and SuperCollider/Surge XT/MIDI audio
 still needs its own document, operation, preview/export and replay adapter.
 Material Maker/Krita/Surge currently have planned catalog entries; their
 first-party servers are not implemented. Paid or desktop-only apps (Aseprite,
-REAPER, MuseScore, Audacity) were removed as built-in tools (ADR 0025).
+REAPER, MuseScore) were removed as built-in tools (ADR 0025); Audacity
+returned in its own worker (ADR 0082).
 
 Acceptance examples: alter an existing material graph and reimport it; edit a
 sprite layer and refresh its Godot resource; change a synth patch and compare

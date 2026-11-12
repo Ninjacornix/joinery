@@ -96,8 +96,10 @@ exports, record replay/provenance, validate Godot import, and show before/after
 images or audio for review. Existing source edits preserve the owning document;
 replay preimages are kept separately from editable sources. Surge XT renders
 offline in the worker from named parameters and notes; SuperCollider remains
-available too. Aseprite, REAPER, MuseScore and Audacity are no longer built-in
-tools (ADR 0025); add any of them as a custom tool if you want it.
+available too, and Audacity cleans up your own recordings (noise reduction,
+spectral edits, labels, mixdowns) in its own offline worker (ADR 0082).
+Aseprite, REAPER and MuseScore are no longer built-in tools (ADR 0025); add any
+of them as a custom tool if you want it.
 
 Art creation requires approval of the project's completed `art/bible.md`.
 A bible drafted from your own answers when the project is made (the New project

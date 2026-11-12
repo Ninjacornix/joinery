@@ -189,9 +189,14 @@ suites cannot report success. This inventory is separate from
 the support matrix: a catalog entry does not mean Joinery has an installer or
 authoring adapter for it.
 
-Aseprite, REAPER, MuseScore and Audacity were removed from the catalog and
-GIMP's community MCP pin was dropped ([ADR 0025](adr/0025-tool-removals.md)),
-so no community MCP currently needs a separate upstream suite. The lane stays
+Aseprite, REAPER and MuseScore were removed from the catalog and GIMP's
+community MCP pin was dropped ([ADR 0025](adr/0025-tool-removals.md)). Audacity's
+pinned MCP is exercised in its real worker instead, by
+`tests/integration/audacity_native.py` (build the worker with
+`docker build --platform linux/amd64 -t joinery-audacity-worker -f sandbox/audacity.Dockerfile sandbox`
+on top of `joinery-mcp-worker`; set `JOINERY_SERVER_CACHE` to try the MCP
+without touching your own install). So no community MCP currently needs a
+separate upstream suite. The lane stays
 for the next one: list its id in `PROFILES` in `tests/upstream/plan.py`, then
 
 ```sh

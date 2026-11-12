@@ -1,5 +1,16 @@
 # All catalogued programs and MCPs
 
+> Update (2026-11-12): Audacity is back in the catalog in its own offline
+> worker ([ADR 0082](../../docs/adr/0082-audacity-worker.md)). The stall below
+> was a plugin check in a child `audacity --host` process that replaced the
+> script pipes under the running Audacity, plus a stale X lock left in the
+> image. Measured on macOS arm64 under amd64 emulation: the worker's own layers
+> build in 42 s (no cache, warm base) and add about 37 MB (compressed content)
+> to `joinery-mcp-worker`; 26 of 26 fresh starts answered within 5.8 s;
+> `tests/integration/audacity_native.py` passes in 30 s, with the `.aup3`, WAV
+> mixdown and label file identical across recipe rebuilds, separate runs and
+> image rebuilds. Native amd64 CI has not run it yet.
+
 > Note (2026-11-09): Aseprite, REAPER, MuseScore and Audacity were later removed from the catalog and GIMP's community MCP pin was dropped ([ADR 0025](../../docs/adr/0025-tool-removals.md)). The results below are kept as history.
 
 Measured locally on 2026-11-08, macOS ARM64. Native worker checks use offline
