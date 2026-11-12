@@ -36,7 +36,8 @@ Joinery's prompts didn't keep to that:
    bible and game brief where the role reads them (the reviewer). They reach
    the provider as `Prompt.rules`, the same bytes on every run of the role.
 4. The project map: the editor context without its per-turn keys
-   (`TURN_KEYS`), keys sorted, one JSON spelling.
+   (`TURN_KEYS`), keys sorted, one JSON spelling. (ADR 0063 puts the ranked
+   `joinery map` ahead of it and makes its node list an outline.)
 5. The turn: the summary a fresh session starts from, the per-turn editor
    keys, the selection, the request and its attachments.
 

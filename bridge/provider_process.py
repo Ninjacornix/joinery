@@ -19,6 +19,7 @@ from joinery.catalog import ROOT
 from joinery.chat_attachments import listed
 from joinery.compact import editor_outline
 from joinery.connection import status
+from joinery.project_map import cached as cached_map
 from joinery.provider_support import WINDOWS_BOUNDARY_REASON, require_supported
 from joinery.wiring import _command_str
 
@@ -60,10 +61,22 @@ def _json(value: object) -> str:
 
 
 def project_map(prompt: Prompt) -> str:
-    """The editor context without its per-turn keys, its node list as an outline
-    (ADR 0063): the same bytes while the scene on screen is unchanged."""
+    """The project's ranked map (``joinery map``, the same bytes while its files are
+    the same), then the editor context without its per-turn keys, its node list as an
+    outline (ADR 0063): the same bytes while the scene on screen is unchanged."""
     stable = {k: v for k, v in prompt.editor_context.items() if k not in TURN_KEYS}
-    return "Editor context:\n" + _json(editor_outline(stable)) + "\n\n"
+    summary = ""
+    if prompt.project_dir:
+        try:
+            summary = cached_map(Path(prompt.project_dir))
+        except OSError:
+            summary = ""  # The map is context only; a turn never waits on it.
+    return (
+        (summary + "\n\n" if summary else "")
+        + "Editor context:\n"
+        + _json(editor_outline(stable))
+        + "\n\n"
+    )
 
 
 def turn_part(prompt: Prompt, images_inline: bool = False) -> str:

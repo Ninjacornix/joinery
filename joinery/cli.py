@@ -33,6 +33,7 @@ from joinery import (
     match_cli,
     metrics,
     playtest,
+    project_map,
     references,
     replays,
     setup_imports,
@@ -1234,6 +1235,7 @@ def _parser() -> argparse.ArgumentParser:
     history.register(commands)
     timeline.register(commands)
     metrics.register(commands)
+    project_map.register(commands)
     chats.register(commands)
     parts = _parts()
     if parts is not None:
@@ -1252,6 +1254,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.command == "metrics":
         return metrics.run(args)
+
+    if args.command == "map":
+        return project_map.run(args)
 
     if args.command == "chats":
         return chats.run(args)
