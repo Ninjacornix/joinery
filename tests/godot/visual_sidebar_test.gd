@@ -54,6 +54,7 @@ var _checks: GDScript
 var _theme: GDScript
 var _motion: GDScript
 var _todo: GDScript
+var _cards: GDScript
 var _failed := false
 ## The width being captured; below the dock's own minimum it is the shared (classic) column.
 var _width := 0
@@ -63,6 +64,7 @@ func _initialize() -> void:
 	_checks = load(get_script().resource_path.get_base_dir().path_join("ui_checks.gd"))
 	_theme = load("res://addons/joinery/ui_theme.gd")
 	_todo = load(get_script().resource_path.get_base_dir().path_join("visual_todo.gd"))
+	_cards = load(get_script().resource_path.get_base_dir().path_join("visual_checks.gd"))
 	# Windowed runs animate; captures must show end states.
 	_motion = load("res://addons/joinery/ui_motion.gd")
 	_motion.set_enabled(false)
@@ -239,10 +241,10 @@ func _states(light: bool, width: int) -> void:
 	await _parallel(light, width, chat)
 	await _playtest(light, width, chat)
 	await _todo.shots(self, light, width, chat)
-	await _match(light, width, chat)
-	await _check_cards(light, width, chat)
-	await _design(light, width, chat)
-	await _sound_pass(light, width, chat)
+	await _cards.match_shots(self, light, width, chat)
+	await _cards.check_cards(self, light, width, chat)
+	await _cards.design(self, light, width, chat)
+	await _cards.sound_pass(self, light, width, chat)
 
 	chat.append_agent_text("I widened **Door** by 20% in Blender and darkened the wood.", true)
 	chat.finish_agent_response(true)
@@ -900,108 +902,3 @@ func _saved_chats(light: bool, width: int) -> void:
 	var folder := ProjectSettings.globalize_path("res://.joinery/chats")
 	for file_name: String in DirAccess.get_files_at(folder):
 		DirAccess.remove_absolute(folder.path_join(file_name))
-
-
-## Make it match: the scores and the top findings, then its fixes running as tasks.
-func _match(light: bool, width: int, chat: Control) -> void:
-	var tasks: Node = chat.get("_tasks")
-	var fixture: GDScript = load(
-		get_script().resource_path.get_base_dir().path_join("match_fixture.gd")
-	)
-	var matcher: Node = tasks.get_node("Match")
-	matcher.set(
-		"audit_runner", func(_args: PackedStringArray) -> Dictionary: return fixture.call("audit")
-	)
-	matcher.call("open")
-	var card: Control = tasks.get("match_card")
-	_check(card != null, "The match card shows")
-	await _shot("match", light, width, chat)
-	var rows: Array = fixture.call("run_rows")
-	card.call("apply_run", {"state": "fixing", "tasks": rows})
-	var apps := {"palette": ["krita"], "lighting": ["godot"], "sound": ["supercollider"]}
-	for row: Dictionary in rows:
-		var event := {"kind": "task", "task_id": row["task_id"], "title": row["title"]}
-		event.merge({"state": "working", "apps": apps[row["area"]], "origin": "match"})
-		tasks.call("on_event", event)
-		if row["state"] == "in_review":
-			event.merge({"state": "in_review", "transaction_id": "fixture"}, true)
-			tasks.call("on_event", event)
-	await _shot("match-fixing", light, width, chat)
-	for row: Dictionary in rows:
-		tasks.call("_remove", row["task_id"])
-	card.free()
-	tasks.set("match_card", null)
-	tasks.call("sync_visible")
-
-
-## The design check: its findings at a glance, the agent reading, and a sound game.
-func _design(light: bool, width: int, chat: Control) -> void:
-	var tasks: Node = chat.get("_tasks")
-	var fixture: GDScript = load(
-		get_script().resource_path.get_base_dir().path_join("design_fixture.gd")
-	)
-	var designer: Node = tasks.get_node("Design")
-	designer.set(
-		"check_runner", func(_args: PackedStringArray) -> Dictionary: return fixture.call("report")
-	)
-	designer.call("open")
-	var card: Control = tasks.get("design_card")
-	_check(card != null, "The design card shows")
-	await _shot("design", light, width, chat)
-	card.call("show_report", fixture.call("report", true), false)
-	card.call("set_reading")
-	await _shot("design-reading", light, width, chat)
-	card.call("show_report", fixture.call("clean"), true)
-	await _shot("design-clean", light, width, chat)
-	card.free()
-	tasks.set("design_card", null)
-	tasks.call("sync_visible")
-
-
-## The accessibility and performance checks: each card at a glance, the fixes as tasks.
-func _check_cards(light: bool, width: int, chat: Control) -> void:
-	var tasks: Node = chat.get("_tasks")
-	var fixture: GDScript = load(
-		get_script().resource_path.get_base_dir().path_join("checks_fixture.gd")
-	)
-	for check: String in ["access", "perf"]:
-		var checker: Node = tasks.get_node("Access" if check == "access" else "Perf")
-		checker.set(
-			"audit_runner", func(_args: PackedStringArray) -> Dictionary: return fixture.call(check)
-		)
-		checker.call("open")
-		var card: Control = tasks.get("%s_card" % check)
-		_check(card != null, "The %s card shows" % check)
-		await _shot(check, light, width, chat)
-		if check == "access":
-			(card.get("guidelines") as Control).call("set_open", true)
-			await _shot("access-guidelines", light, width, chat)
-			var rows: Array = fixture.call("run_rows")
-			card.call("apply_run", {"state": "fixing", "tasks": rows})
-			for row: Dictionary in rows:
-				var event := {"kind": "task", "task_id": row["task_id"], "title": row["title"]}
-				event.merge({"state": "working", "apps": ["godot"], "origin": "user"})
-				tasks.call("on_event", event)
-			await _shot("access-fixing", light, width, chat)
-			for row: Dictionary in rows:
-				tasks.call("_remove", row["task_id"])
-		card.free()
-		tasks.set("%s_card" % check, null)
-		tasks.call("sync_visible")
-
-
-## The sound pass: what the level is missing, its rows following the sounds being made.
-func _sound_pass(light: bool, width: int, chat: Control) -> void:
-	var tasks: Node = chat.get("_tasks")
-	var sounder: Node = tasks.get_node("SoundPass")
-	sounder.call("_open")
-	var card: Control = tasks.get("sound_card")
-	_check(card != null, "The sound pass card shows")
-	var fixture: GDScript = load(
-		get_script().resource_path.get_base_dir().path_join("sound_pass_fixture.gd")
-	)
-	card.call("apply", fixture.call("making"))
-	await _shot("sound-pass", light, width, chat)
-	card.free()
-	tasks.set("sound_card", null)
-	tasks.call("sync_visible")
