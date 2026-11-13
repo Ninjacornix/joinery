@@ -352,6 +352,31 @@ def test_stale_image_revision_needs_setup(host: FakeHost) -> None:
     assert krita["action"] == {"id": "rebuild", "label": "Refresh tools"}
 
 
+def test_after_an_update_stale_apps_are_offered_one_refresh(
+    host: FakeHost, tmp_path: Path
+) -> None:
+    root = project(tmp_path, ["krita", "blender", "godot"])
+    host.revision = "rev-2"
+    for name in (CREATIVE_WORKER, BLENDER_WORKER):
+        host.images[name] = Image("sha256:old-" + name, revision="rev-1")
+    # Docker first: a refresh can't run without it.
+    host.docker_reason = "Docker is not running."
+    assert status(root, host=host)["notice"]["action"]["id"] == "start_docker"
+    host.docker_reason = ""
+    report = readiness.current(root, host=host, max_age=-1, background=False)
+    assert report["notice"] == {
+        "state": "needs_image",
+        "text": "Blender and Krita need a refresh after the Joinery update.",
+        "tools": ["blender", "krita"],
+        "action": {"id": "rebuild", "label": "Refresh tools"},
+    }
+    # The snapshot every screen reads says the same, without asking Docker again.
+    again = readiness.current(root, host=host, background=False)
+    assert again["cached"] is True and again["notice"] == report["notice"]
+    # Nothing starts by itself: a refresh can take an hour, so it waits for the button.
+    assert host.runs == []
+
+
 def test_cache_miss_reports_checking_without_running_a_worker(host: FakeHost) -> None:
     tools = by_id(status(catalog=True, host=host))
     assert host.runs == []
