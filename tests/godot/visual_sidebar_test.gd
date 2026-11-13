@@ -276,7 +276,9 @@ func _states(light: bool, width: int) -> void:
 			[{"path": "art/props/door.glb", "media": "image", "after": still}],
 		)
 	)
-	_check(str(footer.call("text")).contains("Waiting for your review"), "Footer waits")
+	_check(
+		str(footer.call("text")).is_empty(), "The card's own row offers the review, not the footer"
+	)
 	await _shot("review-waiting", light, width, chat)
 
 	chat.call("_on_accept")

@@ -128,7 +128,10 @@ func _run_with_motion() -> void:
 	await create_timer(0.3).timeout
 	_check(chat._send.visible and not chat._stop.visible, "Send settles back after the turn")
 	_check(not card._timer.visible, "The timer leaves when the change is ready")
-	_check(chat._footer.text() == "Waiting for your review", "The footer waits for review")
+	_check(
+		card.review_row().visible and chat._footer.text().is_empty(),
+		"The card offers the review; the footer doesn't say it again"
+	)
 	chat._on_accept()
 	chat.hide_edit_review("Change accepted", "success")
 	await create_timer(0.8).timeout

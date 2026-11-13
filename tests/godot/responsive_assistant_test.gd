@@ -238,7 +238,10 @@ func _run() -> void:
 		chat.show_file_review("Widen the assembly", "+ a\n- b", [], [], "tx-1")
 		_check(change.state == "ready", "The card offers the review")
 		chat.set_chat_busy(false)
-		_check(chat._footer.text() == "Waiting for your review", "The footer waits for review")
+		_check(
+			change.review_row().visible and chat._footer.text().is_empty(),
+			"The card offers the review; the footer doesn't say it again"
+		)
 		_check(chat._prompt.editable, "The composer stays open to queue a message")
 		_check(
 			chat._prompt.placeholder_text == "Queue a message for after the review…",

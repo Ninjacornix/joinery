@@ -43,6 +43,10 @@ signal revert_requested(transaction_id: String)
 ## The decision line is about to show; the transcript moves [param row] to the end of the turn.
 ## Without a listener the row is shown under the card's own steps.
 signal outcome_placing(row: Control)
+## The ready change's row (picture, line, Discard / Accept) is about to show; the transcript
+## moves [param row] after the reply, so the explanation is read before the decision. Without a
+## listener the row stays under the card's own steps.
+signal review_placing(row: Control)
 ## "Review the look" on the art gate.
 signal gate_review_requested
 ## "Describe my own" on the art gate.
@@ -270,9 +274,11 @@ func _init(text := "", context: Array = []) -> void:
 
 
 func _notification(what: int) -> void:
-	if what == NOTIFICATION_PREDELETE and is_instance_valid(_outcome):
-		if _outcome.get_parent() == null:
+	if what == NOTIFICATION_PREDELETE:
+		if is_instance_valid(_outcome) and _outcome.get_parent() == null:
 			_outcome.free()
+		if is_instance_valid(_ready_row) and _ready_row.get_parent() == null:
+			_ready_row.free()
 
 
 ## Controls whose text follows the transcript text size, as [control, TYPE step] pairs.
@@ -436,6 +442,7 @@ func set_ready(media: Array = [], review: Object = null) -> void:
 	state = "ready"
 	_error.hide()
 	_outcome.hide()
+	_place_review()
 	_ready_row.show_for(media, review)
 	_sync_activity()
 
@@ -640,6 +647,25 @@ func _set_sending_look(on: bool) -> void:
 	# Faint through the theme, not alpha, so the pending text keeps its contrast.
 	text_label.theme_type_variation = "JoineryFaintRichText" if on else ""
 	_sync_activity()
+
+
+## The ready row goes where the transcript puts it (after the reply), or under the steps.
+func _place_review() -> void:
+	if _ready_row.get_parent() != _column:
+		return
+	_column.remove_child(_ready_row)
+	review_placing.emit(_ready_row)
+	var placed := _ready_row.get_parent()
+	if placed == null:
+		_column.add_child(_ready_row)
+		_column.move_child(_ready_row, _progress.get_index() + 1)
+		return
+	# While it waits it stays the turn's last line: whatever the turn adds later goes above it.
+	placed.child_entered_tree.connect(
+		func(added: Node) -> void:
+			if added != _ready_row and _ready_row.get_parent() == placed:
+				placed.move_child.call_deferred(_ready_row, -1)
+	)
 
 
 ## The decision line goes where the transcript puts it (after the reply), or under the steps.

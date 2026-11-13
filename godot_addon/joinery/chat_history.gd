@@ -247,6 +247,7 @@ func add_request(text: String, targets: Array = []) -> Control:
 	_turn.add_child(card)
 	card.retry_requested.connect(func() -> void: retry_requested.emit(card))
 	card.outcome_placing.connect(_place_outcome.bind(_turn))
+	card.review_placing.connect(_place_outcome.bind(_turn))
 	card.revert_requested.connect(func(id: String) -> void: revert_requested.emit(id))
 	for pair: Array in card.scalables():
 		_scale(pair[0], pair[1])
@@ -271,8 +272,7 @@ func add_request(text: String, targets: Array = []) -> Control:
 	return card
 
 
-## Whether unsent cards offer Retry. While a connection banner owns the fix, they only say
-## "Not sent", so one problem has one action.
+## Whether unsent cards offer Retry (not while a connection banner owns the fix).
 func set_retry_allowed(on: bool) -> void:
 	_retry_allowed = on
 	for card: Control in _cards:
@@ -335,7 +335,7 @@ func add_decision(text: String, kind: String, card: Control) -> void:
 	add_notice(text, kind)
 
 
-## A card's decision line ends its turn: after the reply and its timing line, like a notice.
+## A card's ready row and decision line end its turn: after the reply and its timing line.
 func _place_outcome(row: Control, turn: VBoxContainer) -> void:
 	if is_instance_valid(turn) and turn.is_inside_tree():
 		_inset(turn).add_child(row)

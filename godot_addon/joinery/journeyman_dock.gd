@@ -36,8 +36,7 @@ signal models_refresh_requested
 signal target_opened(path: String)
 ## An accepted change was reverted on disk; the editor should rescan and reload its files.
 signal change_reverted(transaction_id: String)
-## A change the user applied from the sidebar (a feature) wrote [param paths] (project-relative)
-## on disk. Without a listener the dock rescans the file system itself.
+## A change applied from the sidebar (a feature) wrote [param paths]; else the dock rescans.
 signal files_changed(transaction_id: String, paths: PackedStringArray)
 
 const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
@@ -68,8 +67,7 @@ var min_em := MIN_EM
 
 ## "connected", "connecting", "error" or "none" (no account connected yet).
 var connection_state := "connecting"
-## The latest art review from the bridge ({text, sha256, approved, version, references,
-## suggestions}); the art direction dialog reads it.
+## The latest art review ({text, sha256, approved, version, references, suggestions}).
 var art_review_event: Dictionary = {}
 var _content: VBoxContainer
 var _header: HEADER_SCRIPT
@@ -659,7 +657,8 @@ func _sync() -> void:
 		var shown: bool = card != null and card.shows_step(_progress)
 		_footer.set_mode("idle" if shown else "busy", _progress)
 	elif _review_pending:
-		_footer.set_mode("review")
+		var inline: bool = _card() != null and _card().review_row().visible
+		_footer.set_mode("idle" if inline else "review")
 	else:
 		_footer.set_mode("idle")
 	_composer.set_locked(not command.is_empty())
@@ -941,6 +940,7 @@ func _open_review(media: Array) -> void:
 	var card := _card()
 	if card != null:
 		card.set_ready(media, _review)
+		card.review_row().visibility_changed.connect(_sync, CONNECT_REFERENCE_COUNTED)
 	_command_popup.close()
 	_sync()
 	review_requested.emit()

@@ -1,11 +1,11 @@
 extends SceneTree
 ## One gutter: at 340, 480 and 1000 px every sidebar row starts and ends UI_THEME.gutter() from
 ## the dock's edges. The header's last icon glyph, the readiness line and "Check again", the
-## user's bubble, the reply, the review row, a check card, the footer and "Show review", and
-## the composer share the same left and right edge; the transcript's scrollbar sits in the
-## gutter, and the header row starts SPACE.1 under the top edge. Chips with long names end in an
-## ellipsis inside the gutter instead of widening the sidebar, and Settings' reviewer Model field
-## shows "Same as Journeyman" uncut, and "Older versions" beside or above its choice uncut.
+## user's bubble, the reply, the review row, a check card and the composer share the same left
+## and right edge; the transcript's scrollbar sits in the gutter, and the header row starts
+## SPACE.1 under the top edge. Chips with long names end in an ellipsis inside the gutter
+## instead of widening the sidebar, and Settings' reviewer Model field shows "Same as
+## Journeyman" uncut, and "Older versions" beside or above its choice uncut.
 
 const WIDTHS: Array[int] = [340, 480, 1000]
 const HEIGHT := 760
@@ -168,12 +168,10 @@ func _measure(width: int) -> void:
 	_on(_reply(transcript), "left", left, "The reply", width)
 	_on(_reply(transcript), "right", right, "The reply", width)
 	_on(card.get("_ready_row"), "left", left, "The review row", width)
+	_on(card.get("_ready_row"), "right", right, "The review row", width)
 
-	# A check card, the footer's line and link, and the composer.
+	# A check card and the composer.
 	_both(tasks.get("design_card"), left, right, "The design card", width)
-	var footer: Node = chat.get("_footer")
-	_on(footer.get("_text"), "left", left, "Waiting for your review", width)
-	_on(footer.get("_show"), "right", right, "Show review", width)
 	_both(chat.get("_composer"), left, right, "The composer", width)
 	await _long_chips(chat, width, right)
 	await _model_field(chat, width)
