@@ -1,0 +1,146 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Fri, 13 Nov 2026 09:43:47 +0100
+Subject: [PATCH] feat(editor): scene tree and inspector side by side
+
+Joinery-only, not for upstream. Scene and Inspector were sibling tabs in the bottom panel, so the tree and the selected node's properties never showed together and the Inspector stretched across the window. Scene now sits above Inspector in the left column beside the viewport, as in stock Godot; Files and Output stay at the bottom. Saved Joinery layouts migrate once (layout 3); the classic view is unchanged.
+---
+ editor/docks/inspector_dock.cpp  |  3 +-
+ editor/docks/scene_tree_dock.cpp | 11 +++----
+ editor/editor_node.cpp           | 49 +++++++++++++++++++++++++++-----
+ 3 files changed, 48 insertions(+), 15 deletions(-)
+
+diff --git a/editor/docks/inspector_dock.cpp b/editor/docks/inspector_dock.cpp
+index 7085d8f..6b1adb7 100644
+--- a/editor/docks/inspector_dock.cpp
++++ b/editor/docks/inspector_dock.cpp
+@@ -708,8 +708,9 @@ InspectorDock::InspectorDock(EditorData &p_editor_data) {
+ 	set_name(TTRC("Inspector"));
+ 	set_icon_name("AnimationTrackList");
+ 	set_dock_shortcut(ED_SHORTCUT_AND_COMMAND("docks/open_inspector", TTRC("Open Inspector Dock")));
++	// Joinery: below the Scene dock in the left column, beside the viewport.
+ 	if (EditorSettings::is_joinery_layout()) {
+-		set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
++		set_default_slot(EditorDock::DOCK_SLOT_LEFT_BR);
+ 		set_available_layouts(DOCK_LAYOUT_ALL);
+ 	} else {
+ 		set_default_slot(EditorDock::DOCK_SLOT_RIGHT_UL);
+diff --git a/editor/docks/scene_tree_dock.cpp b/editor/docks/scene_tree_dock.cpp
+index 2a1a7ea..62100aa 100644
+--- a/editor/docks/scene_tree_dock.cpp
++++ b/editor/docks/scene_tree_dock.cpp
+@@ -4997,15 +4997,12 @@ SceneTreeDock::SceneTreeDock(Node *p_scene_root, EditorSelection *p_editor_selec
+ 	set_name(TTRC("Scene"));
+ 	set_icon_name("PackedScene");
+ 	set_dock_shortcut(ED_SHORTCUT_AND_COMMAND("docks/open_scene", TTRC("Open Scene Dock")));
+-	// Joinery: the hierarchy sits along the bottom with the other docks,
+-	// leaving the full width of the window to the viewport and the
+-	// Journeyman sidebar (ADR 0005). The bottom slot lays its docks out
+-	// horizontally, which upstream does not permit by default.
++	// Joinery: the hierarchy sits in the left column above the Inspector, so
++	// a node and its properties show together. DOCK_LAYOUT_ALL keeps it
++	// movable to the bottom slot, which lays its docks out horizontally.
++	set_default_slot(EditorDock::DOCK_SLOT_LEFT_UR);
+ 	if (EditorSettings::is_joinery_layout()) {
+-		set_default_slot(EditorDock::DOCK_SLOT_BOTTOM);
+ 		set_available_layouts(DOCK_LAYOUT_ALL);
+-	} else {
+-		set_default_slot(EditorDock::DOCK_SLOT_LEFT_UR);
+ 	}
+ 
+ 	singleton = this;
+diff --git a/editor/editor_node.cpp b/editor/editor_node.cpp
+index d018919..851fe73 100644
+--- a/editor/editor_node.cpp
++++ b/editor/editor_node.cpp
+@@ -856,7 +856,10 @@ bool EditorNode::_is_project_data_missing() {
+ }
+ 
+ // Joinery: the bottom docks a Joinery layout opens, in their tab order.
+-static const char *JOINERY_OPEN_BOTTOM_DOCKS[] = { "Scene", "FileSystem", "Inspector", "Output" };
++// Scene and Inspector sit in the left column instead (JOINERY_SHELL_LAYOUT 3).
++static const char *JOINERY_OPEN_BOTTOM_DOCKS[] = { "FileSystem", "Output" };
++// Joinery: version of the saved Joinery dock arrangement; older ones migrate once.
++static const int JOINERY_SHELL_LAYOUT = 3;
+ 
+ void EditorNode::_notification(int p_what) {
+ 	switch (p_what) {
+@@ -1001,8 +1004,8 @@ void EditorNode::_notification(int p_what) {
+ 
+ 		case NOTIFICATION_READY: {
+ 			// Store the default order of bottom docks. It can only be determined dynamically.
+-			// Joinery: the default layout opens only Scene, Files, Inspector and
+-			// Output, in that order. Every other bottom dock starts closed and
++			// Joinery: the default layout opens only Files and Output at the
++			// bottom, in that order. Every other bottom dock starts closed and
+ 			// stays one click away in the bottom panel's menu and Editor > Editor
+ 			// Docks; the debugger still opens itself on Run.
+ 			PackedStringArray bottom_docks;
+@@ -6379,7 +6382,7 @@ void EditorNode::_load_editor_layout() {
+ 		} else {
+ 			ep.step(TTR("Loading docks..."), 1, true);
+ 			// Joinery: a new project starts from the Joinery default, which
+-			// closes every bottom dock except Scene, Files, Inspector and
++			// closes every bottom dock except Files and
+ 			// Output. Stock Godot only needs the bottom panel's own settings
+ 			// here, because its docks already sit where its default puts them.
+ 			editor_dock_manager->load_docks_from_config(default_layout, "docks", true);
+@@ -6453,6 +6456,37 @@ void EditorNode::_load_editor_layout() {
+ 			}
+ 			config->set_value("docks", "dock_closed", closed);
+ 		}
++		// Joinery: layout 3 puts Scene above Inspector in the left column, so
++		// the tree and the selected node's properties show together instead of
++		// being sibling tabs in the bottom panel.
++		if (!switched && joinery_layout && int(config->get_value(EDITOR_NODE_CONFIG_SECTION, "joinery_shell_layout", 0)) < 3) {
++			const String moved[] = { "Scene", "Inspector" };
++			for (int slot = 1; slot <= EditorDock::DOCK_SLOT_MAX; slot++) {
++				const String key = "dock_" + itos(slot);
++				PackedStringArray names = String(config->get_value("docks", key, "")).split(",", false);
++				for (const String &name : moved) {
++					names.erase(name);
++				}
++				config->set_value("docks", key, String(",").join(names));
++			}
++			const int slots[] = { EditorDock::DOCK_SLOT_LEFT_UR + 1, EditorDock::DOCK_SLOT_LEFT_BR + 1 };
++			for (int i = 0; i < 2; i++) {
++				const String key = "dock_" + itos(slots[i]);
++				PackedStringArray names = String(config->get_value("docks", key, "")).split(",", false);
++				names.insert(0, moved[i]);
++				config->set_value("docks", key, String(",").join(names));
++				config->set_value("docks", key + "_selected_tab_idx", 0);
++			}
++			Array closed = config->get_value("docks", "dock_closed", Array());
++			for (const String &name : moved) {
++				closed.erase(name);
++			}
++			config->set_value("docks", "dock_closed", closed);
++			// The left column was empty, so its saved width is 0.
++			if (int(config->get_value("docks", "dock_hsplit_2", 0)) <= 0) {
++				config->set_value("docks", "dock_hsplit_2", 280);
++			}
++		}
+ 		if (!switched) {
+ 			editor_dock_manager->load_docks_from_config(config, "docks", true);
+ 		}
+@@ -6473,7 +6507,7 @@ void EditorNode::_load_editor_layout() {
+ 
+ void EditorNode::_save_central_editor_layout_to_config(Ref<ConfigFile> p_config_file) {
+ 	if (EditorSettings::is_joinery_layout()) {
+-		p_config_file->set_value(EDITOR_NODE_CONFIG_SECTION, "joinery_shell_layout", 2);
++		p_config_file->set_value(EDITOR_NODE_CONFIG_SECTION, "joinery_shell_layout", JOINERY_SHELL_LAYOUT);
+ 	}
+ 	p_config_file->set_value(EDITOR_NODE_CONFIG_SECTION, "joinery_view", EditorSettings::is_joinery_layout() ? "joinery" : "classic");
+ 	// Bottom panel.
+@@ -9388,8 +9422,9 @@ EditorNode::EditorNode() {
+ 	// Joinery: native utility panels now default to the bottom. The READY
+ 	// notification records their full bottom order after every dock exists.
+ 	if (joinery_layout) {
+-		default_layout->set_value(docks_section, "dock_3", String());
+-		default_layout->set_value(docks_section, "dock_4", String());
++		// Scene above Inspector in the left column; the rest at the bottom.
++		default_layout->set_value(docks_section, "dock_3", SceneTreeDock::get_singleton()->get_effective_layout_key());
++		default_layout->set_value(docks_section, "dock_4", InspectorDock::get_singleton()->get_effective_layout_key());
+ 		default_layout->set_value(docks_section, "dock_5", String());
+ 	} else {
+ 		// Godot's classic layout: its stock default, Scene and Import top left,

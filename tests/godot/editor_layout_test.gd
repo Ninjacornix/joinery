@@ -54,12 +54,21 @@ func _run() -> void:
 	for button: Node in switches.get_children():
 		if button is Button:
 			_check(button.text.is_empty(), "Native workspace selectors must be icon-only")
+	# Scene above Inspector in the left column, so a node and its properties show together.
+	for pair: Array in [["Scene", "DockSlotLeftUR"], ["Inspector", "DockSlotLeftBR"]]:
+		var docked: Node
+		for candidate: Node in base.find_children("*", "EditorDock", true, false):
+			if str(candidate.name) == pair[0]:
+				docked = candidate
+				break
+		_check(docked != null, "Missing dock: " + str(pair[0]))
+		if docked != null:
+			_check(docked.get_parent().name == pair[1], "%s must be in %s" % pair)
+			_check((docked as Control).is_visible_in_tree(), str(pair[0]) + " must be open")
 	var dock_titles: Array[String] = [
-		"Scene",
 		"FileSystem",
 		"Import",
 		"History",
-		"Inspector",
 		"Signals",
 		"Groups",
 	]

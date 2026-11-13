@@ -133,8 +133,9 @@ func _run() -> void:
 	(editor[0] as Node).notification.call_deferred(NOTIFICATION_WM_CLOSE_REQUEST)
 
 
-## Where Scene, FileSystem and Inspector sit: the bottom panel in Joinery's layout, the side
-## columns in the classic one, as stock Godot puts them.
+## Where Scene, FileSystem and Inspector sit: in Joinery's layout FileSystem is in the bottom
+## panel and Scene above Inspector in the left column; in the classic one all three are in the
+## side columns, as stock Godot puts them.
 func _check_docks(base: Control, classic: bool) -> void:
 	for type: String in ["SceneTreeDock", "FileSystemDock", "InspectorDock"]:
 		var docks := base.find_children("*", type, true, false)
@@ -143,10 +144,14 @@ func _check_docks(base: Control, classic: bool) -> void:
 			continue
 		var holder := (docks[0] as Node).get_parent()
 		var bottom := holder != null and holder.is_class("EditorBottomPanel")
+		var expect_bottom := not classic and type == "FileSystemDock"
 		_check(
-			bottom != classic,
-			"%s is %s" % [type, "in a side column" if classic else "in the bottom panel"]
+			bottom == expect_bottom,
+			"%s is %s" % [type, "in the bottom panel" if expect_bottom else "in a side column"]
 		)
+		if not classic and type != "FileSystemDock":
+			var slot := "DockSlotLeftUR" if type == "SceneTreeDock" else "DockSlotLeftBR"
+			_check(holder != null and holder.name == slot, "%s is in %s" % [type, slot])
 		var control := docks[0] as Control
 		if classic and type != "InspectorDock":
 			# Stock Godot opens Scene and FileSystem; Inspector shares its slot with Node.
