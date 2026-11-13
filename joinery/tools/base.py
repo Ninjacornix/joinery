@@ -122,11 +122,8 @@ class Feature:
     id: str
     #: Short phrase for the ready summary, such as "Rigify".
     label: str
-    #: Shown when the feature's worker image is missing or stale.
-    needs_image: str = ""
-    #: Shown when its MCP is not installed.
-    needs_install: str = ""
-    #: Prefix shown when a check runs and fails.
+    #: Prefix shown when a check runs and fails. What a refresh fixes is worded by
+    #: joinery.readiness, the same for every tool.
     broken: str = ""
 
 
@@ -164,14 +161,9 @@ class ToolModule:
     #: Fixed version when no check reports one (Material Maker's binary has none).
     version: str = ""
     #: Ready line; "{name}" and "{version}" are filled in.
-    ready_summary: str = "{name} {version} ready (offline worker)"
-    #: Shown when the required worker image is missing or stale.
-    needs_image: str = (
-        "{name} runs in an offline worker that isn't built yet. Rebuild the worker."
-    )
-    #: Shown when a required pinned MCP is not installed.
-    needs_install: str = "{name}: its tools aren't installed yet. Rebuild the worker."
-    #: Prefix for a failing required check; the reason follows.
+    ready_summary: str = "{name} {version} ready (runs offline)"
+    #: Prefix for a failing required check; the reason follows. What a refresh
+    #: fixes is worded by joinery.readiness, the same for every tool.
     broken: str = "{name} failed its check"
     #: Optional provider of selectable parts inside a source document.
     parts_provider: str = ""

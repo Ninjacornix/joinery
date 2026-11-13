@@ -22,9 +22,7 @@ class Godot(ToolModule):
     worker_image = MCP_WORKER
     binary = "godot"
     desktop = "godot"
-    ready_summary = "Godot {version} tools ready (offline worker)"
-    needs_image = "Godot tools: worker missing. Rebuild the worker."
-    needs_install = "Godot tools: not installed. Rebuild the worker."
+    ready_summary = "Godot {version} tools ready (runs offline)"
     broken = "Godot tools: error"
     checks = (
         HostExec(

@@ -2,7 +2,7 @@
 @tool
 extends PanelContainer
 ## Journeyman, the sidebar chat. Top to bottom: the header (quiet when all is well; the
-## connection banner and one app readiness line when needed, and the settings menu), the
+## connection banner and one setup notice when needed, and the settings menu), the
 ## transcript of change cards and replies, the status footer, and the composer. The Review
 ## panel is built here but lives in the editor's bottom panel ([method take_review_panel]);
 ## decisions are made only there. The persona is always "Journeyman"; the provider (Codex,
@@ -131,7 +131,8 @@ func _ready() -> void:
 	_header = HEADER_SCRIPT.new()
 	_header.reconnect_pressed.connect(func() -> void: reconnect_requested.emit())
 	_header.connect_pressed.connect(func() -> void: connect_requested.emit())
-	_header.readiness_check_pressed.connect(func() -> void: run_command("/tools"))
+	_header.notice.check_requested.connect(func() -> void: run_command("/tools"))
+	_header.notice.setup_requested.connect(func() -> void: setup_requested.emit())
 	_content.add_child(_header)
 	_transcript = HISTORY_SCRIPT.new()
 	_transcript.accessibility_name = "Conversation"
@@ -184,8 +185,7 @@ func _ready() -> void:
 	_settings = SETTINGS_SCRIPT.attach(self, _header.row, _content)
 	_show_connection()
 	_settings.apply_all()
-	if Engine.is_editor_hint():
-		# Which enabled app needs something, from the cache (refreshed in the background).
+	if Engine.is_editor_hint():  # Which app needs something, from the cache.
 		_slash.check_readiness.call_deferred()
 
 
@@ -630,9 +630,9 @@ func _on_feature_applied(ok: bool, message: String, transaction_id: String) -> v
 		EditorInterface.get_resource_filesystem().scan()
 
 
-## The header names the first enabled app that needs something.
+## The header's notice names the apps that need something, with the button that fixes it.
 func _on_readiness(report: Dictionary) -> void:
-	_header.show_readiness(SLASH_SCRIPT.readiness_line(report))
+	_header.notice.show_readiness(report)
 
 
 ## Which accepted changes can still be reverted, from `joinery transactions list`.

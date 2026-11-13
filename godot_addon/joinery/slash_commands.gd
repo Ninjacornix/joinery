@@ -538,40 +538,15 @@ static func readiness_reply(report: Dictionary) -> String:
 	return "\n".join(lines)
 
 
-## The header's one line for the first enabled app that needs something, or "".
-static func readiness_line(report: Dictionary) -> String:
-	for entry: Variant in report.get("tools", []):
-		if not entry is Dictionary or not bool(entry.get("selected", true)):
-			continue
-		var status := str(entry.get("status", "ready"))
-		if status == "ready" or status == "preparing" or bool(entry.get("custom", false)):
-			continue
-		var name := str(entry.get("name", ""))
-		var first: String = (
-			{
-				"needs_docker": "%s needs Docker." % name,
-				"needs_licence": "%s needs your licence." % name,
-				"unavailable": "%s isn't available yet." % name,
-			}
-			. get(status, _sentence(str(entry.get("summary", name))))
-		)
-		var hint := ""
-		var action: Variant = entry.get("action")
-		if action is Dictionary:
-			hint = _action_hint(str(action.get("id", "")), str(action.get("label", "")))
-		return (first + " " + _sentence(hint)).strip_edges()
-	return ""
-
-
 ## What a person does for an action id, in words.
 static func _action_hint(id: String, label: String) -> String:
 	match id:
 		"start_docker":
 			return "Start Docker Desktop"
 		"rebuild":
-			return "Rebuild its worker in /setup"
+			return "Press Refresh tools at the top of the sidebar"
 		"get":
-			return "Add your licence in /setup"
+			return "Add your licence in Project setup"
 		"check_again":
 			return ""
 	return label

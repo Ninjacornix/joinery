@@ -69,14 +69,11 @@ class SuperCollider(ToolModule):
     binary = "sclang"
     desktop = "supercollider"
     ready_summary = "{name} {version} ready (offline renders)"
-    needs_image = "SuperCollider: worker image missing. Rebuild the worker."
     broken = "SuperCollider failed its check"
     features = (
         Feature(
             "live-audition",
             "live audition",
-            needs_image="Offline renders ready; live audition not installed. Rebuild the worker.",
-            needs_install="Offline renders ready; live audition not installed. Rebuild the worker.",
             broken="Live audition error",
         ),
         # The same ffmpeg edits Surge XT's renders get, run after the patch.

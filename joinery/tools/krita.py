@@ -28,8 +28,7 @@ class Krita(ToolModule):
     #: The headless launcher every operation and replay runs.
     requires = ("joinery-krita",)
     desktop = "krita"
-    ready_summary = "{name} {version} ready (runs offline in the creative worker)"
-    needs_image = "Krita: the creative worker isn't built yet. Rebuild the worker."
+    ready_summary = "{name} {version} ready (runs offline)"
     broken = "Krita: last check failed"
     checks = (
         ImageCheck(CREATIVE_WORKER),

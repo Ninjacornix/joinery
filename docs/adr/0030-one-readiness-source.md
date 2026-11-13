@@ -38,7 +38,7 @@ Screens show five states (`SURFACE`), always with the same words
 | Internal | Shown | Words | Dot |
 |---|---|---|---|
 | `ready` | `ready` | Ready | green |
-| `downloading` | `preparing` | Downloading… | accent |
+| `downloading` | `preparing` | Refreshing… | accent |
 | `needs_docker` | `needs_docker` | Needs Docker | red |
 | `needs_licence` | `needs_licence` | Needs your licence | red |
 | `needs_image`, `broken` | `unavailable` | Not available yet | ring |
@@ -50,10 +50,17 @@ reviewed connector), and a paid app needs a licence. Each entry carries:
 - `summary`, one plain sentence, and `status_reason` (the summary when the
   tool is not ready, else empty);
 - `action`, at most one: `{id, label}` with id `start_docker` ("Start
-  Docker"), `rebuild` ("Rebuild"), `check_again` ("Check again") or `get`
+  Docker"), `rebuild` ("Refresh tools"), `check_again` ("Check again") or `get`
   ("Get it"), or null;
 - `checked_at`, so a stalled check never looks current ("Last checked 14:02");
 - `checking`, true while a check has no answer yet.
+
+The report also carries `notice`: the sidebar's one sentence about the
+project's apps, with every app that has the same problem named once
+("Blender and Krita need a refresh after the Joinery update.") and its one
+action, or null. The words for what a refresh fixes live only in
+`joinery/readiness.py`; tool modules don't word it, and no screen names a
+worker, an image, bootstrap, MCP or a revision.
 
 `joinery status --agents` adds each agent's connection summary and its
 `verified` flag, so one report can feed both the setup step and `/tools`.
@@ -75,11 +82,11 @@ reviewed connector), and a paid app needs a licence. Each entry carries:
 - The workspace reads `cached_tools()` only: no Docker call on its two-second
   refresh. An unknown tool simply shows no dot.
 - Setup (`joinery bootstrap`) writes `setup.json` (`phase`, `image`,
-  `started`, `pid`) while it builds, so every surface says "Downloading…"
+  `started`, `pid`) while it builds, so every surface says "Refreshing…"
   instead of "Not available yet". It labels each image
   `org.joinery.sandbox-rev` with a hash of `sandbox/`, sets
   `JOINERY_SANDBOX_REV`, and starts a background refresh when it is done. An
-  image whose label differs is out of date ("Rebuild"); an image without the
+  image whose label differs is out of date ("Refresh tools"); an image without the
   label counts as current. Setup never removes images or build cache.
 
 ## UI rules

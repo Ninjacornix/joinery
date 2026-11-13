@@ -175,11 +175,11 @@ def test_every_catalog_tool_is_ready_in_healthy_workers(host: FakeHost) -> None:
         "audacity": "3.7.3",
     }
     assert tools["blender"]["summary"].startswith(
-        "Blender 5.2.1 ready (offline worker). Rigify, MPFB2 humans"
+        "Blender 5.2.1 ready (runs offline). Rigify, MPFB2 humans"
     )
     # Surge XT shows what it can really do: MIDI music and audio edits.
     assert tools["surge-xt"]["summary"] == (
-        "Surge XT 1.3.4 ready: renders offline in the creative worker. "
+        "Surge XT 1.3.4 ready: renders offline. "
         "MIDI music (General MIDI and Surge XT), audio edits (trim, fade, "
         "loudness, loops)."
     )
@@ -215,19 +215,35 @@ def test_docker_down_is_needs_docker_and_runs_nothing(host: FakeHost) -> None:
     assert [run for run in host.runs if run[0] != "host"] == []
 
 
-def test_missing_worker_image_needs_setup_with_the_tools_own_wording(
+#: Words no screen shows: how the tools run is Joinery's business, not the user's.
+HIDDEN_WORDS = ("worker", "image", "bootstrap", "MCP", "revision", "Rebuild")
+
+
+def test_missing_worker_image_needs_a_refresh_in_the_one_wording(
     host: FakeHost,
 ) -> None:
     del host.images[CREATIVE_WORKER]
-    tools = by_id(status(catalog=True, refresh=True, host=host))
-    assert tools["blender"]["state"] == "needs_image"
-    assert (
-        tools["blender"]["summary"]
-        == "Blender worker image not built. Rebuild the worker."
+    report = status(
+        project(host.engine.parent, ["blender", "gimp", "godot"]),
+        refresh=True,
+        host=host,
     )
-    assert tools["gimp"]["summary"].startswith("GIMP runs in the creative worker")
+    tools = by_id(report)
+    assert tools["blender"]["state"] == "needs_image"
+    assert tools["blender"]["summary"] == "Blender needs a refresh before it can work."
+    assert tools["gimp"]["summary"] == "GIMP needs a refresh before it can work."
     assert tools["blender"]["status"] == "unavailable"
-    assert tools["blender"]["action"] == {"id": "rebuild", "label": "Rebuild"}
+    assert tools["blender"]["action"] == {"id": "rebuild", "label": "Refresh tools"}
+    for entry in tools.values():
+        reason = entry["status_reason"] + entry["summary"]
+        assert not any(word in reason for word in HIDDEN_WORDS), reason
+    # The sidebar's one notice names both apps, with the one button.
+    assert report["notice"] == {
+        "state": "needs_image",
+        "text": "Blender and GIMP need a refresh before they can work.",
+        "tools": ["blender", "gimp"],
+        "action": {"id": "rebuild", "label": "Refresh tools"},
+    }
     # Features on that image are not ready either; no command ran in it.
     assert features(tools["blender"])["mpfb"]["state"] == "needs_image"
     assert not any(image == CREATIVE_WORKER for image, _ in host.runs)
@@ -242,21 +258,22 @@ def test_mpfb_missing_degrades_only_that_feature(host: FakeHost) -> None:
     assert blender["state"] == "ready"
     mpfb = features(blender)["mpfb"]
     assert mpfb["state"] == "needs_image"
-    assert "worker image predates the fix" in mpfb["detail"]
-    assert mpfb["action"] == {"id": "rebuild", "label": "Rebuild"}
+    assert mpfb["detail"] == "MPFB2 humans needs a refresh after the Joinery update."
+    assert mpfb["action"] == {"id": "rebuild", "label": "Refresh tools"}
     assert mpfb["status"] == "unavailable"
     assert features(blender)["rigify"]["state"] == "ready"
     assert "MPFB2" not in blender["summary"]
-    assert "MPFB2 humans unavailable" in "\n".join(lines({"tools": [blender]}))
+    assert "MPFB2 humans needs a refresh" in "\n".join(lines({"tools": [blender]}))
 
 
 def test_program_missing_from_a_present_image_names_the_rebuild(host: FakeHost) -> None:
     host.outputs["Surge XT.vst3"] = (1, "")
     surge = by_id(status(tool="surge-xt", refresh=True, host=host))["surge-xt"]
     assert surge["state"] == "needs_image"
-    assert surge["summary"] == (
-        "Surge XT: the plugin is missing from the worker; rebuild the creative worker"
-    )
+    # Missing from an image that is there: built before this Joinery.
+    assert surge["summary"] == "Surge XT needs a refresh after the Joinery update."
+    # What exactly is missing stays in the detail, for /doctor and the logs.
+    assert surge["detail"].startswith("Surge XT: the plugin is missing")
 
 
 def test_gimp_missing_from_the_worker_needs_a_rebuild_not_broken(
@@ -268,7 +285,7 @@ def test_gimp_missing_from_the_worker_needs_a_rebuild_not_broken(
     del host.outputs["JOINERY_GIMP_OK"]
     gimp = by_id(status(tool="gimp", refresh=True, host=host))["gimp"]
     assert gimp["state"] == "needs_image"
-    assert gimp["summary"] == "GIMP is missing from the creative worker; rebuild it"
+    assert gimp["summary"] == "GIMP needs a refresh after the Joinery update."
     assert not any("JOINERY_GIMP_OK" in " ".join(argv) for _, argv in host.runs)
 
 
@@ -303,12 +320,12 @@ def test_missing_pinned_install_needs_setup(host: FakeHost) -> None:
     host.missing_installs["blender"] = "not installed"
     tools = by_id(status(catalog=True, refresh=True, host=host))
     assert tools["godot"]["state"] == "needs_image"
-    assert (
-        tools["godot"]["summary"] == "Godot tools: not installed. Rebuild the worker."
-    )
+    assert tools["godot"]["summary"] == "Godot needs a refresh before it can work."
     mcp = features(tools["blender"])["mcp"]
     assert mcp["state"] == "needs_image"
-    assert mcp["detail"].startswith("Blender MCP not installed. Rebuild the worker.")
+    assert mcp["detail"] == (
+        "Official Blender MCP connected needs a refresh before it can work."
+    )
     assert tools["blender"]["state"] == "ready"
 
 
@@ -316,9 +333,9 @@ def test_setup_in_progress_is_downloading(host: FakeHost) -> None:
     host.setup_data = {"phase": "build", "image": CREATIVE_WORKER, "pid": os.getpid()}
     tools = by_id(status(catalog=True, refresh=True, host=host))
     assert tools["krita"]["state"] == "downloading"
-    assert tools["krita"]["summary"] == "Krita: setting up the offline worker…"
+    assert tools["krita"]["summary"] == "Refreshing Krita…"
     assert tools["krita"]["status"] == "preparing"
-    assert tools["krita"]["status_label"] == "Downloading…"
+    assert tools["krita"]["status_label"] == "Refreshing…"
     assert tools["krita"]["action"] is None
     # Godot's own worker is not the one being built.
     assert tools["godot"]["state"] == "ready"
@@ -329,11 +346,10 @@ def test_stale_image_revision_needs_setup(host: FakeHost) -> None:
     host.images[CREATIVE_WORKER] = Image("sha256:old", revision="rev-1")
     krita = by_id(status(tool="krita", refresh=True, host=host))["krita"]
     assert krita["state"] == "needs_image"
-    # The image is there, only older: say "out of date", never "isn't built" or "missing".
-    assert krita["summary"] == (
-        "Krita: its offline worker is out of date after an update. Rebuild the worker."
-    )
-    assert krita["action"] == {"id": "rebuild", "label": "Rebuild"}
+    # The image is there, only older: an update, never "isn't built" or "missing".
+    assert krita["summary"] == "Krita needs a refresh after the Joinery update."
+    assert krita["after_update"] is True
+    assert krita["action"] == {"id": "rebuild", "label": "Refresh tools"}
 
 
 def test_cache_miss_reports_checking_without_running_a_worker(host: FakeHost) -> None:
@@ -365,7 +381,7 @@ def test_cached_failure_keeps_its_wording(host: FakeHost) -> None:
     host.outputs["Surge XT.vst3"] = (1, "")
     status(tool="surge-xt", refresh=True, host=host)
     surge = by_id(status(tool="surge-xt", host=host))["surge-xt"]
-    assert surge["summary"].startswith("Surge XT: the plugin is missing")
+    assert surge["summary"] == "Surge XT needs a refresh after the Joinery update."
 
 
 def test_timed_out_check_is_reported_but_never_cached(host: FakeHost) -> None:
@@ -670,8 +686,8 @@ def test_one_fake_status_flows_unchanged_into_every_surface(
     report = by_id(status(root, refresh=True, host=host))
     krita = report["krita"]
     assert krita["status"] == "unavailable"
-    assert krita["action"] == {"id": "rebuild", "label": "Rebuild"}
-    fields = ("status", "status_label", "status_reason", "action", "checked_at")
+    assert krita["action"] == {"id": "rebuild", "label": "Refresh tools"}
+    fields =("status", "status_label", "status_reason", "action", "checked_at")
     expected = {key: krita[key] for key in fields}
 
     menu = tool_menu(load_catalog(), load_project_tools(root / "joinery.toml"))

@@ -176,15 +176,23 @@ func _run() -> void:
 	var reply: String = slash.readiness_reply(report)
 	_check(reply.begins_with("Godot 4.7 is ready."), "/tools shows each app's summary")
 	_check(reply.contains("Start Docker Desktop."), "/tools says what to do")
+	# The header's notice reads the sentence joinery status words, with a real button.
+	report["notice"] = {
+		"state": "needs_image",
+		"text": "Blender and Krita need a refresh after the Joinery update.",
+		"tools": ["blender", "krita"],
+		"action": {"id": "rebuild", "label": "Refresh tools"},
+	}
 	chat._on_readiness(report)
+	var notice: Node = chat._header.notice
 	_check(
-		chat._header.readiness_text() == "Blender needs Docker. Start Docker Desktop.",
-		"The header names the app that needs something, with its action"
+		notice.text() == "Blender and Krita need a refresh after the Joinery update.",
+		"The header names every app that needs the refresh: " + str(notice.text())
 	)
-	_check(chat._header._readiness_action.text == "Check again", "The header offers Check again")
-	chat._on_readiness({"tools": [report["tools"][0]]})
+	_check(notice.action_text() == "Refresh tools", "The header offers the refresh as a button")
+	chat._on_readiness({"tools": [report["tools"][0]], "notice": null})
 	await create_timer(0.3).timeout
-	_check(chat._header.readiness_text().is_empty(), "The line leaves once every app is ready")
+	_check(notice.text().is_empty(), "The notice leaves once every app is ready")
 
 	chat.queue_free()
 	await process_frame

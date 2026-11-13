@@ -125,7 +125,7 @@ def test_extensions_named_in_the_code_are_enabled_before_it(
     script = _script(code, base="art/sources/crate.blend")
     enable = script.index(f"addon_utils.enable({module!r}, default_set=True)")
     assert script.index("open_mainfile") < enable < script.index(code)
-    assert "Run Joinery setup to rebuild the worker image." in script
+    assert "Refresh tools in the Joinery sidebar." in script
     compile(script, "recipe.py", "exec")
 
 

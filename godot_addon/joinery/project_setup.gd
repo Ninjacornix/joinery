@@ -589,7 +589,7 @@ func _check_done(tool_id: String, result: Dictionary) -> void:
 	_apply_readiness(row, entry)
 
 
-## Rebuild the offline workers (`joinery bootstrap`): readiness says Downloading… meanwhile.
+## Refresh tools (`joinery bootstrap`): readiness says Refreshing… meanwhile.
 func _rebuild(row: Row) -> void:
 	if _rebuild_job != null:
 		return
@@ -599,7 +599,7 @@ func _rebuild(row: Row) -> void:
 	for other: Row in _rows:
 		if other.state.action.action_id == "rebuild":
 			other.state.set_busy(true)
-	row.reason.text = "Rebuilding the offline workers. This can take a few minutes."
+	row.reason.text = "Refreshing tools. The first time takes about an hour."
 	row.reason.show()
 	row.below.show()
 	_poll_in = POLL_SECONDS

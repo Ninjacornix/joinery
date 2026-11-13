@@ -26,7 +26,7 @@ const ALL_ASSETS := ""
 ## Readiness words, the same as ui_components.READINESS (kept here for callers that read them).
 const STATUS_TEXT := {
 	"ready": "Ready",
-	"preparing": "Downloading…",
+	"preparing": "Refreshing…",
 	"needs_docker": "Needs Docker",
 	"needs_licence": "Needs your licence",
 	"unavailable": "Not available yet",
@@ -648,7 +648,7 @@ func _on_card_action() -> void:
 		"rebuild":
 			_run_action(
 				["bootstrap", "--project", _project()],
-				"Rebuilding the offline workers. This can take a few minutes."
+				"Refreshing tools. The first time takes about an hour."
 			)
 
 

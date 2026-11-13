@@ -22,7 +22,7 @@ const STATUS_ICONS := {
 ## for project setup, the app rail and the asset workspace.
 const READINESS := {
 	"ready": ["Ready", "ready"],
-	"preparing": ["Downloading…", "working"],
+	"preparing": ["Refreshing…", "working"],
 	"needs_docker": ["Needs Docker", "attention"],
 	"needs_licence": ["Needs your licence", "attention"],
 	"unavailable": ["Not available yet", "off"],

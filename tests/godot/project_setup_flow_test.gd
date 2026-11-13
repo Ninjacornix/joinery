@@ -728,10 +728,10 @@ func _check_rows(dialog: AcceptDialog) -> void:
 		return count >= 2 and _readiness(_row(dialog, "surge-xt"))[0] == "Ready"
 	_check(await _until(asked_twice), "Readiness is asked again while it is still checking")
 	var expected := {
-		"godot": ["Downloading…", "working", ""],
+		"godot": ["Refreshing…", "working", ""],
 		"blender": ["Ready", "ready", ""],
 		"krita": ["Needs Docker", "attention", "Start Docker"],
-		"inkscape": ["Not available yet", "off", "Rebuild"],
+		"inkscape": ["Not available yet", "off", "Refresh tools"],
 		"gimp": ["Not available yet", "off", "Check again"],
 		"surge-xt": ["Ready", "ready", ""],
 	}

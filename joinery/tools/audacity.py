@@ -84,11 +84,7 @@ class Audacity(ToolModule):
     uses_preimage = False
     binary = "joinery-audacity"
     desktop = "audacity"
-    ready_summary = "{name} {version} ready (its own offline worker)"
-    needs_image = (
-        "Audacity runs in its own offline worker that isn't built yet. "
-        "Rebuild the worker."
-    )
+    ready_summary = "{name} {version} ready (runs offline)"
     broken = "Audacity failed its check"
     mcp_notes = (
         ("project_save", KEEP_EDITS),
@@ -98,7 +94,6 @@ class Audacity(ToolModule):
         Feature(
             "mcp",
             "the Audacity MCP (inspection)",
-            needs_install="The Audacity MCP isn't installed yet. Rebuild the worker.",
             broken="The Audacity MCP failed its check",
         ),
     )

@@ -232,7 +232,9 @@ _WORKER_FILES = (
 def _worker_files(image: str, directory: str, names: tuple[str, ...]) -> bytes:
     """A tar of `names` under `directory` in an offline worker image."""
     if shutil.which("docker") is None:
-        raise ValueError("Needs Docker: install and start Docker, then run Joinery setup.")
+        raise ValueError(
+            "Needs Docker: install Docker Desktop and start it, then try again."
+        )
     try:
         done = subprocess.run(
             [
@@ -251,13 +253,11 @@ def _worker_files(image: str, directory: str, names: tuple[str, ...]) -> bytes:
         message = done.stderr.decode(errors="replace")
         if "No such image" in message or "Unable to find image" in message:
             raise ValueError(
-                f"The offline worker {image} is not built. Run Joinery setup."
+                readiness.refresh_text(["Godot's tools"], after_update=False, plural=True)
             )
         if "daemon" in message.lower():
-            raise ValueError("Needs Docker: start Docker, then run Joinery setup.")
-        raise ValueError(
-            f"The offline worker {image} has no pinned Godot MCP. Rebuild the worker."
-        )
+            raise ValueError("Needs Docker: start Docker, then try again.")
+        raise ValueError(readiness.refresh_text(["Godot's tools"], after_update=True, plural=True))
     return done.stdout
 
 
@@ -283,8 +283,7 @@ def _install_from_worker(tool_id: str, destination: Path) -> ServerSpec:
         pin = json.loads((files / "joinery-pin.json").read_text())
         if pin.get("ref") != tool.mcp.ref or pin.get("repo") != tool.mcp.repo:
             raise ValueError(
-                f"The offline worker carries a different {tool.name} MCP than the "
-                "pinned one. Rebuild the worker."
+                readiness.refresh_text([tool.name + "'s tools"], after_update=True, plural=True)
             )
         lock = files / "package-lock.json"
         lock_sha = hashlib.sha256(lock.read_bytes()).hexdigest()
@@ -550,14 +549,14 @@ def describe(item: dict[str, Any], *, offline: bool = False) -> str:
         if item.get("name") in _FIRST_PARTY_STATUS:
             return f"{label}: ready"
         count = len(item.get("tools", []))
-        where = ", offline worker" if offline else ""
+        where = ", runs offline" if offline else ""
         return f"{label} ready ({count} operations{where})"
     if state == "runtime-missing":
         if detail.startswith(NEEDS_DOCKER):
             return f"{label}: {NEEDS_DOCKER}. Start Docker, then check again."
-        return f"{label}: worker missing. Rebuild the worker."
+        return readiness.refresh_text([label], after_update=False, plural=True)
     if state == "not-installed":
-        return f"{label}: not installed. Rebuild the worker." + (
+        return readiness.refresh_text([label], after_update=False, plural=True) + (
             f" ({detail})" if detail and "not installed" not in detail else ""
         )
     if state == "error":
@@ -653,7 +652,9 @@ async def inspect_servers(project: Path, probe: bool = False) -> list[dict[str, 
                 revision=spec.revision,
                 detail=f"{NEEDS_DOCKER}: {problem} Start Docker, then check again."
                 if problem
-                else f"Offline image {image} is not built. Run Joinery setup.",
+                else readiness.refresh_text(
+                    [server_label(spec.name)], after_update=False, plural=True
+                ),
             ).model_dump()
             result.append({**item, "summary": describe(item)})
             continue

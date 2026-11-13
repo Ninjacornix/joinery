@@ -7,8 +7,9 @@ extends VBoxContainer
 ## accent-tinted card for first-run setup (no account yet), which is a step, not a failure.
 ## The banner keeps SPACE.5 above and below, like other sections.
 ##
-## Under the row, one quiet line can name an app that needs something, with its fix and a
-## "Check again" link ([method show_readiness]).
+## Below the banner, one notice can say what Joinery or the project's apps need, with a button
+## that does it ([member notice], setup_notice.gd). Connect wins: while the banner asks to
+## connect, the notice waits.
 ##
 ## While several agents work at once (parallel tasks, ADR 0036) the row says how many, quietly:
 ## "3 agents working" with the activity dots ([method show_agents]).
@@ -18,8 +19,6 @@ extends VBoxContainer
 
 signal reconnect_pressed
 signal connect_pressed
-## "Check again" on the app readiness line.
-signal readiness_check_pressed
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_MOTION := preload("ui_motion.gd")
@@ -33,7 +32,7 @@ const NOTICE_SCRIPT := preload("setup_notice.gd")
 var row: HBoxContainer
 ## The context ring beside the menu (usage_meter.gd), shown once the provider reports usage.
 var usage: USAGE_SCRIPT
-## Joinery's own setup (an out-of-date add-on), below the banner (setup_notice.gd).
+## What Joinery or the project's apps need, below the banner (setup_notice.gd).
 var notice: NOTICE_SCRIPT
 var _dot: Control
 var _indicator: Control
@@ -45,9 +44,6 @@ var _banner_icon: TextureRect
 var _banner_text: Label
 var _banner_action: Button
 var _banner_kind := ""
-var _readiness: HBoxContainer
-var _readiness_text: Label
-var _readiness_action: Button
 ## How many agents work now (shown from two up), and the connection state the row last showed.
 var _agents := 0
 var _state := "connected"
@@ -79,7 +75,6 @@ func _init() -> void:
 	row.add_child(_name)
 	usage = USAGE_SCRIPT.new()
 	row.add_child(usage)
-	_build_readiness(stack)
 	# The gap around the banner comes and goes with it, so the idle header stays tight.
 	_banner_gap = MarginContainer.new()
 	_banner_gap.hide()
@@ -186,41 +181,6 @@ func _show_count() -> void:
 	_name.set_meta("_joinery_value", _agents)
 	if several:
 		UI_MOTION.fade_in(_name)
-
-
-## One line about an app that needs something ("Blender needs Docker. Start Docker Desktop,
-## then Check again."), with a "Check again" link; "" hides it.
-func show_readiness(text: String) -> void:
-	var fresh := not _readiness.visible or _readiness_text.text != text
-	_readiness_text.text = text
-	_readiness_text.tooltip_text = text
-	if text.is_empty():
-		if _readiness.visible:
-			UI_MOTION.exit(_readiness)
-	elif fresh:
-		UI_MOTION.enter(_readiness)
-
-
-## The readiness line's text ("" when hidden).
-func readiness_text() -> String:
-	return _readiness_text.text if _readiness.visible else ""
-
-
-func _build_readiness(column: VBoxContainer) -> void:
-	_readiness = HBoxContainer.new()
-	_readiness.theme_type_variation = "JoineryRowTight"
-	_readiness.accessibility_name = "App status"
-	_readiness.hide()
-	column.add_child(_readiness)
-	_readiness_text = UI.label("", "JoineryCaption", true)
-	_readiness_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_readiness.add_child(_readiness_text)
-	_readiness_action = UI.link("Check again")
-	_readiness_action.accessibility_name = "Check the apps again"
-	_readiness_action.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
-	UI.bind_height(_readiness_action, "xs")
-	_readiness_action.pressed.connect(func() -> void: readiness_check_pressed.emit())
-	_readiness.add_child(_readiness_action)
 
 
 func _show_banner(kind: String, text: String, action: String) -> void:

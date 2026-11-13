@@ -217,11 +217,7 @@ class MaterialMaker(ToolModule):
     requires = (f"{HOME}/material_maker.x86_64", f"{HOME}/joinery-godot")
     desktop = "material-maker"
     version = _version()
-    ready_summary = "{name} {version} ready (offline worker)"
-    needs_image = (
-        "Material Maker runs offline in the creative worker. Rebuild the "
-        "worker (Docker required)."
-    )
+    ready_summary = "{name} {version} ready (runs offline)"
     broken = "Material Maker failed its check"
     checks = (
         ImageCheck(CREATIVE_WORKER),

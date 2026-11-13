@@ -251,15 +251,12 @@ class Inkscape(ToolModule):
     authoring = True
     binary = "inkscape"
     desktop = "inkscape"
-    ready_summary = "{name} {version} ready (offline worker)"
-    needs_image = "Inkscape runs in Joinery's offline worker. Rebuild the worker."
+    ready_summary = "{name} {version} ready (runs offline)"
     broken = "Inkscape failed its check"
     features = (
         Feature(
             "analysis",
             "analysis tools",
-            needs_image="Inkscape analysis tools not installed; run Joinery setup.",
-            needs_install="Inkscape analysis tools not installed; run Joinery setup.",
             broken="Inkscape analysis tools error",
         ),
     )

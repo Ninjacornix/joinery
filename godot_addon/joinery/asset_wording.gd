@@ -7,7 +7,7 @@ extends RefCounted
 ## Readiness ("status", older names too) → [dot, wording], the same marks as the app rail.
 const READINESS := {
 	"ready": ["ready", "Ready"],
-	"preparing": ["working", "Downloading…"],
+	"preparing": ["working", "Refreshing…"],
 	"needs_docker": ["off", "Needs Docker"],
 	"needs_licence": ["off", "Needs your licence"],
 	"unavailable": ["off", "Not available yet"],

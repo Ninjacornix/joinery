@@ -80,7 +80,7 @@ def setup(project: Path) -> dict[str, Any]:
     """Build the offline workers and install the pinned servers for a project.
 
     While it builds, `~/.cache/joinery/setup.json` names the image in progress,
-    so every readiness screen says "Downloading…" instead of "Not available".
+    so every readiness screen says "Refreshing…" instead of "Not available".
     Each image is labelled with the sandbox revision, and a readiness refresh
     starts once the build is done. No image or build cache is ever removed.
     """
@@ -89,11 +89,12 @@ def setup(project: Path) -> dict[str, Any]:
     )
     if shutil.which("docker") is None:
         raise ValueError(
-            "Install and start Docker to run the offline creative workers."
+            "Joinery's apps run offline in Docker. Install Docker Desktop and "
+            "start it, then try again."
         )
     result = subprocess.run(["docker", "info"], capture_output=True, check=False)
     if result.returncode:
-        raise ValueError("Start Docker, then run Joinery setup again.")
+        raise ValueError("Docker isn't running. Start Docker Desktop, then try again.")
     revision = readiness.sandbox_revision()
     os.environ["JOINERY_SANDBOX_REV"] = revision
     ready = []

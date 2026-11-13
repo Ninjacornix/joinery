@@ -351,7 +351,7 @@ def test_missing_worker_image_offers_a_rebuild(no_real_docker: FakeHost) -> None
     del no_real_docker.images[CREATIVE_WORKER]
     tools = _menu(no_real_docker)
     assert tools["krita"]["status"] == "unavailable"
-    assert tools["krita"]["action"] == {"id": "rebuild", "label": "Rebuild"}
+    assert tools["krita"]["action"] == {"id": "rebuild", "label": "Refresh tools"}
     assert tools["krita"]["status_reason"]
 
 
@@ -359,7 +359,7 @@ def test_setup_building_a_worker_is_preparing(no_real_docker: FakeHost) -> None:
     no_real_docker.setup_data = {"phase": "build", "image": CREATIVE_WORKER, "pid": 1}
     tools = _menu(no_real_docker)
     assert tools["krita"]["status"] == "preparing"
-    assert tools["krita"]["status_label"] == "Downloading…"
+    assert tools["krita"]["status_label"] == "Refreshing…"
     assert tools["krita"]["action"] is None
 
 

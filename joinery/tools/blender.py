@@ -862,8 +862,8 @@ def extension_lines(code: str) -> list[str]:
     for word, module, label in EXTENSIONS:
         if re.search(word, code, re.IGNORECASE):
             reason = (
-                f"{label} is not available in this Blender worker. "
-                "Run Joinery setup to rebuild the worker image."
+                f"{label} isn't available in Blender yet. Ask the user to press "
+                "Refresh tools in the Joinery sidebar."
             )
             lines += [
                 "import addon_utils",
@@ -883,37 +883,23 @@ class Blender(ToolModule):
     binary = "blender"
     desktop = "blender"
     parts_provider = "blender"
-    ready_summary = "{name} {version} ready (offline worker)"
-    needs_image = "Blender worker image not built. Rebuild the worker."
+    ready_summary = "{name} {version} ready (runs offline)"
     broken = "Blender failed to start"
     mcp_notes = (("execute_blender_code", "Joinery: " + MPFB_HINT),)
     features = (
         Feature(
             "rigify",
             "Rigify",
-            needs_image="Rigify unavailable: the worker image is out of date. Rebuild the worker.",
             broken="Rigify failed to load",
         ),
         Feature(
             "mpfb",
             "MPFB2 humans",
-            needs_image=(
-                "MPFB2 humans unavailable: worker image predates the fix. Run Joinery "
-                "setup to rebuild (about 1 h, about 6 GB)."
-            ),
             broken="MPFB2 humans failed to load",
         ),
         Feature(
             "mcp",
             "official Blender MCP connected",
-            needs_image=(
-                "Blender MCP worker not built. Rebuild the worker. Editing still works "
-                "through Joinery's Blender adapter."
-            ),
-            needs_install=(
-                "Blender MCP not installed. Rebuild the worker. Editing still works "
-                "through Joinery's Blender adapter."
-            ),
             broken="Blender MCP error",
         ),
     )

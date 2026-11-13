@@ -95,7 +95,9 @@ func _measure(width: int) -> void:
 	chat.set_chat_state("connected", "Codex connected")
 	chat.set_resource_target("res://art/props/door.blend", "PackedScene")
 	var header: Node = chat.get("_header")
-	header.call("show_readiness", "Godot isn't available yet.")
+	var refresh := {"id": "rebuild", "label": "Refresh tools"}
+	var needs := {"text": "Godot needs a refresh before it can work.", "action": refresh}
+	header.get("notice").call("show_readiness", {"notice": needs})
 	var transcript: Node = chat.get("_transcript")
 	transcript.call("add_message", "You", REQUEST)
 	var card: Control = transcript.call("current_card")
@@ -159,8 +161,7 @@ func _measure(width: int) -> void:
 		)
 	else:
 		_check(false, "The header shows its icon buttons (%d px)" % width)
-	_on(header.get("_readiness_text"), "left", left, "The readiness line", width)
-	_on(header.get("_readiness_action"), "right", right, "Check again", width)
+	_both(header.get("notice").get("_panel"), left, right, "The setup notice", width)
 
 	# The conversation: the bubble, the reply and the review row on the same edges.
 	_both(card.get("_bubble"), left, right, "The user's bubble", width)

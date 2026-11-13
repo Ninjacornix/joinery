@@ -95,7 +95,7 @@ SURFACE: dict[str, str] = {
 #: The words for each screen state, the same everywhere.
 STATUS_LABELS: dict[str, str] = {
     "ready": "Ready",
-    "preparing": "Downloading…",
+    "preparing": "Refreshing…",
     "needs_docker": "Needs Docker",
     "needs_licence": "Needs your licence",
     "unavailable": "Not available yet",
@@ -110,10 +110,14 @@ ACTION_FOR_STATE: dict[str, str] = {
 #: Button text for each action id.
 ACTION_LABELS: dict[str, str] = {
     "start_docker": "Start Docker",
-    "rebuild": "Rebuild",
+    "rebuild": "Refresh tools",
     "check_again": "Check again",
     "get": "Get it",
 }
+#: The one vocabulary for what Refresh tools fixes. Screens and agents read these
+#: words; none of them names a worker, an image, bootstrap, MCP or a revision.
+REFRESH_AFTER_UPDATE = "{names} {verb} a refresh after the Joinery update."
+REFRESH_FIRST = "{names} {verb} a refresh before {pronoun} can work."
 #: Tier-3 results expire after a day even if nothing else changed.
 MCP_TTL_SECONDS = 24 * 3600
 #: How long a whole report stands before `current()` asks Docker again.
@@ -532,7 +536,7 @@ class Outcome:
     install: bool = False
     #: The detail is the check's own user-facing wording, not raw output.
     explicit: bool = False
-    #: The image exists but was built from older sources (an update changed them).
+    #: The image is there but was built from older sources (after an update).
     stale: bool = False
 
 
@@ -603,6 +607,7 @@ def _cached(ctx: _Context, key: str, ttl: float | None = None) -> Outcome | None
         str(raw.get("detail", "")),
         str(raw.get("version", "")),
         explicit=bool(raw.get("explicit", False)),
+        stale=bool(raw.get("stale", False)),
     )
 
 
@@ -639,6 +644,7 @@ def _store(ctx: _Context, key: str, outcome: Outcome) -> Outcome:
         "detail": outcome.detail,
         "version": outcome.version,
         "explicit": outcome.explicit,
+        "stale": outcome.stale,
         "at": ctx.now,
     }
     return outcome
@@ -656,7 +662,14 @@ def _match(check: WorkerExec | HostExec, code: int, output: str) -> Outcome:
         return Outcome("broken", _first_line(output), version)
     state: State = getattr(check, "on_failure", "broken")
     reason = check.failure or _first_line(output) or f"exit code {code}"
-    return Outcome(state, reason, version, explicit=bool(check.failure))
+    # Missing from an image that is there: the image predates this Joinery.
+    return Outcome(
+        state,
+        reason,
+        version,
+        explicit=bool(check.failure),
+        stale=state == "needs_image",
+    )
 
 
 def _image_gate(ctx: _Context, image: str) -> Outcome | None:
@@ -774,6 +787,7 @@ def _probe_outcome(check: McpProbe, result: ProbeResult) -> Outcome:
                 "needs_image",
                 check.failure or f"{check.capability} is missing from the worker",
                 explicit=bool(check.failure),
+                stale=True,
             )
     return Outcome("ready")
 
@@ -813,21 +827,16 @@ def _worst(outcomes: Iterable[Outcome]) -> Outcome:
     return worst
 
 
-_STALE = "its offline worker is out of date after an update. Rebuild the worker."
-
-
 def _feature_text(feature: Feature, outcome: Outcome, name: str) -> str:
     if outcome.state == "ready":
         return feature.label
     if outcome.state == "needs_docker":
         return f"{feature.label}: needs Docker running."
     if outcome.state == "downloading":
-        return f"{feature.label}: setting up the offline worker…"
+        return f"{feature.label}: refreshing…"
     if outcome.state == "needs_image":
-        if outcome.stale:
-            return f"{feature.label}: {_STALE}"
-        text = (feature.needs_install if outcome.install else "") or feature.needs_image
-        return text or f"{feature.label} unavailable: run Joinery setup."
+        label = feature.label[:1].upper() + feature.label[1:]
+        return refresh_text([label], after_update=outcome.stale)
     prefix = feature.broken or f"{feature.label} failed"
     return f"{prefix}: {outcome.detail}" if outcome.detail else prefix
 
@@ -842,21 +851,73 @@ def _tool_text(module: ToolModule, outcome: Outcome) -> str:
             )
         return f"{name} runs offline in Docker. Start Docker Desktop, then check again."
     if outcome.state == "downloading":
-        return f"{name}: setting up the offline worker…"
+        return f"Refreshing {name}…"
     if outcome.state == "needs_image":
-        # The image is there but older than Joinery's sources: say so, not "missing".
-        if outcome.stale:
-            return f"{name}: {_STALE}"
-        # A check that names what is missing says it better than the default.
-        if outcome.explicit:
-            return outcome.detail
-        if outcome.install:
-            return module.needs_install.format(name=name)
-        return module.needs_image.format(name=name)
+        # What is missing stays in `detail`; the sentence is the same for every tool.
+        return refresh_text([name], after_update=outcome.stale)
     if outcome.state == "needs_licence":
         return f"{name} needs your own licence."
     prefix = module.broken.format(name=name)
     return f"{prefix}: {outcome.detail}" if outcome.detail else prefix
+
+
+def names(items: Sequence[str]) -> str:
+    """ "Blender", "Blender and Krita", "Blender, Krita and GIMP"."""
+    if len(items) < 2:
+        return "".join(items)
+    return ", ".join(items[:-1]) + " and " + items[-1]
+
+
+def refresh_text(
+    apps: Sequence[str], *, after_update: bool, plural: bool = False
+) -> str:
+    """What Refresh tools fixes, for one app or several, in the one wording."""
+    template = REFRESH_AFTER_UPDATE if after_update else REFRESH_FIRST
+    several = plural or len(apps) > 1
+    return template.format(
+        names=names(apps),
+        verb="need" if several else "needs",
+        pronoun="they" if several else "it",
+    )
+
+
+def notice(tools: Sequence[Mapping[str, Any]]) -> dict[str, Any] | None:
+    """The sidebar's one line about the project's apps, or None when all is well.
+
+    One problem at a time, the one to fix first: a refresh already running,
+    Docker, then a refresh, then a licence, then an app that failed its check. Every app with that problem is
+    named in the one sentence, and `action` is the button that fixes it.
+    """
+    chosen = [
+        t
+        for t in tools
+        if t.get("selected", True) and not t.get("custom") and t.get("state")
+    ]
+    order = ("downloading", "needs_docker", "needs_image", "needs_licence", "broken")
+    for state in order:
+        apps = [t for t in chosen if t.get("state") == state]
+        if not apps:
+            continue
+        found = [str(t.get("name", t.get("id", ""))) for t in apps]
+        verb = "need" if len(found) > 1 else "needs"
+        if state == "downloading":
+            text = f"Refreshing {names(found)}…"
+        elif state == "needs_docker":
+            text = f"{names(found)} {verb} Docker, which isn't running."
+        elif state == "needs_image":
+            stale = any(t.get("after_update") for t in apps)
+            text = refresh_text(found, after_update=stale)
+        elif state == "needs_licence":
+            text = f"{names(found)} {verb} your licence."
+        else:
+            text = f"{names(found)} {'aren' if len(found) > 1 else 'isn'}'t working right now."
+        return {
+            "state": state,
+            "text": text,
+            "tools": [str(t.get("id", "")) for t in apps],
+            "action": action_for(state),
+        }
+    return None
 
 
 def _clean(text: str) -> str:
@@ -937,6 +998,8 @@ def tool_status(ctx: _Context, module: ToolModule) -> dict[str, Any]:
         "features": features,
         "checked_at": _stamp(ctx.now),
         "image_id": image.id if image else "",
+        # Needs a refresh because Joinery was updated (not a first-time setup).
+        "after_update": overall.state == "needs_image" and overall.stale,
     }
     if module.desktop:
         available, where = ctx.host.desktop(ctx.project, module.desktop)
@@ -1072,6 +1135,7 @@ def status(
         "checked_at": _stamp(now),
         "tools": [*report_tools, *scope.custom],
         "removed": scope.notices,
+        "notice": notice(report_tools),
     }
 
 
@@ -1146,6 +1210,7 @@ def _snapshot_report(
         "cached": True,
         "tools": [*entries, *scope.custom],
         "removed": scope.notices,
+        "notice": notice(entries),
     }
 
 
