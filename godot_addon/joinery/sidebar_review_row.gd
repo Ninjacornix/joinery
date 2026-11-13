@@ -45,10 +45,16 @@ func _init() -> void:
 	column.theme_type_variation = "JoineryTight"
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	add_child(column)
+	# The facts, and "Try other ways" at the end of their line, so the decision's buttons keep
+	# one line even in a narrow sidebar.
+	var facts := HBoxContainer.new()
+	facts.theme_type_variation = "JoineryRow"
+	column.add_child(facts)
 	_line = UI.label("", "JoineryCaption")
 	_line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_line.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_line.mouse_filter = Control.MOUSE_FILTER_PASS
-	column.add_child(_line)
+	facts.add_child(_line)
 	# The actions wrap in a narrow sidebar instead of pushing it wider than its gutters.
 	_actions = HFlowContainer.new()
 	STYLE.on_theme_overrides(
@@ -67,18 +73,22 @@ func _init() -> void:
 	_accept.accessibility_name = "Accept this change"
 	_accept.tooltip_text = "Keep this change"
 	_accept.pressed.connect(_decide.bind(true))
-	_open = UI.link("Review")
+	# A bigger change's one action is still the card's call to action: filled like Accept.
+	_open = UI.primary("Review")
 	_open.accessibility_name = "Open the review"
 	_open.tooltip_text = "A bigger change: look at it in the Review panel"
 	_open.pressed.connect(_show_panel)
-	ways = UI.quiet("Try other ways")
+	ways = UI.quiet_link("Try other ways")
 	ways.accessibility_name = "Try other ways of this change"
 	ways.tooltip_text = "Make a few other versions side by side and keep the one you like"
 	ways.pressed.connect(func() -> void: other_ways_pressed.emit())
+	UI.bind_height(ways, "xs")
+	ways.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	facts.add_child(ways)
 	var ordered := (
 		[_accept, _discard] if DisplayServer.get_swap_cancel_ok() else [_discard, _accept]
 	)
-	for button: Button in ordered + [_open, ways]:
+	for button: Button in ordered + [_open]:
 		UI.bind_height(button, "sm")
 		_actions.add_child(button)
 	STYLE.on_theme(
@@ -114,8 +124,8 @@ func refresh(media: Array = []) -> void:
 	_frame.visible = picture != null
 	_line.text = str(glance.get("line", ""))
 	_line.tooltip_text = str(glance.get("title", _line.text))
-	_line.visible = not _line.text.is_empty()
 	var decidable := not glance.is_empty()
+	_line.visible = not _line.text.is_empty() or decidable
 	var simple := bool(glance.get("simple", false))
 	_actions.visible = decidable
 	_discard.visible = simple

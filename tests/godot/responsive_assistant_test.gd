@@ -244,7 +244,7 @@ func _run() -> void:
 		)
 		_check(chat._prompt.editable, "The composer stays open to queue a message")
 		_check(
-			chat._prompt.placeholder_text == "Queue a message for after the review…",
+			chat._prompt.placeholder_text == "Queue for after the review…",
 			"Say how to continue during review"
 		)
 		chat._on_accept()
