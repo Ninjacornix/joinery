@@ -97,6 +97,8 @@ from joinery.workspace import index, open_asset, watch_stamp
 
 #: `joinery mcp status` states that mean a server cannot work yet.
 MCP_FAILURES = frozenset({"error", "not-installed", "runtime-missing"})
+#: What the chat says to an add-on older than this Joinery (setup_notice.gd ADDON_STALE).
+ADDON_STALE = "Joinery's add-on for this project is out of date."
 
 
 def check_mcp_config(root: Path, config: Path = CONFIG_PATH) -> list[str]:
@@ -1517,13 +1519,17 @@ def main(argv: list[str] | None = None) -> int:
         from bridge.stdio import run
 
         if args.addon_protocol != 2:
+            # The sidebar knows the first sentence and offers its Update and restart
+            # button (setup_notice.gd ADDON_STALE); `action` says the same for others.
             print(
                 json.dumps(
                     {
                         "kind": "connection",
                         "state": "error",
                         "agent": args.agent,
-                        "message": "This editor addon uses an older tool protocol. Close the project and run joinery update-addon --project <project>, then reopen it.",
+                        "message": ADDON_STALE
+                        + " Choose Update and restart at the top of the sidebar.",
+                        "action": {"id": "update_addon", "label": "Update and restart"},
                     }
                 )
             )

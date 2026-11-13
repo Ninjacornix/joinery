@@ -119,6 +119,14 @@ func _check_banner_wins() -> void:
 	await _until(func() -> bool: return header.notice.visible, 2.0)
 	_check(header.notice.text() == NOTICE.ADDON_STALE, "Connected, the notice is back")
 	header.queue_free()
+	# The chat refusing an older add-on: Update and restart is the fix, not Reconnect.
+	var refused: HEADER = HEADER.new()
+	root.add_child(refused)
+	refused.show_state("error", "codex", NOTICE.ADDON_STALE + " Choose Update and restart.")
+	await _until(func() -> bool: return refused.notice.visible, 2.0)
+	_check(refused.notice.action_text() == "Update and restart", "The notice offers the update")
+	_check(not refused.get("_banner").visible, "No Reconnect banner for an old add-on")
+	refused.queue_free()
 
 
 ## /doctor exits 1 when an app needs work: that is its answer, shown app by app.
