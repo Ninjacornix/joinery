@@ -216,18 +216,32 @@ func _check_chrome(base: Control, classic: bool) -> void:
 			if button.is_visible_in_tree() and not button.text.is_empty():
 				labels.append(button.text)
 		_check(("Play" in labels) != classic, "The run bar reads: " + ", ".join(labels))
-		# Both layouts keep Play current scene, Play custom scene and Movie Maker beside Play.
+		# The classic run bar keeps Play current scene, Play custom scene and Movie Maker beside
+		# Play; Joinery's puts them in one ▾ menu beside Play.
 		var tips: Array[String] = []
 		for node: Node in (bars[0] as Node).find_children("*", "BaseButton", true, false):
 			var control := node as Control
 			if control.is_visible_in_tree():
 				tips.append(control.tooltip_text)
-		for tip: String in [
-			"Play the currently edited scene.", "Play a custom scene.", "Enable Movie Maker mode."
-		]:
+		var expected: Array[String] = ["More ways to play"]
+		if classic:
+			expected = [
+				"Play the currently edited scene.",
+				"Play a custom scene.",
+				"Enable Movie Maker mode."
+			]
+		for tip: String in expected:
 			_check(
 				tips.any(func(text: String) -> bool: return text.begins_with(tip)),
 				"The run bar shows: " + tip
+			)
+		if not classic:
+			var play := (bars[0] as Node).find_children("*", "Button", true, false).filter(
+				func(node: Node) -> bool: return (node as Button).text == "Play"
+			)
+			_check(
+				not play.is_empty() and (play[0] as Button).theme_type_variation == "RunBarButton",
+				"Play is neutral, so Accept is the one filled accent button"
 			)
 
 

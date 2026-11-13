@@ -1,0 +1,154 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Fri, 13 Nov 2026 10:01:58 +0100
+Subject: [PATCH] feat(editor): Play with one menu of other ways to run
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Joinery-only, not for upstream. The run bar showed Play beside three unlabelled, equal icons (play this scene, play a scene, Movie Maker), and Play used the same accent fill as Accept. In Joinery's layout Play is now a neutral button with an accent icon and a ▾ menu beside it holding Play This Scene, Play a Scene..., Movie Maker Mode and its settings, so Accept is the only filled accent button while a change waits for review. A scene run from the menu shows its own button to reload it, and Movie Maker's button shows while the mode is on. The classic view keeps Godot's run bar.
+---
+ editor/run/editor_run_bar.cpp | 78 ++++++++++++++++++++++++++++++++---
+ editor/run/editor_run_bar.h   | 12 ++++++
+ 2 files changed, 85 insertions(+), 5 deletions(-)
+
+diff --git a/editor/run/editor_run_bar.cpp b/editor/run/editor_run_bar.cpp
+index b81ff1f..606d9ec 100644
+--- a/editor/run/editor_run_bar.cpp
++++ b/editor/run/editor_run_bar.cpp
+@@ -112,6 +112,9 @@ void EditorRunBar::_notification(int p_what) {
+ 			}
+ 
+ 			write_movie_button->set_button_icon(get_editor_theme_icon(SNAME("MainMovieWrite")));
++			if (joinery_run_menu) {
++				_joinery_style_play();
++			}
+ 
+ 		} break;
+ 	}
+@@ -131,6 +134,8 @@ void EditorRunBar::_reset_play_buttons() {
+ 		const bool playing = is_playing();
+ 		pause_button->set_visible(playing);
+ 		stop_button->set_visible(playing);
++		play_scene_button->set_visible(false);
++		play_custom_scene_button->set_visible(false);
+ 	}
+ 
+ 	play_scene_button->set_pressed(false);
+@@ -170,6 +175,54 @@ void EditorRunBar::_update_play_buttons() {
+ 	}
+ 	if (active_button == play_button && EditorSettings::is_joinery_layout()) {
+ 		play_button->set_text(TTRC("Restart"));
++	} else if (active_button && EditorSettings::is_joinery_layout()) {
++		// A scene run from the ▾ menu shows its own button, to reload it.
++		active_button->set_visible(true);
++	}
++}
++
++void EditorRunBar::_joinery_style_play() {
++	// Play is neutral with an accent icon, so Accept stays the one filled
++	// accent button while a change waits for review.
++	const Color accent = get_theme_color(SNAME("accent_color"), EditorStringName(Editor));
++	play_button->begin_bulk_theme_override();
++	for (const char *state : { "icon_normal_color", "icon_hover_color", "icon_focus_color", "icon_pressed_color", "icon_hover_pressed_color" }) {
++		play_button->add_theme_color_override(state, accent);
++	}
++	play_button->end_bulk_theme_override();
++	joinery_run_menu->set_button_icon(get_editor_theme_icon(SNAME("GuiOptionArrow")));
++	write_movie_panel->set_visible(is_movie_maker_enabled());
++}
++
++void EditorRunBar::_joinery_fill_run_menu() {
++	PopupMenu *popup = joinery_run_menu->get_popup();
++	popup->clear();
++	popup->add_icon_shortcut(get_editor_theme_icon(SNAME("PlayScene")), ED_GET_SHORTCUT("editor/run_current_scene"), JOINERY_RUN_CURRENT);
++	popup->set_item_text(-1, TTR("Play This Scene"));
++	popup->add_icon_shortcut(get_editor_theme_icon(SNAME("PlayCustom")), ED_GET_SHORTCUT("editor/run_specific_scene"), JOINERY_RUN_CUSTOM);
++	popup->set_item_text(-1, TTR("Play a Scene..."));
++	popup->add_separator();
++	popup->add_check_item(TTR("Movie Maker Mode"), JOINERY_MOVIE_MAKER);
++	popup->set_item_checked(-1, is_movie_maker_enabled());
++	popup->set_item_tooltip(-1, TTR("Run at a steady frame rate and record the picture and sound to a video file."));
++	popup->add_item(TTR("Movie Maker Settings..."), JOINERY_MOVIE_MAKER_SETTINGS);
++}
++
++void EditorRunBar::_joinery_run_menu_option(int p_id) {
++	switch (p_id) {
++		case JOINERY_RUN_CURRENT:
++			_play_current_pressed();
++			break;
++		case JOINERY_RUN_CUSTOM:
++			_play_custom_pressed();
++			break;
++		case JOINERY_MOVIE_MAKER:
++			_movie_maker_item_pressed(MOVIE_MAKER_TOGGLE);
++			write_movie_panel->set_visible(is_movie_maker_enabled());
++			break;
++		case JOINERY_MOVIE_MAKER_SETTINGS:
++			_movie_maker_item_pressed(MOVIE_MAKER_OPEN_SETTINGS);
++			break;
+ 	}
+ }
+ 
+@@ -625,13 +678,11 @@ EditorRunBar::EditorRunBar() {
+ 
+ 	play_button = memnew(Button);
+ 	main_hbox->add_child(play_button);
+-	// Joinery: Play is the run bar's one primary action, "▶ Play" in the
+-	// accent style shared with the Journeyman sidebar.
++	// Joinery: Play is the run bar's labelled action, "▶ Play", with the
++	// other ways to run in a ▾ menu beside it.
++	play_button->set_theme_type_variation("RunBarButton");
+ 	if (EditorSettings::is_joinery_layout()) {
+-		play_button->set_theme_type_variation("JoineryPrimaryButton");
+ 		play_button->set_text(TTRC("Play"));
+-	} else {
+-		play_button->set_theme_type_variation("RunBarButton");
+ 	}
+ 	play_button->set_toggle_mode(true);
+ 	play_button->set_focus_mode(Control::FOCUS_ACCESSIBILITY);
+@@ -741,4 +792,21 @@ EditorRunBar::EditorRunBar() {
+ 	write_movie_button->set_tooltip_text(TTRC("Enable Movie Maker mode.\nThe project will run at stable FPS and the visual and audio output will be recorded to a video file."));
+ 	write_movie_button->set_accessibility_name(TTRC("Enable Movie Maker Mode"));
+ 	write_movie_button->set_flat(false);
++
++	if (EditorSettings::is_joinery_layout()) {
++		joinery_run_menu = memnew(MenuButton);
++		joinery_run_menu->set_name("JoineryRunMenu");
++		joinery_run_menu->set_theme_type_variation("RunBarButton");
++		joinery_run_menu->set_flat(false);
++		joinery_run_menu->set_focus_mode(Control::FOCUS_ACCESSIBILITY);
++		joinery_run_menu->set_tooltip_text(TTRC("More ways to play: this scene, another scene, Movie Maker."));
++		joinery_run_menu->set_accessibility_name(TTRC("More ways to play"));
++		main_hbox->add_child(joinery_run_menu);
++		main_hbox->move_child(joinery_run_menu, play_button->get_index() + 1);
++		joinery_run_menu->get_popup()->connect("about_to_popup", callable_mp(this, &EditorRunBar::_joinery_fill_run_menu));
++		joinery_run_menu->get_popup()->connect(SceneStringName(id_pressed), callable_mp(this, &EditorRunBar::_joinery_run_menu_option));
++		play_scene_button->set_visible(false);
++		play_custom_scene_button->set_visible(false);
++		write_movie_panel->set_visible(false);
++	}
+ }
+diff --git a/editor/run/editor_run_bar.h b/editor/run/editor_run_bar.h
+index 98df6e1..d8d051a 100644
+--- a/editor/run/editor_run_bar.h
++++ b/editor/run/editor_run_bar.h
+@@ -88,6 +88,18 @@ class EditorRunBar : public MarginContainer {
+ 	MenuButton *write_movie_button = nullptr;
+ 	bool movie_maker_enabled = false;
+ 
++	// Joinery: one ▾ menu beside Play holds the other ways to run.
++	enum JoineryRunMenuItem {
++		JOINERY_RUN_CURRENT,
++		JOINERY_RUN_CUSTOM,
++		JOINERY_MOVIE_MAKER,
++		JOINERY_MOVIE_MAKER_SETTINGS,
++	};
++	MenuButton *joinery_run_menu = nullptr;
++	void _joinery_fill_run_menu();
++	void _joinery_run_menu_option(int p_id);
++	void _joinery_style_play();
++
+ 	RunMode current_mode = RunMode::STOPPED;
+ 	String run_custom_filename;
+ 	String run_current_filename;
