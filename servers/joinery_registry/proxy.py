@@ -127,7 +127,7 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
     @server.tool()
     @tool_errors
     async def edit_scene(edit: SceneEdit) -> dict[str, Any]:
-        """Preview native changes in the current live Godot editor, including unsaved scenes. Reusable create/delete/duplicate/rename/reparent/property operations. Uses stable context identities. instantiate_scene places a model by its res:// path, also one you made earlier in this change: it is reviewed together with the model, in one change. To swap a placeholder, pass replace (the placeholder's identity; the model takes its parent and transform) and fit_size true to keep its size. The user accepts or rejects; never claim it is saved."""
+        """Preview native changes in the current live Godot editor, including unsaved scenes. Reusable create/delete/duplicate/rename/reparent/property operations. Uses stable context identities. instantiate_scene places a model by its res:// path, also one you made earlier in this change: it is reviewed together with the model, in one change. To swap a placeholder, pass replace (the placeholder's identity; the model takes its parent and transform) and fit_size true to keep its size. To put it on something (a mug on a table), pass on (that node's identity): it rests on the node's top, centred, under the node's parent; at [x, z] shifts it in metres, as_child true puts it under the node. The user accepts or rejects; never claim it is saved."""
         return await rpc(socket, "editor_edit", edit.model_dump(mode="json"))
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))

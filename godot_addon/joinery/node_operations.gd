@@ -57,6 +57,14 @@ func plan(op: Dictionary, targets: Array) -> Dictionary:
 		removal = removed["plan"]
 		if str(op.get("parent", "")).is_empty():
 			parent = replaced.get_parent()
+	var surface: Node = null
+	if action == "instantiate_scene" and not str(op.get("on", "")).is_empty():
+		surface = _target(str(op.get("on", "")), targets)
+		if surface == null:
+			return _error("The object to put it on no longer exists in this scene.")
+		if str(op.get("parent", "")).is_empty():
+			var under := bool(op.get("as_child", false)) or surface == scene
+			parent = surface if under else surface.get_parent()
 	var entry := {"action": action, "node": target, "op": op, "scene": scene}
 	if target != null:
 		entry["parent_before"] = target.get_parent()
@@ -113,6 +121,10 @@ func plan(op: Dictionary, targets: Array) -> Dictionary:
 		if replaced != null:
 			entry["index_after"] = replaced.get_index()
 			_place(node, replaced, bool(op.get("fit_size", false)))
+		elif surface != null:
+			var refused := _rest_on(node, surface, parent, op.get("at"))
+			if not refused.is_empty():
+				return _error(refused)
 	elif action == "reparent_node":
 		if parent.has_node(NodePath(str(target.name))):
 			return _error("The destination already has a child with this name.")
@@ -478,6 +490,40 @@ func _place(node: Node, replaced: Node, fit: bool) -> void:
 			var fitted := Transform3D(Basis.from_scale(Vector3.ONE * ratio), foot - own * ratio)
 			place = place * fitted
 	node.transform = place
+
+
+## Stand [param node] on [param surface]: its bounds' bottom on the surface's top, centred
+## on it or [param at] metres (x, z) from that centre, in [param parent]'s space. Returns
+## why it can't, or "".
+func _rest_on(node: Node, surface: Node, parent: Node, at: Variant) -> String:
+	if node is Node2D and surface is Node2D:
+		var spot := (surface as Node2D).global_position
+		node.position = (parent as Node2D).to_local(spot) if parent is Node2D else spot
+		return ""
+	if not (node is Node3D and surface is Node3D):
+		return "Put a 3D model on a 3D object."
+	var shown := surface.find_children("*", "VisualInstance3D", true, false)
+	if not surface is VisualInstance3D and shown.is_empty():
+		return (
+			str(surface.name)
+			+ " has nothing visible to rest on. Place it with parent and a position instead."
+		)
+	var top: AABB = (surface as Node3D).global_transform * _bounds(surface)
+	var turn := (node as Node3D).transform.basis
+	var have: AABB = Transform3D(turn, Vector3.ZERO) * _bounds(node)
+	var offset := Vector2.ZERO
+	if at is Array and at.size() == 2:
+		offset = Vector2(float(at[0]), float(at[1]))
+	var centre := top.get_center()
+	var foot := have.get_center()
+	var spot := Vector3(
+		centre.x + offset.x - foot.x, top.end.y - have.position.y, centre.z + offset.y - foot.z
+	)
+	var space := Transform3D.IDENTITY
+	if parent is Node3D:
+		space = (parent as Node3D).global_transform
+	node.transform = space.affine_inverse() * Transform3D(turn, spot)
+	return ""
 
 
 ## The bounds of [param root]'s meshes in its own space (its own transform not applied).

@@ -169,7 +169,8 @@ TEXT_SUFFIXES = frozenset(
 LIVE_SCENE = (
     "This scene is on screen or has unsaved edits; change it live with edit_scene. "
     "edit_scene's instantiate_scene places a model made in this change too (pass "
-    "replace to swap a placeholder), and it is reviewed with the model as one change."
+    "replace to swap a placeholder, on to stand it on a node), and it is reviewed "
+    "with the model as one change."
 )
 #: A task tried to stage the scene on screen while it can't change it live.
 LANE_LIVE_SCENE = (

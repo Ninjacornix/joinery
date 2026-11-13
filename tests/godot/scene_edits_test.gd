@@ -160,7 +160,81 @@ func _run() -> void:
 	_check(restored == order, "Reject restores exact sibling ordering")
 	_check(nested.owner == scene, "Reject restores descendant ownership")
 	_check(scene.get_node("B/Nested") == nested, "Reject restores the original subtree identity")
+	_rest_on(edits, scene, context)
 	scene.queue_free()
 	await process_frame
 	print("scene edits: ", "FAILED" if _failed else "ok")
 	quit(1 if _failed else 0)
+
+
+## A model put on a table rests on its top, centred, beside it under the same parent.
+func _rest_on(edits: RefCounted, scene: Node3D, context: Dictionary) -> void:
+	var room := Node3D.new()
+	room.name = "Room"
+	scene.add_child(room)
+	room.owner = scene
+	room.position = Vector3(1, 0.25, 0)
+	var table := Node3D.new()
+	table.name = "Table"
+	room.add_child(table)
+	table.owner = scene
+	table.position = Vector3(2, 0, -1)
+	_box(scene, table, Vector3(1.2, 0.8, 0.6), Vector3(0, 0.4, 0))
+	var bare := Node3D.new()
+	bare.name = "Marker"
+	room.add_child(bare)
+	bare.owner = scene
+	# The mug's mesh is centred on its origin: its bottom is below the origin.
+	var mug := Node3D.new()
+	mug.name = "Mug"
+	_box(mug, mug, Vector3(0.1, 0.12, 0.1), Vector3.ZERO)
+	var packed := PackedScene.new()
+	_check(packed.pack(mug) == OK, "Pack the mug")
+	mug.free()
+	var path := "res://rest_on_mug.tscn"
+	_check(ResourceSaver.save(packed, path) == OK, "Save the mug scene")
+	var id := scene.scene_file_path + "::Room/Table"
+	var edit := {
+		"summary": "Put the mug on the table",
+		"operations": [{"operation": "instantiate_scene", "resource_path": path, "on": id}]
+	}
+	var result: Dictionary = edits.preview(scene, edit, context, [id])
+	_check(result["success"], "Put the mug on the table: " + str(result))
+	var placed := room.get_node_or_null("Mug") as Node3D
+	_check(placed != null, "The mug stands beside the table, under its parent")
+	if placed != null:
+		var box: AABB = placed.global_transform * edits._generic._bounds(placed)
+		_check(absf(box.position.y - 1.05) < 0.001, "Mug bottom on the table top: %s" % box)
+		_check(absf(box.get_center().x - 3.0) < 0.001, "Mug centred on x: %s" % box)
+		_check(absf(box.get_center().z + 1.0) < 0.001, "Mug centred on z: %s" % box)
+	edits.reject()
+	_check(not room.has_node("Mug"), "Reject takes the mug away")
+	edit["operations"][0]["at"] = [0.4, -0.2]
+	edit["operations"][0]["as_child"] = true
+	result = edits.preview(scene, edit, context, [id])
+	_check(result["success"], "Put the mug on the table's corner: " + str(result))
+	placed = table.get_node_or_null("Mug") as Node3D
+	_check(placed != null, "as_child puts the mug under the table")
+	if placed != null:
+		var box: AABB = placed.global_transform * edits._generic._bounds(placed)
+		_check(absf(box.position.y - 1.05) < 0.001, "Still on the top: %s" % box)
+		_check(absf(box.get_center().x - 3.4) < 0.001, "at moves it along x: %s" % box)
+		_check(absf(box.get_center().z + 1.2) < 0.001, "at moves it along z: %s" % box)
+	edits.reject()
+	var marker := scene.scene_file_path + "::Room/Marker"
+	edit["operations"] = [{"operation": "instantiate_scene", "resource_path": path, "on": marker}]
+	result = edits.preview(scene, edit, context, [marker])
+	_check(not result["success"], "Nothing visible to rest on is refused")
+	_check(str(result.get("message", "")).contains("nothing visible"), str(result))
+	room.free()
+	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
+
+
+func _box(owner: Node, parent: Node, size: Vector3, at: Vector3) -> void:
+	var mesh := MeshInstance3D.new()
+	var shape := BoxMesh.new()
+	shape.size = size
+	mesh.mesh = shape
+	mesh.position = at
+	parent.add_child(mesh)
+	mesh.owner = owner

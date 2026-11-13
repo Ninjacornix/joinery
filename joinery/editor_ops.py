@@ -91,6 +91,14 @@ class NodeOperation(BaseModel):
     #: With replace: scale the instance evenly to the replaced node's size and
     #: stand it where that node stood (its bounds' bottom centre).
     fit_size: bool = False
+    #: instantiate_scene only: the node the new instance stands on. Its bounds'
+    #: bottom rests on that node's top, centred (or at ``at``), beside it under
+    #: its parent (or under it with ``as_child``).
+    on: str = ""
+    #: With on: metres (x, z) from the top's centre, in world axes.
+    at: tuple[FiniteFloat, FiniteFloat] | None = None
+    #: With on: the instance becomes the node's child instead of its sibling.
+    as_child: bool = False
 
     @model_validator(mode="after")
     def required_fields(self) -> NodeOperation:
@@ -98,6 +106,14 @@ class NodeOperation(BaseModel):
             raise ValueError("Only instantiate_scene replaces a node.")
         if self.fit_size and not self.replace:
             raise ValueError("fit_size needs replace: the node whose size to keep.")
+        if self.on and self.operation != "instantiate_scene":
+            raise ValueError("Only instantiate_scene places a node on another.")
+        if self.on and self.replace:
+            raise ValueError("Use replace or on, not both.")
+        if (self.at is not None or self.as_child) and not self.on:
+            raise ValueError("at and as_child need on: the node to stand it on.")
+        if self.at is not None and any(abs(v) > 10000 for v in self.at):
+            raise ValueError("at is outside the supported scene bounds.")
         if (
             self.operation not in {"create_node", "instantiate_scene"}
             and not self.target
@@ -173,7 +189,12 @@ def validate_edit(
                 "Transform edits must refer to an object selected for this prompt."
             )
         if isinstance(operation, NodeOperation):
-            for identity in (operation.parent, operation.receiver, operation.replace):
+            for identity in (
+                operation.parent,
+                operation.receiver,
+                operation.replace,
+                operation.on,
+            ):
                 if identity and identity not in targets:
                     raise ValueError(
                         "Referenced nodes must be in the current editor context."
@@ -193,6 +214,9 @@ SCENE_TOOL = {
         "instantiate_scene places a model or scene by its res:// path, including one made earlier in this same change "
         "(it is reviewed together with the model). To swap a placeholder for it, pass replace with the placeholder's identity "
         "(it keeps the placeholder's parent and transform) and fit_size true to keep the placeholder's size. "
+        "To put it on something (a mug on a table), pass on with that node's identity: it rests on the node's top, "
+        "centred, beside it under the same parent; at [x, z] moves it that many metres from the centre and as_child "
+        "true puts it under the node. "
         "Use this tool for requested live scene changes instead of manual steps. The user then accepts "
         "or rejects the preview in the Review panel below the viewport. Do not claim a preview is accepted or saved."
     ),
