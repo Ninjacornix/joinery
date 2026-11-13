@@ -286,6 +286,24 @@ class _Request:
     timeout: float
 
 
+async def _image_present(image: str) -> int:
+    """`docker image inspect`'s exit code for [image] (1 when it takes over 10 s)."""
+    check = await asyncio.create_subprocess_exec(
+        "docker",
+        "image",
+        "inspect",
+        image,
+        stdout=asyncio.subprocess.DEVNULL,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    try:
+        return await asyncio.wait_for(check.wait(), 10)
+    except TimeoutError:
+        check.kill()
+        await check.wait()
+        return 1
+
+
 @dataclass
 class MCPConnection:
     spec: ServerSpec
@@ -314,23 +332,19 @@ class MCPConnection:
                 raise PolicyStop(verdict.reason)
             raise PermissionError(verdict.reason)
         if self.spec.worker_image:
-            check = await asyncio.create_subprocess_exec(
-                "docker",
-                "image",
-                "inspect",
-                self.spec.worker_image,
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            try:
-                code = await asyncio.wait_for(check.wait(), 10)
-            except TimeoutError:
-                check.kill()
-                await check.wait()
-                code = 1
+            # Asked twice: a busy Docker answering late is not a missing tool.
+            code = await _image_present(self.spec.worker_image)
+            if code:
+                await asyncio.sleep(1)
+                code = await _image_present(self.spec.worker_image)
             if code:
                 self.readiness.state = "runtime-missing"
-                self.readiness.detail = f"Offline image {self.spec.worker_image} is unavailable or Docker is not running. Run joinery bootstrap --project <project>."
+                self.readiness.detail = (
+                    "This app's offline tools aren't available right now: Docker "
+                    "may not be running, or the tools need a refresh after an "
+                    "update. Ask the user to start Docker or press Refresh tools "
+                    "in the Joinery sidebar, then try again."
+                )
                 raise ValueError(self.readiness.detail)
         self._ready = asyncio.get_running_loop().create_future()
         self._task = asyncio.create_task(self._serve())

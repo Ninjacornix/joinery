@@ -386,6 +386,74 @@ def test_timed_out_check_is_reported_but_never_cached(host: FakeHost) -> None:
     assert surge["state"] == "needs_image"
 
 
+def test_docker_refusing_a_run_is_never_cached_as_missing(host: FakeHost) -> None:
+    host.outputs["Surge XT.vst3"] = (125, "docker: Error response from daemon: EOF")
+    surge = by_id(status(tool="surge-xt", refresh=True, host=host))["surge-xt"]
+    assert surge["state"] == "broken"
+    assert by_id(status(tool="surge-xt", host=host))["surge-xt"]["checking"] is True
+
+
+def test_a_docker_hiccup_is_checking_not_a_missing_tool(host: FakeHost) -> None:
+    class Hiccup(FakeHost):
+        def image(self, name: str) -> Image | None:
+            if name == CREATIVE_WORKER:
+                raise readiness.ImageUnknown("Error response from daemon: EOF")
+            return super().image(name)
+
+    flaky = Hiccup(engine=host.engine)
+    blender = by_id(status(tool="blender", refresh=True, host=flaky))["blender"]
+    assert blender["state"] != "needs_image"
+    assert blender["checking"] is True
+    assert blender["action"] is None
+    assert not any(image == CREATIVE_WORKER for image, _ in flaky.runs)
+    # Nothing about it was kept: the next answer from Docker decides.
+    assert readiness.cached_tools()["blender"]["status"] != "unavailable"
+    again = by_id(status(tool="blender", refresh=True, host=host))
+    assert again["blender"]["state"] == "ready"
+
+
+def _docker(
+    monkeypatch: pytest.MonkeyPatch, answers: list[tuple[int, str, str]]
+) -> list[list[str]]:
+    import subprocess
+
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        calls.append(argv)
+        code, out, err = answers.pop(0)
+        return subprocess.CompletedProcess(argv, code, out, err)
+
+    monkeypatch.setattr(readiness.subprocess, "run", run)
+    monkeypatch.setattr(readiness, "IMAGE_RETRY_SECONDS", 0.0)
+    return calls
+
+
+def test_docker_host_asks_twice_and_cross_checks_before_saying_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    daemon = (1, "", "Error response from daemon: i/o timeout")
+    calls = _docker(monkeypatch, [daemon, daemon, (1, "", "Cannot connect")])
+    with pytest.raises(readiness.ImageUnknown):
+        readiness.DockerHost().image("joinery-creative-worker")
+    assert [call[:3] for call in calls] == [
+        ["docker", "image", "inspect"],
+        ["docker", "image", "inspect"],
+        ["docker", "image", "ls"],
+    ]
+    # The listing answers: nothing by that name, so it really is missing.
+    _docker(monkeypatch, [daemon, daemon, (0, "", "")])
+    assert readiness.DockerHost().image("joinery-creative-worker") is None
+    # Docker's own "No such image" is an answer at once.
+    calls = _docker(monkeypatch, [(1, "", "Error: No such image: joinery-x")])
+    assert readiness.DockerHost().image("joinery-x") is None
+    assert len(calls) == 1
+    # A hiccup, then the image.
+    labels = json.dumps({readiness.SETUP_LABEL: "abc"})
+    _docker(monkeypatch, [daemon, (0, f"sha256:1\t2026\t{labels}\n", "")])
+    assert readiness.DockerHost().image("joinery-x") == Image("sha256:1", "2026", "abc")
+
+
 def test_background_refresh_releases_its_lock_when_done(
     host: FakeHost, monkeypatch: pytest.MonkeyPatch, cache: Path
 ) -> None:

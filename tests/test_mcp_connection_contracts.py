@@ -283,8 +283,12 @@ def test_missing_worker_image_reports_runtime_missing_without_launching_client(
         ),
         project,
     )
-    with pytest.raises(ValueError, match="bootstrap"):
+    monkeypatch.setattr(mcp_runtime.asyncio, "sleep", AsyncMock())
+    # Plain words for the agent to pass on: no command line, no placeholder.
+    with pytest.raises(ValueError, match="Refresh tools in the Joinery sidebar"):
         asyncio.run(conn.connect())
+    # Asked twice: a busy Docker answering late is not a missing tool.
+    assert spawn.await_count == 2
     assert conn.readiness.state == "runtime-missing"
     assert not conn.readiness.connected and conn._task is None
     peer.assert_not_called()

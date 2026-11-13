@@ -294,6 +294,26 @@ def clear_setup() -> None:
             path.unlink()
 
 
+#: Docker's own words for an image that isn't there (any other failure is a hiccup).
+_NO_SUCH_IMAGE = re.compile(r"no such (image|object)", re.IGNORECASE)
+#: Pause before asking Docker about an image a second time.
+IMAGE_RETRY_SECONDS = 1.0
+
+
+class ImageUnknown(Exception):
+    """Docker didn't answer about an image: it may or may not be there."""
+
+
+def _parse_image(stdout: str) -> Image:
+    identifier, _, rest = stdout.strip().partition("\t")
+    created, _, labels = rest.partition("\t")
+    try:
+        parsed = json.loads(labels) or {}
+    except json.JSONDecodeError:
+        parsed = {}
+    return Image(identifier, created, str(parsed.get(SETUP_LABEL, "")))
+
+
 class DockerHost:
     """The real boundary: Docker CLI, the installed MCP cache and the desktop."""
 
@@ -313,32 +333,52 @@ class DockerHost:
         return "" if done.returncode == 0 else "Docker is not running."
 
     def image(self, name: str) -> Image | None:
+        """The image, None when Docker says it doesn't exist.
+
+        Raises `ImageUnknown` when Docker couldn't say (a busy daemon, a
+        timeout): asked twice and cross-checked with `docker image ls`, so a
+        hiccup is never reported as a missing image.
+        """
+        reason = ""
+        for attempt in range(2):
+            if attempt:
+                time.sleep(IMAGE_RETRY_SECONDS)
+            try:
+                done = subprocess.run(
+                    [
+                        "docker",
+                        "image",
+                        "inspect",
+                        "--format",
+                        "{{.Id}}\t{{.Created}}\t{{json .Config.Labels}}",
+                        name,
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=15,
+                    check=False,
+                )
+            except (OSError, subprocess.SubprocessError) as exc:
+                reason = str(exc) or type(exc).__name__
+                continue
+            if done.returncode == 0:
+                return _parse_image(done.stdout)
+            reason = _first_line(done.stderr) or f"exit code {done.returncode}"
+            if _NO_SUCH_IMAGE.search(done.stderr):
+                return None
         try:
-            done = subprocess.run(
-                [
-                    "docker",
-                    "image",
-                    "inspect",
-                    "--format",
-                    "{{.Id}}\t{{.Created}}\t{{json .Config.Labels}}",
-                    name,
-                ],
+            listed = subprocess.run(
+                ["docker", "image", "ls", "--quiet", name],
                 capture_output=True,
                 text=True,
                 timeout=15,
                 check=False,
             )
-        except (OSError, subprocess.SubprocessError):
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ImageUnknown(reason or str(exc)) from None
+        if listed.returncode == 0 and not listed.stdout.strip():
             return None
-        if done.returncode:
-            return None
-        identifier, _, rest = done.stdout.strip().partition("\t")
-        created, _, labels = rest.partition("\t")
-        try:
-            parsed = json.loads(labels) or {}
-        except json.JSONDecodeError:
-            parsed = {}
-        return Image(identifier, created, str(parsed.get(SETUP_LABEL, "")))
+        raise ImageUnknown(reason)
 
     def run(
         self, image: str, argv: Sequence[str], entrypoint: str, timeout: int
@@ -509,6 +549,8 @@ class _Context:
     removed: set[str] = field(default_factory=set)
     docker_reason: str | None = None
     images: dict[str, Image | None] = field(default_factory=dict)
+    #: Images Docker couldn't say anything about this time.
+    unsure: set[str] = field(default_factory=set)
     setup: dict[str, Any] | None = None
     setup_read: bool = False
     updates: dict[str, Any] = field(default_factory=dict)
@@ -522,7 +564,12 @@ class _Context:
 
     def image(self, name: str) -> Image | None:
         if name not in self.images:
-            self.images[name] = None if self.docker() else self.host.image(name)
+            try:
+                self.images[name] = None if self.docker() else self.host.image(name)
+            except ImageUnknown:
+                # Docker didn't answer: "checking", never "not built".
+                self.images[name] = None
+                self.unsure.add(name)
         return self.images[name]
 
     def downloading(self, image: str) -> bool:
@@ -565,8 +612,14 @@ def _cached(ctx: _Context, key: str, ttl: float | None = None) -> Outcome | None
 TIMED_OUT = 124
 
 
+#: `docker run`'s own failure (the daemon refused), before the check ran at all.
+DOCKER_FAILED = 125
+
+
 def _timed_out(code: int, output: str) -> bool:
-    return code == TIMED_OUT and output.startswith("timed out after")
+    return (code == TIMED_OUT and output.startswith("timed out after")) or (
+        code == DOCKER_FAILED
+    )
 
 
 def _store_run(
@@ -613,6 +666,8 @@ def _image_gate(ctx: _Context, image: str) -> Outcome | None:
     if ctx.downloading(image):
         return Outcome("downloading", image)
     found = ctx.image(image)
+    if found is None and image in ctx.unsure:
+        return Outcome(known=False, detail="Docker didn't answer")
     if found is None:
         return Outcome("needs_image", f"{image} is not built")
     expected = ctx.host.expected_revision()
