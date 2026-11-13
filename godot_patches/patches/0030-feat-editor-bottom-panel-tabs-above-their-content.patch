@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Fri, 13 Nov 2026 09:53:36 +0100
+Subject: [PATCH] feat(editor): bottom panel tabs above their content
+
+Joinery-only, not for upstream. In Joinery's layout the bottom panel's tab strip sits above the dock it names, like every other tab strip in the editor. The classic view keeps it below.
+---
+ editor/gui/editor_bottom_panel.cpp | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/editor/gui/editor_bottom_panel.cpp b/editor/gui/editor_bottom_panel.cpp
+index 61be681..973e603 100644
+--- a/editor/gui/editor_bottom_panel.cpp
++++ b/editor/gui/editor_bottom_panel.cpp
+@@ -341,7 +341,9 @@ EditorBottomPanel::EditorBottomPanel() :
+ 	grid_rect = Rect2i(2, 4, 4, 2);
+ 
+ 	get_tab_bar()->connect("tab_changed", callable_mp(this, &EditorBottomPanel::_on_tab_changed));
+-	set_tabs_position(TabPosition::POSITION_BOTTOM);
++	// Joinery: the tab strip sits above the dock it names, like every other
++	// tab strip in the editor, so the panel reads from its title down.
++	set_tabs_position(EditorSettings::is_joinery_layout() ? TabPosition::POSITION_TOP : TabPosition::POSITION_BOTTOM);
+ 	set_deselect_enabled(true);
+ 	set_theme_type_variation("BottomPanel");
+ 

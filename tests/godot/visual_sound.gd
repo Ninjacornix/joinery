@@ -30,7 +30,7 @@ static func mixer(suite: Variant) -> void:
 	if tab == null:
 		return
 	var plugin: EditorPlugin = suite._plugin
-	plugin.make_bottom_panel_item_visible(tab)
+	plugin.call("open_page", tab)
 	var split: SplitContainer
 	var walker: Node = tab
 	while walker != null and split == null:

@@ -60,6 +60,9 @@ var start_docker_argv := PackedStringArray(
 var _buttons: Dictionary = {}
 var _items: Dictionary = {}
 var _tools: VBoxContainer
+## Joinery's own pages (Timeline, Share, Mixer) below the apps, and their ids.
+var _pages: VBoxContainer
+var _page_ids: Array[String] = []
 var _toolbar: RailItem
 var _group := ButtonGroup.new()
 var _selected := "godot"
@@ -173,6 +176,11 @@ func _ready() -> void:
 	_tools = VBoxContainer.new()
 	_tools.theme_type_variation = "JoineryTight"
 	add_child(_tools)
+	_pages = VBoxContainer.new()
+	_pages.name = "Pages"
+	_pages.theme_type_variation = "JoineryTight"
+	_pages.hide()
+	add_child(_pages)
 	var spacer := Control.new()
 	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -262,8 +270,10 @@ func update_tools(tools: Array, assets: Array) -> void:
 	for child: Node in _tools.get_children():
 		_tools.remove_child(child)
 		child.queue_free()
-	_buttons.clear()
-	_items.clear()
+	for id: String in _buttons.keys():
+		if not _page_ids.has(id):
+			_buttons.erase(id)
+			_items.erase(id)
 	var added_all := false
 	for tool: Dictionary in shown:
 		var id := str(tool["id"])
@@ -316,11 +326,22 @@ func _restyle(force := true) -> void:
 			_style(item)
 
 
+## Add one of Joinery's own pages (Timeline, Share, Mixer) below the apps; choosing it emits
+## tool_selected with [param id].
+func add_page(id: String, title: String, source: Dictionary) -> void:
+	if _page_ids.has(id):
+		return
+	_page_ids.append(id)
+	_add_tool(id, title, source, _pages)
+	_pages.show()
+	select_tool(_selected)
+
+
 func _add_all_assets() -> void:
 	_add_tool(ALL_ASSETS, "All assets", {"svg": _glyph("all")})
 
 
-func _add_tool(id: String, title: String, source: Dictionary) -> void:
+func _add_tool(id: String, title: String, source: Dictionary, parent: Control = null) -> void:
 	var button := _button("AllAssets" if id == ALL_ASSETS else id, title)
 	button.button_group = _group
 	button.set_meta("title", title)
@@ -344,7 +365,7 @@ func _add_tool(id: String, title: String, source: Dictionary) -> void:
 			_show_card(id)
 	)
 	var item := _item(button, source, true)
-	_tools.add_child(item)
+	(parent if parent != null else _tools).add_child(item)
 	_buttons[id] = button
 	_items[id] = item
 

@@ -48,11 +48,20 @@ var _sent := false
 static func install(plugin: EditorPlugin) -> Control:
 	var tab: Control = load(SELF_PATH).new()
 	tab.set("_plugin", plugin)
-	plugin.add_control_to_bottom_panel(tab, "Mixer")
+	# A rail page in Joinery's layout; a bottom panel tab in the classic one.
+	var rail: bool = (
+		plugin.has_method("add_rail_page")
+		and plugin.call("add_rail_page", "mixer", "Mixer", tab, {"ui": "volume"})
+	)
+	if not rail:
+		plugin.add_control_to_bottom_panel(tab, "Mixer")
 	plugin.tree_exiting.connect(
 		func() -> void:
 			if is_instance_valid(tab):
-				plugin.remove_control_from_bottom_panel(tab)
+				if rail:
+					plugin.call("remove_rail_page", tab)
+				else:
+					plugin.remove_control_from_bottom_panel(tab)
 				tab.queue_free(),
 		CONNECT_ONE_SHOT
 	)

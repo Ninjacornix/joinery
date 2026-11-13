@@ -40,7 +40,7 @@ static func _timeline(suite: Variant) -> void:
 	var plugin: EditorPlugin = suite._plugin
 	tab.set("cli_enabled", false)
 	tab.call("show_list")
-	plugin.make_bottom_panel_item_visible(tab)
+	plugin.call("open_page", tab)
 	var now := Time.get_unix_time_from_system()
 	var rows := [
 		["Bring in Ana's changes", "Ben Okafor", 60, 4, false, false],

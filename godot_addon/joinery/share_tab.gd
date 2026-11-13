@@ -73,11 +73,20 @@ var _dialog: PUBLISH
 ## Add the Share tab after Timeline; it removes itself when the plugin leaves the tree.
 static func install(plugin: EditorPlugin) -> Control:
 	var tab: Control = load(SELF_PATH).new()
-	plugin.add_control_to_bottom_panel(tab, "Share")
+	# A rail page in Joinery's layout; a bottom panel tab in the classic one.
+	var rail: bool = (
+		plugin.has_method("add_rail_page")
+		and plugin.call("add_rail_page", "share", "Share", tab, {"ui": "external"})
+	)
+	if not rail:
+		plugin.add_control_to_bottom_panel(tab, "Share")
 	plugin.tree_exiting.connect(
 		func() -> void:
 			if is_instance_valid(tab):
-				plugin.remove_control_from_bottom_panel(tab)
+				if rail:
+					plugin.call("remove_rail_page", tab)
+				else:
+					plugin.remove_control_from_bottom_panel(tab)
 				tab.queue_free(),
 		CONNECT_ONE_SHOT
 	)

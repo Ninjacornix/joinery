@@ -459,7 +459,11 @@ func _target(id: String) -> Variant:
 				if not (found is Control and (found as Control).is_visible_in_tree()):
 					found = _bottom_tab("Review")
 			"timeline", "share":
-				found = _bottom_tab(id.capitalize())
+				# A rail page in Joinery's layout, a bottom panel tab in the classic one.
+				if plugin.has_method("rail_button"):
+					found = plugin.call("rail_button", id)
+				if not (found is Control and (found as Control).is_visible_in_tree()):
+					found = _bottom_tab(id.capitalize())
 	return found if found is Control or found is Rect2 else null
 
 

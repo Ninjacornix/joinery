@@ -190,6 +190,9 @@ func _pin() -> void:
 	var tabs := dock.get_parent() as TabContainer if dock != null else null
 	if tabs == null:
 		return
+	# Docks opened, closed or restored later reorder the tabs: pin again after each.
+	if not tabs.child_order_changed.is_connected(_pin):
+		tabs.child_order_changed.connect(_pin, CONNECT_DEFERRED)
 	var index := tabs.get_tab_idx_from_control(dock)
 	if index < 0:
 		return

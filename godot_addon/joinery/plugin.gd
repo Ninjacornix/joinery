@@ -22,10 +22,13 @@ const UI_COMPONENTS := preload("res://addons/joinery/ui_components.gd")
 const REVIEW_TAB_SCRIPT := preload("res://addons/joinery/review_tab.gd")
 const REVIEW_CHECKS := preload("res://addons/joinery/review_checks.gd")
 const FLOW_SCRIPT := preload("res://addons/joinery/review_flow.gd")
+const EDITOR_CONTEXT := preload("res://addons/joinery/editor_context.gd")
 
 ## Focus mode is remembered, so a user who wants the stripped-back layout gets
 ## it on every launch instead of re-toggling it each session.
 const FOCUS_SETTING := "joinery/focus_mode"
+## The main screen this plugin adds: the asset workspace and the rail pages.
+const SCREEN := "Tools"
 
 ## Written by the Project Manager's Next button, in the fork. Tells the addon
 ## that this project was just created and still needs its questionnaire.
@@ -70,6 +73,12 @@ var _deciding := false
 ## The 2D or 3D view the user had last, for the Godot rail button.
 var _last_view := "3D"
 var _connect_dialog: AcceptDialog
+## Joinery's own pages opened from the rail (Timeline, Share, Mixer), by rail id, each
+## {"title", "control", "icon"}. Shown in the main screen in place of the asset workspace.
+## Empty in Godot's classic layout, where they are bottom panel tabs.
+var _pages: Dictionary = {}
+## The rail page the main screen shows, or "" for the asset workspace.
+var _page := ""
 ## False in Godot's classic layout (the fork's interface/joinery/editor_layout) and on stock Godot.
 var _joinery_layout := false
 
@@ -176,6 +185,8 @@ func _restore_focus() -> void:
 		_rail.tool_selected.connect(_on_tool_selected)
 		_rail.toolbar_requested.connect(_on_toggle_toolbar)
 		_rail.set_toolbar_shown(_shell.is_shown())
+		for id: String in _pages:
+			_rail.add_page(id, str(_pages[id]["title"]), _pages[id]["icon"])
 		_workspace.refresh()
 	main_screen_changed.connect(_on_main_screen_changed)
 	# Godot's classic layout opens as Godot arranges it; Focus mode stays one command away.
@@ -394,7 +405,7 @@ func _has_main_screen() -> bool:
 
 
 func _get_plugin_name() -> String:
-	return "Tools"
+	return SCREEN
 
 
 func _get_plugin_icon() -> Texture2D:
@@ -402,11 +413,74 @@ func _get_plugin_icon() -> Texture2D:
 
 
 func _make_visible(visible: bool) -> void:
+	if not visible:
+		_page = ""
+	_show_page(visible)
+	if visible and _page.is_empty() and _workspace != null:
+		_workspace.select_tool("")
+		_workspace.refresh()
+
+
+## Show the asset workspace, or the rail page in [member _page], in the main screen.
+func _show_page(visible := true) -> void:
 	if _workspace != null:
-		_workspace.visible = visible
-		if visible:
-			_workspace.select_tool("")
-			_workspace.refresh()
+		_workspace.visible = visible and _page.is_empty()
+	for id: String in _pages:
+		var page: Control = _pages[id]["control"]
+		if is_instance_valid(page):
+			page.visible = visible and id == _page
+
+
+# --- Rail pages ------------------------------------------------------------------------------
+
+
+## Make [param page] a rail page titled [param title] in Joinery's layout (Timeline, Share,
+## Mixer: tab scripts call this from their install). Returns false in Godot's classic layout
+## and on stock Godot, where the caller adds it to the bottom panel instead.
+func add_rail_page(id: String, title: String, page: Control, icon: Dictionary) -> bool:
+	if not _joinery_layout:
+		return false
+	page.hide()
+	get_editor_interface().get_editor_main_screen().add_child(page)
+	_pages[id] = {"title": title, "control": page, "icon": icon}
+	if _rail != null:
+		_rail.add_page(id, title, icon)
+	return true
+
+
+## Take [param page] out of the rail pages and the main screen.
+func remove_rail_page(page: Control) -> void:
+	for id: String in _pages.keys():
+		if _pages[id]["control"] == page:
+			_pages.erase(id)
+			if _page == id:
+				_page = ""
+	if is_instance_valid(page) and page.get_parent() != null:
+		page.get_parent().remove_child(page)
+
+
+## Show [param page] wherever it lives: its rail page, or its bottom panel tab.
+func open_page(page: Control) -> void:
+	for id: String in _pages:
+		if _pages[id]["control"] == page:
+			_open_rail_page(id)
+			return
+	make_bottom_panel_item_visible(page)
+
+
+## The rail button of [param id] (an app or a page), or null without the rail.
+func rail_button(id: String) -> Control:
+	if _rail == null:
+		return null
+	return (_rail.get("_buttons") as Dictionary).get(id) as Control
+
+
+func _open_rail_page(id: String) -> void:
+	_page = id
+	get_editor_interface().set_main_screen_editor(SCREEN)
+	_show_page()
+	if _rail != null:
+		_rail.select_tool(id)
 
 
 func _on_resource_selected(resource: Resource, _path: String) -> void:
@@ -438,8 +512,15 @@ func _on_asset_selected(asset: Dictionary) -> void:
 func _on_target_opened(path: String) -> void:
 	if _workspace == null or path.is_empty():
 		return
-	get_editor_interface().set_main_screen_editor("Tools")
+	_open_workspace()
 	_workspace.select_resource(path)
+
+
+## Open the asset workspace in the main screen, in place of any rail page.
+func _open_workspace() -> void:
+	_page = ""
+	get_editor_interface().set_main_screen_editor(SCREEN)
+	_show_page()
 
 
 func _on_workspace_selection() -> void:
@@ -494,12 +575,15 @@ func _on_toggle_toolbar() -> void:
 
 
 func _on_tool_selected(tool: String) -> void:
+	if _pages.has(tool):
+		_open_rail_page(tool)
+		return
 	if tool == "godot":
 		get_editor_interface().set_main_screen_editor(_godot_view())
 		if _rail != null:
 			_rail.select_tool("godot")
 		return
-	get_editor_interface().set_main_screen_editor("Tools")
+	_open_workspace()
 	_workspace.select_tool(tool)
 
 
@@ -517,12 +601,12 @@ func _godot_view() -> String:
 func _on_main_screen_changed(screen: String) -> void:
 	if screen in ["2D", "3D"]:
 		_last_view = screen
-	if _rail != null and screen != "Tools":
+	if _rail != null and screen != SCREEN:
 		_rail.select_tool("godot")
 
 
 func _on_creator_changed(tool: String) -> void:
-	if _rail != null:
+	if _rail != null and _page.is_empty():
 		_rail.select_tool(tool if _workspace.visible else "godot")
 
 
@@ -623,93 +707,7 @@ func _editor_context(targets: Array) -> Dictionary:
 	_scene_revision += 1
 	context["scene_revision"] = str(_scene_revision)
 	context["unsaved_scenes"] = JSON.stringify(EditorInterface.get_unsaved_scenes())
-	var identities := {}
-	if scene != null:
-		for target: Dictionary in targets:
-			var id := str(target.get("id", ""))
-			var parts := id.split("::", true, 1)
-			if parts.size() == 2 and parts[0] == scene.scene_file_path:
-				var node := scene.get_node_or_null(NodePath(parts[1]))
-				if node != null:
-					identities[id] = str(node.get_instance_id())
-	var manifest: Array[Dictionary] = []
-	var context_bytes := 0
-	if scene != null:
-		var queue: Array[Node] = [scene]
-		var cursor := 0
-		while cursor < queue.size() and manifest.size() < 1000:
-			var node := queue[cursor]
-			cursor += 1
-			var id := scene.scene_file_path + "::" + str(scene.get_path_to(node))
-			identities[id] = str(node.get_instance_id())
-			var row := {"id": id, "name": str(node.name), "type": node.get_class()}
-			if node is Node3D:
-				row["position"] = [node.position.x, node.position.y, node.position.z]
-				row["rotation_degrees"] = [
-					node.rotation_degrees.x, node.rotation_degrees.y, node.rotation_degrees.z
-				]
-				row["scale"] = [node.scale.x, node.scale.y, node.scale.z]
-			var script: Script = node.get_script()
-			if script != null:
-				row["script"] = script.resource_path
-			var properties := {}
-			for property: Dictionary in node.get_property_list():
-				if not int(property["usage"]) & PROPERTY_USAGE_STORAGE:
-					continue
-				var key := str(property["name"])
-				var value: Variant = node.get(key)
-				if properties.size() >= 32:
-					break
-				if value is String and value.length() > 4096:
-					continue
-				if value is bool or value is int or value is float or value is String:
-					properties[key] = value
-				elif value is Resource and not value is Script:
-					properties[key] = _resource_context(value)
-			row["properties"] = properties
-			var source_node: Node = node
-			while source_node != null and source_node != scene:
-				if not source_node.scene_file_path.is_empty():
-					row["source"] = source_node.scene_file_path
-					break
-				source_node = source_node.get_parent()
-			context_bytes += JSON.stringify(row).length()
-			if context_bytes > 500000:
-				break
-			manifest.append(row)
-			for child: Node in node.get_children():
-				queue.append(child)
-	context["nodes"] = JSON.stringify(manifest)
-	context["node_manifest_count"] = str(manifest.size())
-	context["selection_instances"] = JSON.stringify(identities)
-	return context
-
-
-func _resource_context(resource: Resource, depth: int = 0) -> Dictionary:
-	var result := {"resource_type": resource.get_class(), "resource_path": resource.resource_path}
-	var properties := {}
-	if depth < 2:
-		for property: Dictionary in resource.get_property_list():
-			if properties.size() >= 32:
-				break
-			if not int(property["usage"]) & PROPERTY_USAGE_STORAGE:
-				continue
-			var key := str(property["name"])
-			var value: Variant = resource.get(key)
-			if value is String and value.length() > 4096:
-				continue
-			if value is bool or value is int or value is float or value is String:
-				properties[key] = value
-			elif value is Vector3:
-				properties[key] = [value.x, value.y, value.z]
-			elif value is Vector2:
-				properties[key] = [value.x, value.y]
-			elif value is Color:
-				properties[key] = [value.r, value.g, value.b, value.a]
-			elif value is Resource and not value is Script:
-				properties[key] = _resource_context(value, depth + 1)
-	result["properties"] = properties
-	return result
+	return EDITOR_CONTEXT.describe(scene, targets, context)
 
 
 func _on_editor_action(event: Dictionary) -> void:
@@ -930,7 +928,7 @@ func _on_file_decision(event: Dictionary) -> void:
 			and path.get_extension() in ["glb", "gltf"]
 			and FileAccess.file_exists(path)
 		):
-			EditorInterface.set_main_screen_editor("Tools")
+			_open_workspace()
 			_workspace.select_resource(path)
 			_workspace.invalidate()
 			_workspace.refresh()

@@ -550,7 +550,7 @@ func _timeline() -> void:
 		return
 	tab.set("cli_enabled", false)
 	tab.call("show_list")
-	_plugin.make_bottom_panel_item_visible(tab)
+	_plugin.call("open_page", tab)
 	var now := Time.get_unix_time_from_system()
 	var people := ["Ada Lovelace", "Ada Lovelace", "Grace Hopper", "Ada Lovelace", "Joinery user"]
 	var subjects := [
@@ -753,7 +753,7 @@ func _share() -> void:
 	if tab == null:
 		return
 	tab.set("cli_enabled", false)
-	_plugin.make_bottom_panel_item_visible(tab)
+	_plugin.call("open_page", tab)
 	var cache := OS.get_cache_dir().path_join("joinery-visual")
 	DirAccess.make_dir_recursive_absolute(cache)
 	var shots: Array = []
