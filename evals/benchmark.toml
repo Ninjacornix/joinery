@@ -1,4 +1,4 @@
-# Ten typical requests on the testbed, to judge a harness change by its cost.
+# Typical requests on the testbed, to judge a harness change by its cost.
 #
 # Run with a pinned agent and model, before and after the change:
 #   uv run python evals/run.py --suite benchmark --live --agent claude --model <id>
@@ -147,4 +147,29 @@ offset_top = 24.0
 offset_right = 240.0
 offset_bottom = 48.0
 text = "Press E to open"
+'''
+
+[[case]]
+id = "make-and-place"
+kind = "make and place"
+# Done means both parts: a mug model under art/ and, in kitchen.tscn, a mug instance
+# beside Table (under Kitchen) whose bottom rests on the table top (y 0.8).
+request = "Make a mug and put it on the table in the kitchen."
+expect = ["art/", "game/kitchen.tscn", "joinery.lock"]
+
+[case.seed]
+"game/kitchen.tscn" = '''
+[gd_scene load_steps=2 format=3]
+
+[sub_resource type="BoxMesh" id="BoxMesh_top"]
+size = Vector3(1.2, 0.8, 0.7)
+
+[node name="Kitchen" type="Node3D"]
+
+[node name="Table" type="Node3D" parent="."]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 1.5, 0, -1)
+
+[node name="Top" type="MeshInstance3D" parent="Table"]
+transform = Transform3D(1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0.4, 0)
+mesh = SubResource("BoxMesh_top")
 '''

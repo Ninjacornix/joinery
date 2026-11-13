@@ -31,6 +31,7 @@ KINDS = {
     "kit batch",
     "scene layout",
     "UI text",
+    "make and place",
 }
 
 
@@ -43,10 +44,18 @@ def test_the_suite_covers_the_typical_requests_on_the_testbed() -> None:
     for case in suite.cases:
         assert case.request and case.expect
     seeded = {case.id: case.seed for case in suite.cases if case.seed}
-    assert set(seeded) == {"animation-tweak", "script-fix", "ui-text"}
+    assert set(seeded) == {
+        "animation-tweak",
+        "script-fix",
+        "ui-text",
+        "make-and-place",
+    }
     script = seeded["script-fix"]["game/door_toggle.gd"]
     assert script.startswith("extends Node3D") and "\tis_open = true" in script
-    for scene in ("game/door_swing.tscn", "ui/hud.tscn"):
+    kitchen = seeded["make-and-place"]["game/kitchen.tscn"]
+    assert '[node name="Table" type="Node3D" parent="."]' in kitchen
+    assert 'type="MeshInstance3D" parent="Table"' in kitchen, "a top to rest on"
+    for scene in ("game/door_swing.tscn", "ui/hud.tscn", "game/kitchen.tscn"):
         text = next(s[scene] for s in seeded.values() if scene in s)
         assert text.startswith("[gd_scene")
     # What the unseeded cases change is in the testbed.

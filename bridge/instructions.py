@@ -66,8 +66,11 @@ OBJECT_GUIDE = (
     "in the scene on screen with edit_scene's instantiate_scene and its res:// path, "
     "in any other scene with the Godot tools; Joinery imports it first. To replace a "
     "placeholder with the model, pass replace with the placeholder's identity (and "
-    "fit_size true to keep its size); don't leave the placeholder beside it. Make the "
-    "model, place it, then submit once, so the user reviews both together. "
+    "fit_size true to keep its size); don't leave the placeholder beside it. To stand it "
+    "on something (a mug on a table), pass on with that node's identity: it rests on the "
+    "node's top, centred (at [x, z] shifts it in metres). Make the model, place it where "
+    "the request says, then submit once, so the user reviews both together; a model the "
+    "request places but no scene uses is sent back. "
 )
 
 #: A picked part (a selection target with part_kind) names the typed operations
@@ -414,7 +417,9 @@ REVIEW_GUIDE = (
     "attempt and changes nothing. Fix every item it returns first (each names its "
     "rule, file, node, what was measured, what is expected and a fix). "
     "When your change is complete, call submit_for_review with one short line naming "
-    "what changed. Joinery checks it (art bible rules, Godot import, missing files, "
+    "what changed, and done: each part of the request with what you did about it "
+    "('Made the mug in Blender', 'Put it on Table'); a part you couldn't do is listed "
+    "saying so, never dropped. Joinery checks it (art bible rules, Godot import, missing files, "
     "asset provenance, project tests, objects built from placeholder shapes). Fix "
     "every problem it returns and submit again. "
     "Only after it returns status in_review say the change is open for review; never "
