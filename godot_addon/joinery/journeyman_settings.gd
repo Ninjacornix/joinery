@@ -392,6 +392,8 @@ func _build_replies() -> void:
 	_agent_switch.tooltip_text = "Connect Journeyman to Codex, Claude Code, Gemini CLI or opencode"
 	_agent_switch.pressed.connect(_run.bind("connect"))
 	_agent_row = UI.setting_row("Agent", _agent_switch)
+	_agent_row.title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_agent_row.title.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 	section.body.add_child(_agent_row)
 	_mode_picker = UI.picker(MODES)
 	_flush_picker(_mode_picker)
