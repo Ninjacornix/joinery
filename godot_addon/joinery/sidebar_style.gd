@@ -97,9 +97,12 @@ static func card_title(text: String, wrap := false) -> Label:
 
 ## A row's own action ([param action], a row's Fix or Ignore) shows only while [param row] is
 ## pointed at or the action has keyboard focus, so a list leads with what it lists. It keeps
-## its place (only its ink fades), so nothing moves when it appears.
-static func reveal_on_hover(row: Control, action: Control) -> void:
+## its place (only its ink fades), so nothing moves when it appears. A [param collapse] button
+## gives its room to the row's words while hidden (its text clipped away), still focusable.
+static func reveal_on_hover(row: Control, action: Control, collapse := false) -> void:
 	action.self_modulate.a = 0.0
+	if collapse and action is Button:
+		(action as Button).clip_text = true
 	if row.mouse_filter == Control.MOUSE_FILTER_IGNORE:
 		row.mouse_filter = Control.MOUSE_FILTER_PASS
 	var update := func() -> void:
@@ -108,6 +111,8 @@ static func reveal_on_hover(row: Control, action: Control) -> void:
 		var shown := (
 			action.has_focus() or row.get_global_rect().has_point(row.get_global_mouse_position())
 		)
+		if collapse and action is Button:
+			(action as Button).clip_text = not shown
 		UI_MOTION.tween_to(action, action, "self_modulate:a", 1.0 if shown else 0.0, "fast")
 	row.mouse_entered.connect(update)
 	row.mouse_exited.connect(update)

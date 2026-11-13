@@ -295,7 +295,7 @@ func _row(item: Dictionary) -> HBoxContainer:
 			fix_requested.emit(item)
 	)
 	row.add_child(ask)
-	STYLE.reveal_on_hover(row, ask)
+	STYLE.reveal_on_hover(row, ask, true)
 	return row
 
 
