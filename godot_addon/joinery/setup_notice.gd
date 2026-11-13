@@ -12,7 +12,8 @@ extends MarginContainer
 ## - the project's apps, from the `notice` of `joinery status` ([method show_readiness]): one
 ##   sentence that names every app with the same problem, worded by joinery/readiness.py
 ##   ("Blender and Krita need a refresh after the Joinery update."), and its button: Refresh
-##   tools runs the refresh right here, Start Docker opens Docker, Check again asks again.
+##   tools runs the refresh right here, Start Docker opens Docker and asks it again every 3 s
+##   for 2 minutes (no Check again needed), Check again asks again.
 ##
 ## A refresh stays on show while it runs (`joinery bootstrap --progress`): which step, a bar,
 ## Cancel and Show log. If it fails, the notice says why in plain words and keeps Show log.
@@ -36,6 +37,10 @@ const ADDON_STALE := "Joinery's add-on for this project is out of date."
 const ADDON_ACTION := "Update and restart"
 ## Button text per readiness action id, where the sidebar's differs from the label.
 const ACTION_TEXT := {"get": "Open Project setup"}
+const DOCKER_OPENING := "Opening Docker Desktop. Joinery checks again by itself once it runs."
+## After Start Docker: ask Docker every 3 s, 40 times (2 minutes).
+const DOCKER_INTERVAL := 3.0
+const DOCKER_POLLS := 40
 
 ## The command that runs the Joinery CLI and its leading arguments. Empty: the engine
 ## checkout's `uv run … joinery`. Tests point it at a fixture.
@@ -70,8 +75,11 @@ var _addon := {}
 var _tools := {}
 ## A sentence that replaces the apps' notice until the next report (a failed refresh).
 var _said := ""
-## Running CLI jobs by kind ("addon_check", "addon_update", "refresh").
+## Running CLI jobs by kind ("addon_check", "addon_update", "refresh", "cancel", "docker").
 var _jobs := {}
+## Questions left to ask Docker after Start Docker, and seconds to the next one.
+var _docker_polls := 0
+var _docker_in := 0.0
 
 
 func _init() -> void:
@@ -231,6 +239,9 @@ func _refresh() -> void:
 	elif refreshing():
 		kind = "tools"
 		words = str(_progress.get("text", "Refreshing %s…" % _apps()))
+	elif _docker_polls > 0 and str(_tools.get("state", "")) == "needs_docker":
+		kind = "tools"
+		words = DOCKER_OPENING
 	elif not _said.is_empty():
 		kind = "tools"
 		words = _said
@@ -295,7 +306,9 @@ func _on_action() -> void:
 			"start_docker":
 				if not start_docker_argv.is_empty():
 					OS.create_process(start_docker_argv[0], start_docker_argv.slice(1))
-				check_requested.emit()
+				_docker_polls = DOCKER_POLLS
+				_docker_in = DOCKER_INTERVAL
+				set_process(true)
 			"get":
 				setup_requested.emit()
 			"check_again":
@@ -309,10 +322,15 @@ func _run(kind: String, args: Array) -> void:
 	var job: RefCounted = COMMAND.joinery(cli_prefix, args)
 	if job != null:
 		_jobs[kind] = job
-	set_process(not _jobs.is_empty())
+	set_process(not _jobs.is_empty() or _docker_polls > 0)
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	if _docker_polls > 0 and not _jobs.has("docker"):
+		_docker_in -= delta
+		if _docker_in <= 0.0:
+			# Docker itself, not the cached answer, which still says it isn't running.
+			_run("docker", ["status", "--project", _project(), "--json"])
 	if _jobs.has("refresh"):
 		var moved := false
 		for line: String in (_jobs["refresh"] as RefCounted).call("take_lines"):
@@ -328,7 +346,7 @@ func _process(_delta: float) -> void:
 		if kind == "refresh" and data.is_empty():
 			data = _result  # The result line already came through take_lines.
 		_finished(kind, int(done.get("code", 1)), data, done)
-	set_process(not _jobs.is_empty())
+	set_process(not _jobs.is_empty() or _docker_polls > 0)
 
 
 func _exit_tree() -> void:
@@ -351,6 +369,14 @@ func _finished(kind: String, code: int, data: Dictionary, raw: Dictionary) -> vo
 			else:
 				print("[Joinery] update-addon\n", raw.get("output", ""), "\n", raw.get("error", ""))
 				_addon["last_error"] = str(data.get("error", "Details are in Output."))
+		"docker":
+			_docker_in = DOCKER_INTERVAL
+			var up := str(data.get("docker", "")) == "ok"
+			_docker_polls = 0 if up else _docker_polls - 1
+			if data.has("tools"):
+				show_readiness(data)
+			if up:
+				check_requested.emit()  # The checks Docker kept waiting can run now.
 		"refresh":
 			_log = str(data.get("log", _log))
 			_progress = {}

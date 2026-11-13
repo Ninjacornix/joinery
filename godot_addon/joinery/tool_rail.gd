@@ -35,12 +35,15 @@ const STATUS_TEXT := {
 ## an accent dot while the app is getting ready, a red dot when it needs you, a hollow ring
 ## while it can't be used yet. Ready (and an unknown status) shows no mark, so the rail stays
 ## quiet until an app needs something.
-const DOCKER_HOWTO := "Open Docker Desktop and wait until it says it's running, then check again."
+const DOCKER_HOWTO := "Opening Docker Desktop. Joinery checks again by itself once it runs."
 ## Fallback glyph (ui_theme icon) by catalog domain, for apps without their own icon.
 const DOMAIN_ICONS := {"3d": "model", "2d": "image", "audio": "audio", "materials": "material"}
 ## Seconds between readiness checks while an app is still preparing, and otherwise.
 const PREPARING_INTERVAL := 5.0
 const IDLE_INTERVAL := 60.0
+## After Start Docker: ask Docker itself (not the cached answer) every 3 s, for 2 minutes.
+const DOCKER_INTERVAL := 3.0
+const DOCKER_POLLS := 40
 ## Seconds the card stays after the pointer and focus leave both the app and the card.
 const CARD_GRACE := 0.15
 ## The card's text width in multiples of the body font.
@@ -66,6 +69,8 @@ var _job: RefCounted
 var _action_job: RefCounted
 var _action_tool := ""
 var _since_check := 0.0
+## Questions left to ask Docker after Start Docker (0: not waiting for it).
+var _docker_polls := 0
 ## The app whose card a click dismissed; it stays hidden until the pointer enters again.
 ## Whether the open card came from keyboard focus, which keeps it open while focused.
 var _card_by_keys := false
@@ -199,7 +204,8 @@ func _process(delta: float) -> void:
 		var waiting := _action_job != null
 		for entry: Dictionary in _readiness.values():
 			waiting = waiting or entry.get("status") == "preparing" or entry.get("checking", false)
-		if _since_check >= (PREPARING_INTERVAL if waiting else IDLE_INTERVAL):
+		var every := PREPARING_INTERVAL if waiting else IDLE_INTERVAL
+		if _since_check >= (DOCKER_INTERVAL if _docker_polls > 0 else every):
 			_refresh_readiness()
 		return
 	var result: Dictionary = _job.call("poll")
@@ -210,6 +216,11 @@ func _process(delta: float) -> void:
 	var readiness := _parse(result)
 	if readiness.is_empty():
 		return  # Keep the last known readiness; the rail still works without it.
+	if _docker_polls > 0:
+		var down := readiness.values().any(
+			func(entry: Dictionary) -> bool: return entry.get("status") == "needs_docker"
+		)
+		_docker_polls = _docker_polls - 1 if down else 0
 	var merged := _readiness.duplicate()
 	merged.merge(readiness, true)
 	_apply_readiness(merged)
@@ -462,7 +473,9 @@ func _refresh_readiness() -> void:
 	if _job != null:
 		return
 	_since_check = 0.0
-	_job = _start(["status", "--catalog", "--background", "--json", "--project", _project()])
+	# While Docker starts, ask it now: the cached answer would still say it isn't running.
+	var quick := "--background" if _docker_polls == 0 else "--json"
+	_job = _start(["status", "--catalog", quick, "--json", "--project", _project()])
 
 
 func _project() -> String:
@@ -643,6 +656,8 @@ func _on_card_action() -> void:
 			if not start_docker_argv.is_empty():
 				OS.create_process(start_docker_argv[0], start_docker_argv.slice(1))
 			_card.set_meta("howto", true)
+			_docker_polls = DOCKER_POLLS
+			_since_check = 0.0
 			_fill_card()
 			_card.again.grab_focus()
 		"rebuild":

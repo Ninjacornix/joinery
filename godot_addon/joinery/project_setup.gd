@@ -35,9 +35,10 @@ const DOMAIN_WORDS := {
 	"audio": "sound and music",
 }
 const RULE_ZERO := "Joinery makes assets with real apps, never AI generators."
-const DOCKER_HOWTO := "Open Docker Desktop and wait until it says it's running, then check again."
-## Seconds between readiness questions while something is still being checked or built.
+const DOCKER_HOWTO := "Opening Docker Desktop. Joinery checks again by itself once it runs."
+## Seconds between readiness questions; Start Docker asks every 3 s, 40 times (2 minutes).
 const POLL_SECONDS := 2.0
+const DOCKER_POLLS := 40
 ## Size of the dialog: width in multiples of the body font, capped by these screen fractions.
 const WIDTH_EM := 52
 const WIDTH_SCREEN := 0.9
@@ -74,6 +75,7 @@ var _rebuild_job: RefCounted
 var _check_jobs: Dictionary = {}
 var _loaded := false
 var _poll_in := -1.0
+var _docker_polls := 0
 
 
 ## The dialog's content root: the watched theme root. A rebuild is copied to the dialog so its
@@ -511,7 +513,8 @@ func _query_status() -> void:
 	if _status_job != null:
 		return
 	_poll_in = -1.0
-	_status_job = _start(["status", "--catalog", "--background", "--json", "--project", _project()])
+	var quick := "--background" if _docker_polls == 0 else "--json"  # Docker's answer now.
+	_status_job = _start(["status", "--catalog", quick, "--json", "--project", _project()])
 
 
 func _status_done(result: Dictionary) -> void:
@@ -530,7 +533,9 @@ func _status_done(result: Dictionary) -> void:
 		if entries.has(row.tool_id) and not _check_jobs.has(row.tool_id):
 			_apply_readiness(row, entries[row.tool_id])
 		waiting = waiting or str(row.state.entry.get("status", "")) == "preparing"
-	_poll_in = POLL_SECONDS if waiting else -1.0
+	if _docker_polls > 0:
+		_docker_polls = _docker_polls - 1 if str(data.get("docker", "")) != "ok" else 0
+	_poll_in = 3.0 if _docker_polls > 0 else (POLL_SECONDS if waiting else -1.0)
 
 
 func _on_action(row: Row) -> void:
@@ -550,6 +555,8 @@ func _on_action(row: Row) -> void:
 func _start_docker(row: Row) -> void:
 	if not start_docker_argv.is_empty():
 		OS.create_process(start_docker_argv[0], start_docker_argv.slice(1))
+	_docker_polls = DOCKER_POLLS
+	_poll_in = 3.0
 	row.howto.show()
 	row.below.show()
 	UI_MOTION.reveal(row.below)
@@ -611,7 +618,6 @@ func _rebuild_done(result: Dictionary) -> void:
 		row.state.set_busy(false)
 		_apply_readiness(row, row.state.entry)
 	if int(result.get("code", 1)) != 0:
-		# Its JSON error is already plain words (joinery/tool_refresh.py), never Docker's own.
 		var data: Variant = _json(result)
 		var why := str((data as Dictionary).get("error", "")) if data is Dictionary else ""
 		_show_status(why if not why.is_empty() else "The refresh didn't finish.", true)
@@ -893,10 +899,10 @@ func _show_status(text: String, error: bool) -> void:
 
 
 func _process(delta: float) -> void:
-	_catalog_job = _poll(_catalog_job, _catalog_done)
-	_save_job = _poll(_save_job, _save_done)
-	_status_job = _poll(_status_job, _status_done)
-	_rebuild_job = _poll(_rebuild_job, _rebuild_done)
+	_catalog_job = COMMAND_SCRIPT.finish(_catalog_job, _catalog_done)
+	_save_job = COMMAND_SCRIPT.finish(_save_job, _save_done)
+	_status_job = COMMAND_SCRIPT.finish(_status_job, _status_done)
+	_rebuild_job = COMMAND_SCRIPT.finish(_rebuild_job, _rebuild_done)
 	for tool_id: String in _check_jobs.keys():
 		var result: Dictionary = (_check_jobs[tool_id] as RefCounted).call("poll")
 		if not result.is_empty():
@@ -905,10 +911,6 @@ func _process(delta: float) -> void:
 		_poll_in -= delta
 		if _poll_in < 0.0:
 			_query_status()
-
-
-func _poll(job: RefCounted, done: Callable) -> RefCounted:
-	return COMMAND_SCRIPT.finish(job, done)
 
 
 func _cancel_jobs() -> void:

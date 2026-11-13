@@ -19,6 +19,14 @@ if a[0] == "update-addon" and "--check" in a:
     print(json.dumps({"state": os.environ.get("ADDON", "stale")}))
 elif a[0] == "update-addon":
     print(json.dumps({"state": "scheduled", "helper": 7, "project": "p"}))
+elif a[0] == "status":
+    seen = os.environ["CALLS"] + ".status"
+    count = int(open(seen).read()) + 1 if os.path.exists(seen) else 1
+    open(seen, "w").write(str(count))
+    up = count >= 2
+    print(json.dumps({"docker": "ok" if up else "Docker is not running.", "tools": [],
+        "notice": None if up else {"state": "needs_docker", "text": "Blender needs Docker.",
+        "action": {"id": "start_docker", "label": "Start Docker"}}}))
 elif a[0] == "bootstrap" and "--cancel" in a:
     print(json.dumps({"state": "idle"}))
 elif a[0] == "bootstrap":
@@ -83,13 +91,15 @@ func _logged() -> Array:
 func _run() -> void:
 	root.size = Vector2i(500, 700)
 	_calls = OS.get_user_data_dir().path_join("setup-notice-calls.jsonl")
-	if FileAccess.file_exists(_calls):
-		DirAccess.remove_absolute(_calls)
+	for left: String in [_calls, _calls + ".status"]:
+		if FileAccess.file_exists(left):
+			DirAccess.remove_absolute(left)
 	OS.set_environment("CALLS", _calls)
 	await _check_addon()
 	await _check_banner_wins()
 	_check_doctor()
 	await _check_refresh()
+	await _check_docker()
 	print("setup notice: ok" if not _failed else "setup notice: FAILED")
 	quit(1 if _failed else 0)
 
@@ -203,4 +213,34 @@ func _check_refresh() -> void:
 	)
 	_check(notice.action_text() == "Try again", "And offers to try again")
 	_check((notice.get("_show_log") as Button).visible, "Show log stays for the failure")
+	notice.queue_free()
+
+
+## Start Docker opens it and asks Docker again by itself until it answers: no Check again.
+func _check_docker() -> void:
+	var notice := _notice()
+	notice.start_docker_argv = PackedStringArray()
+	root.add_child(notice)
+	var asked: Array[bool] = []
+	notice.check_requested.connect(func() -> void: asked.append(true))
+	var needs := {
+		"state": "needs_docker",
+		"text": "Blender needs Docker, which isn't running.",
+		"action": {"id": "start_docker", "label": "Start Docker"},
+	}
+	notice.show_readiness({"notice": needs})
+	_check(notice.action_text() == "Start Docker", "The notice offers Start Docker")
+	notice.press()
+	_check(notice.text() == NOTICE.DOCKER_OPENING, "It says it checks by itself: " + notice.text())
+	_check(
+		await _until(func() -> bool: return not asked.is_empty(), 15.0),
+		"Once Docker answers, the apps are checked again without a click"
+	)
+	_check(notice.text().is_empty(), "And the notice leaves: " + notice.text())
+	var polls := _logged().filter(func(call: Array) -> bool: return call[0] == "status")
+	_check(polls.size() >= 2, "Docker was asked more than once (%d)" % polls.size())
+	_check(
+		polls.all(func(call: Array) -> bool: return not call.has("--background")),
+		"Past the cached answer"
+	)
 	notice.queue_free()

@@ -775,6 +775,14 @@ func _check_actions(dialog: AcceptDialog) -> void:
 	_check(howto.is_visible_in_tree(), "Start Docker shows how to start it")
 	var again := howto.find_child("Action", true, false) as Button
 	_check(again != null and again.text == "Check again", "The how-to offers Check again")
+	# And asks Docker again by itself every few seconds, past the cached answer.
+	var asks_docker := func() -> bool:
+		for call: Variant in _calls():
+			var words := call as Array
+			if words.has("status") and words.has("--catalog") and not words.has("--background"):
+				return true
+		return false
+	_check(await _until(asks_docker, 10.0), "Start Docker checks again by itself")
 	# Rebuild runs joinery bootstrap as a job.
 	var inkscape := _row(dialog, "inkscape")
 	((inkscape.get("state") as Control).get("action") as Button).pressed.emit()
