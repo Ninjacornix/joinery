@@ -286,11 +286,11 @@ jobs:
 
           evidence = Path('out/native-evidence')
           error = json.loads((evidence / 'mcp-install.json').read_text(encoding='utf-8'))['error']
-          assert error.startswith('Needs Docker') or 'is not built' in error, error
+          assert error.startswith('Needs Docker') or 'need a refresh' in error, error
           servers = json.loads((evidence / 'mcp.json').read_text(encoding='utf-8'))['servers']
           (godot,) = [item for item in servers if item['name'] == 'godot']
           assert godot['state'] == 'not-installed', godot
-          assert godot['summary'].startswith('Godot tools: not installed. Rebuild the worker.'), godot
+          assert godot['summary'].startswith('Godot tools need a refresh'), godot
           print('Godot MCP without its worker:', error, '/', godot['summary'])
           PY
       - name: Read the release version
