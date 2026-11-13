@@ -158,9 +158,11 @@ class SubmitResult:
     live_edits: int = 0
     problems: list[Problem] = field(default_factory=list)
     next: str = ""
+    #: What the agent should say in its reply; never a reason the change fails.
+    notes: list[str] = field(default_factory=list)
 
     def as_tool_result(self) -> dict[str, Any]:
-        return {
+        result: dict[str, Any] = {
             "status": self.status,
             "attempt": self.attempt,
             "attempts_left": self.attempts_left,
@@ -171,6 +173,9 @@ class SubmitResult:
             "problems": [problem.as_dict() for problem in self.problems],
             "next": self.next,
         }
+        if self.notes:
+            result["notes"] = self.notes
+        return result
 
 
 #: What the agent is told to do next, by outcome.
@@ -263,6 +268,10 @@ class TurnController:
         self.live_edits = 0
         #: Placeholder shapes the live edits added this turn: (parent, shape).
         self.live_shapes: list[tuple[str, Any]] = []
+        #: Project files the live edits loaded this turn (models they instanced).
+        self.live_loaded: list[str] = []
+        #: New models already reported unplaced this turn: said once, then a note.
+        self._unplaced_said: set[str] = set()
         #: A change is on screen for the user; nothing new may be made until decided.
         self.review_open = False
         #: The transaction under review ("" for a live edit alone).
@@ -374,12 +383,14 @@ class TurnController:
         self._peer = self._peer_print = None
         self._sent_back = None
         self.prechecks = 0
+        self._unplaced_said = set()
         self.request = request
         self.requests = [*self.requests, request.strip()[:160]][-10:]
         if not self.review_open:
             self.live_scenes.clear()
             self.live_edits = 0
             self.live_shapes = []
+            self.live_loaded = []
         self._to(TurnState.WORKING)
 
     def needs_compaction(self) -> bool:
@@ -598,10 +609,12 @@ class TurnController:
     ) -> None:
         if ok:
             from joinery.complex_models import live_shapes
+            from joinery.staged_assets import loaded_paths
 
             self.live_scenes.add(_res(scene))
             self.live_edits += 1
             self.live_shapes += live_shapes(payload or {})
+            self.live_loaded += loaded_paths(payload or {})
         elif not self.live_edits:
             # Nothing on screen after all: the scene is free again.
             claims = self.gateway.claims
@@ -624,6 +637,7 @@ class TurnController:
         self.live_scenes.clear()
         self.live_edits = 0
         self.live_shapes = []
+        self.live_loaded = []
         if self.review_open and not self.review_id:
             self.review_open = False
             if self.state is TurnState.IN_REVIEW:
@@ -742,6 +756,49 @@ class TurnController:
             self.live_shapes = []
         return [found]
 
+    def _placement(
+        self, changes: list[dict[str, str]], *, consume: bool = True
+    ) -> tuple[list[Problem], list[str]]:
+        """New models no scene uses (shared core, ``joinery.placement``).
+
+        When the request puts them somewhere it is a problem, said once a turn: a
+        submit after it passes with a note, as does Joinery's own last submit, so
+        the made model is never lost over it. Without placement intent it is only a
+        note. A precheck (``consume`` False) says it and leaves it for the submit."""
+        from joinery import placement
+
+        tx = self.gateway.transaction
+        if tx is None or tx.state != "staging" or not changes:
+            return [], []
+        found = placement.check(
+            self.gateway.project,
+            tx.stage,
+            changes,
+            self.request,
+            self.gateway.editor_context,
+            self.live_loaded,
+        )
+        if found is None:
+            return [], []
+        fresh = [p for p in found.paths if p not in self._unplaced_said]
+        if (
+            found.intent is None
+            or not fresh
+            or self._last_chance
+            or self.attempts >= MAX_SUBMITS
+        ):
+            return [], [found.message()]
+        if consume:
+            self._unplaced_said.update(found.paths)
+        return [
+            Problem(
+                "placement",
+                found.message(),
+                list(found.paths),
+                items=found.reasons(),
+            )
+        ], []
+
     async def _run_checks(self) -> Validation:
         async with self.gateway.call_lock:
             return await self.gateway.submit_checks(self.live_scenes)
@@ -791,11 +848,15 @@ class TurnController:
             return self._stopped()
         gate: dict[str, Any] | None = None
         skipped: list[str] = []
+        notes: list[str] = []
         error = checks.exception()
         if error is None:
             checked = checks.result()
             found, problems, gate = checked.changes, checked.problems, checked.gate
             problems = problems + self._live_shape_problems()
+            if gate is None:
+                placed, notes = self._placement(found)
+                problems = problems + placed
             self._passed = {"ran": checked.ran, "skipped": checked.skipped}
             skipped = checked.skipped
         elif isinstance(error, (OSError, RuntimeError, ValueError, TimeoutError)):
@@ -857,6 +918,7 @@ class TurnController:
                 changes=changes,
                 problems=problems,
                 next=NEXT_FIX,
+                notes=notes,
             )
         if not found and not self.live_edits:
             self._to(TurnState.WORKING)
@@ -927,6 +989,7 @@ class TurnController:
             transaction_id=self.review_id,
             changes=changes,
             next=NEXT_REVIEW,
+            notes=notes,
         )
 
     async def precheck(self) -> dict[str, Any]:
@@ -980,6 +1043,10 @@ class TurnController:
                 {"path": c["path"], "change": c["change"]} for c in checked.changes
             ]
             problems = checked.problems + self._live_shape_problems(consume=False)
+            if checked.gate is None:
+                placed, said = self._placement(checked.changes, consume=False)
+                problems += placed
+                notes = [*notes, *said]
             if checked.gate is not None:
                 status, after = "needs_user", NEXT_PRECHECK_ART
                 problems = [
@@ -1259,6 +1326,7 @@ class TurnController:
         self.live_scenes.clear()
         self.live_edits = 0
         self.live_shapes = []
+        self.live_loaded = []
         self.review_open = False
         self.review_id = ""
         self._to(TurnState.IDLE, reason)
