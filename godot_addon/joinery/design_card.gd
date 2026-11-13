@@ -88,7 +88,7 @@ func _init() -> void:
 	_step.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_step.mouse_filter = Control.MOUSE_FILTER_PASS
 	line.add_child(_step)
-	again = UI.link("Check again")
+	again = UI.quiet_link("Check again")
 	UI.bind_height(again, "xs")
 	again.pressed.connect(func() -> void: recheck_requested.emit())
 	again.hide()
@@ -98,7 +98,7 @@ func _init() -> void:
 	_findings.accessibility_name = "Design problems"
 	_findings.hide()
 	column.add_child(_findings)
-	_more = UI.link("")
+	_more = UI.quiet_link("")
 	UI.bind_height(_more, "xs")
 	_more.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	STYLE.hug_left(_more)
@@ -276,7 +276,8 @@ func _row(item: Dictionary) -> HBoxContainer:
 	words.tooltip_text = row.tooltip_text
 	row.accessibility_name = "%s, %s: %s" % [severity, str(item.get("title", "")), where(item)]
 	row.add_child(words)
-	# Quiet until hovered, so the problems lead and five rows of links don't shout.
+	# Shown only while its row is pointed at, so the problems lead and five rows of links
+	# don't shout.
 	var ask := UI.quiet("Ask agent to fix")
 	STYLE.hug_right(ask)
 	UI.bind_height(ask, "xs")
@@ -294,6 +295,7 @@ func _row(item: Dictionary) -> HBoxContainer:
 			fix_requested.emit(item)
 	)
 	row.add_child(ask)
+	STYLE.reveal_on_hover(row, ask)
 	return row
 
 

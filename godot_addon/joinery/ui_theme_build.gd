@@ -340,6 +340,19 @@ static func _buttons(t: Theme, c: Dictionary, m: Dictionary) -> void:
 			"icon_hover": c["accent_hover"],
 		},
 		"JoineryQuietButton": {"ink": c["text_muted"], "pad_h": _sp(m, 2)},
+		# A card's secondary actions (Check again, Show all, a row's Fix): link-shaped but in
+		# the muted text colour, so the card's one accent action stays the only one that calls.
+		"JoineryQuietLink":
+		{
+			"hover": Color.TRANSPARENT,
+			"pressed": Color.TRANSPARENT,
+			"pad_h": 0.0,
+			"ink": c["text_muted"],
+			"ink_hover": c["text"],
+			"ink_pressed": c["text"],
+			"icon": c["text_muted"],
+			"icon_hover": c["text"],
+		},
 		# A disclosure toggle ("Details"): no fill in any state, so an open toggle never looks
 		# pressed, and no side inset, so its glyph starts on the content edge.
 		"JoineryDisclosureButton":

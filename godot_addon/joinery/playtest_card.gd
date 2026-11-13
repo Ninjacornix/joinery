@@ -187,7 +187,7 @@ func _init(identifier := "") -> void:
 	_items.theme_type_variation = "JoineryTight"
 	_items.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_body.add_child(_items)
-	_more = UI.link("")
+	_more = UI.quiet_link("")
 	UI.bind_height(_more, "xs")
 	STYLE.hug_left(_more)
 	_more.pressed.connect(_show_all)

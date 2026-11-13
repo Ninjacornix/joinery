@@ -172,7 +172,7 @@ func _init(card_kind := "match") -> void:
 	_review.pressed.connect(func() -> void: review_pressed.emit())
 	_review.hide()
 	line.add_child(_review)
-	_again = UI.link("Check again")
+	_again = UI.quiet_link("Check again")
 	UI.bind_height(_again, "xs")
 	_again.pressed.connect(func() -> void: recheck_requested.emit())
 	_again.hide()
@@ -187,7 +187,7 @@ func _init(card_kind := "match") -> void:
 	_findings.accessibility_name = "What drifts"
 	_findings.hide()
 	column.add_child(_findings)
-	_more = UI.link("")
+	_more = UI.quiet_link("")
 	UI.bind_height(_more, "xs")
 	_more.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	STYLE.hug_left(_more)
@@ -516,11 +516,11 @@ func _area_row(entry: Dictionary) -> Dictionary:
 		number, func() -> void: number.custom_minimum_size.x = roundf(UI_THEME.unit(number) * 38.0)
 	)
 	row.add_child(number)
-	# A link as tall as a caption line (UI.link is a full control height), never narrower
-	# than it is tall, so the rows stay compact and every Fix is a full target.
+	# A quiet link as tall as a caption line (UI.quiet_link is a full control height), never
+	# narrower than it is tall, so the rows stay compact and every Fix is a full target.
 	var fix := Button.new()
 	fix.text = "Fix"
-	fix.theme_type_variation = "JoineryLinkButton"
+	fix.theme_type_variation = "JoineryQuietLink"
 	fix.accessibility_name = "Fix %s" % str(entry.get("label", ""))
 	fix.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	UI_MOTION.press_feedback(fix)
@@ -531,7 +531,7 @@ func _area_row(entry: Dictionary) -> Dictionary:
 			fix.custom_minimum_size = Vector2(side, side)
 			for box_state: String in ["normal", "hover", "pressed", "disabled", "focus"]:
 				fix.remove_theme_stylebox_override(box_state)
-				var source := fix.get_theme_stylebox(box_state, "JoineryLinkButton")
+				var source := fix.get_theme_stylebox(box_state, "JoineryQuietLink")
 				if source == null:
 					continue
 				var box := source.duplicate() as StyleBox
@@ -542,6 +542,8 @@ func _area_row(entry: Dictionary) -> Dictionary:
 	var id := str(entry.get("id", ""))
 	fix.pressed.connect(func() -> void: fix_requested.emit([id]))
 	row.add_child(fix)
+	# Fix all is the card's one call to action; an area's own Fix shows when its row is pointed at.
+	STYLE.reveal_on_hover(row, fix)
 	return {"row": row, "label": label, "bar": bar, "number": number, "fix": fix}
 
 

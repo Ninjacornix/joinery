@@ -112,7 +112,7 @@ func _init() -> void:
 	_step.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	_step.mouse_filter = Control.MOUSE_FILTER_PASS
 	line.add_child(_step)
-	again = UI.link("Check again")
+	again = UI.quiet_link("Check again")
 	UI.bind_height(again, "xs")
 	again.pressed.connect(func() -> void: recheck_requested.emit())
 	again.hide()
@@ -129,7 +129,7 @@ func _init() -> void:
 	_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_list.minimum_size_changed.connect(_fit_list)
 	_scroll.add_child(_list)
-	_more = UI.link("")
+	_more = UI.quiet_link("")
 	UI.bind_height(_more, "xs")
 	_more.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	STYLE.hug_left(_more)

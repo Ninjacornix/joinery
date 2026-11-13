@@ -77,7 +77,7 @@ func _init() -> void:
 	_rows = VBoxContainer.new()
 	_rows.theme_type_variation = "JoineryTight"
 	column.add_child(_rows)
-	_more = UI.link("")
+	_more = UI.quiet_link("")
 	UI.bind_height(_more, "xs")
 	STYLE.hug_left(_more)
 	_more.pressed.connect(_toggle_more)
@@ -216,16 +216,16 @@ func _action(group: Dictionary) -> Button:
 	var button: Button
 	match str(group.get("status", "open")):
 		"open", "stopped":
-			button = UI.link("Fix" if str(group.get("status")) == "open" else "Try again")
+			button = UI.quiet_link("Fix" if str(group.get("status")) == "open" else "Try again")
 			button.accessibility_name = "Fix: " + label
 			button.pressed.connect(_on_fix.bind(id, button))
 		"in_review":
-			button = UI.link("Review")
+			button = UI.quiet_link("Review")
 			button.accessibility_name = "Review the fix for: " + label
 			var transaction := str(group.get("transaction_id", ""))
 			button.pressed.connect(func() -> void: review_requested.emit(transaction))
 		"ignored":
-			button = UI.link("Restore")
+			button = UI.quiet_link("Restore")
 			button.accessibility_name = "Stop ignoring: " + label
 			button.pressed.connect(func() -> void: ignore_requested.emit(id, false))
 		_:

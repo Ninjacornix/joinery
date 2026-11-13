@@ -5,6 +5,7 @@ extends RefCounted
 ## and accent changes reach these controls live.
 
 const UI_THEME := preload("ui_theme.gd")
+const UI_MOTION := preload("ui_motion.gd")
 
 
 ## Give [param control] the [param variation] panel with its side padding set to SPACE
@@ -77,6 +78,28 @@ static func hug_right(button: Button) -> void:
 					(box as StyleBoxFlat).expand_margin_right += pad
 				button.add_theme_stylebox_override(state, box)
 	)
+
+
+## A row's own action ([param action], a row's Fix or Ignore) shows only while [param row] is
+## pointed at or the action has keyboard focus, so a list leads with what it lists. It keeps
+## its place (only its ink fades), so nothing moves when it appears.
+static func reveal_on_hover(row: Control, action: Control) -> void:
+	action.self_modulate.a = 0.0
+	if row.mouse_filter == Control.MOUSE_FILTER_IGNORE:
+		row.mouse_filter = Control.MOUSE_FILTER_PASS
+	var update := func() -> void:
+		if not is_instance_valid(action) or not action.is_inside_tree():
+			return
+		var shown := (
+			action.has_focus() or row.get_global_rect().has_point(row.get_global_mouse_position())
+		)
+		UI_MOTION.tween_to(action, action, "self_modulate:a", 1.0 if shown else 0.0, "fast")
+	row.mouse_entered.connect(update)
+	row.mouse_exited.connect(update)
+	action.mouse_entered.connect(update)
+	action.mouse_exited.connect(update)
+	action.focus_entered.connect(update)
+	action.focus_exited.connect(update)
 
 
 ## A quiet button that reads as a button at rest: a surface_raised fill (a step stronger on
