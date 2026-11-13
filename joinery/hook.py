@@ -320,6 +320,48 @@ def violation(raw: dict[str, Any]) -> Verdict | None:
     return rule_zero(event)
 
 
+def registry_probe(agent_id: str, project: Path) -> dict[str, Any]:
+    """A harmless joinery-registry call as ``agent_id`` hands it to its hook: Claude
+    Code names the server as an object, Codex may spell it with ``_``, Gemini CLI
+    prefixes ``mcp_``, and opencode's plugin sends the server beside the tool."""
+    cwd = str(project)
+    if agent_id == "claude":
+        return {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "mcp__joinery-registry__discover_tools",
+            "mcp_server": {"name": "joinery-registry", "source": "dynamic"},
+            "tool_input": {},
+            "cwd": cwd,
+        }
+    if agent_id == "codex":
+        return {
+            "hook_event_name": "PreToolUse",
+            "tool_name": "mcp__joinery_registry__discover_tools",
+            "tool_input": {},
+            "cwd": cwd,
+        }
+    if agent_id == "gemini":
+        return {
+            "hook_event_name": "BeforeTool",
+            "tool_name": "mcp_joinery-registry_discover_tools",
+            "tool_input": {},
+            "cwd": cwd,
+        }
+    return {
+        "tool": "joinery-registry_discover_tools",
+        "server": "joinery-registry",
+        "args": {},
+        "directory": cwd,
+    }
+
+
+def self_check(agent_id: str, project: Path) -> Verdict | None:
+    """The policy's verdict on Joinery's own registry in ``agent_id``'s payload shape:
+    None when it lets the call through, as it must. A refusal is a Joinery bug that
+    would deny every tool call in the session, so the chat says so before it starts."""
+    return violation(registry_probe(agent_id, project))
+
+
 _RULE_ZERO = (
     "Joinery is creation, not generation: assets are made by operating real "
     "tools, never generated. Tell the user what was attempted and agree on a "

@@ -521,6 +521,7 @@ async def _serve(
         bridge = Bridge(agent_id)
         if not project.is_dir() or not (project / "project.godot").is_file():
             raise ValueError("Open a Godot project before connecting chat.")
+        connect_errors.check_policy(agent_id, project)
         await rpc_server.start()
         bridge.bind_gateway(rpc_server.path)
         connection_timing = TurnTiming()

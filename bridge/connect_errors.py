@@ -12,9 +12,11 @@ from __future__ import annotations
 import re
 from collections import deque
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any, Literal
 
 from joinery.connection import _AUTH, _QUOTA, INSTALL_URLS
+from joinery.hook import self_check
 
 Reason = Literal[
     "not_installed", "signed_out", "outdated", "gate", "sandbox", "quota", "crashed"
@@ -104,6 +106,22 @@ def reason_of(exc: BaseException) -> Reason:
     if re.search(r"update|out of date|too old|unknown option", text, re.IGNORECASE):
         return "outdated"
     return "crashed"
+
+
+def check_policy(agent_id: str, project: Path) -> None:
+    """Refuse to connect when Joinery's own policy would deny Joinery's own tools in
+    this agent's payload shape: every call of the session would fail quietly. A folder
+    without joinery.toml is not a Joinery project; its gateway refuses it already."""
+    if not (project / "joinery.toml").is_file():
+        return
+    verdict = self_check(agent_id, project)
+    if verdict is not None:
+        raise ConnectError(
+            "Joinery bug: its policy refuses its own tools for this agent "
+            f"({verdict.reason}). Please report it; Switch agent meanwhile.",
+            "gate",
+            details=f"self-check refused: {verdict.reason}",
+        )
 
 
 def event(agent_id: str, name: str, exc: BaseException) -> dict[str, Any]:
