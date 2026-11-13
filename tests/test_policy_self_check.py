@@ -41,3 +41,25 @@ def test_a_refusal_stops_the_connection_as_a_joinery_bug(
     assert stopped.value.reason == "gate"
     assert str(stopped.value).startswith("Joinery bug")
     assert "not enabled" in stopped.value.details
+
+
+def test_the_check_never_hands_its_stdin_to_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # In the Windows chat host stdin is the editor's pipe, which a reader thread waits
+    # on; a child sharing it hangs as it starts, and the connection with it.
+    import subprocess
+
+    from joinery import hook
+
+    seen: list[object] = []
+    real = subprocess.run
+
+    def run(*args: object, **kwargs: object) -> object:
+        seen.append(kwargs.get("stdin"))
+        return real(*args, **kwargs)  # type: ignore[call-overload]
+
+    monkeypatch.setattr(hook.subprocess, "run", run)
+    (tmp_path / "joinery.toml").write_text('[tools]\nenabled=["godot"]\n')
+    assert self_check("codex", tmp_path) is None
+    assert seen == [subprocess.DEVNULL]

@@ -129,6 +129,9 @@ def _resolve_project_dir(cwd: str) -> Path:
     try:
         root = subprocess.run(
             ["git", "-C", str(start), "rev-parse", "--show-toplevel"],
+            # Never the caller's stdin: in the Windows chat host that is the
+            # editor's pipe, which a reader thread is waiting on (bridge.stdio).
+            stdin=subprocess.DEVNULL,
             capture_output=True,
             text=True,
             timeout=5,
