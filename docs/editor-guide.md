@@ -6,16 +6,19 @@ The full reference for the editor, the command line and project settings. The
 In the Joinery editor, use the left app icons to switch between Godot and the
 project's creation tools. Tool views show a large preview, readable asset names,
 search, and an Open action. They update automatically after source changes.
-Scene, FileSystem, Import, History and Inspector live in the bottom tab row;
-Journeyman stays on the right without a docking tab bar. Bottom panels open to
-roughly half the work area and can be resized by dragging their divider.
+Scene sits above the Inspector in a column left of the viewport, so a node and
+its properties show together. Review, Files and Output live in the bottom tab
+row, tabs above their content; Import, History, Signals and Groups are one
+click away in its ⋮ menu. Timeline, Share and Mixer are full pages: open them
+from the rail, below the apps. Journeyman stays on the right without a docking
+tab bar. Every bottom tab opens at the same height, which only dragging the
+divider changes.
 
 Scene tabs sit above the viewport: click a tab to switch between open scenes,
 or **+** at the end of the tabs to make a new scene (also **Scene > New Scene**,
-Ctrl+N or Cmd+N). The 3D viewport controls are hidden by default. Type
-`/toolbar` in Journeyman, use the bottom rail icon, or choose **Joinery: Toggle
-viewport toolbar** from the editor's Tools menu to show them. The preference is
-saved.
+Ctrl+N or Cmd+N). The 3D viewport controls show by default. Type `/toolbar` in
+Journeyman, or choose **Joinery > Show or Hide Viewport Toolbar**, to hide or
+show them. The preference is saved.
 
 ### Classic Godot view
 
