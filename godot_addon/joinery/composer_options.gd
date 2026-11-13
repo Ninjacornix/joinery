@@ -75,6 +75,28 @@ func restore(selection: Dictionary) -> void:
 	_rebuild()
 
 
+## The {mode, model, effort} saved in this project for [param agent]. Each agent keeps its
+## own: one agent's models mean nothing to another. A project saved before that has one
+## choice for every agent ("assistant"); it is where each agent starts.
+static func saved(settings: EditorSettings, agent: String) -> Dictionary:
+	var shared: Dictionary = settings.get_project_metadata(
+		"joinery", "assistant", {"mode": "auto", "model": "", "effort": ""}
+	)
+	return settings.get_project_metadata("joinery", "assistant_" + agent, shared)
+
+
+static func save(settings: EditorSettings, agent: String, selection: Dictionary) -> void:
+	settings.set_project_metadata("joinery", "assistant_" + agent, selection)
+
+
+## Put [param agent]'s saved choice on the sidebar ([param dock]) and the chat bridge.
+static func restore_saved(settings: EditorSettings, agent: String, dock: Node, chat: Node) -> void:
+	var selection := saved(settings, agent)
+	if dock.has_method("restore_selection_options"):
+		dock.call("restore_selection_options", selection)
+	chat.call("set_selection", selection)
+
+
 ## The current {mode, model, effort}; effort is always "" (the mode decides it).
 func selection() -> Dictionary:
 	return _selection.duplicate()

@@ -8,8 +8,9 @@ import pytest
 
 from bridge.acp_session import ACPSession
 from bridge.codex_session import CodexSession
-from bridge.models import ModelChoice, Selection, route
-from bridge.protocol import Prompt
+from bridge.host import Bridge
+from bridge.models import ModelChoice, Selection, route, unavailable
+from bridge.protocol import Done, Message, Prompt
 from joinery.timing import TurnTiming
 
 CHOICES = [
@@ -55,16 +56,43 @@ def test_explicit_model_and_effort_override_automatic_routing():
     assert choice.id == "available-sol" and effort == "high"
 
 
-@pytest.mark.parametrize(
-    "selection",
-    [
-        Selection(model="not-entitled"),
-        Selection(model="available-luna", effort="ultra"),
-    ],
-)
-def test_stale_or_unsupported_overrides_never_silently_switch_models(selection):
+def test_unsupported_effort_never_silently_switches():
     with pytest.raises(ValueError):
-        route(selection, "hello", CHOICES)
+        route(Selection(model="available-luna", effort="ultra"), "hello", CHOICES)
+
+
+def test_a_model_this_provider_lacks_falls_back_to_automatic():
+    # Chosen under another agent (Codex's model, now on Claude Code): the provider's
+    # own routing, and its effort goes with it.
+    stale = Selection(model="other-agents-model", effort="ultra", mode="thorough")
+    assert unavailable(stale, CHOICES) and not unavailable(Selection(), CHOICES)
+    assert not unavailable(Selection(model="available-luna"), CHOICES)
+    choice, effort, mode = route(stale, "hello", CHOICES)
+    assert (choice.id, effort, mode) == ("available-sol", "high", "thorough")
+
+
+def test_the_bridge_says_once_that_a_chosen_model_is_unavailable(monkeypatch):
+    bridge = Bridge("claude")
+    bridge.model_choices = CHOICES
+    sent: list[Prompt] = []
+
+    async def run(message):
+        sent.append(message)
+        yield Done()
+
+    monkeypatch.setattr(bridge._adapter, "run", run)
+    prompt = Prompt(
+        text="hello", project_dir="/fixture", selection=Selection(model="gpt-old")
+    )
+
+    async def turn():
+        return [event async for event in bridge.send(prompt)]
+
+    first, second = asyncio.run(turn()), asyncio.run(turn())
+    notes = [e for e in first if isinstance(e, Message)]
+    assert len(notes) == 1 and "Claude Code doesn't offer gpt-old" in notes[0].text
+    assert not any(isinstance(e, Message) for e in second)
+    assert first[-1].ok and sent[0].model in {c.id for c in CHOICES}
 
 
 def test_single_model_endpoints_and_missing_inventory_keep_provider_defaults():

@@ -15,6 +15,7 @@ const SHELL_SCRIPT := preload("res://addons/joinery/editor_shell.gd")
 const RAIL_SCRIPT := preload("res://addons/joinery/tool_rail.gd")
 const EDITS_SCRIPT := preload("res://addons/joinery/scene_edits.gd")
 const CHAT_SCRIPT := preload("res://addons/joinery/chat_bridge.gd")
+const OPTIONS_SCRIPT := preload("res://addons/joinery/composer_options.gd")
 const CONNECT_SCRIPT := preload("res://addons/joinery/agent_connect.gd")
 const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
 const UI_COMPONENTS := preload("res://addons/joinery/ui_components.gd")
@@ -217,15 +218,11 @@ func _connect_chat(settings: EditorSettings) -> void:
 	_link(_chat.models_received, "set_model_options")
 	_link(_chat.execution_changed, "show_execution")
 	_link(_chat.timing_received, "show_timing")
-	var selection: Dictionary = settings.get_project_metadata(
-		"joinery", "assistant", {"mode": "auto", "model": "", "effort": ""}
-	)
-	_call_dock("restore_selection_options", [selection])
-	_chat.set_selection(selection)
+	OPTIONS_SCRIPT.restore_saved(settings, agent, _dock, _chat)
 	_dock.selection_options_changed.connect(
 		func(options: Dictionary) -> void:
 			_chat.set_selection(options)
-			settings.set_project_metadata("joinery", "assistant", options)
+			OPTIONS_SCRIPT.save(settings, str(_chat.get("_agent")), options)
 	)
 	_dock.prompt_submitted.connect(_chat.submit)
 	_dock.cancel_requested.connect(_chat.cancel_turn)
@@ -590,6 +587,7 @@ func _on_agent_connected(agent: String, method_or_view: Variant, view: Variant =
 	settings.set_setting("joinery/agent", agent)
 	settings.set_setting("joinery/connection", connection)
 	_call_dock("set_chat_agent", [agent])
+	OPTIONS_SCRIPT.restore_saved(settings, agent, _dock, _chat)
 	_chat.start(agent, connection, _engine_dir(), ProjectSettings.globalize_path("res://"))
 
 

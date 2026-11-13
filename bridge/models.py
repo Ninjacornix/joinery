@@ -24,6 +24,11 @@ class Selection(BaseModel):
     effort: str = ""
 
 
+def unavailable(selection: Selection, choices: list[ModelChoice]) -> bool:
+    """True when the chosen model is not among the connected provider's choices."""
+    return bool(selection.model) and all(c.id != selection.model for c in choices)
+
+
 def route(
     selection: Selection, text: str, choices: list[ModelChoice]
 ) -> tuple[ModelChoice, str, str]:
@@ -59,9 +64,9 @@ def route(
             mode = "fast"
     explicit = next((c for c in choices if c.id == selection.model), None)
     if selection.model and explicit is None:
-        raise ValueError(
-            "The selected model is no longer in this provider's model list. Choose Automatic or refresh the connection."
-        )
+        # Chosen for another agent, or no longer offered: the provider's own choice, as
+        # Automatic. The caller says so once (see `unavailable`).
+        selection = selection.model_copy(update={"model": "", "effort": ""})
     model = explicit or default
     if explicit is None and mode == "fast":
         model = next(

@@ -13,8 +13,15 @@ from pathlib import Path
 from typing import Any
 
 from bridge.adapters import AgentAdapter, adapter_for
-from bridge.models import ModelChoice, route
-from bridge.protocol import AgentEvent, Execution, Models, Prompt, SidebarMessage
+from bridge.models import ModelChoice, route, unavailable
+from bridge.protocol import (
+    AgentEvent,
+    Execution,
+    Message,
+    Models,
+    Prompt,
+    SidebarMessage,
+)
 from joinery.agents import get
 from joinery.roles import spec
 from joinery.wiring import unwireable
@@ -39,6 +46,8 @@ class Bridge:
             )
         self._adapter: AgentAdapter = adapter_for(agent_id)
         self.model_choices: list[ModelChoice] = []
+        #: Chosen models this agent doesn't offer, already explained to the user.
+        self._unavailable_said: set[str] = set()
         if role:
             # The role's own transport: read-only roles get the specialists' one.
             self.role = spec(role).role
@@ -98,6 +107,17 @@ class Bridge:
                 f"the {self.agent.name} adapter is not implemented yet"
             )
         if isinstance(message, Prompt):
+            chosen = message.selection.model
+            if (
+                unavailable(message.selection, self.model_choices)
+                and chosen not in self._unavailable_said
+            ):
+                self._unavailable_said.add(chosen)
+                yield Message(
+                    text=f"{self.agent.name} doesn't offer {chosen}, so replies use its "
+                    "default model. Choose another model in the reply options.",
+                    level="warn",
+                )
             model, effort, mode = route(
                 message.selection, message.text, self.model_choices
             )
