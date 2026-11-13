@@ -26,8 +26,8 @@ func _init() -> void:
 		"Reviewer agent", "Another agent reads each change before you see it.", true
 	)
 	row.switch_button.accessibility_name = "Review each change with a second agent"
-	# Unknown until the project answers.
-	row.switch_button.disabled = true
+	# Unknown until the project answers; the row says it is checking.
+	row.set_checking()
 	row.toggled.connect(_on_toggled)
 	add_child(row)
 	model = LineEdit.new()

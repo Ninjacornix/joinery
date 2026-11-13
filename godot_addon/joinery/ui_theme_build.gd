@@ -204,11 +204,15 @@ static func _text_types(t: Theme, c: Dictionary, m: Dictionary, context: Node) -
 	# A split between two columns (asset list | detail) keeps one SPACE.3 gutter.
 	t.set_constant("separation", "HSplitContainer", int(_sp(m, 3)))
 	t.set_type_variation("JoineryInset", "MarginContainer")
+	# A setting row with a description line: SPACE.2 above and below, so its two lines keep the
+	# rhythm of the one-line rows around it.
+	t.set_type_variation("JoineryInsetTall", "MarginContainer")
 	t.set_type_variation("JoineryPage", "MarginContainer")
 	t.set_type_variation("JoineryGutter", "MarginContainer")
 	for side: String in ["left", "right", "top", "bottom"]:
 		var inset := _sp(m, 2) if side in ["left", "right"] else 0.0
 		t.set_constant("margin_" + side, "JoineryInset", int(inset))
+		t.set_constant("margin_" + side, "JoineryInsetTall", int(_sp(m, 2)))
 		t.set_constant("margin_" + side, "JoineryPage", int(_sp(m, 3)))
 		t.set_constant("margin_" + side, "JoineryGutter", int(_sp(m, 3) if side == "right" else 0))
 

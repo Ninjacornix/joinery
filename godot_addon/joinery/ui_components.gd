@@ -165,6 +165,11 @@ class SwitchRow:
 	func is_on() -> bool:
 		return switch_button.button_pressed
 
+	## Until the project answers: the switch waits, and the row says so instead of looking
+	## locked. Any [method set_disabled_reason] (the answer) replaces it.
+	func set_checking() -> void:
+		set_disabled_reason("Checking…")
+
 	## Disable the switch and show [param text] under the title; "" enables it again.
 	func set_disabled_reason(text: String) -> void:
 		switch_button.disabled = not text.is_empty()
@@ -765,7 +770,7 @@ static func switch(text := "") -> CheckButton:
 ## [param on]. Connect to SwitchRow.toggled; call set_disabled_reason() to lock it with a why.
 static func switch_row(title: String, description := "", on := false) -> SwitchRow:
 	var row := SwitchRow.new()
-	row.theme_type_variation = "JoineryInset"
+	row.theme_type_variation = "JoineryInset" if description.is_empty() else "JoineryInsetTall"
 	var line := HBoxContainer.new()
 	line.theme_type_variation = "JoineryRow"
 	row.add_child(line)

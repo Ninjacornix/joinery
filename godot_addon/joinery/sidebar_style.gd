@@ -269,8 +269,9 @@ static func scroll_in_gutter(scroller: ScrollContainer) -> void:
 ## in the gutter, and the page spans the sidebar like the transcript, with no narrower cap.
 static func page_edges(page: ScrollContainer, body: Control) -> void:
 	var local := Theme.new()
-	local.set_type_variation("JoineryInset", "MarginContainer")
-	local.set_constant("margin_left", "JoineryInset", 0)
+	for inset: String in ["JoineryInset", "JoineryInsetTall"]:
+		local.set_type_variation(inset, "MarginContainer")
+		local.set_constant("margin_left", inset, 0)
 	body.theme = local
 	page.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_RESERVE
 	scroll_in_gutter(page)

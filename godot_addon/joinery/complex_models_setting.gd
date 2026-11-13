@@ -22,8 +22,8 @@ func _init() -> void:
 	theme_type_variation = "JoineryFlush"
 	row = UI.switch_row("Complex models in Blender", CAPTION, true)
 	row.switch_button.accessibility_name = "Make complex models in Blender"
-	# Unknown until the project answers.
-	row.switch_button.disabled = true
+	# Unknown until the project answers; the row says it is checking.
+	row.set_checking()
 	row.toggled.connect(_on_toggled)
 	add_child(row)
 	set_process(false)

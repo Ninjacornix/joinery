@@ -29,6 +29,15 @@ const MODE_HINTS := [
 	"Takes longer and works through bigger changes step by step",
 ]
 const THEMES := {"match": "Match editor", "dark": "Dark", "light": "Light"}
+const PROJECT_COMMANDS := [
+	["Art direction", "/art"],
+	["Make it match", "/match"],
+	["Accessibility check", "/access"],
+	["Performance check", "/perf"],
+	["Design check", "/design"],
+	["Unused content", "/tidy"],
+	["Project apps", "/setup"],
+]
 const TROUBLESHOOTING := [
 	["Refresh models", "/models"],
 	["Check installed apps", "/doctor"],
@@ -184,6 +193,7 @@ func _ready() -> void:
 	_build_appearance()
 	_build_replies()
 	_build_project()
+	_build_checks()
 	_build_troubleshooting()
 	_on_theme_rebuilt()
 	UI_THEME.bus().connect("changed", _on_pref_changed)
@@ -400,19 +410,6 @@ func _hint_mode() -> void:
 
 func _build_project() -> void:
 	var section := _section("Project")
-	for item: Array in [
-		["Art direction", "/art"],
-		["Make it match", "/match"],
-		["Accessibility check", "/access"],
-		["Performance check", "/perf"],
-		["Design check", "/design"],
-		["Unused content", "/tidy"],
-		["Project apps", "/setup"],
-	]:
-		var button := UI.row_button(str(item[0]))
-		button.pressed.connect(_run.bind(str(item[1])))
-		_flush_row(button)
-		section.body.add_child(button)
 	var tools := HBoxContainer.new()
 	tools.theme_type_variation = "JoineryRow"
 	# The dots show only while Compact runs; they stay hidden otherwise.
@@ -566,6 +563,17 @@ func _policy_checked(data: Dictionary) -> void:
 		UI_MOTION.enter(_policy_panel)
 	else:
 		UI_MOTION.fade_in(_policy_panel.text)
+
+
+## The project's checks and tools, each a row that runs its command: after the preferences, so
+## the switches and choices come first.
+func _build_checks() -> void:
+	var section := _section("Checks and tools")
+	for item: Array in PROJECT_COMMANDS:
+		var button := UI.row_button(str(item[0]))
+		button.pressed.connect(_run.bind(str(item[1])))
+		_flush_row(button)
+		section.body.add_child(button)
 
 
 func _build_troubleshooting() -> void:

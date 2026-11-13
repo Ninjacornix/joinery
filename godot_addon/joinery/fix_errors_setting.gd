@@ -28,8 +28,8 @@ func _init() -> void:
 	# The whole name, on two lines in a narrow sidebar rather than cut short.
 	row.title.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 	row.title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	# Unknown until the project answers.
-	row.switch_button.disabled = true
+	# Unknown until the project answers; the row says it is checking.
+	row.set_checking()
 	row.toggled.connect(_on_toggled)
 	add_child(row)
 	set_process(false)
