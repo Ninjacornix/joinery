@@ -49,7 +49,7 @@ def test_update_from_the_editor_waits_updates_and_reopens(project: Path) -> None
     }
     plan = json.loads(started[0].read_text())
     assert plan["relaunch_argv"] == [
-        "/opt/joinery/bin/godot",
+        str(Path("/opt/joinery/bin/godot")),  # The system's own separators.
         "--editor",
         "--path",
         str(project.resolve()),
@@ -109,7 +109,7 @@ def test_a_mac_app_is_opened_as_an_app(tmp_path: Path) -> None:
     assert addon_refresh.relaunch_argv(editor, tmp_path) == [
         "open",
         "-n",
-        "/Applications/Joinery.app",
+        str(Path("/Applications/Joinery.app")),
         "--args",
         "--editor",
         "--path",
