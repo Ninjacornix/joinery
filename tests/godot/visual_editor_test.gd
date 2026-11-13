@@ -910,7 +910,7 @@ func _planks(tone: Color) -> Image:
 func _tools() -> void:
 	var workspace: Control = _plugin.get("_workspace")
 	var rail: Control = _plugin.get("_rail")
-	EditorInterface.set_main_screen_editor("Tools")
+	EditorInterface.set_main_screen_editor("Assets")
 	await _wait_workspace()
 	await _shot("tools", [workspace, rail])
 	if rail == null:

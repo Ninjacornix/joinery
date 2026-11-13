@@ -28,7 +28,7 @@ const EDITOR_CONTEXT := preload("res://addons/joinery/editor_context.gd")
 ## it on every launch instead of re-toggling it each session.
 const FOCUS_SETTING := "joinery/focus_mode"
 ## The main screen this plugin adds: the asset workspace and the rail pages.
-const SCREEN := "Tools"
+const SCREEN := "Assets"
 
 ## Written by the Project Manager's Next button, in the fork. Tells the addon
 ## that this project was just created and still needs its questionnaire.
@@ -501,7 +501,7 @@ func _on_asset_selected(asset: Dictionary) -> void:
 	_dock.set_resource_target("res://" + str(asset["path"]), "Resource", source)
 
 
-## A chip in the chat opens its asset in the Tools view, under the tool that made it.
+## A chip in the chat opens its asset in the Assets view, under the tool that made it.
 func _on_target_opened(path: String) -> void:
 	if _workspace == null or path.is_empty():
 		return
@@ -908,7 +908,7 @@ func _on_file_decision(event: Dictionary) -> void:
 			EditorInterface.reload_scene_from_path(path)
 		elif EditorInterface.get_edited_scene_root() == null or change.get("change") == "created":
 			EditorInterface.open_scene_from_path(path)
-	# Only a newly created model takes the user to the Tools view, where it is selected and
+	# Only a newly created model takes the user to the Assets view, where it is selected and
 	# flashed; an edit to an existing model stays in the view the user is working in.
 	for change: Dictionary in event.get("changes", []):
 		var path := "res://" + str(change["path"])

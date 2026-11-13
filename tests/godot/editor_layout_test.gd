@@ -141,7 +141,7 @@ func _run() -> void:
 		await get_tree().process_frame
 	_check(plugin._rail._buttons.has("blender"), "Blender must be in the rail")
 	_check(plugin._rail._buttons.has("godot"), "Godot must be in the app rail")
-	_check(plugin._rail._buttons.has(""), "All assets must be in the app rail")
+	_check(plugin._rail._buttons.has(""), "Assets must be in the app rail")
 	await _rail_states(plugin)
 	_check(
 		plugin._rail.find_child("ViewportToolbarToggle", true, false) == null,

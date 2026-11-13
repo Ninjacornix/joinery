@@ -1,10 +1,11 @@
 @tool
 extends VBoxContainer
 ## The app rail beside the viewport. The fork provides the column (JoineryNavigation); the
-## addon fills it: Godot, All assets, then each project app, and Joinery's own pages.
+## addon fills it: Godot, a divider, Assets and each project app, a divider, and Joinery's own
+## pages (Timeline, Share, Mixer). Every item has a tooltip naming it.
 ##
 ## Each app shows its official logo in its own colours (icons/apps, see licenses/tool-logos.md);
-## an app without one (and All assets, the pages and custom tools) shows a
+## an app without one (and Assets, the pages and custom tools) shows a
 ## monochrome glyph tinted text, or accent when selected. The selected item gets an accent bar
 ## on the rail's left edge and a raised pill behind its icon; a logo is never recoloured. Icons
 ## are rendered again whenever the theme turns light or dark. Each app shows its readiness from
@@ -19,7 +20,7 @@ const UI_THEME := preload("ui_theme.gd")
 const UI_COMPONENTS := preload("ui_components.gd")
 const UI_MOTION := preload("ui_motion.gd")
 const COMMAND_SCRIPT := preload("command_job.gd")
-## The id of the "All assets" item: the workspace's unfiltered view.
+## The id of the "Assets" item: the workspace's unfiltered view.
 const ALL_ASSETS := ""
 ## Readiness words, the same as ui_components.READINESS (kept here for callers that read them).
 const STATUS_TEXT := {
@@ -177,6 +178,7 @@ func _ready() -> void:
 	_pages.name = "Pages"
 	_pages.theme_type_variation = "JoineryTight"
 	_pages.hide()
+	_pages.add_child(HSeparator.new())
 	add_child(_pages)
 	_build_card()
 	_refresh_readiness()
@@ -271,6 +273,8 @@ func update_tools(tools: Array, assets: Array) -> void:
 			added_all = true
 		_add_tool(id, str(tool["name"]), _icon_source(id, str(tool.get("domain", ""))))
 		if id == "godot":
+			# Godot's own view, then the apps that make the project's assets.
+			_tools.add_child(HSeparator.new())
 			_add_all_assets()
 			added_all = true
 	if not added_all:
@@ -279,7 +283,7 @@ func update_tools(tools: Array, assets: Array) -> void:
 	select_tool(_selected)
 
 
-## Mark [param tool] as the current item ("godot", "" for All assets, or an app id).
+## Mark [param tool] as the current item ("godot", "" for Assets, an app or a page id).
 func select_tool(tool: String) -> void:
 	_selected = tool
 	for id: String in _items:
@@ -320,7 +324,7 @@ func add_page(id: String, title: String, source: Dictionary) -> void:
 
 
 func _add_all_assets() -> void:
-	_add_tool(ALL_ASSETS, "All assets", {"svg": _glyph("all")})
+	_add_tool(ALL_ASSETS, "Assets", {"svg": _glyph("all")})
 
 
 func _add_tool(id: String, title: String, source: Dictionary, parent: Control = null) -> void:
