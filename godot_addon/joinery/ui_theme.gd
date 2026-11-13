@@ -147,7 +147,11 @@ const _WATCH_META := "joinery_ui_watcher"
 const _APPEARANCE_KEYS := ["theme", "accent", "reduce_motion"]
 const _FONTS_META := "joinery_ui_fonts"
 ## Bundled faces (OFL, fonts/LICENSE.Inter.txt), the same files the editor is built with.
-const _FONT_FILES := {"main": "fonts/Inter_Regular.woff2", "bold": "fonts/Inter_Bold.woff2"}
+const _FONT_FILES := {
+	"main": "fonts/Inter_Regular.woff2",
+	"bold": "fonts/Inter_Bold.woff2",
+	"semibold": "fonts/Inter_SemiBold.woff2",
+}
 const _MEDIUM_EMBOLDEN := 0.35
 ## A FontVariation emboldened at least this much stands for the bold weight.
 const _BOLD_EMBOLDEN := 0.5
@@ -311,9 +315,14 @@ static func bold_font(context: Node) -> Font:
 	return _joinery_font(context, "bold")
 
 
-## The medium weight of [method text_font] (Inter has no bundled medium file, so the regular
-## face is lightly emboldened): user messages, row titles and emphasis inside body text.
+## The semibold weight of [method text_font]: card titles, command names, row titles and
+## emphasis inside body text. Inter SemiBold when fonts/Inter_SemiBold.woff2 is bundled;
+## otherwise the regular face lightly emboldened.
 static func medium_font(context: Node) -> Font:
+	if FileAccess.file_exists(_directory().path_join(_FONT_FILES["semibold"])):
+		var semibold := _joinery_font(context, "semibold")
+		if semibold is FontFile:
+			return semibold
 	var font := FontVariation.new()
 	font.base_font = text_font(context)
 	font.variation_embolden = _MEDIUM_EMBOLDEN

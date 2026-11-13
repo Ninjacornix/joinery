@@ -544,16 +544,10 @@ func _apply_scale(control: Control, type_name: String) -> void:
 		control.add_theme_font_size_override("font_size", size)
 
 
-## Bold is the body font emboldened to a semibold weight, so emphasis changes weight only.
+## Bold is the body font's semibold weight, so emphasis changes weight only.
 func _semibold(label: RichTextLabel) -> void:
 	# The transcript is in the tree even when the label is not yet, so it resolves the theme.
-	var body := get_theme_font("normal_font", "RichTextLabel")
-	if body == null:
-		return
-	var semibold := FontVariation.new()
-	semibold.base_font = body
-	semibold.variation_embolden = 0.35
-	label.add_theme_font_override("bold_font", semibold)
+	label.add_theme_font_override("bold_font", UI_THEME.medium_font(self))
 
 
 func _format(source: String) -> String:

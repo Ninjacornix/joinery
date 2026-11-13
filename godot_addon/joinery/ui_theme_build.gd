@@ -138,9 +138,7 @@ static func _text_types(t: Theme, c: Dictionary, m: Dictionary, context: Node) -
 	t.set_stylebox("normal", "Label", StyleBoxEmpty.new())
 	t.set_color("font_color", "Label", c["text"])
 	var bold := bold_font(context)
-	var semibold := FontVariation.new()
-	semibold.base_font = m["font"]
-	semibold.variation_embolden = 0.35
+	var semibold := UI_THEME.medium_font(context)
 	var caption := roundi(size * float(UI_THEME.TYPE["caption"]))
 	var labels := {
 		"JoineryCaption": [caption, c["text_muted"], null],
@@ -557,6 +555,8 @@ static func _panels(t: Theme, c: Dictionary, m: Dictionary) -> void:
 		"JoineryComposerFocused":
 		[c["surface_sunken"], c["accent"], hairline, "xl", _sp(m, 2), _sp(m, 2)],
 		"JoineryBubble": [c["surface_raised"], Color.TRANSPARENT, 0.0, "xl", _sp(m, 3), _sp(m, 3)],
+		# The one transcript card (a request, a check, a task, a plan): filled, no border; only a
+		# selected card draws one (JoineryCardSelected).
 		"JoineryChangeCard":
 		[c["surface_raised"], Color.TRANSPARENT, 0.0, "lg", _sp(m, 3), _sp(m, 3)],
 		"JoineryMediaFrame": [c["surface_sunken"], Color.TRANSPARENT, 0.0, "md", 0.0, 0.0],

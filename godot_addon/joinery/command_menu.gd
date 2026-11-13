@@ -14,6 +14,8 @@ const UI := preload("ui_components.gd")
 const SLASH := preload("slash_commands.gd")
 ## Popup height cap as a share of the viewport height.
 const MAX_HEIGHT := 0.4
+## Below this menu width, in font sizes, each description goes under its command's name.
+const STACK_EM := 27.0
 
 ## Commands in the order they are shown.
 var matches: Array[String] = []
@@ -28,7 +30,7 @@ var _scroll: ScrollContainer
 var _list: VBoxContainer
 var _rows: Array[PanelContainer] = []
 var _index := 0
-var _semibold: FontVariation
+var _semibold: Font
 var _closing := false
 
 
@@ -138,8 +140,9 @@ func _add_row(command: String) -> void:
 	var row := PanelContainer.new()
 	row.mouse_filter = Control.MOUSE_FILTER_STOP
 	row.accessibility_name = command + ", " + str(SLASH.all_commands()[command][0])
-	var box := HBoxContainer.new()
+	var box := BoxContainer.new()
 	box.theme_type_variation = "JoineryRow"
+	box.vertical = _stacked()
 	box.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(box)
 	var name := UI.label(command)
@@ -176,10 +179,8 @@ func _select(index: int) -> void:
 
 
 func _style_rows() -> void:
-	if _semibold == null:
-		_semibold = FontVariation.new()
-		_semibold.variation_embolden = 0.35
-	_semibold.base_font = get_theme_default_font()
+	_semibold = UI_THEME.medium_font(self)
+	var stacked := _stacked()
 	var widest := 0.0
 	for row: PanelContainer in _rows:
 		var name: Label = row.get_child(0).get_child(0)
@@ -187,8 +188,18 @@ func _style_rows() -> void:
 		var size := name.get_theme_font_size("font_size")
 		widest = maxf(widest, _semibold.get_string_size(name.text, 0, -1, size).x)
 	for row: PanelContainer in _rows:
-		row.get_child(0).get_child(0).custom_minimum_size.x = ceilf(widest)
+		var box := row.get_child(0) as BoxContainer
+		box.vertical = stacked
+		# Side by side, the names are one column; stacked, the description sits right under.
+		box.add_theme_constant_override("separation", 0 if stacked else UI_THEME.space(self, 2))
+		box.get_child(0).custom_minimum_size.x = 0.0 if stacked else ceilf(widest)
 	_select(_index)
+
+
+## A narrow menu (under [constant STACK_EM] font sizes) puts descriptions under the names.
+func _stacked() -> bool:
+	var wide := anchor.size.x if anchor != null and anchor.is_inside_tree() else size.x
+	return wide > 0.0 and wide < STACK_EM * float(get_theme_default_font_size())
 
 
 func _row_style(selected: bool) -> StyleBox:
