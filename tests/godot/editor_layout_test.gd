@@ -250,6 +250,8 @@ func _rail_states(plugin: EditorPlugin) -> void:
 	plugin._rail._buttons["godot"].pressed.emit()
 	await get_tree().process_frame
 	_check(_screens.has("3D"), "Godot opens 3D for a 3D scene")
+	var switch := EditorInterface.get_base_control().find_child("JoineryScreenSwitch", true, false)
+	_check(switch != null and switch.get_node("3D").button_pressed, "The switch highlights 3D")
 	_check(plugin._rail._buttons["godot"].button_pressed, "Godot is the selected rail item")
 	var deadline := Time.get_ticks_msec() + 30000
 	while plugin._rail._job != null and Time.get_ticks_msec() < deadline:
@@ -268,35 +270,26 @@ func _review_in_focus(plugin: EditorPlugin) -> void:
 		plugin._on_toggle_focus()
 	plugin._on_toggle_focus()
 	_check(plugin._focus.is_active(), "Focus mode must find the editor docks")
+	var dock := (plugin._review_tab as Control).get_parent() as Control
+	var tabs := dock.get_parent() as TabContainer
+	_check(tabs.is_visible_in_tree(), "Focus mode keeps the bottom tab strip")
+	_check(tabs.current_tab == -1, "Focus mode collapses the bottom panel to its strip")
+	var focus_button := EditorInterface.get_base_control().find_child("JoineryFocus", true, false)
+	_check(focus_button != null and focus_button.button_pressed, "⤢ shows Focus mode is on")
 	plugin._open_review("Layout check")
 	await get_tree().create_timer(0.3).timeout
 	var review: Control = plugin._review_panel
-	var dock := (plugin._review_tab as Control).get_parent() as Control
-	var tabs := dock.get_parent() as TabContainer
-	var index := tabs.get_tab_idx_from_control(dock)
-	_check(index == 0, "Review is the first bottom tab")
-	_check(not tabs.is_tab_hidden(index), "Review tab shows while a review is pending")
+	_check(tabs.get_tab_idx_from_control(dock) == 0, "Review is the first bottom tab")
 	_check(review.is_visible_in_tree(), "A pending review opens on its full before and after")
 	var accept := _button_starting(review, "Accept")
 	_check(accept != null and accept.is_visible_in_tree(), "Accept stays visible in Focus mode")
-	for other: int in tabs.get_tab_count():
-		if other != index:
-			_check(tabs.is_tab_hidden(other), "Focus mode shows only the Review tab")
 	await _capture("/tmp/joinery-editor-focus-review.png")
 	plugin._close_review("", "info")
 	await get_tree().process_frame
-	_check(
-		not tabs.is_tab_hidden(tabs.get_tab_idx_from_control(dock)),
-		"The Review tab is always there"
-	)
-	_check(not tabs.is_visible_in_tree(), "Focus mode hides the bottom panel once nothing waits")
-	plugin._on_toggle_focus()
-	_check(not plugin._focus.is_active(), "Focus mode turns off")
-	_check(tabs.is_visible_in_tree(), "Bottom panel returns after Focus mode")
-	var shown := 0
-	for other: int in tabs.get_tab_count():
-		shown += 0 if tabs.is_tab_hidden(other) else 1
-	_check(shown > 1, "Focus mode restores the other bottom tabs")
+	_check(tabs.is_visible_in_tree(), "The bottom tab strip stays once nothing waits")
+	focus_button.pressed.emit()
+	_check(not plugin._focus.is_active(), "⤢ turns Focus mode off")
+	_check(not focus_button.button_pressed, "⤢ shows Focus mode is off")
 
 
 ## A file decision that also commits a live scene edit posts exactly one notice.

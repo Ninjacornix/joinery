@@ -23,6 +23,9 @@ var _toolbars: Array[Control] = []
 var _styled_menus: Array[MenuButton] = []
 ## The 2D | 3D | Script switch in the scene tab row, in Joinery's layout (screen_switch.gd).
 var _switch: Control
+## The ⤢ Focus toggle that stands in for Godot's distraction-free button, and that button.
+var _focus_button: Button
+var _distraction_free: Button
 ## Toolbar controls hidden to keep the 3D toolbar compact.
 var _compacted: Array[Control] = []
 var _previous: Array[bool] = []
@@ -130,6 +133,37 @@ static func current_screen() -> String:
 				if child.is_class(type):
 					return SCREEN_CLASSES[type]
 	return ""
+
+
+## Make the ⤢ button in the scene tab row the one Focus mode toggle: Godot's distraction-free
+## button would hide the sidebar too, so it steps aside for a button that calls
+## [param toggle]. Does nothing when the row has no such button.
+func add_focus_toggle(base: Control, toggle: Callable) -> void:
+	for node: Node in base.find_children("*", "Button", true, false):
+		var button := node as Button
+		if button.tooltip_text.begins_with("Toggle distraction-free mode"):
+			_distraction_free = button
+			break
+	if _distraction_free == null or _focus_button != null:
+		return
+	_focus_button = Button.new()
+	_focus_button.name = "JoineryFocus"
+	_focus_button.flat = true
+	_focus_button.toggle_mode = true
+	_focus_button.focus_mode = Control.FOCUS_ACCESSIBILITY
+	_focus_button.theme_type_variation = _distraction_free.theme_type_variation
+	_focus_button.icon = _distraction_free.get_theme_icon("DistractionFree", "EditorIcons")
+	_focus_button.tooltip_text = "Focus: hide the side panels and collapse the bottom panel"
+	_focus_button.accessibility_name = "Focus"
+	_focus_button.pressed.connect(toggle)
+	_distraction_free.add_sibling(_focus_button)
+	_distraction_free.hide()
+
+
+## Show Focus mode as on or off on the ⤢ button.
+func set_focus_shown(on: bool) -> void:
+	if is_instance_valid(_focus_button):
+		_focus_button.set_pressed_no_signal(on)
 
 
 ## The main screen changed to [param screen]: highlight it on the switch.
@@ -263,6 +297,12 @@ func restore() -> void:
 	if is_instance_valid(_switch):
 		_switch.queue_free()
 	_switch = null
+	if is_instance_valid(_focus_button):
+		_focus_button.queue_free()
+	_focus_button = null
+	if is_instance_valid(_distraction_free):
+		_distraction_free.show()
+	_distraction_free = null
 	var compacted := _compacted.duplicate()
 	_compacted.clear()
 	for control: Control in compacted:

@@ -72,6 +72,8 @@ func _run() -> void:
 	await _shot("disconnected", [dock])
 	_converse(dock)
 	await _shot("layout", [base])
+	_check(base.find_child("JoineryScreenSwitch", true, false) != null, "2D | 3D | Script switch")
+	_check(base.find_child("JoineryFocus", true, false) != null, "⤢ is the Focus toggle")
 	await _sidebar(dock)
 	await _reviews(dock)
 	await _approvals()

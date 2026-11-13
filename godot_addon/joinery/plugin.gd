@@ -170,6 +170,8 @@ func _restore_focus() -> void:
 	var settings := get_editor_interface().get_editor_settings()
 	_connect_chat(settings)
 	_shell.apply(get_editor_interface().get_base_control(), settings, _joinery_layout)
+	if _joinery_layout:
+		_shell.add_focus_toggle(get_editor_interface().get_base_control(), _on_toggle_focus)
 	_shell.watch_file_tree(get_editor_interface().get_file_system_dock())
 	# The saved layout has been applied by now; put the Review tab back in front.
 	_review_tab.pin_first()
@@ -190,8 +192,7 @@ func _restore_focus() -> void:
 	# Godot's classic layout opens as Godot arranges it; Focus mode stays one command away.
 	var focus := settings.has_setting(FOCUS_SETTING) and bool(settings.get_setting(FOCUS_SETTING))
 	if _joinery_layout and focus:
-		if _focus.apply(get_editor_interface().get_base_control(), _review_tab):
-			_focus.show_review(_review_open)
+		_shell.set_focus_shown(_focus.apply(get_editor_interface().get_base_control(), _review_tab))
 	_offer_setup_if_pending()
 	if not startup_prompt.is_empty() and _dock.has_method("_on_submit"):
 		_dock.call_deferred("_on_submit", startup_prompt)
@@ -263,12 +264,6 @@ func _link(source: Signal, method: String) -> void:
 ## A transient line in the sidebar footer (Focus mode, viewport tools).
 func _status(text: String) -> void:
 	_call_dock("show_status", [text])
-
-
-## A transient footer note with a link ("Panels hidden · Show panels"). A sidebar whose
-## show_status takes no action shows the text alone; _call_dock drops the extra arguments.
-func _status_action(text: String, action: String, callback: Callable) -> void:
-	_call_dock("show_status", [text, 4.0, action, callback])
 
 
 func _engine_dir() -> String:
@@ -551,14 +546,11 @@ func _on_toggle_focus() -> void:
 		# pending review gets its own footer line again.
 		_status("" if _review_open else "Panels shown")
 	elif _focus.apply(editor.get_base_control(), _review_tab):
-		_focus.show_review(_review_open)
 		# A pending review keeps its footer line: review status wins over this note.
-		if _review_open:
-			_status("")
-		else:
-			_status_action("Panels hidden", "Show panels", _on_toggle_focus)
+		_status("" if _review_open else "Panels hidden. ⤢ shows them again")
 	else:
 		_status("This editor version can't hide the panels")
+	_shell.set_focus_shown(_focus.is_active())
 	editor.get_editor_settings().set_setting(FOCUS_SETTING, _focus.is_active())
 
 

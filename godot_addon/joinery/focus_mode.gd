@@ -1,77 +1,66 @@
 @tool
 extends RefCounted
-## Focus mode: viewport, sidebar and the Review panel only.
+## Focus mode: the viewport, the sidebar and the bottom tab strip.
 ##
-## Most control goes through the sidebar, so the rest of Godot's layout is more
-## than the user needs (ADR 0005). The proper version of this is a fork patch
-## that restructures the editor. A plugin has no API for hiding built-in docks,
-## so this walks the editor's control tree and hides the tab containers it
-## finds, remembering each one so it can put everything back.
+## Most control goes through the sidebar, so the rest of Godot's layout is more than the user
+## needs (ADR 0005). Focus mode hides the side dock columns (Scene, Inspector) and collapses
+## the bottom panel to its tab strip, so Review, Files and Output stay one click away and a
+## review still opens in place. The ⤢ button in the scene tab row is its one toggle.
 ##
-## That makes it a presentation trick, not surgery: nothing is removed, nothing
-## about the project changes, and `restore()` returns the editor exactly as it
-## was. It is also the fragile part of the addon, since it depends on the
-## editor's internal node shape; if a Godot release moves things, Focus mode
-## stops finding panels and [method apply] returns false rather than breaking
-## the editor.
-##
-## The Review panel is where every change is decided, so Focus mode never hides
-## it: the bottom panel that holds it stays, with every other tab hidden, and is
-## shown only while a review is pending ([method show_review]).
+## A plugin has no API for hiding built-in docks, so this walks the editor's control tree and
+## hides the dock columns it finds, remembering each one so it can put everything back. It is
+## a presentation trick, not surgery: nothing is removed, nothing about the project changes,
+## and `restore()` returns the editor as it was. If a Godot release moves things, Focus mode
+## stops finding panels and [method apply] returns false rather than breaking the editor.
 
-## Docks whose titles we keep, by substring. Everything else gets hidden.
+## Docks whose titles we keep, by substring. Every other dock column gets hidden.
 const KEEP := ["Journeyman", "Chatup", "JoineryNavigation", "Review"]
 
 var _hidden: Array[Control] = []
 var _active := false
-## The tab container holding the Review panel, the tabs hidden in it, and whether it was
-## visible before Focus mode took it over.
-var _review_tabs: TabContainer
-var _review_tabs_visible := true
-var _hidden_tabs: Array[Control] = []
+## The bottom panel, and the tab it showed before Focus mode collapsed it (-1: none).
+var _bottom: TabContainer
+var _bottom_tab := -1
 
 
 func is_active() -> bool:
 	return _active
 
 
-## Hide every dock column except the sidebar, the navigation rail and the Review panel's
-## container. [param review] is the Review panel; its container keeps only the Review tab.
+## Hide every dock column except the sidebar and the navigation rail, and collapse the bottom
+## panel to its tab strip. [param review] is the Review panel, whose bottom panel stays.
 ## Returns false, and changes nothing, when the editor layout has nothing to hide.
 func apply(base: Control, review: Control = null) -> bool:
 	if _active:
 		return true
 	_hidden.clear()
-	var containers := _find_dock_containers(base)
-	if review != null:
-		for container: Control in containers:
-			if container is TabContainer and container.is_ancestor_of(review):
-				_isolate_review(container as TabContainer, review)
-				break
-	for container: Control in containers:
-		# The Review panel's container (and anything inside it) is handled by its tabs.
-		if (
-			_review_tabs != null
-			and (container == _review_tabs or _review_tabs.is_ancestor_of(container))
-		):
+	for container: Control in _find_dock_containers(base):
+		if review != null and container.is_ancestor_of(review):
+			_bottom = container as TabContainer
 			continue
-		if _should_keep(container):
+		if container.is_class("EditorBottomPanel"):
+			_bottom = container as TabContainer
 			continue
-		if container.visible:
-			container.visible = false
-			_hidden.append(container)
-	# The viewport toolbar has its own persisted /toolbar toggle. Workspace
-	# navigation stays visible so Focus mode never strands the current view.
+		if _should_keep(container) or not container.visible:
+			continue
+		container.visible = false
+		_hidden.append(container)
 	_active = not _hidden.is_empty()
 	if not _active:
 		restore()
-	return _active
+		return false
+	# A review on screen stays open; otherwise the bottom panel collapses to its strip.
+	if is_instance_valid(_bottom) and not (review != null and review.is_visible_in_tree()):
+		_bottom_tab = _bottom.current_tab
+		_bottom.current_tab = -1
+	return true
 
 
-## While Focus mode is on, show the Review panel's container only when a review is pending.
+## A review opening in Focus mode shows in the bottom panel as usual; one closing collapses
+## the panel back to its strip.
 func show_review(pending: bool) -> void:
-	if _active and is_instance_valid(_review_tabs):
-		_review_tabs.visible = pending
+	if _active and not pending and is_instance_valid(_bottom):
+		_bottom.current_tab = -1
 
 
 func restore() -> void:
@@ -79,29 +68,12 @@ func restore() -> void:
 		if is_instance_valid(container):
 			container.visible = true
 	_hidden.clear()
-	if is_instance_valid(_review_tabs):
-		for control: Control in _hidden_tabs:
-			var index := (
-				_review_tabs.get_tab_idx_from_control(control) if is_instance_valid(control) else -1
-			)
-			if index >= 0:
-				_review_tabs.set_tab_hidden(index, false)
-		_review_tabs.visible = _review_tabs_visible
-	_hidden_tabs.clear()
-	_review_tabs = null
+	if _active and is_instance_valid(_bottom) and _bottom.current_tab == -1:
+		if _bottom_tab >= 0 and _bottom_tab < _bottom.get_tab_count():
+			_bottom.current_tab = _bottom_tab
+	_bottom = null
+	_bottom_tab = -1
 	_active = false
-
-
-func _isolate_review(tabs: TabContainer, review: Control) -> void:
-	_review_tabs = tabs
-	_review_tabs_visible = tabs.visible
-	_hidden_tabs.clear()
-	for index: int in tabs.get_tab_count():
-		var control := tabs.get_tab_control(index)
-		if control == review or control.is_ancestor_of(review) or tabs.is_tab_hidden(index):
-			continue
-		tabs.set_tab_hidden(index, true)
-		_hidden_tabs.append(control)
 
 
 func _should_keep(container: Control) -> bool:
@@ -114,8 +86,8 @@ func _should_keep(container: Control) -> bool:
 
 
 func _find_dock_containers(base: Control) -> Array[Control]:
-	## The editor keeps its docks in TabContainers down the left and right.
-	## Collect those, and leave the central viewport alone.
+	## The editor keeps its docks in TabContainers down the left and right and along the
+	## bottom. Collect those, and leave the central viewport alone.
 	var found: Array[Control] = []
 	for node: Node in _descendants(base):
 		if node is TabContainer and node.get_tab_count() > 0:
@@ -131,7 +103,7 @@ func _holds_main_screen(container: Control) -> bool:
 	var tabs := container as TabContainer
 	for index: int in tabs.get_tab_count():
 		var title := tabs.get_tab_title(index)
-		if title in ["3D", "2D", "Script", "AssetLib", "Game", "Tools"]:
+		if title in ["3D", "2D", "Script", "AssetLib", "Game", "Tools", "Assets"]:
 			return true
 	return false
 
