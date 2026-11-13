@@ -164,11 +164,13 @@ func _draw() -> void:
 	var width := maxf(1.5, roundf(unit * 2.0))
 	var radius := minf(size.x, size.y) * 0.32
 	var center := size / 2.0
-	var track := UI_THEME.color(self, "border_subtle")
+	# A full, clearly drawn track: the ring reads as a gauge filling up, never as a spinner.
+	var track := UI_THEME.color(self, "border_strong")
+	track.a *= 0.6
 	draw_arc(center, radius, 0.0, TAU, 48, track, width, true)
 	if _shown <= 0.0:
 		return
-	var role := "danger" if _shown >= NEAR_FULL else "text_muted"
+	var role := "danger" if _shown >= NEAR_FULL else "text"
 	var start := -PI / 2.0
 	draw_arc(
 		center, radius, start, start + TAU * _shown, 48, UI_THEME.color(self, role), width, true

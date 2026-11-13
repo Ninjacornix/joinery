@@ -335,6 +335,9 @@ func _restyle() -> void:
 		return
 	var pad := float(UI_THEME.space(self, 1))
 	box.set_content_margin_all(pad)
+	# A way sits in the strip's card (radius lg, SPACE.2 in): inner radius = outer - padding.
+	var outer := float(UI_THEME.radius(self, "lg"))
+	box.set_corner_radius_all(int(UI_THEME.nested(outer, float(UI_THEME.space(self, 2)))))
 	var hovered := (
 		get_global_rect().has_point(get_global_mouse_position()) if is_inside_tree() else false
 	)

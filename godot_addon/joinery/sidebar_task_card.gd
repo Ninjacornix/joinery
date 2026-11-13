@@ -74,7 +74,9 @@ func _init(identifier := "", name_text := "") -> void:
 	title_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	title_label.tooltip_text = name_text
 	head.add_child(title_label)
+	# Framed like the composer's Stop, so it reads as a button, not a grey square.
 	stop = UI.icon_button("stop", "Stop this task")
+	stop.theme_type_variation = "JoineryStopButton"
 	stop.accessibility_name = "Stop task: " + name_text
 	stop.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	UI_MOTION.press_feedback(stop)
