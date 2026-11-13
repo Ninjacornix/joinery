@@ -158,11 +158,19 @@ def setup(project: Path) -> dict[str, Any]:
     }
 
 
+#: Files Godot writes next to the add-on's own in a project; never part of its version.
+_GENERATED = {".uid", ".import"}
+
+
 def addon_version(source: Path | None = None) -> str:
     source = source or ROOT / "godot_addon/joinery"
     digest = hashlib.sha256()
     for path in sorted(source.rglob("*")):
-        if path.is_file() and path.suffix != ".uid" and path.name != ".DS_Store":
+        if (
+            path.is_file()
+            and path.suffix not in _GENERATED
+            and path.name != ".DS_Store"
+        ):
             digest.update(
                 path.relative_to(source).as_posix().encode() + b"\0" + path.read_bytes()
             )

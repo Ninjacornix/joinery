@@ -27,11 +27,14 @@ const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
 const INDICATOR := preload("activity_indicator.gd")
 const USAGE_SCRIPT := preload("usage_meter.gd")
+const NOTICE_SCRIPT := preload("setup_notice.gd")
 
 ## The header row; the settings page adds its menu button here.
 var row: HBoxContainer
 ## The context ring beside the menu (usage_meter.gd), shown once the provider reports usage.
 var usage: USAGE_SCRIPT
+## Joinery's own setup (an out-of-date add-on), below the banner (setup_notice.gd).
+var notice: NOTICE_SCRIPT
 var _dot: Control
 var _indicator: Control
 var _name: Label
@@ -117,6 +120,8 @@ func _init() -> void:
 				reconnect_pressed.emit()
 	)
 	column.add_child(_banner_action)
+	notice = NOTICE_SCRIPT.new()
+	add_child(notice)
 
 
 ## Show [param state] ("connected", "connecting", "error", "none"). [param agent] names the
@@ -127,6 +132,10 @@ func _init() -> void:
 func show_state(state: String, agent: String, detail := "", with_banner := true) -> void:
 	var named := agent if not agent.is_empty() else "Journeyman"
 	_state = state
+	if state == "error" and (detail.begins_with(notice.ADDON_STALE) or notice.addon_stale()):
+		# The chat refused this older add-on: Update and restart fixes it, not Reconnect.
+		notice.mark_addon_stale()
+		with_banner = false
 	_indicator.set("running", state == "connecting")
 	# Healthy is quiet: nothing but the menu.
 	_dot.visible = state == "error"
@@ -144,6 +153,8 @@ func show_state(state: String, agent: String, detail := "", with_banner := true)
 	elif _banner.visible:
 		UI_MOTION.exit(_banner)
 		_banner_kind = ""
+	# One notice at a time: while the banner asks to connect, it is the one shown.
+	notice.set_held(state == "none" or (state == "error" and with_banner))
 
 
 ## [param count] agents work now, Journeyman's own request included. From two up the row says

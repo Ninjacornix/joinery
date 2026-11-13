@@ -964,6 +964,20 @@ def _parser() -> argparse.ArgumentParser:
         "update-addon", help="update a closed project's addon with a reversible backup"
     )
     delivery.add_argument("--project", type=Path, required=True)
+    delivery.add_argument(
+        "--check",
+        action="store_true",
+        help="only say whether the project's addon is older than this Joinery's",
+    )
+    delivery.add_argument(
+        "--after-exit",
+        type=int,
+        default=0,
+        help="update once this editor process exits, then open the project again",
+    )
+    delivery.add_argument(
+        "--editor", default="", help="the editor executable to open the project with"
+    )
     tx_cmd = commands.add_parser(
         "transactions",
         help="inspect, accept, reject, recover or revert project changes",
@@ -1425,7 +1439,16 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == "bootstrap":
                 outcome = setup_runtime(args.project.resolve())
             elif args.command == "update-addon":
-                outcome = dict(update_addon(args.project.resolve()))
+                from joinery import addon_refresh
+
+                if args.check:
+                    outcome = addon_refresh.state(args.project.resolve())
+                elif args.after_exit:
+                    outcome = addon_refresh.schedule(
+                        args.project, wait_pid=args.after_exit, editor=args.editor
+                    )
+                else:
+                    outcome = dict(update_addon(args.project.resolve()))
             else:
                 if args.action == "revert" and not args.id:
                     raise ValueError(
