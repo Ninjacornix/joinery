@@ -701,7 +701,7 @@ func _place_review() -> void:
 	var placed := _ready_row.get_parent()
 	if placed == null:
 		_column.add_child(_ready_row)
-		_column.move_child(_ready_row, _progress.get_index() + 1)
+		_column.move_child(_ready_row, maxi(_progress.get_index(), _done_list.get_index()) + 1)
 		return
 	# While it waits it stays the turn's last line: whatever the turn adds later goes above it.
 	placed.child_entered_tree.connect(

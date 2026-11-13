@@ -648,7 +648,7 @@ func _check_card(panel: PANEL) -> void:
 		"The card lists each part of the request: " + str(card.done_lines())
 	)
 	var done_list: Control = card._done_list
-	_check(done_list.visible and done_list.get_index() < row.get_index(), "Listed above the row")
+	_check(done_list.visible and row.is_greater_than(done_list), "Listed above the row")
 	var first: Label = done_list.get_child(0).get_child(1)
 	_check(first.theme_type_variation == "JoineryCaption", "The list is quiet caption text")
 	card.set_done([])
