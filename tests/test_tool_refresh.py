@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -96,25 +97,30 @@ def test_one_refresh_at_a_time_and_a_second_caller_follows_it(
 
     from joinery import bootstrap
 
-    # Another process runs a refresh: it holds the slot and writes its progress.
+    # Another process runs a refresh: it takes the slot under its own pid and writes
+    # its progress. Its own pid, not Popen's: on Windows a venv's python.exe is a
+    # launcher that runs the interpreter as a child process with a pid of its own.
+    cache.mkdir(parents=True, exist_ok=True)
+    state = cache / "refresh.json"
     other = subprocess.Popen(
         _script(
             tmp_path,
             "import json, os, sys, time\n"
-            "state = sys.argv[1]\n"
+            "state, lock = sys.argv[1], sys.argv[2]\n"
             "def put(**data):\n"
             "    data.update(pid=os.getpid(), log='refresh.log', steps=2)\n"
             "    open(state + '.tmp', 'w').write(json.dumps(data))\n"
             "    os.replace(state + '.tmp', state)\n"
+            "open(lock, 'w').write(str(os.getpid()))\n"
             "put(state='running', progress=0.25, step=1, text='Refreshing Godot')\n"
-            "time.sleep(1.0)\n"
+            "time.sleep(2.0)\n"
             "put(state='failed', step=2, error='Docker ran out of disk space.')\n",
         )
-        + [str(cache / "refresh.json")]
+        + [str(state), str(cache / "refresh.lock")]
     )
-    cache.mkdir(parents=True, exist_ok=True)
-    (cache / "refresh.lock").write_text(str(other.pid))
-    # Reaped as it ends, so its pid stops answering (a real holder isn't our child).
+    deadline = time.monotonic() + 30
+    while not state.exists() and time.monotonic() < deadline:
+        time.sleep(0.02)
     reaper = threading.Thread(target=other.wait)
     reaper.start()
     try:
