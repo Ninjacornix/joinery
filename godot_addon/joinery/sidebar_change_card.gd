@@ -125,6 +125,8 @@ var _retry: Button
 var _reason := ""
 var _retry_allowed := true
 var _steps: VBoxContainer
+## Each part of the request and what was done about it, ticked (set_done).
+var _done_list: VBoxContainer
 ## The ready change: picture, one line, Discard / Accept or Review.
 var _ready_row: REVIEW_ROW
 var _outcome: HBoxContainer
@@ -231,6 +233,11 @@ func _init(text := "", context: Array = []) -> void:
 	_steps.theme_type_variation = "JoineryTight"
 	_steps.hide()
 	_progress.add_child(_steps)
+	_done_list = VBoxContainer.new()
+	_done_list.theme_type_variation = "JoineryTight"
+	_done_list.accessibility_name = "What was done"
+	_done_list.hide()
+	_column.add_child(_done_list)
 	_ready_row = REVIEW_ROW.new()
 	_ready_row.other_ways_pressed.connect(_try_other_ways)
 	_column.add_child(_ready_row)
@@ -446,6 +453,35 @@ func set_ready(media: Array = [], review: Object = null) -> void:
 	_ready_row.waiting = true
 	_ready_row.show_for(media, review)
 	_sync_activity()
+
+
+## The agent's list of what it did for each part of the request ("Made the mug in Blender",
+## "Put it on Table"), shown under the steps as quiet ticked lines. An empty list hides it.
+func set_done(items: Array) -> void:
+	for child: Node in _done_list.get_children():
+		_done_list.remove_child(child)
+		child.queue_free()
+	for item: Variant in items:
+		var line := str(item).strip_edges()
+		if line.is_empty():
+			continue
+		var row := _row(_done_list)
+		row.add_child(_icon("check", "text_muted"))
+		var label := UI.label(line, "JoineryCaption", true)
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(label)
+	_done_list.visible = _done_list.get_child_count() > 0
+	if _done_list.visible:
+		UI_MOTION.fade_in(_done_list)
+	_sync_activity()
+
+
+## The lines of the done list, in order.
+func done_lines() -> PackedStringArray:
+	var lines := PackedStringArray()
+	for row: Node in _done_list.get_children():
+		lines.append((row.get_child(1) as Label).text)
+	return lines
 
 
 ## "Try other ways": a few more versions of this request beside this change (sidebar_variants.gd).

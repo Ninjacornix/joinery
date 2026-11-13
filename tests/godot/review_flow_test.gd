@@ -40,9 +40,13 @@ class FakeCard:
 	extends RefCounted
 	var state := "ready"
 	var media: Array = []
+	var done: Array = []
 
 	func set_ready(items: Array) -> void:
 		media = items
+
+	func set_done(items: Array) -> void:
+		done = items
 
 
 ## The sidebar (journeyman_dock.gd).
@@ -118,9 +122,11 @@ func _run() -> void:
 	chat.turn_state.emit({"state": "working"})
 	chat.turn_state.emit({"state": "submitting"})
 	_check(plugin.calls.is_empty(), "Nothing opens before the change is in review")
-	chat.turn_state.emit({"state": "in_review"})
+	var parts := ["Made the lamp in Blender", "Put it on Desk"]
+	chat.turn_state.emit({"state": "in_review", "done": parts})
 	_check(plugin.calls == [["open", "Rename the lamp"]], "in_review opens the live review")
 	_check(not flow.live_waiting(), "Opened once")
+	_check(plugin._dock.card.done == parts, "The card lists what was done for each part")
 
 	plugin.calls.clear()
 	plugin._edits.waiting = true

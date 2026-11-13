@@ -221,9 +221,14 @@ def make_server(socket: Path, role: str | None = None) -> MCPServer[Any]:
     async def submit_for_review(
         summary: Annotated[str, Field(min_length=1, max_length=160)],
         facts: Annotated[list[str], Field(max_length=3)] | None = None,
+        done: Annotated[list[str], Field(max_length=8)] | None = None,
     ) -> dict[str, Any]:
-        """Hand your finished change to Joinery. Joinery checks it (art bible rules, Godot import, missing res:// files, asset provenance, project tests). status 'in_review': the user now sees it; make no more changes this turn. 'failed' and not final: fix every problem listed and submit again (attempts_left). 'needs_user', or final: stop and tell the user plainly what failed. summary: one short line in the user's words naming what changed. facts: optional, up to 3 tiny plain phrases of what visibly changed, with numbers when known ('door 20% wider', 'wood darker')."""
-        return await rpc(socket, "submit", {"summary": summary, "facts": facts or []})
+        """Hand your finished change to Joinery. Joinery checks it (art bible rules, Godot import, missing res:// files, asset provenance, project tests). status 'in_review': the user now sees it; make no more changes this turn. 'failed' and not final: fix every problem listed and submit again (attempts_left). 'needs_user', or final: stop and tell the user plainly what failed. summary: one short line in the user's words naming what changed. facts: optional, up to 3 tiny plain phrases of what visibly changed, with numbers when known ('door 20% wider', 'wood darker'). done: each part of the user's request and what you did about it, one short line each ('Made the mug in Blender', 'Put it on Table in kitchen.tscn'); a part you couldn't do is listed too, saying so, never dropped. The request's card shows the list. notes in the result: say them in your reply."""
+        return await rpc(
+            socket,
+            "submit",
+            {"summary": summary, "facts": facts or [], "done": done or []},
+        )
 
     @server.tool(annotations=ToolAnnotations(read_only_hint=True))
     @tool_errors

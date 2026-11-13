@@ -413,7 +413,16 @@ class GatewayRPC:
                     isinstance(fact, str) for fact in facts
                 ):
                     raise ValueError("facts is a list of short phrases.")
-                submitted = await self.gateway.turn.submit(summary, "agent", facts)
+                done = params.get("done") or []
+                if not isinstance(done, list) or not all(
+                    isinstance(item, str) for item in done
+                ):
+                    raise ValueError(
+                        "done is a list of short lines, one per part of the request."
+                    )
+                submitted = await self.gateway.turn.submit(
+                    summary, "agent", facts, done
+                )
                 data = submitted.as_tool_result()
             elif method == "precheck":
                 if self.inspection_only:

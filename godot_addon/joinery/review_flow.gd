@@ -73,8 +73,18 @@ func live_waiting() -> bool:
 
 
 func _on_turn_state(event: Dictionary) -> void:
+	if str(event.get("state", "")) == "in_review" and event.get("done") is Array:
+		_show_done(event["done"])
 	if _live_owner.is_empty():
 		_follow(event)
+
+
+## The request's card lists what was done for each part of it (submit_for_review's done).
+func _show_done(items: Array) -> void:
+	var dock: Variant = _plugin.get("_dock")
+	var card: Variant = (dock as Object).call("_card") if dock is Object else null
+	if card is Object and (card as Object).has_method("set_done"):
+		(card as Object).call("set_done", items)
 
 
 ## A task's events: the turn of the task whose live edit is on screen moves its review.

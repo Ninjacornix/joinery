@@ -178,6 +178,9 @@ class SubmitResult:
         return result
 
 
+#: The request checklist (``submit_for_review``'s done): items, characters each.
+DONE_ITEMS = 8
+DONE_CHARS = 120
 #: What the agent is told to do next, by outcome.
 NEXT_FIX = "Fix each problem, then call submit_for_review again."
 NEXT_STOP = (
@@ -294,6 +297,8 @@ class TurnController:
         self._passed: dict[str, list[str]] = {}
         #: The agent's plain words on what visibly changed, for the review.
         self._facts: list[str] = []
+        #: Each part of the request and what was done about it, for the card's list.
+        self._done_items: list[str] = []
         #: The reviewer agent that reads each submitted change (None: no reviewer).
         self.reviewer: Reviewer | None = None
         #: Times the reviewer may send a change back this turn.
@@ -345,7 +350,9 @@ class TurnController:
 
     # --- State -----------------------------------------------------------------------
 
-    def _to(self, state: TurnState, reason: str = "") -> None:
+    def _to(
+        self, state: TurnState, reason: str = "", extra: Mapping[str, Any] | None = None
+    ) -> None:
         if not allowed(self.state, state):
             raise RuntimeError(f"A turn cannot go from {self.state} to {state}.")
         self.state = state
@@ -358,6 +365,7 @@ class TurnController:
             event["transaction_id"] = self.review_id
         if reason:
             event["reason"] = reason
+        event.update(extra or {})
         self.emit(event)
 
     def begin(self, request: str, todo: done_when.Todo | None = None) -> None:
@@ -379,6 +387,7 @@ class TurnController:
         self.last_result = None
         self._checked = None
         self._facts = []
+        self._done_items = []
         self.review_rounds = 0
         self._peer = self._peer_print = None
         self._sent_back = None
@@ -711,6 +720,7 @@ class TurnController:
         summary: str,
         origin: Literal["agent", "joinery"] = "agent",
         facts: list[str] | None = None,
+        done: list[str] | None = None,
     ) -> SubmitResult:
         """Check the turn's change and, when it passes, put it in front of the user.
 
@@ -719,10 +729,16 @@ class TurnController:
         whose turn was stopped while its checks ran returns "stopped" and leaves
         the turn that runs now alone. ``facts`` are the agent's few plain words on
         what visibly changed ("door 20% wider"); the review shows them in one line.
+        ``done`` is each part of the request and what was done ("Put it on Table in
+        kitchen.tscn"); the request's card lists them when the change opens.
         """
         turn = self.turn_id
         if facts is not None or origin == "agent":
             self._facts = [f.strip()[:40] for f in facts or [] if f.strip()][:3]
+        if done is not None or origin == "agent":
+            self._done_items = [
+                " ".join(d.split())[:DONE_CHARS] for d in done or [] if d.strip()
+            ][:DONE_ITEMS]
         result = await self._submit(summary, origin)
         if self.turn_id == turn:
             self.last_result = result
@@ -981,7 +997,10 @@ class TurnController:
         self.review_open = True
         if preview is not None:
             self.emit(preview)
-        self._to(TurnState.IN_REVIEW)
+        self._to(
+            TurnState.IN_REVIEW,
+            extra={"done": list(self._done_items)} if self._done_items else None,
+        )
         self.gateway.start_media(self.emit)
         return self._result(
             "in_review",

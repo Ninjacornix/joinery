@@ -637,6 +637,22 @@ func _check_card(panel: PANEL) -> void:
 	_check(row.visible and row.call("thumbnail") != null, "The card shows a tiny picture")
 	_check(bool(row.call("decidable")), "A small change is decided from the card")
 	_check(row._line.text == "Crate darker · 1 image", "The card's one line: " + row._line.text)
+	# The request's parts, ticked: quiet lines above the change's row, blanks dropped.
+	card.set_done(["Made the mug in Blender", " ", "Put it on Table in kitchen.tscn"])
+	await _frames()
+	_check(
+		(
+			card.done_lines()
+			== PackedStringArray(["Made the mug in Blender", "Put it on Table in kitchen.tscn"])
+		),
+		"The card lists each part of the request: " + str(card.done_lines())
+	)
+	var done_list: Control = card._done_list
+	_check(done_list.visible and done_list.get_index() < row.get_index(), "Listed above the row")
+	var first: Label = done_list.get_child(0).get_child(1)
+	_check(first.theme_type_variation == "JoineryCaption", "The list is quiet caption text")
+	card.set_done([])
+	_check(not done_list.visible, "An empty list hides it")
 	var accepted: Array[int] = [0]
 	panel.accept_pressed.connect(func() -> void: accepted[0] += 1)
 	row._accept.pressed.emit()
