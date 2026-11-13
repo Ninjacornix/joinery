@@ -1,0 +1,25 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Fri, 13 Nov 2026 10:16:29 +0100
+Subject: [PATCH] feat(editor): title bar names the project
+
+Joinery-only, not for upstream. The title bar read "visual.tscn - Harbour Keeper", repeating the scene tab beside it. In Joinery's layout it shows the project's name alone; the scene tab already names the scene and its unsaved mark. The OS window title keeps the scene so the task bar still tells windows apart.
+---
+ editor/editor_node.cpp | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/editor/editor_node.cpp b/editor/editor_node.cpp
+index 851fe73..c17da57 100644
+--- a/editor/editor_node.cpp
++++ b/editor/editor_node.cpp
+@@ -379,7 +379,9 @@ void EditorNode::_update_title() {
+ 	}
+ 	DisplayServer::get_singleton()->window_set_title(title + String(" - ") + GODOT_VERSION_NAME);
+ 	if (project_title) {
+-		project_title->set_text(title);
++		// Joinery: the scene tab already names the scene and its unsaved mark,
++		// so the title bar shows the project alone.
++		project_title->set_text(EditorSettings::is_joinery_layout() ? (appname.is_empty() ? TTR("Unnamed Project") : appname) : title);
+ 	}
+ }
+ 
