@@ -38,6 +38,10 @@ const CHOOSE_HINT := "Choose an account to continue."
 
 var engine_home := ""
 var initial_agent := ""
+## In the editor's switch dialog: [member initial_agent] is only highlighted, and nothing
+## continues until the user chooses (a row or Continue). The Project Manager leaves it off,
+## so a signed-in agent there continues on its own.
+var confirm_choice := false
 var initial_profile := ""
 var selected_profile := ""
 var _selected := ""
@@ -332,7 +336,7 @@ func _style_unavailable(card: Card) -> void:
 func _select(id: String, user_choice: bool = true) -> void:
 	_selected = id
 	_chosen_by_user = _chosen_by_user or user_choice
-	_auto_redirect = true
+	_auto_redirect = user_choice or not confirm_choice
 	_redirecting = false
 	if _waiting_for != id:
 		_waiting_for = ""

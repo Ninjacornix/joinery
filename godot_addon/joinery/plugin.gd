@@ -564,6 +564,7 @@ func _on_connect_requested() -> void:
 	var view: Control = CONNECT_SCRIPT.new()
 	view.set("engine_home", _engine_dir())
 	view.set("initial_agent", str(_chat.get("_agent")) if _chat != null else "")
+	view.set("confirm_choice", true)
 	dialog.add_child(view)
 	view.connect("connected", _on_agent_connected.bind(view))
 	dialog.canceled.connect(dialog.queue_free)
@@ -578,19 +579,18 @@ func _on_connect_requested() -> void:
 func _on_agent_connected(agent: String, method_or_view: Variant, view: Variant = null) -> void:
 	var screen: Variant = view if view is Object else method_or_view
 	var profile: Variant = screen.get("selected_profile") if screen is Object else null
-	var settings := get_editor_interface().get_editor_settings()
-	settings.set_setting("joinery/agent", agent)
-	settings.set_setting("joinery/connection", str(profile) if profile is String else "")
+	var connection := str(profile) if profile is String else ""
 	if is_instance_valid(_connect_dialog):
 		_connect_dialog.hide()
 		_connect_dialog.queue_free()
+	# The agent already in use, still connected: nothing to restart.
+	if _chat != null and _chat.is_current(agent, connection):
+		return
+	var settings := get_editor_interface().get_editor_settings()
+	settings.set_setting("joinery/agent", agent)
+	settings.set_setting("joinery/connection", connection)
 	_call_dock("set_chat_agent", [agent])
-	_chat.start(
-		agent,
-		str(profile) if profile is String else "",
-		_engine_dir(),
-		ProjectSettings.globalize_path("res://")
-	)
+	_chat.start(agent, connection, _engine_dir(), ProjectSettings.globalize_path("res://"))
 
 
 ## A change the user applied wrote files: show them, and when it edited project.godot offer to
