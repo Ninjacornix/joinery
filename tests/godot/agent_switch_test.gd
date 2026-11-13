@@ -1,7 +1,8 @@
 extends SceneTree
 ## Switching Journeyman's agent from the editor (Settings → Replies → Switch): the Connect
 ## screen opens on the agent in use and waits for the user's choice; choosing the same agent
-## again restarts nothing, choosing another one continues with it.
+## again restarts nothing, choosing another one continues with it. A request still running
+## when the agent changes ends: the sidebar is no longer busy and says why.
 
 const CONNECT_PATH := "res://addons/joinery/agent_connect.gd"
 const BRIDGE_PATH := "res://addons/joinery/chat_bridge.gd"
@@ -70,6 +71,7 @@ func _run() -> void:
 	await _check_switch_dialog()
 	await _check_first_run()
 	await _check_same_agent()
+	await _check_mid_request()
 	print("agent switch: ", "FAILED" if _failed else "ok")
 	quit(1 if _failed else 0)
 
@@ -118,5 +120,39 @@ func _check_same_agent() -> void:
 	bridge.set("_connected", false)
 	_check(not bridge.call("is_current", "codex", ""), "A lost connection reconnects")
 	bridge.set("_job", null)
+	bridge.queue_free()
+	await process_frame
+
+
+## The agent changes while a request runs: it ends as failed, the sidebar stops waiting, and
+## the transcript says why.
+func _check_mid_request() -> void:
+	var bridge: Node = load(BRIDGE_PATH).new()
+	root.add_child(bridge)
+	var heard: Array = []
+	var notices: Array[String] = []
+	bridge.connect("busy_changed", func(busy: bool) -> void: heard.append(busy))
+	bridge.connect("completed", func(ok: bool) -> void: heard.append("ok" if ok else "failed"))
+	bridge.connect("notice", func(text: String, _kind: String) -> void: notices.append(text))
+	bridge.set("_agent", "codex")
+	var job := Job.new()
+	bridge.set("_job", job)
+	bridge.set("_connected", true)
+	bridge.call("submit", "make a hammer", [])
+	_check(heard == [true], "The request is running: %s" % [heard])
+	# A missing engine folder keeps the new agent's host from starting for real.
+	bridge.call("start", "claude", "", "/nonexistent-joinery-engine", "/nonexistent-project")
+	bridge.call("close")
+	await process_frame
+	_check(job.closed, "The old agent's pipe is closed")
+	_check(heard == [true, "failed", false], "The request ends and busy clears: %s" % [heard])
+	_check(
+		notices.size() == 1 and notices[0].begins_with("Stopped: switched to Claude"),
+		"The transcript says why: %s" % [notices]
+	)
+	# Closing with nothing running says nothing more.
+	heard.clear()
+	bridge.call("close")
+	_check(heard.is_empty(), "An idle close is quiet: %s" % [heard])
 	bridge.queue_free()
 	await process_frame

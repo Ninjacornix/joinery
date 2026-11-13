@@ -98,20 +98,28 @@ var _engine := ""
 var _project := ""
 var _error_detail := ""
 var _selection: Dictionary = {"mode": "auto", "model": "", "effort": ""}
+## True from a request's send until its done (or the connection ends).
+var _busy := false
 ## The model's display name from the latest execution event, for usage events.
 var _model_name := ""
 
 
 func start(agent: String, profile: String, engine: String, project: String) -> void:
-	close()
+	var stopped := close()
 	_error_detail = ""
 	_model_name = ""
 	# A new session: its token use starts over.
 	usage_received.emit({})
+	var switched := agent != _agent
 	_agent = agent
 	_profile = profile
 	_engine = engine
 	_project = project
+	if stopped:
+		_notice(
+			"Stopped: switched to %s." % _display_name() if switched else "Stopped: reconnected.",
+			"info"
+		)
 	if agent.is_empty():
 		status_changed.emit("error", "Journeyman isn't connected.")
 		return
@@ -173,6 +181,7 @@ func submit(text: String, targets: Array) -> void:
 		var pending := _pending.duplicate(true)
 		reconnect()
 		_pending = pending
+	_busy = _job != null
 	if _connected:
 		_send_pending()
 	elif _job == null:
@@ -446,6 +455,7 @@ func cancel_turn() -> void:
 	if _job != null and _connected:
 		_job.send_line(JSON.stringify({"kind": "cancel"}))
 	else:
+		_busy = false
 		busy_changed.emit(false)
 
 
@@ -461,6 +471,7 @@ func _process(_delta: float) -> void:
 	if not result.is_empty():
 		_job = null
 		_connected = false
+		_busy = false
 		if _error_detail.is_empty():
 			_error_detail = "Lost connection to %s." % _display_name()
 		if not _pending.is_empty():
@@ -560,6 +571,7 @@ func _handle(event: Dictionary) -> void:
 			_send_view(str(event.get("request_id", "")))
 		"done":
 			status_changed.emit("connected", _agent.capitalize() + " connected")
+			_busy = false
 			completed.emit(bool(event.get("ok", false)))
 			busy_changed.emit(false)
 
@@ -665,12 +677,20 @@ func reconnect() -> void:
 	start(_agent, _profile, _engine, _project)
 
 
-func close() -> void:
+## End the connection. A request still running ends with it: the sidebar hears it failed
+## and is no longer busy. True when one was running.
+func close() -> bool:
+	var stopped := _busy and _job != null
 	_connected = false
 	_pending.clear()
+	_busy = false
 	if _job != null:
 		_job.close_pipes()
 		_job = null
+	if stopped:
+		completed.emit(false)
+		busy_changed.emit(false)
+	return stopped
 
 
 func _exit_tree() -> void:
