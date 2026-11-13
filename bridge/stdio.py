@@ -56,6 +56,7 @@ from joinery import (
     session_summary,
 )
 from joinery.agents import display_name
+from joinery.agents import get as get_agent
 from joinery.art_approval import approve, review
 from joinery.authoring import run_offline
 from joinery.claims import parallel_limit
@@ -66,6 +67,7 @@ from joinery.gateway_rpc import GatewayRPC
 from joinery.routing import routing_settings
 from joinery.timing import TurnTiming
 from joinery.turn import TurnController
+from joinery.wiring import refresh_gate
 
 #: The open chat's recorder while a host serves; it sees every event the sidebar does.
 _recorder: ChatRecorder | None = None
@@ -522,6 +524,15 @@ async def _serve(
         if not project.is_dir() or not (project / "project.godot").is_file():
             raise ValueError("Open a Godot project before connecting chat.")
         connect_errors.check_policy(agent_id, project)
+        if refresh_gate(project, get_agent(agent_id)):
+            emit(
+                {
+                    "kind": "notice",
+                    "level": "info",
+                    "text": "Joinery moved, so the project's policy hook now points "
+                    "at this install.",
+                }
+            )
         await rpc_server.start()
         bridge.bind_gateway(rpc_server.path)
         connection_timing = TurnTiming()

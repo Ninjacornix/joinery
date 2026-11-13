@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shlex
 from pathlib import Path
 
@@ -158,6 +159,37 @@ def _content(agent: Agent, engine: str) -> str:
     if agent.id == "opencode":
         return _opencode_plugin(engine)
     raise KeyError(f"no wiring for agent {agent.id!r}")
+
+
+_ENGINE_MARK = "JOINERYENGINEDIRMARK"
+
+
+def written_engine(agent: Agent, text: str) -> str | None:
+    """The engine dir baked into ``text`` when it is exactly the hook config Joinery
+    writes for ``agent`` (any engine dir, written the same way in every place), else
+    None: a file someone edited is never Joinery's to rewrite."""
+    template = _content(agent, _ENGINE_MARK)
+    pattern = "(.+?)".join(re.escape(part) for part in template.split(_ENGINE_MARK))
+    found = re.fullmatch(pattern, text, re.DOTALL)
+    if found is None or len(set(found.groups())) > 1:
+        return None
+    return found.group(1) if found.groups() else ""
+
+
+def refresh_gate(project: Path, agent: Agent) -> bool:
+    """Point ``agent``'s hook config in ``project`` at this engine when it is Joinery's
+    own file for another engine dir (the engine moved or was reinstalled). True when
+    it was rewritten; an edited or missing file is left for Repair."""
+    path = project / agent.config_path
+    try:
+        text = path.read_text()
+    except OSError:
+        return False
+    current = _content(agent, str(ROOT))
+    if text == current or written_engine(agent, text) is None:
+        return False
+    path.write_text(current)
+    return True
 
 
 def _engine_ref(agent: Agent, portable: bool) -> str:
