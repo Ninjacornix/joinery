@@ -59,6 +59,21 @@ def test_missing_worker_points_at_setup_not_a_docker_build(
     assert "docker build" not in text and "joinery-sandbox" not in text
 
 
+def test_the_report_counts_problems_for_the_sidebar(
+    tmp_path: Path, host: FakeHost
+) -> None:
+    host.images.pop("joinery-creative-worker")
+    found = doctor.readiness_report(project(tmp_path, '"godot", "krita"'), host=host)
+    assert found["problems"] == 1
+    krita = next(t for t in found["tools"] if t["id"] == "krita")
+    assert krita["action"] is not None
+    host.images["joinery-creative-worker"] = Image("sha256:creative")
+    found = doctor.readiness_report(
+        project(tmp_path, '"godot", "krita"'), refresh=True, host=host
+    )
+    assert found["problems"] == 0
+
+
 def test_docker_down_says_start_docker(tmp_path: Path, host: FakeHost) -> None:
     host.docker_reason = "Docker is not running."
     text, code = doctor.report(project(tmp_path, '"godot"'), host=host)

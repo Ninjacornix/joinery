@@ -6,6 +6,7 @@ extends SceneTree
 
 const NOTICE := preload("res://addons/joinery/setup_notice.gd")
 const HEADER := preload("res://addons/joinery/sidebar_header.gd")
+const SLASH := preload("res://addons/joinery/slash_commands.gd")
 ## Answers like the CLI; every call is appended to CALLS (one JSON line of arguments).
 ## It runs from a file, not `python -c` (see update_dialog_test.gd).
 const FAKE := """
@@ -72,6 +73,7 @@ func _run() -> void:
 	OS.set_environment("CALLS", _calls)
 	await _check_addon()
 	await _check_banner_wins()
+	_check_doctor()
 	print("setup notice: ok" if not _failed else "setup notice: FAILED")
 	quit(1 if _failed else 0)
 
@@ -117,3 +119,24 @@ func _check_banner_wins() -> void:
 	await _until(func() -> bool: return header.notice.visible, 2.0)
 	_check(header.notice.text() == NOTICE.ADDON_STALE, "Connected, the notice is back")
 	header.queue_free()
+
+
+## /doctor exits 1 when an app needs work: that is its answer, shown app by app.
+func _check_doctor() -> void:
+	var report := {
+		"problems": 1,
+		"tools":
+		[
+			{"name": "Godot", "status": "ready", "summary": "Godot 4.7 ready"},
+			{
+				"name": "Krita",
+				"status": "unavailable",
+				"summary": "Krita needs a refresh",
+				"action": {"id": "rebuild", "label": "Refresh tools"},
+			},
+		],
+	}
+	var text := SLASH.reply("/doctor", 1, JSON.stringify(report))
+	_check(text.contains("Godot 4.7 ready."), "Each app has its line: " + text)
+	_check(text.contains("Krita needs a refresh."), "The app that needs work too: " + text)
+	_check(not text.contains("couldn't finish"), "A found problem is not a crash: " + text)

@@ -39,6 +39,27 @@ def _fill(
     return {**data, "tools": tools, "checking": any(t.get("checking") for t in tools)}
 
 
+def readiness_report(
+    config: Path = CONFIG_PATH,
+    *,
+    workers: bool = True,
+    refresh: bool = False,
+    host: readiness.Host | None = None,
+) -> dict[str, Any]:
+    """The readiness report doctor renders, with the checks the cache lacked run now.
+
+    `problems` counts the tools that can't work until someone acts; the
+    sidebar's /doctor shows each tool's line from it, problems included.
+    """
+    project = config.parent
+    data = readiness.status(project, refresh=refresh, host=host)
+    if workers and not refresh and data.get("checking"):
+        data = _fill(project, data, host)
+    tools = [t for t in data["tools"] if not t.get("custom")]
+    data["problems"] = sum(1 for t in tools if t.get("state") in PROBLEMS)
+    return data
+
+
 def report(
     config: Path = CONFIG_PATH,
     *,
@@ -53,9 +74,7 @@ def report(
     With `refresh`, every check runs again.
     """
     project = config.parent
-    data = readiness.status(project, refresh=refresh, host=host)
-    if workers and not refresh and data.get("checking"):
-        data = _fill(project, data, host)
+    data = readiness_report(config, workers=workers, refresh=refresh, host=host)
     lines = ["Joinery doctor: can this project's tools do their work?"]
     tools = [t for t in data["tools"] if not t.get("custom")]
     if not data["tools"]:

@@ -1230,6 +1230,11 @@ def _parser() -> argparse.ArgumentParser:
         "--cached", action="store_true", help="answer from the cache only"
     )
     doctor.add_argument("--refresh", action="store_true", help="run every check again")
+    doctor.add_argument(
+        "--json",
+        action="store_true",
+        help="the readiness report as JSON (exit code 1 still means a tool needs work)",
+    )
     status = commands.add_parser(
         "status", help="what each tool can do in this project, as JSON or text"
     )
@@ -1654,6 +1659,16 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         return _agents()
     if args.command == "doctor":
+        if args.json:
+            from joinery.doctor import readiness_report
+
+            found = readiness_report(
+                args.project / "joinery.toml",
+                workers=not args.cached,
+                refresh=args.refresh,
+            )
+            print(json.dumps(found))
+            return 1 if found["problems"] else 0
         text, code = doctor_report(
             args.project / "joinery.toml",
             workers=not args.cached,

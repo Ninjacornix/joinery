@@ -357,7 +357,9 @@ func _process(_delta: float) -> void:
 func _on_check(result: Dictionary, command: String, words: PackedStringArray) -> void:
 	var output := str(result.get("output", ""))
 	var code := int(result.get("code", 1))
-	if code != 0 or not command in ["/feature", "/tools"]:
+	# Doctor's exit code 1 is an answer (a tool needs work), not a check that broke.
+	var answered := command == "/doctor" and code == 1 and parse_json(output).has("tools")
+	if (code != 0 and not answered) or not command in ["/feature", "/tools", "/doctor"]:
 		# Plans and readiness are JSON for the cards; Output gets them only when they fail.
 		print("[Joinery] ", command, "\n", output)
 	if command == "/tools":
@@ -382,7 +384,8 @@ func _on_check(result: Dictionary, command: String, words: PackedStringArray) ->
 			feature_planned.emit(plan)
 			finished.emit(command, "", "info")
 			return
-	finished.emit(command, reply(command, code, output, words), "success" if code == 0 else "error")
+	var kind := "success" if code == 0 else ("info" if answered else "error")
+	finished.emit(command, reply(command, code, output, words), kind)
 
 
 func _on_revert_done(result: Dictionary) -> void:
@@ -482,7 +485,7 @@ static func reply(
 	command: String, code: int, output: String, words := PackedStringArray()
 ) -> String:
 	var name := command.trim_prefix("/")
-	if name == "tools":
+	if name == "tools" or name == "doctor":
 		var report := parse_json(output)
 		if report.has("tools"):
 			return readiness_reply(report)
@@ -613,7 +616,9 @@ static func args_for(command: String, words := PackedStringArray()) -> PackedStr
 			return readiness_args()
 		"agents":
 			args.append_array(["agents", "--json"])
-		"doctor", "rebuild":
+		"doctor":
+			args.append_array([command, "--project", project, "--json"])
+		"rebuild":
 			args.append_array([command, "--project", project])
 		"check":
 			args.append_array(["check", "assets", "--project", project])
