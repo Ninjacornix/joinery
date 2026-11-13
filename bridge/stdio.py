@@ -196,9 +196,35 @@ class InputTransport(Protocol):
     def close(self) -> None: ...
 
 
+def children_read_nothing() -> bool:
+    """Windows: make NUL the standard input children inherit; True when it is.
+
+    The reader thread waits in a synchronous ReadFile on the editor's pipe, and
+    Windows serialises synchronous I/O on one pipe object. A child started with an
+    inherited stdin (git, docker, a tool) would share that pipe and hang as it
+    starts, until the editor next writes. The thread keeps reading the pipe itself;
+    only what a new process inherits changes.
+    """
+    import ctypes
+    import importlib
+
+    try:
+        native: Any = ctypes  # WinDLL exists only on Windows.
+        msvcrt: Any = importlib.import_module("msvcrt")
+        kernel = native.WinDLL("kernel32", use_last_error=True)
+        kernel.SetStdHandle.argtypes = [ctypes.c_uint32, ctypes.c_void_p]
+        kernel.SetStdHandle.restype = ctypes.c_int
+        null = os.open(os.devnull, os.O_RDONLY)  # Open for the host's lifetime.
+        std_input = 0xFFFFFFF6  # STD_INPUT_HANDLE, (DWORD)-10
+        return bool(kernel.SetStdHandle(std_input, msvcrt.get_osfhandle(null)))
+    except (AttributeError, ImportError, OSError):
+        return False
+
+
 async def input_reader(stream: BinaryIO) -> tuple[asyncio.StreamReader, InputTransport]:
     reader = asyncio.StreamReader(limit=1_000_000)
     if os.name == "nt":
+        children_read_nothing()
         return reader, ThreadInput(stream, reader)
     transport, _ = await asyncio.get_running_loop().connect_read_pipe(
         lambda: asyncio.StreamReaderProtocol(reader), stream
