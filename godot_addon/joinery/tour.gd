@@ -121,11 +121,17 @@ static func install(target: EditorPlugin) -> Control:
 	tour.set("plugin", target)
 	# Deferred: the editor is still adding its own children while plugins load.
 	EditorInterface.get_base_control().add_child.call_deferred(tour)
-	target.add_tool_menu_item(MENU_ITEM, tour.open)
+	# The Joinery menu where the plugin has one (it falls back to Project > Tools itself).
+	var command := target.has_method("add_command")
+	if command:
+		target.call("add_command", "Tour", tour.open)
+	else:
+		target.add_tool_menu_item(MENU_ITEM, tour.open)
 	tour.call_deferred("_hook_up")
 	target.tree_exiting.connect(
 		func() -> void:
-			target.remove_tool_menu_item(MENU_ITEM)
+			if not command:
+				target.remove_tool_menu_item(MENU_ITEM)
 			if is_instance_valid(tour):
 				tour.call("_unhook")
 				tour.queue_free(),

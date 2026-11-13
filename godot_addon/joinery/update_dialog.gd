@@ -58,12 +58,18 @@ static func install(plugin: EditorPlugin) -> AcceptDialog:
 	var dialog: AcceptDialog = load(SELF_PATH).new()
 	dialog.set("project_path", ProjectSettings.globalize_path("res://").rstrip("/"))
 	EditorInterface.get_base_control().add_child.call_deferred(dialog)
-	plugin.add_tool_menu_item(MENU_ITEM, dialog.open)
+	# The Joinery menu where the plugin has one (it falls back to Project > Tools itself).
+	var command := plugin.has_method("add_command")
+	if command:
+		plugin.call("add_command", "Check for Updates…", dialog.open)
+	else:
+		plugin.add_tool_menu_item(MENU_ITEM, dialog.open)
 	dialog.call_deferred("_hook_help")
 	dialog.call_deferred("check_daily")
 	plugin.tree_exiting.connect(
 		func() -> void:
-			plugin.remove_tool_menu_item(MENU_ITEM)
+			if not command:
+				plugin.remove_tool_menu_item(MENU_ITEM)
 			if is_instance_valid(dialog):
 				dialog.call("_unhook_help")
 				dialog.queue_free(),
@@ -219,7 +225,9 @@ func show_state(which: String) -> void:
 				later_button.visible = false
 		"offline":
 			title_label.text = "Couldn't check for updates"
-			status_label.text = str(result.get("message", "You're offline. Joinery will check again later."))
+			status_label.text = str(
+				result.get("message", "You're offline. Joinery will check again later.")
+			)
 			ok.text = "Try again"
 			later_button.text = "Close"
 		"working":
@@ -240,7 +248,9 @@ func show_state(which: String) -> void:
 			later_button.text = "Later"
 		"failed":
 			title_label.text = "The update didn't install"
-			status_label.text = str(result.get("error", result.get("message", "Something went wrong.")))
+			status_label.text = str(
+				result.get("error", result.get("message", "Something went wrong."))
+			)
 			ok.text = "Try again"
 			later_button.text = "Close"
 	if status_row.visible:

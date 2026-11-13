@@ -26,6 +26,9 @@ var _switch: Control
 ## The ⤢ Focus toggle that stands in for Godot's distraction-free button, and that button.
 var _focus_button: Button
 var _distraction_free: Button
+## The fork's top-level Joinery menu, and the command each of its items runs by id.
+var _menu: PopupMenu
+var _commands: Array[Callable] = []
 ## Toolbar controls hidden to keep the 3D toolbar compact.
 var _compacted: Array[Control] = []
 var _previous: Array[bool] = []
@@ -158,6 +161,26 @@ func add_focus_toggle(base: Control, toggle: Callable) -> void:
 	_focus_button.pressed.connect(toggle)
 	_distraction_free.add_sibling(_focus_button)
 	_distraction_free.hide()
+
+
+## Add [param label] to the fork's top-level Joinery menu, running [param action]. Returns
+## false when this editor has no such menu (the classic view, stock Godot): the caller puts the
+## command under Project > Tools instead.
+func add_command(base: Control, label: String, action: Callable) -> bool:
+	if not is_instance_valid(_menu):
+		var menus := base.find_children("Joinery", "PopupMenu", true, false)
+		if menus.is_empty():
+			return false
+		_menu = menus[0] as PopupMenu
+		_menu.id_pressed.connect(_run_command)
+	_menu.add_item(label, _commands.size())
+	_commands.append(action)
+	return true
+
+
+func _run_command(id: int) -> void:
+	if id >= 0 and id < _commands.size() and _commands[id].is_valid():
+		_commands[id].call()
 
 
 ## Show Focus mode as on or off on the ⤢ button.
@@ -303,6 +326,11 @@ func restore() -> void:
 	if is_instance_valid(_distraction_free):
 		_distraction_free.show()
 	_distraction_free = null
+	if is_instance_valid(_menu):
+		_menu.clear()
+		_menu.id_pressed.disconnect(_run_command)
+	_menu = null
+	_commands.clear()
 	var compacted := _compacted.duplicate()
 	_compacted.clear()
 	for control: Control in compacted:

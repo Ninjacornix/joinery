@@ -73,6 +73,8 @@ var _deciding := false
 ## The 2D or 3D view the user had last, for the Godot rail button.
 var _last_view := "3D"
 var _connect_dialog: AcceptDialog
+## Project > Tools items added where the editor has no Joinery menu, removed on exit.
+var _tool_items: Array[String] = []
 ## Joinery's own pages opened from the rail (Timeline, Share, Mixer), by rail id, each
 ## {"title", "control", "icon"}. Shown in the main screen in place of the asset workspace.
 ## Empty in Godot's classic layout, where they are bottom panel tabs.
@@ -85,6 +87,7 @@ var _joinery_layout := false
 
 func _enter_tree() -> void:
 	_edits = EDITS_SCRIPT.new()
+	_shell = SHELL_SCRIPT.new()
 	scene_changed.connect(_on_edit_scene_changed)
 	_workspace = WORKSPACE_SCRIPT.new()
 	get_editor_interface().get_editor_main_screen().add_child(_workspace)
@@ -137,15 +140,14 @@ func _enter_tree() -> void:
 	_setup.history_changed.connect(_dock.refresh_revertible)
 
 	_focus = FOCUS_SCRIPT.new()
-	_shell = SHELL_SCRIPT.new()
 
 	# Menu entries, so the features are reachable without the dock (also /setup and /focus in
 	# the sidebar): a slash command you have not been told about is hidden.
-	add_tool_menu_item("Joinery: New project…", _on_new_project)
-	add_tool_menu_item("Joinery: Project setup…", _on_project_setup)
-	add_tool_menu_item("Joinery: Hide or show panels", _on_toggle_focus)
+	add_command("New Project…", _on_new_project)
+	add_command("Project Setup…", _on_project_setup)
+	add_command("Focus", _on_toggle_focus)
 	if _joinery_layout:
-		add_tool_menu_item("Joinery: Toggle viewport toolbar", _on_toggle_toolbar)
+		add_command("Show or Hide Viewport Toolbar", _on_toggle_toolbar)
 
 	_dock.setup_requested.connect(_on_project_setup)
 	_dock.focus_toggle_requested.connect(_on_toggle_focus)
@@ -261,6 +263,14 @@ func _link(source: Signal, method: String) -> void:
 		source.connect(Callable(_dock, method))
 
 
+## Put [param label] in the top-level Joinery menu, or under Project > Tools as "Joinery: …"
+## on an editor without it (the classic view, stock Godot). Tabs call this from install too.
+func add_command(label: String, action: Callable) -> void:
+	if not _shell.add_command(get_editor_interface().get_base_control(), label, action):
+		add_tool_menu_item("Joinery: " + label, action)
+		_tool_items.append("Joinery: " + label)
+
+
 ## A transient line in the sidebar footer (Focus mode, viewport tools).
 func _status(text: String) -> void:
 	_call_dock("show_status", [text])
@@ -295,11 +305,8 @@ func _exit_tree() -> void:
 		_edits.reject()
 	if _workspace != null:
 		_workspace.queue_free()
-	remove_tool_menu_item("Joinery: New project…")
-	remove_tool_menu_item("Joinery: Project setup…")
-	remove_tool_menu_item("Joinery: Hide or show panels")
-	if _joinery_layout:
-		remove_tool_menu_item("Joinery: Toggle viewport toolbar")
+	for item: String in _tool_items:
+		remove_tool_menu_item(item)
 	if _shell != null:
 		_shell.restore()
 	if _rail != null:

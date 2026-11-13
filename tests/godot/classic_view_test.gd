@@ -207,6 +207,20 @@ func _check_chrome(base: Control, classic: bool) -> void:
 		base, "Switch to Joinery view" if classic else "Switch to classic Godot view"
 	)
 	_check(menu != null, "The Editor menu offers the switch")
+	# Joinery's commands: a top-level Joinery menu in Joinery's layout, Project > Tools in Godot's.
+	var joinery := base.find_children("Joinery", "PopupMenu", true, false)
+	_check(joinery.is_empty() == classic, "A top-level Joinery menu only in Joinery's layout")
+	if not joinery.is_empty():
+		var popup := joinery[0] as PopupMenu
+		var items: Array[String] = []
+		for index: int in popup.item_count:
+			items.append(popup.get_item_text(index))
+		_check(items.has("Project Setup…") and items.has("Tour"), "Joinery menu: %s" % [items])
+	# The title bar names the project alone; the scene tab names the scene.
+	for label: Node in base.find_children("*", "Label", true, false):
+		var text := (label as Label).text
+		if not classic and text.ends_with("Harbour Keeper") and label.is_visible_in_tree():
+			_check(text == "Harbour Keeper", "Title bar: " + text)
 	var bars := base.find_children("*", "EditorRunBar", true, false)
 	_check(not bars.is_empty(), "The run bar exists")
 	if not bars.is_empty():

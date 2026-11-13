@@ -1,0 +1,29 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: ninjacornix <milanvrankic@gmail.com>
+Date: Fri, 13 Nov 2026 10:16:30 +0100
+Subject: [PATCH] feat(editor): a top-level Joinery menu
+
+Joinery-only, not for upstream. Joinery's commands sat under Project > Tools as "Joinery: ..." items. In Joinery's layout the editor now has a top-level Joinery menu before Help, which the Joinery addon fills (it finds the menu by name). The classic view keeps Project > Tools.
+---
+ editor/editor_node.cpp | 8 ++++++++
+ 1 file changed, 8 insertions(+)
+
+diff --git a/editor/editor_node.cpp b/editor/editor_node.cpp
+index c17da57..5439aba 100644
+--- a/editor/editor_node.cpp
++++ b/editor/editor_node.cpp
+@@ -9212,6 +9212,14 @@ EditorNode::EditorNode() {
+ 	settings_menu->connect(SceneStringName(id_pressed), callable_mp(this, &EditorNode::_menu_option));
+ 	_add_to_main_menu(TTRC("Editor"), settings_menu);
+ 
++	// Joinery: a top-level menu, before Help, that the Joinery addon fills
++	// with its commands (it finds the menu by this name). Classic Godot
++	// keeps them under Project > Tools.
++	if (EditorSettings::is_joinery_layout()) {
++		PopupMenu *joinery_menu = memnew(PopupMenu);
++		_add_to_main_menu("Joinery", joinery_menu);
++	}
++
+ 	help_menu = memnew(PopupMenu);
+ 	help_menu->connect(SceneStringName(id_pressed), callable_mp(this, &EditorNode::_menu_option));
+ 	_add_to_main_menu(TTRC("Help"), help_menu);
