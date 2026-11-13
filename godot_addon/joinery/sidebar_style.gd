@@ -80,6 +80,21 @@ static func hug_right(button: Button) -> void:
 	)
 
 
+## A transcript card's title, the one card header: body size, semibold, so it leads its rows by
+## weight alone. Ellipsized on one line, or wrapped when [param wrap] is set.
+static func card_title(text: String, wrap := false) -> Label:
+	var title := Label.new()
+	title.text = text
+	title.theme_type_variation = "JoineryCardTitle"
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	title.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	if wrap:
+		title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	else:
+		title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	return title
+
+
 ## A row's own action ([param action], a row's Fix or Ignore) shows only while [param row] is
 ## pointed at or the action has keyboard focus, so a list leads with what it lists. It keeps
 ## its place (only its ink fades), so nothing moves when it appears.

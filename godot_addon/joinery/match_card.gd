@@ -136,7 +136,7 @@ func _init(card_kind := "match") -> void:
 	var head := HBoxContainer.new()
 	head.theme_type_variation = "JoineryRowTight"
 	column.add_child(head)
-	title_label = UI.label(str(words[0]))
+	title_label = STYLE.card_title(str(words[0]))
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	title_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS

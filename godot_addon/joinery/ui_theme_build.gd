@@ -148,6 +148,8 @@ static func _text_types(t: Theme, c: Dictionary, m: Dictionary, context: Node) -
 		"JoineryAccentCaption": [caption, c["accent"], null],
 		"JoineryDangerCaption": [caption, c["danger"], null],
 		"JoineryBodyLarge": [roundi(size * float(UI_THEME.TYPE["body_lg"])), c["text"], semibold],
+		# Every transcript card's title: body size, semibold, so it leads its rows by weight alone.
+		"JoineryCardTitle": [size, c["text"], semibold],
 		"JoineryTitle": [roundi(size * float(UI_THEME.TYPE["title"])), c["text"], bold],
 		"JoineryDisplay": [roundi(size * float(UI_THEME.TYPE["display"])), c["text"], bold],
 		"JoineryError": [size, c["danger"], null],

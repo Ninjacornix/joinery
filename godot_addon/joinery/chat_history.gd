@@ -818,7 +818,7 @@ class FeaturePlan:
 		var head := VBoxContainer.new()
 		head.theme_type_variation = "JoineryTight"
 		_column.add_child(head)
-		title_label = UI.label(title, "JoineryBodyLarge", true)
+		title_label = STYLE.card_title(title, true)
 		head.add_child(title_label)
 		_lines.append(_caption(head, "Nothing changes until you apply it."))
 		var files := _files(plan.get("changes", []))

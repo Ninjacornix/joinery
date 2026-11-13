@@ -707,8 +707,7 @@ static func link(text: String) -> Button:
 	return _button(text, "JoineryLinkButton")
 
 
-## A secondary link-style action in the muted text colour (Check again, Show all, a row's
-## Fix): the card's one accent action stays the only accented one.
+## A link-style action in the muted text colour (Check again, Show all, a row's Fix).
 static func quiet_link(text: String) -> Button:
 	return _button(text, "JoineryQuietLink")
 

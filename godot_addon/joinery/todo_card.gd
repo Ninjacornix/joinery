@@ -78,7 +78,7 @@ func _init(identifier := "") -> void:
 	var head := HBoxContainer.new()
 	head.theme_type_variation = "JoineryRowTight"
 	top.add_child(head)
-	title_label = UI.label("To do")
+	title_label = STYLE.card_title("To do")
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	head.add_child(title_label)

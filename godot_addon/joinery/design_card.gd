@@ -60,7 +60,7 @@ func _init() -> void:
 	var head := HBoxContainer.new()
 	head.theme_type_variation = "JoineryRowTight"
 	column.add_child(head)
-	title_label = UI.label("Checking the design")
+	title_label = STYLE.card_title("Checking the design")
 	title_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	title_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	title_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
