@@ -52,6 +52,8 @@ func _ready() -> void:
 	row.add_child(title)
 	_new = UI.primary("New chat")
 	_new.accessibility_name = "Start a new chat"
+	# A small button, centred on the title row, so it keeps clear of the sidebar's top edge.
+	UI.bind_height(_new, "sm")
 	_new.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	_new.pressed.connect(func() -> void: new_chat_requested.emit())
 	row.add_child(_new)
@@ -183,6 +185,8 @@ class ChatRow:
 		_rename.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		_rename.pressed.connect(begin_rename)
 		add_child(_rename)
+		# Rename shows on the row pointed at (or focused), so the titles lead.
+		STYLE.reveal_on_hover(self, _rename)
 		_fit.call_deferred()
 
 	func _fit() -> void:
