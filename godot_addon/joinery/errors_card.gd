@@ -62,7 +62,7 @@ func _init() -> void:
 	var head := HBoxContainer.new()
 	head.theme_type_variation = "JoineryRowTight"
 	column.add_child(head)
-	headline = UI.label("")
+	headline = STYLE.card_title("")
 	headline.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	headline.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	headline.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
@@ -163,26 +163,35 @@ func _row(group: Dictionary) -> Control:
 	text.theme_type_variation = "JoineryTight"
 	text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	row.add_child(text)
-	var message := UI.label(str(group.get("message", "")), "", false)
-	# Expanding: the row's width decides where the text ends, never the text.
-	message.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# The error wraps (two lines at most), so its words are never cut short by the actions.
+	var message := UI.label(str(group.get("message", "")), "", true)
+	message.max_lines_visible = 2
+	message.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	message.tooltip_text = str(group.get("message", ""))
+	message.mouse_filter = Control.MOUSE_FILTER_PASS
 	if status == "ignored":
 		message.theme_type_variation = "JoineryCaption"
 	text.add_child(message)
+	# Where, how often and what is happening, then what can be done about it, on one line
+	# under the error: the action ends on the card's trailing edge, the words give way first.
+	var meta := HBoxContainer.new()
+	meta.theme_type_variation = "JoineryRow"
+	text.add_child(meta)
 	var caption := UI.label(_caption(group), "JoineryCaption", false)
 	caption.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	caption.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	caption.mouse_filter = Control.MOUSE_FILTER_PASS
 	var note := str(group.get("note", ""))
 	caption.tooltip_text = note if not note.is_empty() else caption.text
-	text.add_child(caption)
+	meta.add_child(caption)
 	var action := _action(group)
 	if action != null:
 		action.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		row.add_child(action)
+		meta.add_child(action)
 	if status in ["open", "stopped", "from_change"]:
 		var ignore := UI.icon_button("close", "Ignore this error")
 		ignore.accessibility_name = "Ignore: " + str(group.get("label", ""))
-		ignore.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		ignore.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 		STYLE.on_theme_overrides(
 			ignore,
 			func() -> void:
@@ -191,6 +200,7 @@ func _row(group: Dictionary) -> Control:
 		)
 		ignore.pressed.connect(_on_ignore.bind(id, row))
 		row.add_child(ignore)
+		STYLE.reveal_on_hover(row, ignore)
 	return row
 
 
