@@ -18,7 +18,7 @@ from joinery.catalog import ROOT, load_catalog, load_project_tools, selection_id
 from joinery.platform_support import bash_script_argv, editor_running
 from joinery.server_install import install
 from joinery.transactions import FileTransaction, atomic_json
-from joinery.wiring import _args, _command_str, _opencode_plugin
+from joinery.wiring import _args, _command_str, _opencode_plugin, runs_gate_for
 
 #: Each worker built for a tool that has one, after the shared images.
 TOOL_WORKERS = {"blender": "blender", "inkscape": "inkscape", "audacity": "audacity"}
@@ -369,7 +369,7 @@ def refresh_managed_gates(project: Path) -> None:
                 command = str(hook.get("command", ""))
                 arguments = hook.get("args", [])
                 legacy = command == "uv" and arguments == _args(str(ROOT), agent)
-                owned = ("joinery hook --agent " + agent) in command
+                owned = runs_gate_for(command, agent)
                 if legacy or owned:
                     expected = _command_str(str(ROOT), agent)
                     if command != expected or "args" in hook or "onFailure" in hook:

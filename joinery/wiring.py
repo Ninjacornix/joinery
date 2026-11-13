@@ -21,6 +21,7 @@ any clone. Scaffolded game projects point at the concrete engine install.
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -55,8 +56,12 @@ def _args(engine: str, agent_id: str = "") -> list[str]:
     return [*_HOOK_HEAD, *project, *_HOOK_FOOT, *agent]
 
 
+def _on_windows() -> bool:
+    return os.name == "nt"
+
+
 def _command_str(engine: str, agent_id: str = "") -> str:
-    if os.name == "nt":
+    if _on_windows():
         return hook_command(["uv", *_args(engine, agent_id)])
     return " ".join(
         '"${CLAUDE_PROJECT_DIR}"'
@@ -161,8 +166,34 @@ def _content(agent: Agent, engine: str) -> str:
     raise KeyError(f"no wiring for agent {agent.id!r}")
 
 
-#: A hook command that runs Joinery's gate, whichever engine dir it names.
-_JOINERY_HOOK = re.compile(r"(?:^|[\s\"'/])joinery[\"']? [\"']?hook(?:[\"'\s]|$)")
+#: A hook command that runs Joinery's gate, whichever engine dir it names. The
+#: comma form is the PowerShell argument list a Windows command decodes to.
+_JOINERY_HOOK = re.compile(r"(?:^|[\s\"'/,])joinery[\"']?,? [\"']?hook(?:[\"'\s,]|$)")
+#: A PowerShell `-EncodedCommand` payload: base64 of UTF-16LE script text.
+_ENCODED = re.compile(r"(-EncodedCommand )([A-Za-z0-9+/]+={0,2})")
+
+
+def decoded(text: str) -> str:
+    """``text`` with every PowerShell ``-EncodedCommand`` payload written out as the
+    script it runs, so a Windows hook command reads like the POSIX one does. Text
+    without one, or with a payload that does not decode, is returned unchanged."""
+
+    def plain(found: re.Match[str]) -> str:
+        try:
+            script = base64.b64decode(found.group(2), validate=True)
+            return found.group(1) + script.decode("utf-16-le")
+        except ValueError:  # binascii.Error and UnicodeDecodeError both are.
+            return found.group(0)
+
+    return _ENCODED.sub(plain, text)
+
+
+def runs_gate_for(command: str, agent_id: str) -> bool:
+    """True when ``command`` runs Joinery's gate as ``agent_id``, in either the POSIX
+    form or the encoded PowerShell form written on Windows."""
+    if ("joinery hook --agent " + agent_id) in command:
+        return True
+    return f"'joinery', 'hook', '--agent', '{agent_id}'" in decoded(command)
 
 
 def _is_joinery_hook(hook: object) -> bool:
@@ -170,7 +201,7 @@ def _is_joinery_hook(hook: object) -> bool:
         return False
     command = hook.get("command")
     return hook.get("name") == "joinery-gate" or (
-        isinstance(command, str) and _JOINERY_HOOK.search(command) is not None
+        isinstance(command, str) and _JOINERY_HOOK.search(decoded(command)) is not None
     )
 
 
@@ -232,9 +263,10 @@ def written_engine(agent: Agent, text: str) -> str | None:
     """The engine dir baked into ``text`` when it is exactly the hook config Joinery
     writes for ``agent`` (any engine dir, written the same way in every place), else
     None: a file someone edited is never Joinery's to rewrite."""
-    template = _content(agent, _ENGINE_MARK)
+    # Compared decoded: on Windows the engine dir sits inside an encoded command.
+    template = decoded(_content(agent, _ENGINE_MARK))
     pattern = "(.+?)".join(re.escape(part) for part in template.split(_ENGINE_MARK))
-    found = re.fullmatch(pattern, text, re.DOTALL)
+    found = re.fullmatch(pattern, decoded(text), re.DOTALL)
     if found is None or len(set(found.groups())) > 1:
         return None
     return found.group(1) if found.groups() else ""

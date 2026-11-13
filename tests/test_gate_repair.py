@@ -12,7 +12,7 @@ import pytest
 from joinery.agents import get
 from joinery.catalog import ROOT
 from joinery.cli import main as cli_main
-from joinery.wiring import _command_str, _content
+from joinery.wiring import _command_str, _content, decoded
 
 FOREIGN = {"type": "command", "command": "./scripts/lint-before-bash.sh", "timeout": 5}
 
@@ -35,13 +35,29 @@ def joinery_hooks(groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
         hook
         for group in groups
         for hook in group["hooks"]
-        if "joinery" in str(hook.get("command", "")) and "hook" in str(hook["command"])
+        if "joinery" in decoded(str(hook.get("command", "")))
+        and "hook" in decoded(str(hook["command"]))
     ]
+
+
+@pytest.fixture(params=["posix", "windows"])
+def command_form(
+    request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch
+) -> str:
+    """Each case in the POSIX command form and the encoded PowerShell one Windows
+    writes, whichever system the tests run on."""
+    form = str(request.param)
+    monkeypatch.setattr("joinery.wiring._on_windows", lambda: form == "windows")
+    return form
 
 
 @pytest.mark.parametrize("agent_id,event,extra", CASES)
 def test_repair_keeps_the_users_settings_and_hooks(
-    agent_id: str, event: str, extra: dict[str, Any], tmp_path: Path
+    agent_id: str,
+    event: str,
+    extra: dict[str, Any],
+    tmp_path: Path,
+    command_form: str,
 ) -> None:
     agent = get(agent_id)
     path = tmp_path / agent.config_path
@@ -66,7 +82,7 @@ def test_repair_keeps_the_users_settings_and_hooks(
     assert repaired["hooks"]["SessionStart"] == [{"hooks": [FOREIGN]}]
     ours = joinery_hooks(groups)
     assert [hook["command"] for hook in ours] == [_command_str(str(ROOT), agent_id)]
-    assert "/old/engine" not in path.read_text()
+    assert "/old/engine" not in decoded(path.read_text())
     # A second Repair changes nothing.
     before = path.read_text()
     assert repair(tmp_path, agent_id) == 0
