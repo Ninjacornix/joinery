@@ -132,11 +132,14 @@ func show_state(state: String, agent: String, detail := "", with_banner := true)
 		notice.mark_addon_stale()
 		with_banner = false
 	_indicator.set("running", state == "connecting")
-	# Healthy is quiet: nothing but the menu.
-	_dot.visible = state == "error"
+	# Healthy is quiet: nothing but the menu. While the banner says the connection is lost, the
+	# header doesn't say it again.
+	var banner := state == "none" or (state == "error" and with_banner)
+	_dot.visible = state == "error" and not banner
 	_dot.set("state", "attention" if state == "error" else "off")
 	_dot.tooltip_text = detail if state == "error" and not detail.is_empty() else "Not connected"
-	_name.text = str({"connecting": "Connecting…", "error": "Not connected"}.get(state, ""))
+	var words := {"connecting": "Connecting…", "error": "" if banner else "Not connected"}
+	_name.text = str(words.get(state, ""))
 	_name.tooltip_text = _name.text
 	if state == "connected":
 		_show_count()
