@@ -16,7 +16,14 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, BinaryIO, Protocol
 
-from bridge import compaction, mixer_save, remember, scene_variant, tidy
+from bridge import (
+    compaction,
+    connect_errors,
+    mixer_save,
+    remember,
+    scene_variant,
+    tidy,
+)
 from bridge.chat_record import ChatRecorder
 from bridge.check_runner import Checks
 from bridge.crew import Crew
@@ -239,15 +246,7 @@ async def _serve(
     try:
         gateway = ProjectGateway(project)
     except (OSError, ValueError) as exc:
-        emit(
-            {
-                "kind": "connection",
-                "state": "error",
-                "agent": agent_id,
-                "name": agent_name,
-                "message": str(exc),
-            }
-        )
+        emit(connect_errors.event(agent_id, agent_name, exc))
         return 1
     gateway.keep_reviews = keep_reviews
     editor_calls: dict[str, asyncio.Future[dict[str, Any]]] = {}
@@ -393,15 +392,7 @@ async def _serve(
             await rpc_server.close()
         else:
             await gateway.close()
-        emit(
-            {
-                "kind": "connection",
-                "state": "error",
-                "agent": agent_id,
-                "name": agent_name,
-                "message": str(exc),
-            }
-        )
+        emit(connect_errors.event(agent_id, agent_name, exc))
         return 1
     assert rpc_server is not None
 
@@ -507,15 +498,7 @@ async def _serve(
             )
             emit(Done(ok=False).model_dump())
             if isinstance(exc, OSError):
-                emit(
-                    {
-                        "kind": "connection",
-                        "state": "error",
-                        "agent": agent_id,
-                        "name": agent_name,
-                        "message": str(exc),
-                    }
-                )
+                emit(connect_errors.event(agent_id, agent_name, exc))
         finally:
             if specialists is not None:
                 await specialists.close()
@@ -1253,15 +1236,7 @@ async def _serve(
         KeyError,
         TimeoutError,
     ) as exc:
-        emit(
-            {
-                "kind": "connection",
-                "state": "error",
-                "agent": agent_id,
-                "name": agent_name,
-                "message": str(exc),
-            }
-        )
+        emit(connect_errors.event(agent_id, agent_name, exc))
         return 1
     finally:
         if idle is not None:

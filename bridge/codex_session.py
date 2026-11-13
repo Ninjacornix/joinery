@@ -14,6 +14,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
+from bridge.connect_errors import ConnectError
 from bridge.instructions import GAME_GUIDE, REVIEW_GUIDE
 from bridge.models import ModelChoice
 from bridge.protocol import (
@@ -40,8 +41,8 @@ def require_gate(project: Path) -> None:
     try:
         hooks = json.loads((project / ".codex/hooks.json").read_text())
     except (OSError, ValueError):
-        raise ValueError(
-            "Codex policy hook is missing. Run Joinery project setup first."
+        raise ConnectError(
+            "Codex policy hook is missing. Repair it to connect.", "gate"
         ) from None
     expected = _command_str(str(ROOT), "codex")
     groups = hooks.get("hooks", {}).get("PreToolUse", [])
@@ -51,8 +52,8 @@ def require_gate(project: Path) -> None:
         for group in groups
         if isinstance(group, dict)
     ):
-        raise ValueError(
-            "Codex policy hook is not configured for this Joinery install."
+        raise ConnectError(
+            "Codex policy hook is not configured for this Joinery install.", "gate"
         )
 
 
@@ -153,7 +154,7 @@ class CodexSession:
         require_gate(project)
         executable = shutil.which("codex")
         if executable is None:
-            raise ValueError("Codex CLI is not installed.")
+            raise ConnectError("Codex CLI is not installed.", "not_installed")
         args: list[str] = []
         env = os.environ.copy()
         if self.gateway_socket is not None:
@@ -255,7 +256,7 @@ class CodexSession:
             if not profile_id:
                 account = await self.request("account/read", {"refreshToken": False})
                 if account.get("account") is None:
-                    raise ValueError("Codex is not signed in. Run codex login first.")
+                    raise ConnectError("Codex is not signed in.", "signed_out")
             self.project = project
             thread = await self.request("thread/start", self._start_params())
             self.thread_id = str(thread["thread"]["id"])

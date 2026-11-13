@@ -75,6 +75,9 @@ signal errors_event(event: Dictionary)
 ## The provider hit a usage or quota limit mid-request (ADR 0080): {state: offer|switched|
 ## declined, from, to, to_name, message}. An offer waits for [method switch_provider].
 signal provider_switch(event: Dictionary)
+## Why the connection failed, before the "error" status: {reason, agent, name, url, details}
+## (bridge/connect_errors.py); {} once connected.
+signal connection_problem(problem: Dictionary)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 const ATTACHMENTS := preload("chat_attachments.gd")
@@ -515,6 +518,7 @@ func _handle(event: Dictionary) -> void:
 			_name = str(event.get("name", _name))
 			models_received.emit(event.get("models", []))
 			_connected = event.get("state") == "connected"
+			_problem(event if not _connected else {})
 			if not _connected:
 				_error_detail = str(
 					event.get("message", "Lost connection to %s." % _display_name())
@@ -586,6 +590,17 @@ func _handle(event: Dictionary) -> void:
 			_busy = false
 			completed.emit(bool(event.get("ok", false)))
 			busy_changed.emit(false)
+
+
+## Tell the sidebar why the connection failed; the agent's own error output goes to Output.
+func _problem(event: Dictionary) -> void:
+	var problem := {}
+	for key: String in ["reason", "agent", "name", "url", "details"]:
+		if event.has(key):
+			problem[key] = str(event[key])
+	if not str(problem.get("details", "")).is_empty():
+		print("[Joinery] %s:\n%s" % [_display_name(), problem["details"]])
+	connection_problem.emit(problem)
 
 
 func set_selection(selection: Dictionary) -> void:

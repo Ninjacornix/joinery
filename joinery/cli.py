@@ -1372,7 +1372,8 @@ def _parser() -> argparse.ArgumentParser:
     )
     connect = commands.add_parser("connect", help="connect a local agent account")
     connect.add_argument(
-        "action", choices=["status", "login", "use-key", "configure", "verify"]
+        "action",
+        choices=["status", "login", "use-key", "configure", "verify", "repair-gate"],
     )
     connect.add_argument("--agent", choices=[a.id for a in all_agents()])
     connect.add_argument(
@@ -1607,6 +1608,11 @@ def main(argv: list[str] | None = None) -> int:
                 result_data = {"profile": configure_api(payload)}
             elif args.agent is None:
                 raise ValueError("Choose an agent first.")
+            elif args.action == "repair-gate":
+                if args.project is None:
+                    raise ValueError("Name the project to repair.")
+                written = write_agent_wiring(args.project, (get_agent(args.agent),))
+                result_data = {"message": "Repaired " + ", ".join(written)}
             elif args.action == "verify":
                 verified = connection.verify(args.agent, args.project or Path.cwd())
                 print(json.dumps(verified))

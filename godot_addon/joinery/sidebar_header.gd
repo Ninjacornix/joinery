@@ -11,6 +11,11 @@ extends VBoxContainer
 ## that does it ([member notice], setup_notice.gd). Connect wins: while the banner asks to
 ## connect, the notice waits.
 ##
+## A lost connection's banner offers the fix for its reason ([method show_problem]): Get or
+## Update (the agent's install page), Sign in (the Connect screen), Repair (rewrites the
+## project's policy hook, then reconnects) or Reconnect. "Switch agent" sits under it always,
+## and "Copy details" when the agent left error output.
+##
 ## While several agents work at once (parallel tasks, ADR 0036) the row says how many, quietly:
 ## "3 agents working" with the activity dots ([method show_agents]).
 ##
@@ -27,6 +32,11 @@ const STYLE := preload("sidebar_style.gd")
 const INDICATOR := preload("activity_indicator.gd")
 const USAGE_SCRIPT := preload("usage_meter.gd")
 const NOTICE_SCRIPT := preload("setup_notice.gd")
+const COMMAND := preload("command_job.gd")
+## The banner's action for each connection error reason; any other reads "Reconnect".
+const FIXES := {
+	"not_installed": "Get %s", "signed_out": "Sign in", "outdated": "Update %s", "gate": "Repair"
+}
 
 ## The header row; the settings page adds its menu button here.
 var row: HBoxContainer
@@ -44,6 +54,11 @@ var _banner_icon: TextureRect
 var _banner_text: Label
 var _banner_action: Button
 var _banner_kind := ""
+var _banner_links: HBoxContainer
+var _copy_link: Button
+## The last connection error's {reason, agent, name, url, details} (chat_bridge.gd).
+var _problem: Dictionary = {}
+var _repair_job: RefCounted
 ## How many agents work now (shown from two up), and the connection state the row last showed.
 var _agents := 0
 var _state := "connected"
@@ -107,16 +122,26 @@ func _init() -> void:
 	column.add_child(_banner_text)
 	_banner_action = UI.primary("")
 	_banner_action.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	_banner_action.pressed.connect(
-		func() -> void:
-			if _banner_kind == "none":
-				connect_pressed.emit()
-			else:
-				reconnect_pressed.emit()
-	)
+	_banner_action.pressed.connect(_fix)
 	column.add_child(_banner_action)
 	notice = NOTICE_SCRIPT.new()
 	add_child(notice)
+	_banner_links = HBoxContainer.new()
+	_banner_links.theme_type_variation = "JoineryRow"
+	column.add_child(_banner_links)
+	var switch := UI.link("Switch agent")
+	switch.accessibility_name = "Switch to another agent"
+	UI.bind_height(switch, "xs")
+	switch.pressed.connect(func() -> void: connect_pressed.emit())
+	_banner_links.add_child(switch)
+	_copy_link = UI.link("Copy details")
+	_copy_link.accessibility_name = "Copy the agent's error output"
+	UI.bind_height(_copy_link, "xs")
+	_copy_link.pressed.connect(
+		func() -> void: DisplayServer.clipboard_set(str(_problem.get("details", "")))
+	)
+	_banner_links.add_child(_copy_link)
+	set_process(false)
 
 
 ## Show [param state] ("connected", "connecting", "error", "none"). [param agent] names the
@@ -147,12 +172,76 @@ func show_state(state: String, agent: String, detail := "", with_banner := true)
 		_show_banner("none", "Connect Journeyman to your account to start.", "Connect")
 	elif state == "error" and with_banner:
 		var text := detail if not detail.is_empty() else "Lost connection to %s." % named
-		_show_banner("error", text, "Reconnect")
+		var fix: String = FIXES.get(str(_problem.get("reason", "")), "Reconnect")
+		_show_banner("error", text, fix.replace("%s", str(_problem.get("name", named))))
 	elif _banner.visible:
 		UI_MOTION.exit(_banner)
 		_banner_kind = ""
 	# One notice at a time: while the banner asks to connect, it is the one shown.
 	notice.set_held(state == "none" or (state == "error" and with_banner))
+
+
+## The connection error's reason and its details ({} once connected), shown with the next
+## error state.
+func show_problem(problem: Dictionary) -> void:
+	_problem = problem.duplicate()
+
+
+## The banner's action ("Reconnect", "Sign in"…) and links, for tests ("" when hidden).
+func banner_action() -> String:
+	return _banner_action.text if _banner.visible else ""
+
+
+func banner_links() -> PackedStringArray:
+	var links := PackedStringArray()
+	for link: Node in _banner_links.get_children():
+		if (link as Control).visible:
+			links.append((link as Button).text)
+	return links
+
+
+func _fix() -> void:
+	if _banner_kind == "none":
+		connect_pressed.emit()
+		return
+	var reason := str(_problem.get("reason", ""))
+	var url := str(_problem.get("url", ""))
+	if reason in ["not_installed", "outdated"] and not url.is_empty():
+		OS.shell_open(url)
+	elif reason in ["not_installed", "signed_out"]:
+		connect_pressed.emit()
+	elif reason == "gate" and _repair_job == null:
+		_repair()
+	else:
+		reconnect_pressed.emit()
+
+
+## Rewrite the project's policy hook for this agent (`joinery connect repair-gate`), then
+## reconnect.
+func _repair() -> void:
+	var project := ProjectSettings.globalize_path("res://").rstrip("/")
+	var agent := str(_problem.get("agent", ""))
+	var args := ["connect", "repair-gate", "--agent", agent, "--project", project]
+	_repair_job = COMMAND.joinery(PackedStringArray(), args)
+	_banner_action.disabled = _repair_job != null
+	set_process(_repair_job != null)
+
+
+func _process(_delta: float) -> void:
+	_repair_job = COMMAND.finish(_repair_job, _repaired)
+	if _repair_job == null:
+		set_process(false)
+
+
+func _repaired(result: Dictionary) -> void:
+	_banner_action.disabled = false
+	var answer: Variant = JSON.parse_string(str(result.get("output", "")).get_slice("\n", 0))
+	if int(result.get("code", 1)) == 0:
+		reconnect_pressed.emit()
+	else:
+		var error := str(answer.get("error", "")) if answer is Dictionary else ""
+		_banner_text.text = error if not error.is_empty() else "Couldn't repair the policy hook."
+		print("[Joinery] repair-gate\n", result.get("output", ""), "\n", result.get("error", ""))
 
 
 ## [param count] agents work now, Journeyman's own request included. From two up the row says
@@ -193,6 +282,8 @@ func _show_banner(kind: String, text: String, action: String) -> void:
 	_banner_action.text = action
 	_banner_action.accessibility_name = action
 	_banner_icon.visible = kind == "error"
+	_banner_links.visible = kind == "error"
+	_copy_link.visible = not str(_problem.get("details", "")).is_empty()
 	_paint_banner()
 	if fresh:
 		UI_MOTION.enter(_banner)

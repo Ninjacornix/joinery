@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from bridge.connect_errors import ConnectError
 from bridge.instructions import GAME_GUIDE, REVIEW_GUIDE
 from bridge.protocol import Prompt
 from joinery import memory
@@ -154,10 +155,14 @@ async def require_provider(agent: str, project: Path) -> str:
     require_supported(agent)
     executable = shutil.which(agent)
     if executable is None:
-        raise ValueError(f"{get(agent).name} CLI is not installed.")
+        raise ConnectError(
+            f"{get(agent).name} is not installed on this computer.", "not_installed"
+        )
     data = await asyncio.to_thread(status, agent)
     if not data["connected"]:
-        raise ValueError(f"Sign in with {get(agent).name} before connecting this chat.")
+        raise ConnectError(
+            f"Sign in with {get(agent).name} before connecting this chat.", "signed_out"
+        )
     gate = project / get(agent).config_path
     valid_gate = False
     if gate.is_file() and agent in {"claude", "gemini"}:
@@ -196,8 +201,8 @@ async def require_provider(agent: str, project: Path) -> str:
             in text
         )
     if not valid_gate:
-        raise ValueError(
-            "The shared project policy hook is missing. Run Joinery project setup first."
+        raise ConnectError(
+            "The shared project policy hook is missing. Repair it to connect.", "gate"
         )
     return executable
 
@@ -227,8 +232,10 @@ def readonly_command(argv: list[str], project: Path) -> list[str]:
             "--",
             *argv,
         ]
-    raise ValueError(
-        "This provider needs the read-only project boundary (sandbox-exec on macOS or bubblewrap on Linux)."
+    raise ConnectError(
+        "This provider needs the read-only project boundary (sandbox-exec on macOS or "
+        "bubblewrap on Linux: sudo apt install bubblewrap).",
+        "sandbox",
     )
 
 

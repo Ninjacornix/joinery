@@ -53,6 +53,7 @@ CASES = {
     "composer_recall_test.gd": "composer recall: ok",
     "provider_switch_test.gd": "provider switch: ok",
     "agent_switch_test.gd": "agent switch: ok",
+    "connection_banner_test.gd": "connection banner: ok",
     "parallel_tasks_test.gd": "parallel tasks: ok",
     "agent_roles_test.gd": "agent roles: ok",
     "playtest_card_test.gd": "playtest card: ok",

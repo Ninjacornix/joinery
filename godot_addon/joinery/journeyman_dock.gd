@@ -36,7 +36,7 @@ signal models_refresh_requested
 signal target_opened(path: String)
 ## An accepted change was reverted on disk; the editor should rescan and reload its files.
 signal change_reverted(transaction_id: String)
-## A change applied from the sidebar (a feature) wrote [param paths]; else the dock rescans.
+## A sidebar change (a feature) wrote [param paths] on disk; unheard, the dock rescans itself.
 signal files_changed(transaction_id: String, paths: PackedStringArray)
 
 const UI_THEME := preload("res://addons/joinery/ui_theme.gd")
@@ -245,6 +245,7 @@ func attach_bridge(bridge: Node) -> void:
 		"art_approved": _on_art_approved,
 		"suggestions": _on_suggestions,
 		"usage_received": _header.usage.show_usage,
+		"connection_problem": _header.show_problem,
 	}
 	for signal_name: String in links:
 		if (
@@ -657,8 +658,7 @@ func _sync() -> void:
 		var shown: bool = card != null and card.shows_step(_progress)
 		_footer.set_mode("idle" if shown else "busy", _progress)
 	elif _review_pending:
-		var inline: bool = _card() != null and _card().review_row().visible
-		_footer.set_mode("idle" if inline else "review")
+		_footer.set_mode("idle" if _card() != null and _card().review_row().visible else "review")
 	else:
 		_footer.set_mode("idle")
 	_composer.set_locked(not command.is_empty())
