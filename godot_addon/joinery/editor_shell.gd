@@ -114,7 +114,9 @@ func _compact(toolbar: Control) -> void:
 func _style_view_menu(menu: MenuButton) -> void:
 	for state: String in ["normal", "hover", "pressed", "focus"]:
 		var box := StyleBoxFlat.new()
-		box.bg_color = UI_THEME.color(menu, "surface" if state == "normal" else "surface_raised")
+		# Over the 3D scene in either theme, with Godot's light overlay text: the dark surfaces.
+		box.bg_color = UI_THEME.DARK["surface" if state == "normal" else "surface_raised"]
+		box.bg_color.a = 0.9
 		box.set_corner_radius_all(UI_THEME.radius(menu, "md"))
 		box.set_content_margin_all(UI_THEME.space(menu, 1))
 		box.content_margin_left = UI_THEME.space(menu, 2)
@@ -122,8 +124,6 @@ func _style_view_menu(menu: MenuButton) -> void:
 		if state == "focus":
 			box.draw_center = false
 		menu.add_theme_stylebox_override(state, box)
-	# The Joinery theme gives the label and the menu that opens its colours and type.
-	menu.theme = UI_THEME.build(menu)
 	_styled_menus.append(menu)
 
 
@@ -314,7 +314,6 @@ func restore() -> void:
 		if is_instance_valid(menu):
 			for state: String in ["normal", "hover", "pressed", "focus"]:
 				menu.remove_theme_stylebox_override(state)
-			menu.theme = null
 	_styled_menus.clear()
 	if is_instance_valid(_switch):
 		_switch.queue_free()
