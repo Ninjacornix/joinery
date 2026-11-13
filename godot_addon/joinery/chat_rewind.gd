@@ -217,9 +217,9 @@ func ask(card: Control, turn: int) -> void:
 	if not accepted.is_empty():
 		undo_box = CheckBox.new()
 		undo_box.text = (
-			"Also undo the change made from here"
+			"Also undo the change made since this message"
 			if accepted.size() == 1
-			else "Also undo the %d changes made from here" % accepted.size()
+			else "Also undo the %d changes made since this message" % accepted.size()
 		)
 		undo_box.tooltip_text = "Staged as one change; you review it before any file changes"
 		undo_box.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

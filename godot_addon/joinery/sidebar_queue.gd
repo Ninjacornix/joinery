@@ -35,15 +35,15 @@ func _init() -> void:
 	add_child(inset)
 	var head := HBoxContainer.new()
 	head.theme_type_variation = "JoineryRow"
-	# One height with or without "Send queued message", so the cards never shift.
+	# One height with or without "Send next", so the cards never shift.
 	UI.bind_height(head, "sm", false)
 	inset.add_child(head)
 	heading = UI.label("Queued", "JoineryCaption")
 	heading.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	heading.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	head.add_child(heading)
-	send = UI.link("Send queued message")
-	send.accessibility_name = "Send queued message"
+	send = UI.link("Send next")
+	send.accessibility_name = "Send the next queued message"
 	send.tooltip_text = "The last reply stopped, so the queue waits for you"
 	UI.bind_height(send, "sm")
 	send.hide()

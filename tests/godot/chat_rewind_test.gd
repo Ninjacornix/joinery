@@ -167,7 +167,9 @@ func _run() -> void:
 		"Says what leaves and that files stay: %s" % [labels]
 	)
 	var undo: CheckBox = rewinder.get("undo_box")
-	_check(undo != null and undo.text == "Also undo the 2 changes made from here", undo.text)
+	_check(
+		undo != null and undo.text == "Also undo the 2 changes made since this message", undo.text
+	)
 	_check(not undo.button_pressed, "Undo is the user's choice, off by default")
 	_check(calls.is_empty(), "Nothing ran before the answer: %s" % [calls])
 	rewinder.close()

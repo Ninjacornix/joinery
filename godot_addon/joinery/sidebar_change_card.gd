@@ -527,6 +527,10 @@ func decide(kind: String, text: String) -> bool:
 		_outcome_text.text = text
 		_sync_revert(kind == "success")
 		return true
+	# The card already says it ("Change accepted"): a second report of the same decision is
+	# not shown again as a notice under it.
+	if state == target and _outcome.visible and _outcome_text.text == text:
+		return true
 	var open := awaiting_decision() or not _previous_outcome.is_empty()
 	if kind == "stopped":
 		open = state in ["sending", "working"]

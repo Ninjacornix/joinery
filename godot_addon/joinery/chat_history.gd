@@ -149,7 +149,7 @@ func _build_empty() -> void:
 	column.add_child(title)
 	_scale(title, "title")
 	var hint := UI.label(
-		"Select something in your scene, then describe the change. Type / for commands.",
+		"Select something in your scene, then describe the change. Type\u00a0/\u00a0for commands.",
 		"JoineryCaption",
 		true
 	)
@@ -309,10 +309,11 @@ func add_notice(text: String, kind := "info") -> void:
 	row.theme_type_variation = "JoineryRow"
 	row.accessibility_name = "Status: " + text
 	var spec: Array = NOTICE_ICONS.get(kind, NOTICE_ICONS["info"])
-	var picture := STYLE.glyph(spec[1])
+	# A plain note has no icon, and no empty slot where one would be.
 	if not str(spec[0]).is_empty():
+		var picture := STYLE.glyph(spec[1])
 		STYLE.set_glyph(picture, spec[0], spec[1])
-	row.add_child(picture)
+		row.add_child(picture)
 	var label := UI.label(text, "JoineryCaption", true)
 	row.add_child(label)
 	_scale(label, "caption")
@@ -694,16 +695,14 @@ func _hide_caption() -> void:
 # --- Offers and plans ----------------------------------------------------------------------------
 
 
-## One quiet line from Joinery with its actions, as [[label, callable], …]. Each action runs
-## its callable; the line stays until [method remove_offer]. Returns the line.
+## One quiet line from Joinery with its actions, as [[label, callable], …]; the first is the
+## accent link. Each action runs its callable; the line stays until [method remove_offer].
 func add_offer(text: String, actions: Array = []) -> Control:
 	_hide_empty()
 	var row := HBoxContainer.new()
 	row.theme_type_variation = "JoineryRow"
 	row.accessibility_name = "Suggestion: " + text
 	row.set_meta("joinery_offer", text)
-	var picture := STYLE.glyph("accent")
-	row.add_child(picture)
 	var column := VBoxContainer.new()
 	column.theme_type_variation = "JoineryTight"
 	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -722,7 +721,9 @@ func add_offer(text: String, actions: Array = []) -> Control:
 		)
 		column.add_child(links)
 		for action: Array in actions:
-			var button := UI.link(str(action[0]))
+			# The first action is the offer; the rest (Not now, Dismiss) stay quiet.
+			var first := links.get_child_count() == 0
+			var button := UI.link(str(action[0])) if first else UI.quiet_link(str(action[0]))
 			button.accessibility_name = str(action[0])
 			UI.bind_height(button, "xs")
 			STYLE.hug_left(button)
