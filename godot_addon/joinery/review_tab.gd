@@ -185,21 +185,22 @@ func pin_first() -> void:
 ## Keep this the first bottom tab: a restored layout or a renamed tab can move it.
 func _pin() -> void:
 	var dock := get_parent() as Control
-	if dock != null and dock.is_class("EditorDock"):
+	if dock != null and dock.is_class("EditorDock") and dock.get("layout_key") != "Review":
 		dock.set("layout_key", "Review")
 	var tabs := dock.get_parent() as TabContainer if dock != null else null
 	if tabs == null:
 		return
 	# Docks opened, closed or restored later reorder the tabs: pin again after each.
-	if not tabs.child_order_changed.is_connected(_pin):
-		tabs.child_order_changed.connect(_pin, CONNECT_DEFERRED)
+	if not tabs.sort_children.is_connected(_pin):
+		tabs.sort_children.connect(_pin, CONNECT_DEFERRED)
 	var index := tabs.get_tab_idx_from_control(dock)
 	if index < 0:
 		return
 	if index != 0:
 		tabs.move_child(dock, 0)
 		index = tabs.get_tab_idx_from_control(dock)
-	tabs.set_tab_hidden(index, false)
+	if tabs.is_tab_hidden(index):
+		tabs.set_tab_hidden(index, false)
 
 
 ## Show the full review of the change Journeyman is showing, or [param panel] (a task's). Call
