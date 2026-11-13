@@ -11,7 +11,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-from bridge.connect_errors import reason_of, tail
+from bridge.connect_errors import ConnectError, reason_of, tail
 from bridge.models import ModelChoice
 from bridge.protocol import (
     AgentEvent,
@@ -202,6 +202,41 @@ def claude_model_choices(
     return [first, *choices]
 
 
+#: Flags every message passes Claude Code; a CLI without one fails on the first message.
+REQUIRED_FLAGS = (
+    "--output-format",
+    "--verbose",
+    "--include-partial-messages",
+    "--permission-prompts",
+    "--allowedTools",
+    "--append-system-prompt",
+    "--settings",
+    "--mcp-config",
+    "--resume",
+    "--session-id",
+    "--model",
+)
+
+
+def require_flags(help_text: bytes) -> None:
+    """Refuse a Claude Code too old for the flags Joinery passes, at connect rather than
+    on the first message. An empty help (the probe failed) proves nothing."""
+    if not help_text.strip():
+        return
+    missing = [
+        flag
+        for flag in REQUIRED_FLAGS
+        if re.search(rb"(?<![\w-])" + re.escape(flag.encode()) + rb"\b", help_text)
+        is None
+    ]
+    if missing:
+        raise ConnectError(
+            f"Claude Code is out of date (it has no {missing[0]}). "
+            "Run claude update, then Reconnect.",
+            "outdated",
+        )
+
+
 def claude_exit_text(details: str) -> str:
     """What to say when Claude Code exits with an error: why, when its stderr says."""
     reason = reason_of(ValueError(details))
@@ -257,6 +292,8 @@ class ClaudeSession:
         self.project = project.resolve()
         if self.gateway_socket is None:
             raise ValueError("Connect the project gateway before starting Claude.")
+        # Every message runs inside the read-only project boundary: say now if it's missing.
+        readonly_command(["true"], self.project)
         probe = await asyncio.create_subprocess_exec(
             *launch_argv(self.executable, ["--help"]),
             stdout=asyncio.subprocess.PIPE,
@@ -269,6 +306,7 @@ class ClaudeSession:
             self.tools_flag = re.search(rb"(?m)^\s*--tools\b", output) is not None
         finally:
             await stop_process(probe)
+        require_flags(output)
 
     @property
     def handle(self) -> str:

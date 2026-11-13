@@ -18,7 +18,9 @@ CLAUDE = """#!/usr/bin/env python3
 import json, sys
 from pathlib import Path
 if '--help' in sys.argv:
-    print('--effort')
+    print('--effort --output-format --verbose --include-partial-messages')
+    print('--permission-prompts --allowedTools --append-system-prompt --settings')
+    print('--mcp-config --resume --session-id --model')
     raise SystemExit(0)
 with open(Path(__file__).with_name('argv.jsonl'), 'a') as log:
     log.write(json.dumps(sys.argv[1:]) + '\\n')
