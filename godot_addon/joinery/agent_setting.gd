@@ -1,6 +1,7 @@
 @tool
 extends VBoxContainer
-## Settings → Replies: which agent Journeyman runs ("Agent: Claude Code" with Switch), and the
+## Settings → Replies: which agent Journeyman runs ("Agent: Claude Code" with Switch), its
+## model (the composer's choice, with Refresh to read the provider's list again), and the
 ## question asked in place before the chat restarts while Journeyman works. Restarting stops
 ## the current request and the parallel tasks; changes waiting in Review stay (the chat host
 ## keeps them, chat_bridge.gd close()).
@@ -17,8 +18,13 @@ const RECONNECT_ASK := "Reconnecting stops the current request and tasks. Change
 var dock: Control
 var row: UI.SettingRow
 var switch_button: Button
+## "Model": Automatic, then the provider's models; the same choice as the composer's picker.
+var model_row: UI.SettingRow
+var model_picker: OptionButton
+var refresh_button: Button
 ## "Switching stops …" with Cancel and Switch (or Reconnect); hidden until needed.
 var confirm: MarginContainer
+var _model_ids: Array[String] = []
 var _ask: Label
 var _go: Button
 var _command := ""
@@ -33,6 +39,24 @@ func _init() -> void:
 	switch_button.pressed.connect(func() -> void: request("connect"))
 	row = UI.setting_row("Agent", switch_button)
 	add_child(row)
+	var tools := HBoxContainer.new()
+	tools.theme_type_variation = "JoineryRow"
+	model_picker = UI.picker()
+	model_picker.accessibility_name = "Model"
+	model_picker.item_selected.connect(_choose_model)
+	tools.add_child(model_picker)
+	refresh_button = UI.secondary("Refresh")
+	refresh_button.accessibility_name = "Refresh the model list"
+	refresh_button.tooltip_text = "Read the agent's model list again"
+	refresh_button.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	refresh_button.pressed.connect(
+		func() -> void:
+			if dock != null and dock.has_signal("models_refresh_requested"):
+				dock.emit_signal("models_refresh_requested")
+	)
+	tools.add_child(refresh_button)
+	model_row = UI.setting_row("Model", tools)
+	add_child(model_row)
 	confirm = MarginContainer.new()
 	confirm.theme_type_variation = "JoineryInset"
 	confirm.name = "RestartConfirm"
@@ -66,6 +90,35 @@ func refresh() -> void:
 	var named: bool = agent is String and not agent in ["", "Journeyman"]
 	row.title.text = "Agent: " + str(agent) if named else "Agent: none connected"
 	switch_button.text = "Switch" if named else "Connect"
+	var options := _options()
+	if options != null and not options.is_connected("models_changed", refresh):
+		options.connect("models_changed", refresh)
+	model_picker.clear()
+	_model_ids.clear()
+	model_picker.add_item("Automatic")
+	_model_ids.append("")
+	if options != null:
+		for item: Dictionary in options.call("models"):
+			model_picker.add_item(str(item.get("name", item["id"])))
+			_model_ids.append(str(item["id"]))
+	var chosen: String = str(options.call("selection")["model"]) if options != null else ""
+	model_picker.select(maxi(0, _model_ids.find(chosen)))
+	model_picker.disabled = _model_ids.size() < 2
+	model_picker.tooltip_text = (
+		"This agent offers no other model" if model_picker.disabled else "The model replies use"
+	)
+
+
+## The composer's options picker on the sidebar, or null.
+func _options() -> Object:
+	var options: Variant = dock.get("_options") if dock != null else null
+	return options if options is Object and options.has_method("choose_model") else null
+
+
+func _choose_model(index: int) -> void:
+	var options := _options()
+	if options != null and index >= 0 and index < _model_ids.size():
+		options.call("choose_model", _model_ids[index])
 
 
 ## Run [param command] ("connect" or "reconnect") now, or, while Journeyman works, ask first

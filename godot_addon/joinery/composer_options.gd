@@ -7,6 +7,8 @@ extends MenuButton
 ## provider no longer lists stays visible as "Unavailable: …".
 
 signal changed(selection: Dictionary)
+## The provider's model list arrived again (Settings' Model row follows it).
+signal models_changed
 ## "Try 3 ways": make the typed message three ways side by side (ADR 0042).
 signal try_ways
 
@@ -60,6 +62,19 @@ func set_models(models: Array) -> void:
 		if item is Dictionary and not str(item.get("id", "")).is_empty():
 			_models.append(item)
 	_rebuild()
+	models_changed.emit()
+
+
+## The provider's models: [{id, name}], without "Automatic".
+func models() -> Array:
+	return _models.duplicate()
+
+
+## Choose the model [param id] ("" for Automatic) as the submenu does.
+func choose_model(id: String) -> void:
+	var index := _model_ids.find(id)
+	if index >= 0:
+		_on_model(index)
 
 
 ## Restore a saved {mode, model} without emitting [signal changed]. A saved effort is
@@ -131,9 +146,10 @@ func model_items() -> Array[String]:
 	return _items(_model_menu)
 
 
-## The closed label: the mode only.
+## The closed label: the mode, then the model when one is chosen ("Auto · Sonnet").
 func summary() -> String:
-	return MODE_NAMES[MODES.find(_selection["mode"])]
+	var mode: String = MODE_NAMES[MODES.find(_selection["mode"])]
+	return mode if str(_selection["model"]).is_empty() else mode + " · " + model_name()
 
 
 ## The chosen model's name, or "Automatic".

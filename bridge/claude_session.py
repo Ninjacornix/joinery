@@ -153,6 +153,54 @@ class ClaudeUsage:
         return None
 
 
+#: The model aliases every Claude Code takes for ``--model``, strongest first.
+CLAUDE_ALIASES = (("opus", "Opus"), ("sonnet", "Sonnet"), ("haiku", "Haiku"))
+
+
+def claude_configured_model() -> str:
+    """The model Claude Code uses when none is passed: ``ANTHROPIC_MODEL``, else the
+    ``model`` in its user settings. "" when neither says (Claude Code's own default)."""
+    if model := os.environ.get("ANTHROPIC_MODEL", "").strip():
+        return model
+    config = Path(os.environ.get("CLAUDE_CONFIG_DIR") or Path.home() / ".claude")
+    try:
+        settings = json.loads((config / "settings.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return ""
+    named = settings.get("model") if isinstance(settings, dict) else None
+    return named.strip() if isinstance(named, str) else ""
+
+
+def claude_model_choices(
+    configured: str, efforts: tuple[str, ...]
+) -> list[ModelChoice]:
+    """Opus, Sonnet and Haiku by alias. The one Claude Code is set to is the default; a
+    configured model that is none of them comes first as its own choice, and with nothing
+    configured the default passes no ``--model`` at all (id "")."""
+    effort = "medium" if efforts else ""
+    lowered = configured.lower()
+    choices = [
+        ModelChoice(
+            id=alias,
+            name=name,
+            efforts=efforts,
+            default_effort=effort,
+            is_default=bool(lowered) and alias in lowered,
+        )
+        for alias, name in CLAUDE_ALIASES
+    ]
+    if any(choice.is_default for choice in choices):
+        return choices
+    first = ModelChoice(
+        id=configured,
+        name=configured or "Claude Code's default",
+        efforts=efforts,
+        default_effort=effort,
+        is_default=True,
+    )
+    return [first, *choices]
+
+
 def claude_transcript_exists(project: Path, session_id: str) -> bool:
     """Whether Claude Code keeps session [session_id] for [project]: its transcript is
     <config>/projects/<project path, non-alphanumerics as "-">/<id>.jsonl. When the
@@ -233,17 +281,10 @@ class ClaudeSession:
         self.usage = ClaudeUsage()
 
     async def models(self) -> list[ModelChoice]:
-        # Print mode does not expose an account model inventory. Keep its
-        # configured model, only offering effort if this CLI advertises it.
-        return [
-            ModelChoice(
-                id="",
-                name="Claude configured model",
-                efforts=("low", "medium", "high") if self.effort_supported else (),
-                default_effort="medium" if self.effort_supported else "",
-                is_default=True,
-            )
-        ]
+        # Print mode has no account model inventory; every Claude Code takes the
+        # aliases. Effort only when this CLI advertises it.
+        efforts = ("low", "medium", "high") if self.effort_supported else ()
+        return claude_model_choices(claude_configured_model(), efforts)
 
     async def send(self, prompt: Prompt) -> AsyncIterator[AgentEvent]:
         if not self.executable or self.gateway_socket is None:
@@ -291,6 +332,8 @@ class ClaudeSession:
         ]
         args += cache_flags(self.role, self.stable_system_prompt, self.tools_flag)
         env = dict(os.environ, DISABLE_TELEMETRY="1", DISABLE_ERROR_REPORTING="1")
+        if prompt.model:
+            args += ["--model", prompt.model]
         if prompt.effort:
             args += ["--effort", prompt.effort]
         if prompt.attachments:

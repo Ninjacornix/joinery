@@ -6,6 +6,7 @@ extends SceneTree
 
 const CONNECT_PATH := "res://addons/joinery/agent_connect.gd"
 const BRIDGE_PATH := "res://addons/joinery/chat_bridge.gd"
+const SETTING_PATH := "res://addons/joinery/agent_setting.gd"
 const SIGNED_IN := [
 	{"id": "codex", "installed": true, "connected": true, "supported": true, "method": "ChatGPT"},
 	{"id": "claude", "installed": true, "connected": true, "supported": true, "method": "Claude"},
@@ -73,6 +74,7 @@ func _run() -> void:
 	await _check_same_agent()
 	await _check_mid_request()
 	await _check_restart_question()
+	await _check_model_row()
 	print("agent switch: ", "FAILED" if _failed else "ok")
 	quit(1 if _failed else 0)
 
@@ -180,7 +182,7 @@ func _check_restart_question() -> void:
 	script.reload()
 	var dock: Control = script.new()
 	root.add_child(dock)
-	var setting: VBoxContainer = load("res://addons/joinery/agent_setting.gd").new()
+	var setting: VBoxContainer = load(SETTING_PATH).new()
 	setting.set("dock", dock)
 	dock.add_child(setting)
 	var runs: Array[String] = []
@@ -211,5 +213,46 @@ func _check_restart_question() -> void:
 	_check(confirm.get_index() == other.get_index() + 1, "The question sits under Reconnect")
 	setting.call("close_question")
 	_check(runs == ["connect"] and not confirm.visible, "Cancel runs nothing")
+	dock.queue_free()
+	await process_frame
+
+
+## Settings' Model row lists the agent's models with Automatic, and choosing one there is the
+## composer's choice too: its closed label reads "Auto · Sonnet".
+func _check_model_row() -> void:
+	var script := GDScript.new()
+	script.source_code = (
+		"extends Control\nsignal models_refresh_requested\nvar _busy := false\n"
+		+ 'var _agent_name := "Claude Code"\nvar _options: Object = null\n'
+	)
+	script.reload()
+	var dock: Control = script.new()
+	root.add_child(dock)
+	var options: MenuButton = load("res://addons/joinery/composer_options.gd").new()
+	dock.add_child(options)
+	dock.set("_options", options)
+	var setting: VBoxContainer = load(SETTING_PATH).new()
+	setting.set("dock", dock)
+	dock.add_child(setting)
+	setting.call("refresh")
+	var picker: OptionButton = setting.get("model_picker")
+	_check(picker.item_count == 1 and picker.disabled, "No models yet: Automatic only")
+	var models := [
+		{"id": "opus", "name": "Opus"},
+		{"id": "sonnet", "name": "Sonnet"},
+		{"id": "haiku", "name": "Haiku"},
+	]
+	options.call("set_models", models)
+	_check(picker.item_count == 4 and not picker.disabled, "The models arrive in the row")
+	var chosen: Array = []
+	options.connect("changed", func(value: Dictionary) -> void: chosen.append(value["model"]))
+	picker.select(2)
+	picker.item_selected.emit(2)
+	_check(chosen == ["sonnet"], "The row chooses the composer's model: %s" % [chosen])
+	_check(options.text == "Auto · Sonnet", "The closed picker names the model: " + options.text)
+	var refreshes := [0]
+	dock.connect("models_refresh_requested", func() -> void: refreshes[0] += 1)
+	(setting.get("refresh_button") as Button).pressed.emit()
+	_check(refreshes[0] == 1, "Refresh asks the agent for its models again")
 	dock.queue_free()
 	await process_frame

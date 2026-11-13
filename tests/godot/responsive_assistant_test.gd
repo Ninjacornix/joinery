@@ -97,7 +97,7 @@ func _run() -> void:
 		_check(labels.has("Model: GPT-6.1 Sol"), "The menu names the chosen model")
 		chat.restore_selection_options({"mode": "fast", "model": "fixture-sol", "effort": "ultra"})
 		_check(chat._options.selection()["effort"] == "", "A saved effort is dropped")
-		_check(chat._options.text == "Fast", "The closed picker shows the mode only")
+		_check(chat._options.text == "Fast · GPT-6.1 Sol", "The closed picker names mode and model")
 		_check(chat._options.tooltip_text.contains("GPT-6.1 Sol"), "The tooltip names the model")
 		chat._options._on_mode(2)
 		_check(

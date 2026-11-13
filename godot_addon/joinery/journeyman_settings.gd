@@ -40,7 +40,6 @@ const PROJECT_COMMANDS := [
 	["Project apps", "/setup"],
 ]
 const TROUBLESHOOTING := [
-	["Refresh models", "/models"],
 	["Check installed apps", "/doctor"],
 	["Check app connections", "/tools"],
 	["Check assets", "/check"],
@@ -376,6 +375,7 @@ func _build_replies() -> void:
 	_agent = AGENT_SETTING.new()
 	_agent.dock = dock
 	_agent.run_requested.connect(_run)
+	_flush_picker(_agent.model_picker)
 	section.body.add_child(_agent)
 	_mode_picker = UI.picker(MODES)
 	_flush_picker(_mode_picker)
