@@ -47,7 +47,7 @@ func _init() -> void:
 	STYLE.on_theme_overrides(
 		self,
 		func() -> void:
-			var source := get_theme_stylebox("panel", "JoineryCard")
+			var source := get_theme_stylebox("panel", "JoineryChangeCard")
 			if source == null:
 				return
 			var box := source.duplicate() as StyleBox
@@ -110,6 +110,7 @@ func _init() -> void:
 	_foot.hide()
 	column.add_child(_foot)
 	deeper = UI.secondary("Look deeper")
+	STYLE.on_card(deeper)
 	deeper.tooltip_text = "An agent reads the design for problems the checks can't see"
 	deeper.accessibility_name = "Ask the design agent to look deeper"
 	UI.bind_height(deeper, "sm")

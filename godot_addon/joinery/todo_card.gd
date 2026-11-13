@@ -62,7 +62,7 @@ func _init(identifier := "") -> void:
 	STYLE.on_theme_overrides(
 		self,
 		func() -> void:
-			var source := get_theme_stylebox("panel", "JoineryCard")
+			var source := get_theme_stylebox("panel", "JoineryChangeCard")
 			if source == null:
 				return
 			var box := source.duplicate() as StyleBox

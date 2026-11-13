@@ -80,7 +80,7 @@ func _init(identifier := "") -> void:
 	STYLE.on_theme_overrides(
 		self,
 		func() -> void:
-			var source := get_theme_stylebox("panel", "JoineryCard")
+			var source := get_theme_stylebox("panel", "JoineryChangeCard")
 			if source == null:
 				return
 			var box := source.duplicate() as StyleBox
@@ -471,6 +471,7 @@ func _item_row(item: Dictionary) -> VBoxContainer:
 	if picture != null:
 		body.add_child(picture)
 	var fix := UI.secondary("Fix this")
+	STYLE.on_card(fix)
 	fix.accessibility_name = "Ask Journeyman to fix: " + title
 	fix.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	UI.bind_height(fix, "sm")

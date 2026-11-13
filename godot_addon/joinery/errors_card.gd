@@ -49,7 +49,7 @@ func _init() -> void:
 	STYLE.on_theme_overrides(
 		self,
 		func() -> void:
-			var source := get_theme_stylebox("panel", "JoineryCard")
+			var source := get_theme_stylebox("panel", "JoineryChangeCard")
 			if source == null:
 				return
 			var box := source.duplicate() as StyleBox
@@ -68,6 +68,7 @@ func _init() -> void:
 	headline.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	head.add_child(headline)
 	fix_all = UI.secondary("Fix all")
+	STYLE.on_card(fix_all)
 	fix_all.accessibility_name = "Fix all console errors"
 	UI.bind_height(fix_all, "sm")
 	fix_all.size_flags_vertical = Control.SIZE_SHRINK_CENTER

@@ -206,7 +206,7 @@ func _strip(group: String) -> Control:
 	STYLE.on_theme_overrides(
 		card,
 		func() -> void:
-			var source := card.get_theme_stylebox("panel", "JoineryCard")
+			var source := card.get_theme_stylebox("panel", "JoineryChangeCard")
 			if source == null:
 				return
 			var box := source.duplicate() as StyleBox
@@ -216,8 +216,7 @@ func _strip(group: String) -> Control:
 	var column := VBoxContainer.new()
 	column.theme_type_variation = "JoineryTight"
 	card.add_child(column)
-	var head := UI.label("", "")
-	head.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	var head := STYLE.card_title("")
 	head.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	column.add_child(head)
 	var strip: Control = STRIP.new(group)

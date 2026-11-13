@@ -67,7 +67,7 @@ func _init() -> void:
 	STYLE.on_theme_overrides(
 		self,
 		func() -> void:
-			var source := get_theme_stylebox("panel", "JoineryCard")
+			var source := get_theme_stylebox("panel", "JoineryChangeCard")
 			if source == null:
 				return
 			var box := source.duplicate() as StyleBox
@@ -427,6 +427,7 @@ func _row(item: Dictionary) -> VBoxContainer:
 	keep.pressed.connect(_on_keep.bind(item, row))
 	actions.add_child(keep)
 	var remove := UI.secondary("Remove")
+	STYLE.on_card(remove)
 	remove.tooltip_text = "Remove just this, as a change in Review"
 	remove.accessibility_name = "Remove " + title
 	UI.bind_height(remove, "sm")
