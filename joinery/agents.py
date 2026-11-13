@@ -170,5 +170,11 @@ def get(agent_id: str) -> Agent:
         raise KeyError(f"unknown agent: {agent_id!r}") from None
 
 
+def display_name(agent_id: str) -> str:
+    """The agent's name as the user knows it ("Claude Code"); the id when unknown."""
+    agent = _BY_ID.get(agent_id)
+    return agent.name if agent is not None else agent_id
+
+
 def all_agents() -> tuple[Agent, ...]:
     return AGENTS

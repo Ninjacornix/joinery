@@ -79,6 +79,11 @@ signal provider_switch(event: Dictionary)
 const COMMAND_SCRIPT := preload("command_job.gd")
 const ATTACHMENTS := preload("chat_attachments.gd")
 const EDITOR_VIEW := preload("editor_view.gd")
+## Each agent's name as the user knows it: the same as joinery/agents.py, which the chat host
+## also sends in its connection event.
+const AGENT_NAMES := {
+	"claude": "Claude Code", "codex": "Codex CLI", "gemini": "Gemini CLI", "opencode": "opencode"
+}
 var context_provider: Callable
 ## Captures the editor's viewport for the agent's view_editor tool; returns editor_view.gd's
 ## result. Tests replace it.
@@ -93,6 +98,8 @@ var _pending: Dictionary = {}
 ## Go on a to-do: the line the next request carries (hold_line).
 var _held_line: Dictionary = {}
 var _agent := ""
+## The agent's name from the host's connection event ("" until it connects).
+var _name := ""
 var _profile := ""
 var _engine := ""
 var _project := ""
@@ -108,6 +115,7 @@ func start(agent: String, profile: String, engine: String, project: String) -> v
 	var stopped := close()
 	_error_detail = ""
 	_model_name = ""
+	_name = ""
 	# A new session: its token use starts over.
 	usage_received.emit({})
 	var switched := agent != _agent
@@ -147,7 +155,7 @@ func start(agent: String, profile: String, engine: String, project: String) -> v
 		_job = null
 		status_changed.emit("error", "Couldn't start the chat connection.")
 		return
-	status_changed.emit("connecting", "Connecting to " + agent.capitalize() + "…")
+	status_changed.emit("connecting", "Connecting to " + _display_name() + "…")
 
 
 ## Send [param text] about [param targets]. Image attachments among the targets
@@ -501,6 +509,7 @@ func _handle(event: Dictionary) -> void:
 	match str(event.get("kind", "")):
 		"connection":
 			parallel = int(event.get("parallel", 1))
+			_name = str(event.get("name", _name))
 			models_received.emit(event.get("models", []))
 			_connected = event.get("state") == "connected"
 			if not _connected:
@@ -510,7 +519,7 @@ func _handle(event: Dictionary) -> void:
 			status_changed.emit(
 				str(event.get("state", "error")),
 				(
-					_agent.capitalize() + " connected"
+					_display_name() + " connected"
 					if _connected
 					else str(event.get("message", "Lost connection to %s." % _display_name()))
 				)
@@ -570,7 +579,7 @@ func _handle(event: Dictionary) -> void:
 		"editor_view":
 			_send_view(str(event.get("request_id", "")))
 		"done":
-			status_changed.emit("connected", _agent.capitalize() + " connected")
+			status_changed.emit("connected", _display_name() + " connected")
 			_busy = false
 			completed.emit(bool(event.get("ok", false)))
 			busy_changed.emit(false)
@@ -595,7 +604,14 @@ func _notice(text: String, kind: String) -> void:
 
 
 func _display_name() -> String:
-	return _agent.capitalize() if not _agent.is_empty() else "Journeyman"
+	if not _name.is_empty():
+		return _name
+	return agent_name(_agent) if not _agent.is_empty() else "Journeyman"
+
+
+## [param agent]'s name as the user knows it ("claude" -> "Claude Code").
+static func agent_name(agent: String) -> String:
+	return str(AGENT_NAMES.get(agent, agent))
 
 
 func send_editor_result(request_id: String, result: Dictionary) -> void:

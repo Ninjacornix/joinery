@@ -147,8 +147,7 @@ func _check_mid_request() -> void:
 	_check(job.closed, "The old agent's pipe is closed")
 	_check(heard == [true, "failed", false], "The request ends and busy clears: %s" % [heard])
 	_check(
-		notices.size() == 1 and notices[0].begins_with("Stopped: switched to Claude"),
-		"The transcript says why: %s" % [notices]
+		notices == ["Stopped: switched to Claude Code."], "The transcript says why: %s" % [notices]
 	)
 	# Closing with nothing running says nothing more.
 	heard.clear()

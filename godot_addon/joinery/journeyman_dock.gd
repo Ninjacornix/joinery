@@ -95,7 +95,7 @@ var _review: Control
 var _review_pending := false
 var _details_open := false
 var _busy := false
-var _agent_name := "Codex"
+var _agent_name := "Journeyman"
 var _assistant_open := false
 var _started_msec := 0
 var _last_elapsed := -1
@@ -751,9 +751,9 @@ func _set_targets(targets: Array[Dictionary]) -> void:
 # --- Connection state --------------------------------------------------------------------------
 
 
-## The provider behind Journeyman ("codex"); named only when its connection is lost.
+## The provider behind Journeyman ("claude", shown as "Claude Code"); "" when none.
 func set_chat_agent(agent: String) -> void:
-	_agent_name = agent.capitalize()
+	_agent_name = preload("chat_bridge.gd").agent_name(agent)
 	if _composer != null:
 		_composer.set_placeholder(_waiting_placeholder())
 		_header.show_state(connection_state, _agent_name)

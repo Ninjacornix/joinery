@@ -48,6 +48,7 @@ from joinery import (
     playtest,
     session_summary,
 )
+from joinery.agents import display_name
 from joinery.art_approval import approve, review
 from joinery.authoring import run_offline
 from joinery.claims import parallel_limit
@@ -218,6 +219,8 @@ async def _serve(
 ) -> int:
     bridge: Bridge | None = None
     active: asyncio.Task[None] | None = None
+    #: The agent's name as the user knows it, for the sidebar's words ("Claude Code").
+    agent_name = display_name(agent_id)
     specialists: Specialists | None = None
     crew: Crew | None = None
     step_run: StepRun | None = None
@@ -241,6 +244,7 @@ async def _serve(
                 "kind": "connection",
                 "state": "error",
                 "agent": agent_id,
+                "name": agent_name,
                 "message": str(exc),
             }
         )
@@ -394,6 +398,7 @@ async def _serve(
                 "kind": "connection",
                 "state": "error",
                 "agent": agent_id,
+                "name": agent_name,
                 "message": str(exc),
             }
         )
@@ -496,13 +501,21 @@ async def _serve(
                 await bridge.cancel()
             emit(
                 Message(
-                    text=str(exc) or "Codex could not complete this message.",
+                    text=str(exc) or f"{agent_name} could not complete this message.",
                     level="warn",
                 ).model_dump()
             )
             emit(Done(ok=False).model_dump())
             if isinstance(exc, OSError):
-                emit({"kind": "connection", "state": "error", "message": str(exc)})
+                emit(
+                    {
+                        "kind": "connection",
+                        "state": "error",
+                        "agent": agent_id,
+                        "name": agent_name,
+                        "message": str(exc),
+                    }
+                )
         finally:
             if specialists is not None:
                 await specialists.close()
@@ -915,6 +928,7 @@ async def _serve(
                 "kind": "connection",
                 "state": "connected",
                 "agent": agent_id,
+                "name": agent_name,
                 "mode": "reviewed-scene-edits",
                 "models": [model.model_dump() for model in bridge.model_choices],
                 "parallel": crew.limit,
@@ -1212,7 +1226,8 @@ async def _serve(
                     if active is not None and not active.done():
                         emit(
                             Message(
-                                text="Codex is still responding.", level="warn"
+                                text=f"{agent_name} is still responding.",
+                                level="warn",
                             ).model_dump()
                         )
                     elif str(data.get("text", "")).strip():
@@ -1236,6 +1251,7 @@ async def _serve(
                 "kind": "connection",
                 "state": "error",
                 "agent": agent_id,
+                "name": agent_name,
                 "message": str(exc),
             }
         )
