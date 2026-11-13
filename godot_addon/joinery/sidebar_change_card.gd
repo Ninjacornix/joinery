@@ -443,6 +443,7 @@ func set_ready(media: Array = [], review: Object = null) -> void:
 	_error.hide()
 	_outcome.hide()
 	_place_review()
+	_ready_row.waiting = true
 	_ready_row.show_for(media, review)
 	_sync_activity()
 
@@ -466,6 +467,7 @@ func set_outcome(kind: String, text: String, optimistic := false) -> void:
 	set_sent()
 	_previous_outcome = [state, _ready_row.visible] if optimistic else []
 	_timer.hide()
+	_ready_row.waiting = false
 	_ready_row.hide()
 	_error.hide()
 	_tick_current("success" if kind == "success" else "stopped")
@@ -491,7 +493,8 @@ func roll_back(message := "") -> void:
 	if _previous_outcome.is_empty():
 		return
 	state = str(_previous_outcome[0])
-	_ready_row.visible = bool(_previous_outcome[1])
+	_ready_row.waiting = bool(_previous_outcome[1])
+	_ready_row.visible = _ready_row.waiting
 	_previous_outcome = []
 	_outcome.hide()
 	show_error(message)

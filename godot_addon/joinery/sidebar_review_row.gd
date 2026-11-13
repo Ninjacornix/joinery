@@ -17,6 +17,9 @@ const STYLE := preload("sidebar_style.gd")
 
 ## "Try other ways", while the change waits for a decision.
 var ways: Button
+## True while the card's change waits for a decision: the panel's later updates (another
+## change's review) never bring a decided row back.
+var waiting := false
 var _review: Object
 var _frame: PanelContainer
 var _thumb: TextureRect
@@ -133,7 +136,7 @@ func refresh(media: Array = []) -> void:
 	_open.visible = decidable and not simple
 	ways.visible = decidable
 	var was := visible
-	visible = _frame.visible or decidable
+	visible = waiting and (_frame.visible or decidable)
 	if visible and not was:
 		UI_MOTION.reveal(self)
 
