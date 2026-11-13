@@ -70,6 +70,7 @@ def launch_args(monkeypatch: pytest.MonkeyPatch, prompt: Prompt) -> list[str]:
         raise Started
 
     monkeypatch.setattr("bridge.claude_session.asyncio.create_subprocess_exec", spawn)
+    monkeypatch.setattr("bridge.claude_session.readonly_command", lambda argv, _p: argv)
 
     async def go() -> None:
         async for _ in session.send(prompt):
