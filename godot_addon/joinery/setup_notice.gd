@@ -17,6 +17,9 @@ extends MarginContainer
 ##
 ## A refresh stays on show while it runs (`joinery bootstrap --progress`): which step, a bar,
 ## Cancel and Show log. If it fails, the notice says why in plain words and keeps Show log.
+## Only one refresh runs at a time: one started anywhere else (the app rail, Project setup, a
+## terminal, another editor) is followed here too, through `joinery bootstrap --join`
+## ([member watch_refreshes]), and pressing Refresh tools while one runs joins it.
 ##
 ## The header hides it while the connection banner shows ([method set_held]): one notice at a
 ## time, and Connect wins.
@@ -53,6 +56,10 @@ var editor_path := ""
 var start_docker_argv := PackedStringArray(
 	["open", "-a", "Docker"] if OS.get_name() == "macOS" else []
 )
+## Look every 2 s for a refresh started elsewhere and show its progress (on in the editor).
+var watch_refreshes := Engine.is_editor_hint()
+## Where a running refresh says how far it is (empty: Joinery's readiness cache).
+var refresh_state_path := ""
 
 var _panel: PanelContainer
 var _text: Label
@@ -65,6 +72,8 @@ var _show_log: Button
 var _progress := {}
 ## The refresh's result line (its last), when it came with the progress lines.
 var _result := {}
+## The process of the last refresh followed from elsewhere: followed once, never again.
+var _gone := 0
 ## The refresh log, once a refresh has run.
 var _log := ""
 ## What the notice says now: "" (nothing), "addon" or "tools".
@@ -135,6 +144,45 @@ func _ready() -> void:
 	if Engine.is_editor_hint() and project_path.is_empty():
 		# Is this project's add-on older than the Joinery running it (after an update)?
 		check_addon.call_deferred()
+	if watch_refreshes:
+		var timer := Timer.new()
+		timer.wait_time = 2.0
+		timer.timeout.connect(_look_for_refresh)
+		add_child(timer)
+		timer.start()
+		_look_for_refresh.call_deferred()
+
+
+## A refresh another process runs (refresh.json says so, and its process is alive): follow it.
+func _look_for_refresh() -> void:
+	if refreshing():
+		return
+	var path := refresh_state_path if not refresh_state_path.is_empty() else _state_file()
+	if not FileAccess.file_exists(path):
+		return
+	var state: Variant = JSON.parse_string(FileAccess.get_file_as_string(path))
+	if not state is Dictionary or str((state as Dictionary).get("state", "")) != "running":
+		return
+	# Godot can't ask about a process it didn't start: --join says whether it still runs.
+	var pid := int((state as Dictionary).get("pid", 0))
+	if pid <= 0 or pid == _gone:
+		return
+	_gone = pid
+	_progress = state
+	_log = str((state as Dictionary).get("log", _log))
+	_said = ""
+	_result = {}
+	_run("refresh", ["bootstrap", "--project", _project(), "--progress", "--join"])
+	_refresh()
+
+
+## refresh.json in Joinery's readiness cache (joinery/readiness.py cache_dir).
+static func _state_file() -> String:
+	var folder := OS.get_environment("JOINERY_READINESS_CACHE")
+	if folder.is_empty():
+		var home := OS.get_environment("USERPROFILE" if OS.get_name() == "Windows" else "HOME")
+		folder = home.path_join(".cache/joinery")
+	return folder.path_join("refresh.json")
 
 
 ## Ask whether this project's add-on is older than Joinery's (`joinery update-addon --check`).

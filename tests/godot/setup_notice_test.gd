@@ -27,6 +27,12 @@ elif a[0] == "status":
     print(json.dumps({"docker": "ok" if up else "Docker is not running.", "tools": [],
         "notice": None if up else {"state": "needs_docker", "text": "Blender needs Docker.",
         "action": {"id": "start_docker", "label": "Start Docker"}}}))
+elif a[0] == "bootstrap" and "--join" in a:
+    import time
+    print(json.dumps({"state": "running", "progress": 0.5, "step": 2, "steps": 4,
+        "text": "Refreshing the creative apps (step 2 of 4)…", "joined": True}), flush=True)
+    time.sleep(0.6)
+    print(json.dumps({"state": "done", "joined": True}))
 elif a[0] == "bootstrap" and "--cancel" in a:
     print(json.dumps({"state": "idle"}))
 elif a[0] == "bootstrap":
@@ -100,6 +106,7 @@ func _run() -> void:
 	_check_doctor()
 	await _check_refresh()
 	await _check_docker()
+	await _check_join()
 	print("setup notice: ok" if not _failed else "setup notice: FAILED")
 	quit(1 if _failed else 0)
 
@@ -243,4 +250,28 @@ func _check_docker() -> void:
 		polls.all(func(call: Array) -> bool: return not call.has("--background")),
 		"Past the cached answer"
 	)
+	notice.queue_free()
+
+
+## A refresh started elsewhere (the rail, Project setup, a terminal) shows here too.
+func _check_join() -> void:
+	var state_path := OS.get_user_data_dir().path_join("refresh.json")
+	var running := {"state": "running", "pid": OS.get_process_id(), "progress": 0.25}
+	running["text"] = "Refreshing Godot (step 1 of 4)…"
+	var file := FileAccess.open(state_path, FileAccess.WRITE)
+	file.store_string(JSON.stringify(running))
+	file.close()
+	var notice := _notice()
+	notice.watch_refreshes = true
+	notice.refresh_state_path = state_path
+	root.add_child(notice)
+	var asked: Array[bool] = []
+	notice.check_requested.connect(func() -> void: asked.append(true))
+	_check(
+		await _until(func() -> bool: return notice.text().contains("creative apps")),
+		"The running refresh is followed: " + notice.text()
+	)
+	_check(_logged()[-1].has("--join"), "By joining it, never by starting a second")
+	DirAccess.remove_absolute(state_path)
+	_check(await _until(func() -> bool: return not asked.is_empty()), "Its end asks again")
 	notice.queue_free()

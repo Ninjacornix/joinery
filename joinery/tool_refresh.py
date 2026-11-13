@@ -272,6 +272,80 @@ def stop_on_terminate() -> None:
         signal.signal(signal.SIGTERM, handler)
 
 
+class RefreshBusy(Exception):
+    """Another refresh runs now; join it (`join`) instead of starting a second."""
+
+
+def lock_path() -> Path:
+    return readiness.cache_dir() / "refresh.lock"
+
+
+def _holder() -> int:
+    try:
+        return int(lock_path().read_text().strip() or 0)
+    except (OSError, ValueError):
+        return 0
+
+
+def acquire() -> bool:
+    """Take the one refresh slot; False while another live refresh holds it.
+
+    Two refreshes at once (the rail and Project setup, two editors) would
+    build the same images twice and fight over their tags.
+    """
+    path = lock_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    for _attempt in range(3):
+        try:
+            descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            holder = _holder()
+            if holder and holder != os.getpid() and readiness._alive(holder):
+                return False
+            # Left behind by a refresh that ended without letting go.
+            with contextlib.suppress(OSError):
+                path.unlink()
+            continue
+        with os.fdopen(descriptor, "w") as lock:
+            lock.write(str(os.getpid()))
+        return True
+    return False
+
+
+def release() -> None:
+    if _holder() == os.getpid():
+        with contextlib.suppress(OSError):
+            lock_path().unlink()
+
+
+def join(
+    emit: Emit | None, *, poll: float = 1.0, timeout: float = 4 * 3600
+) -> dict[str, Any]:
+    """Follow the refresh another process runs until it ends; its last state.
+
+    Sends each new progress line to `emit`, like the refresh's own caller
+    sees them. {"state": "idle"} when nothing runs.
+    """
+    holder = _holder()
+    if not holder or not readiness._alive(holder):
+        return {"state": "idle"}
+    sent: dict[str, Any] = {}
+    deadline = time.monotonic() + timeout
+    while readiness._alive(holder) and time.monotonic() < deadline:
+        state = read_state()
+        if state.get("pid") == holder and state.get("state") == "running":
+            if state != sent and emit is not None:
+                emit({**state, "joined": True})
+            sent = state
+        time.sleep(poll)
+    final = read_state()
+    if final.get("pid") != holder:
+        return {"state": "failed", "error": "The other refresh stopped before it began."}
+    if final.get("state") == "running":
+        return {"state": "failed", "error": "The other refresh stopped unexpectedly."}
+    return final
+
+
 def cancel() -> dict[str, Any]:
     """Stop the refresh that is running (Cancel in the sidebar)."""
     state = read_state()

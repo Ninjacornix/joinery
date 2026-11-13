@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -86,3 +87,49 @@ def test_finish_records_a_failure_for_the_next_screen(cache: Path) -> None:
     assert state["state"] == "failed"
     assert state["error"] == "Docker ran out of disk space."
     assert tool_refresh.cancel() == {"state": "idle"}
+
+
+def test_one_refresh_at_a_time_and_a_second_caller_follows_it(
+    tmp_path: Path, cache: Path
+) -> None:
+    import subprocess
+
+    from joinery import bootstrap
+
+    # Another process runs a refresh: it holds the slot and writes its progress.
+    other = subprocess.Popen(
+        _script(
+            tmp_path,
+            "import json, os, sys, time\n"
+            "state = sys.argv[1]\n"
+            "def put(**data):\n"
+            "    data.update(pid=os.getpid(), log='refresh.log', steps=2)\n"
+            "    open(state + '.tmp', 'w').write(json.dumps(data))\n"
+            "    os.replace(state + '.tmp', state)\n"
+            "put(state='running', progress=0.25, step=1, text='Refreshing Godot')\n"
+            "time.sleep(1.0)\n"
+            "put(state='failed', step=2, error='Docker ran out of disk space.')\n",
+        )
+        + [str(cache / "refresh.json")]
+    )
+    cache.mkdir(parents=True, exist_ok=True)
+    (cache / "refresh.lock").write_text(str(other.pid))
+    # Reaped as it ends, so its pid stops answering (a real holder isn't our child).
+    reaper = threading.Thread(target=other.wait)
+    reaper.start()
+    try:
+        assert tool_refresh.acquire() is False
+        with pytest.raises(tool_refresh.RefreshBusy):
+            bootstrap.setup(tmp_path)
+        seen: list[dict[str, Any]] = []
+        final = tool_refresh.join(seen.append, poll=0.05, timeout=20)
+    finally:
+        reaper.join(timeout=10)
+    assert seen and seen[0]["joined"] is True and seen[0]["text"] == "Refreshing Godot"
+    assert final["state"] == "failed"
+    assert final["error"] == "Docker ran out of disk space."
+    # Its holder is gone: the slot is free again, and nothing runs to join.
+    assert tool_refresh.join(None) == {"state": "idle"}
+    assert tool_refresh.acquire() is True
+    tool_refresh.release()
+    assert not (cache / "refresh.lock").exists()

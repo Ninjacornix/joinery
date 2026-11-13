@@ -101,7 +101,19 @@ def setup(
     `emit` gets each change). Each image is labelled with the sandbox revision,
     and a readiness refresh starts once the build is done. No image or build
     cache is ever removed. A failure raises RefreshFailed with a readable reason.
+
+    Only one refresh runs at a time: while another holds the slot this raises
+    RefreshBusy, and the caller follows that one (`tool_refresh.join`).
     """
+    if not tool_refresh.acquire():
+        raise tool_refresh.RefreshBusy()
+    try:
+        return _setup(project, emit)
+    finally:
+        tool_refresh.release()
+
+
+def _setup(project: Path, emit: tool_refresh.Emit | None) -> dict[str, Any]:
     selected = selection_ids(
         load_catalog(), load_project_tools(project / "joinery.toml")
     )

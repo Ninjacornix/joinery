@@ -842,8 +842,12 @@ def _parts() -> Any:
         return None
 
 
-def _refresh_tools(project: Path, progress: bool, cancel: bool) -> int:
-    """`joinery bootstrap`: Refresh tools, with JSON progress lines on request."""
+def _refresh_tools(project: Path, progress: bool, cancel: bool, join: bool) -> int:
+    """`joinery bootstrap`: Refresh tools, with JSON progress lines on request.
+
+    A second caller while one runs follows that one to its end (the rail and
+    Project setup share one refresh); `--join` only follows, never starts one.
+    """
     from joinery import tool_refresh
     from joinery.bootstrap import setup
 
@@ -854,9 +858,22 @@ def _refresh_tools(project: Path, progress: bool, cancel: bool) -> int:
     def emit(event: dict[str, Any]) -> None:
         print(json.dumps(event), flush=True)
 
+    def joined() -> int:
+        final = tool_refresh.join(emit if progress else None)
+        log = {"log": str(tool_refresh.log_path())}
+        if final.get("state") == "failed":
+            print(json.dumps({"error": final.get("error", ""), "joined": True, **log}))
+            return 1
+        print(json.dumps({"state": final.get("state", "idle"), "joined": True, **log}))
+        return 0
+
+    if join:
+        return joined()
     tool_refresh.stop_on_terminate()
     try:
         outcome = setup(project, emit if progress else None)
+    except tool_refresh.RefreshBusy:
+        return joined()
     except tool_refresh.RefreshCancelled:
         print(json.dumps({"state": "cancelled", "log": str(tool_refresh.log_path())}))
         return 0
@@ -994,6 +1011,11 @@ def _parser() -> argparse.ArgumentParser:
     )
     bootstrap.add_argument(
         "--cancel", action="store_true", help="stop the refresh that is running"
+    )
+    bootstrap.add_argument(
+        "--join",
+        action="store_true",
+        help="follow the refresh that is running (never start one)",
     )
     delivery = commands.add_parser(
         "update-addon", help="update a closed project's addon with a reversible backup"
@@ -1476,7 +1498,9 @@ def main(argv: list[str] | None = None) -> int:
         from joinery.bootstrap import transactions, update_addon
 
         if args.command == "bootstrap":
-            return _refresh_tools(args.project.resolve(), args.progress, args.cancel)
+            return _refresh_tools(
+                args.project.resolve(), args.progress, args.cancel, args.join
+            )
         try:
             if args.command == "bootstrap":
                 outcome = setup_runtime(args.project.resolve())

@@ -663,7 +663,7 @@ func _on_card_action() -> void:
 		"rebuild":
 			_run_action(
 				["bootstrap", "--project", _project()],
-				"Refreshing tools. The first time takes about an hour."
+				"Refreshing tools. Its progress shows at the top of the sidebar."
 			)
 
 
