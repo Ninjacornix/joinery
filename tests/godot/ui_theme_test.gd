@@ -548,7 +548,7 @@ func _check_settings() -> void:
 	script.source_code = (
 		"extends PanelContainer\nsignal reconnect_requested\nsignal connect_requested\n"
 		+ "var applied: Array = []\n"
-		+ 'var ran: Array = []\nvar connection_state := "error"\n'
+		+ 'var ran: Array = []\nvar connection_state := "error"\nvar _agent_name := ""\n'
 		+ "func apply_preferences(values: Dictionary) -> void:\n\tapplied.append(values)\n"
 		+ "func run_command(entry: String) -> void:\n\tran.append(entry)\n"
 	)
@@ -607,14 +607,17 @@ func _check_settings() -> void:
 	_check((dock.get("ran") as Array).has("/art"), "Rows run their command through the dock")
 	var switches := [0]
 	dock.connect("connect_requested", func() -> void: switches[0] += 1)
-	var switch_agent: Button = null
-	for button: Node in page.find_children("*", "Button", true, false):
-		if (button as Button).text == "Switch agent":
-			switch_agent = button
-	_check(switch_agent != null, "Switch agent row exists")
-	if switch_agent != null:
-		switch_agent.pressed.emit()
-	_check(switches[0] == 1, "Switch agent opens the Connect screen through the dock")
+	var agent_row: Control = page.get("_agent_row")
+	var switch_agent: Button = page.get("_agent_switch")
+	_check(agent_row.get("title").text == "Agent: none connected", "No agent is named yet")
+	_check(switch_agent.text == "Connect", "Without an agent the row offers Connect")
+	dock.set("_agent_name", "Claude Code")
+	page.set_open(false)
+	page.set_open(true)
+	_check(agent_row.get("title").text == "Agent: Claude Code", agent_row.get("title").text)
+	_check(switch_agent.text == "Switch", "The row offers Switch: " + switch_agent.text)
+	switch_agent.pressed.emit()
+	_check(switches[0] == 1, "Switch opens the Connect screen through the dock")
 	page.set_open(false)
 	_check(header.visible and chat.visible and not page.visible, "Back restores the chat")
 	_check(UI_THEME.set_pref("text_size", "Normal") == OK, "Restore the text size")

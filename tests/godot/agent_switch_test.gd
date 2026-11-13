@@ -153,5 +153,13 @@ func _check_mid_request() -> void:
 	heard.clear()
 	bridge.call("close")
 	_check(heard.is_empty(), "An idle close is quiet: %s" % [heard])
+	# Switching with nothing running: the transcript says which agent answers now.
+	notices.clear()
+	bridge.call("start", "opencode", "", "/nonexistent-joinery-engine", "/nonexistent-project")
+	bridge.call("close")
+	_check(notices == ["Now using opencode."], "The switch is said: %s" % [notices])
+	bridge.call("start", "opencode", "", "/nonexistent-joinery-engine", "/nonexistent-project")
+	bridge.call("close")
+	_check(notices.size() == 1, "A reconnect to the same agent says nothing: %s" % [notices])
 	bridge.queue_free()
 	await process_frame

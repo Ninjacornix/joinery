@@ -118,7 +118,8 @@ func start(agent: String, profile: String, engine: String, project: String) -> v
 	_name = ""
 	# A new session: its token use starts over.
 	usage_received.emit({})
-	var switched := agent != _agent
+	var previous := _agent
+	var switched := agent != previous
 	_agent = agent
 	_profile = profile
 	_engine = engine
@@ -128,6 +129,8 @@ func start(agent: String, profile: String, engine: String, project: String) -> v
 			"Stopped: switched to %s." % _display_name() if switched else "Stopped: reconnected.",
 			"info"
 		)
+	elif switched and not previous.is_empty() and not agent.is_empty():
+		_notice("Now using %s." % _display_name(), "info")
 	if agent.is_empty():
 		status_changed.emit("error", "Journeyman isn't connected.")
 		return

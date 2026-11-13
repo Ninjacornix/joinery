@@ -66,6 +66,9 @@ var _mode_picker: OptionButton
 var _timings_switch: CheckButton
 var _details_switch: CheckButton
 var _reconnect: Button
+## "Agent: Claude Code", with Switch: which agent Journeyman runs.
+var _agent_row: UI.SettingRow
+var _agent_switch: Button
 var _history_row: Control
 var _history_size: Label
 var _history_button: MenuButton
@@ -382,13 +385,14 @@ static func _editor_settings() -> EditorSettings:
 
 func _build_replies() -> void:
 	var section := _section("Replies")
-	# Which agent Journeyman runs (Codex, Claude Code, …): the same Connect screen the banner
-	# opens, picked on the current agent; choosing another restarts the chat with it.
-	var agent := UI.row_button("Switch agent")
-	agent.tooltip_text = "Connect Journeyman to Codex, Claude Code, Gemini CLI or opencode"
-	agent.pressed.connect(_run.bind("connect"))
-	_flush_row(agent)
-	section.body.add_child(agent)
+	# Which agent Journeyman runs (Codex, Claude Code, …). Switch opens the same Connect screen
+	# the banner opens, on the agent in use; choosing another restarts the chat with it.
+	_agent_switch = UI.secondary("Switch")
+	_agent_switch.accessibility_name = "Switch agent"
+	_agent_switch.tooltip_text = "Connect Journeyman to Codex, Claude Code, Gemini CLI or opencode"
+	_agent_switch.pressed.connect(_run.bind("connect"))
+	_agent_row = UI.setting_row("Agent", _agent_switch)
+	section.body.add_child(_agent_row)
 	_mode_picker = UI.picker(MODES)
 	_flush_picker(_mode_picker)
 	for index: int in MODES.size():
@@ -807,6 +811,10 @@ func _run(command: String) -> void:
 func _refresh_rows() -> void:
 	var state := str(dock.get("connection_state")) if dock != null else ""
 	_reconnect.visible = state != "connected"
+	var agent: Variant = dock.get("_agent_name") if dock != null else null
+	var named: bool = agent is String and not agent in ["", "Journeyman"]
+	_agent_row.title.text = "Agent: " + str(agent) if named else "Agent: none connected"
+	_agent_switch.text = "Switch" if named else "Connect"
 
 
 ## Run `joinery history`: "usage", "compact", "policy-check" (a dry run) or "policy".
