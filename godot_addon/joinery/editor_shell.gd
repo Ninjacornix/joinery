@@ -122,8 +122,8 @@ func _style_view_menu(menu: MenuButton) -> void:
 		if state == "focus":
 			box.draw_center = false
 		menu.add_theme_stylebox_override(state, box)
-	menu.add_theme_color_override("font_color", UI_THEME.color(menu, "text"))
-	menu.add_theme_color_override("font_hover_color", UI_THEME.color(menu, "text"))
+	# The Joinery theme gives the label and the menu that opens its colours and type.
+	menu.theme = UI_THEME.build(menu)
 	_styled_menus.append(menu)
 
 
@@ -314,8 +314,7 @@ func restore() -> void:
 		if is_instance_valid(menu):
 			for state: String in ["normal", "hover", "pressed", "focus"]:
 				menu.remove_theme_stylebox_override(state)
-			menu.remove_theme_color_override("font_color")
-			menu.remove_theme_color_override("font_hover_color")
+			menu.theme = null
 	_styled_menus.clear()
 	if is_instance_valid(_switch):
 		_switch.queue_free()

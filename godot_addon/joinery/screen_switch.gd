@@ -30,7 +30,7 @@ func _init() -> void:
 		var button := Button.new()
 		button.name = screen
 		button.text = screen
-		button.flat = true
+		button.theme_type_variation = "JoinerySegment"
 		button.toggle_mode = true
 		button.button_group = _group
 		button.focus_mode = Control.FOCUS_ACCESSIBILITY
@@ -56,32 +56,9 @@ func place(base: Control) -> bool:
 	return false
 
 
-func _notification(what: int) -> void:
-	if what == NOTIFICATION_THEME_CHANGED:
-		_style.call_deferred()
-
-
-## The current screen on a raised pill in accent text, like the selected rail item.
-func _style() -> void:
-	var pill := StyleBoxFlat.new()
-	pill.bg_color = UI_THEME.color(self, "surface_raised")
-	pill.set_corner_radius_all(UI_THEME.radius(self, "md"))
-	pill.set_content_margin_all(UI_THEME.space(self, 1))
-	pill.content_margin_left = UI_THEME.space(self, 2)
-	pill.content_margin_right = UI_THEME.space(self, 2)
-	var plain := pill.duplicate() as StyleBoxFlat
-	plain.draw_center = false
-	for button: Button in _buttons.values():
-		button.begin_bulk_theme_override()
-		for state: String in ["normal", "hover", "focus", "disabled"]:
-			button.add_theme_stylebox_override(state, plain)
-		button.add_theme_stylebox_override("pressed", pill)
-		button.add_theme_stylebox_override("hover_pressed", pill)
-		button.add_theme_color_override("font_color", UI_THEME.color(self, "text_muted"))
-		button.add_theme_color_override("font_hover_color", UI_THEME.color(self, "text"))
-		for state: String in ["font_pressed_color", "font_hover_pressed_color"]:
-			button.add_theme_color_override(state, UI_THEME.color(self, "accent"))
-		button.end_bulk_theme_override()
+## The Joinery theme's segmented buttons: the current screen on an accent tint.
+func _ready() -> void:
+	UI_THEME.watch(self)
 
 
 ## Highlight [param screen], or nothing when it is not one of Godot's screens.
