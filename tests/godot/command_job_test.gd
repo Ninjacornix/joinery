@@ -76,12 +76,17 @@ func _run() -> void:
 
 
 ## True once a drained pipe says it is closed, reading past its end if it hasn't yet.
-static func _reads_eof(pipe: FileAccess) -> bool:
-	if pipe.get_error() != ERR_FILE_EOF:
-		var extra := pipe.get_buffer(1)
-		if not extra.is_empty():
+func _reaches_eof(pipe: FileAccess, deadline: int) -> bool:
+	# A Windows pipe reports EOF (ERROR_BROKEN_PIPE) once every write handle is closed.
+	# The writer can read as exited a moment before Windows has closed its handles (a
+	# venv's python.exe also waits on a child of its own), so ask until the deadline.
+	while Time.get_ticks_msec() < deadline:
+		if pipe.get_length() > 0:
 			return false
-	return pipe.get_error() == ERR_FILE_EOF
+		if pipe.get_error() == ERR_FILE_EOF:
+			return true
+		await process_frame
+	return false
 
 
 func _exited_writer_eof(python: String) -> void:
@@ -123,12 +128,14 @@ func _exited_writer_eof(python: String) -> void:
 		_check(received == expected, "Drain exact Unicode tail bytes after process exit")
 		_check(stdout_pipe.get_length() == 0, "Drained stdout has zero available bytes")
 		if OS.get_name() == "Windows":
-			# A pipe only learns it is closed when a read reaches past the last byte; whether
-			# the drain above already did depends on timing, so read once more.
-			_check(_reads_eof(stdout_pipe), "Closed Windows stdout reports EOF")
+			var eof_by := Time.get_ticks_msec() + 5000
+			_check(await _reaches_eof(stdout_pipe, eof_by), "Closed Windows stdout reports EOF")
 		_check(stderr_pipe.get_length() == 0, "Short EOF writer has no stderr output")
 		if OS.get_name() == "Windows":
-			_check(_reads_eof(stderr_pipe), "Closed Windows stderr reports EOF")
+			var stderr_eof_by := Time.get_ticks_msec() + 5000
+			_check(
+				await _reaches_eof(stderr_pipe, stderr_eof_by), "Closed Windows stderr reports EOF"
+			)
 	stdout_pipe.close()
 	stderr_pipe.close()
 	_check(not stdout_pipe.is_open() and not stderr_pipe.is_open(), "Close owned EOF fixture pipes")
