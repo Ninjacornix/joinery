@@ -597,6 +597,7 @@ func _godot_view() -> String:
 func _on_main_screen_changed(screen: String) -> void:
 	if screen in ["2D", "3D"]:
 		_last_view = screen
+	_shell.screen_changed(screen)
 	if _rail != null and screen != SCREEN:
 		_rail.select_tool("godot")
 

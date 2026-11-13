@@ -8,11 +8,21 @@ extends RefCounted
 
 const TOOLBAR_SETTING := "joinery/show_viewport_toolbar"
 const UI_THEME := preload("ui_theme.gd")
+const SWITCH_SCRIPT := preload("screen_switch.gd")
+## Godot's main screens by the class of the editor each shows.
+const SCREEN_CLASSES := {
+	"CanvasItemEditor": "2D",
+	"Node3DEditor": "3D",
+	"ScriptEditor": "Script",
+	"GameView": "Game",
+}
 ## Longest log line quoted in the Output tab's tooltip.
 const OUTPUT_TIP_CHARS := 120
 
 var _toolbars: Array[Control] = []
 var _styled_menus: Array[MenuButton] = []
+## The 2D | 3D | Script switch in the scene tab row, in Joinery's layout (screen_switch.gd).
+var _switch: Control
 ## Toolbar controls hidden to keep the 3D toolbar compact.
 var _compacted: Array[Control] = []
 var _previous: Array[bool] = []
@@ -43,6 +53,13 @@ func apply(base: Control, settings: EditorSettings, joinery_layout := true) -> v
 			control.visible = _shown
 			if joinery_layout:
 				_compact(control)
+	if joinery_layout and _switch == null:
+		_switch = SWITCH_SCRIPT.new()
+		if _switch.place(base):
+			_switch.select(current_screen())
+		else:
+			_switch.free()
+			_switch = null
 	if joinery_layout:
 		for viewport: Node in base.find_children("*", "Node3DEditorViewport", true, false):
 			for menu: Node in viewport.find_children("*", "MenuButton", true, false):
@@ -102,6 +119,23 @@ func _style_view_menu(menu: MenuButton) -> void:
 	menu.add_theme_color_override("font_color", UI_THEME.color(menu, "text"))
 	menu.add_theme_color_override("font_hover_color", UI_THEME.color(menu, "text"))
 	_styled_menus.append(menu)
+
+
+## The Godot main screen showing now ("2D", "3D", "Script", "Game"), or "" when another one
+## (the asset workspace) is.
+static func current_screen() -> String:
+	for child: Node in EditorInterface.get_editor_main_screen().get_children():
+		if child is Control and (child as Control).visible:
+			for type: String in SCREEN_CLASSES:
+				if child.is_class(type):
+					return SCREEN_CLASSES[type]
+	return ""
+
+
+## The main screen changed to [param screen]: highlight it on the switch.
+func screen_changed(screen: String) -> void:
+	if is_instance_valid(_switch):
+		_switch.select(screen)
 
 
 ## True when [param base] (the editor's base control) runs Joinery's layout. Godot's classic
@@ -226,6 +260,9 @@ func restore() -> void:
 			menu.remove_theme_color_override("font_color")
 			menu.remove_theme_color_override("font_hover_color")
 	_styled_menus.clear()
+	if is_instance_valid(_switch):
+		_switch.queue_free()
+	_switch = null
 	var compacted := _compacted.duplicate()
 	_compacted.clear()
 	for control: Control in compacted:
