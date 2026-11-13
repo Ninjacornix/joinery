@@ -5,7 +5,8 @@ extends SceneTree
 ## and right edge; the transcript's scrollbar sits in the gutter, and the header row starts
 ## SPACE.1 under the top edge. Chips with long names end in an ellipsis inside the gutter
 ## instead of widening the sidebar, and Settings' reviewer Model field shows "Same as
-## Journeyman" uncut, and "Older versions" beside or above its choice uncut.
+## Journeyman" uncut, and "Older versions" beside or above its choice uncut. Settings' rows start
+## on the same left edge as the chat.
 
 const WIDTHS: Array[int] = [340, 480, 1000]
 const HEIGHT := 760
@@ -174,7 +175,7 @@ func _measure(width: int) -> void:
 	_both(tasks.get("design_card"), left, right, "The design card", width)
 	_both(chat.get("_composer"), left, right, "The composer", width)
 	await _long_chips(chat, width, right)
-	await _model_field(chat, width)
+	await _model_field(chat, width, left)
 	host.free()
 	await _frames(2)
 
@@ -220,11 +221,19 @@ func _long_chips(chat: Control, width: int, right: float) -> void:
 	await _frames(2)
 
 
-## Settings: the reviewer's Model field has room for "Same as Journeyman".
-func _model_field(chat: Control, width: int) -> void:
+## Settings: its rows' text starts on the chat's left edge, and the reviewer's Model field has
+## room for "Same as Journeyman".
+func _model_field(chat: Control, width: int, left: float) -> void:
 	var settings: Node = chat.get("_settings")
 	settings.call("set_open", true)
 	await _frames(4)
+	var theme_row := (settings.get("_theme_picker") as Control).get_parent()
+	_on(theme_row.get_child(0), "left", left, "Settings' Theme row", width)
+	var art: Button = null
+	for node: Node in settings.find_children("*", "Button", true, false):
+		if (node as Button).text == "Art direction":
+			art = node
+	_on(art, "left", left, "Settings' Art direction row", width)
 	var reviewer: Node = settings.find_child("ReviewerSetting", true, false)
 	_check(reviewer != null, "Settings shows the Reviewer agent (%d px)" % width)
 	if reviewer != null:
@@ -268,7 +277,7 @@ func _policy_row(chat: Control, settings: Node, width: int) -> void:
 		"The choice stays inside the sidebar (%d px)" % width
 	)
 	_check(
-		(picked.position.y >= row.end.y - 0.5) == (width < WIDTHS[1]),
-		"The choice is under the title only when narrow (%d px)" % width
+		width < WIDTHS[1] or picked.position.y < row.end.y - 0.5,
+		"The choice is beside the title when there is room (%d px)" % width
 	)
 	await _frames(2)

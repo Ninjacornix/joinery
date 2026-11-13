@@ -263,6 +263,19 @@ static func scroll_in_gutter(scroller: ScrollContainer) -> void:
 	)
 
 
+## A sidebar page (Settings, Chats) on the chat's edges: its rows' text starts on the gutter
+## where the transcript's text does (the JoineryInset rows inside [param body] lose their left
+## inset; a row's hover fill reaches outward instead), [param page]'s scrollbar keeps its room
+## in the gutter, and the page spans the sidebar like the transcript, with no narrower cap.
+static func page_edges(page: ScrollContainer, body: Control) -> void:
+	var local := Theme.new()
+	local.set_type_variation("JoineryInset", "MarginContainer")
+	local.set_constant("margin_left", "JoineryInset", 0)
+	body.theme = local
+	page.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_RESERVE
+	scroll_in_gutter(page)
+
+
 ## In Joinery's layout the sidebar is alone in its dock slot, which hides its tabs. There the
 ## slot's own padding goes, so [param dock]'s gutter is measured from the edge you see and its
 ## header row sits level with the editor's tab row. A slot that shows tabs (Godot's classic

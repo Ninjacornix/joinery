@@ -16,11 +16,8 @@ const UI_MOTION := preload("ui_motion.gd")
 const UI := preload("ui_components.gd")
 const STYLE := preload("sidebar_style.gd")
 const STORE := preload("chat_store.gd")
-## Page body width cap, in multiples of the font size (as Settings).
-const MAX_EM := 36.0
 
 var _body: VBoxContainer
-var _spacer: Control
 var _list: VBoxContainer
 var _empty: Label
 var _new: Button
@@ -34,20 +31,10 @@ func _ready() -> void:
 	accessibility_name = "Chats"
 	UI_THEME.watch(self)
 	UI_MOTION.rubber_band(self)
-	var gutter := MarginContainer.new()
-	gutter.theme_type_variation = "JoineryGutter"
-	gutter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	add_child(gutter)
-	var column := HBoxContainer.new()
-	gutter.add_child(column)
 	_body = VBoxContainer.new()
 	_body.theme_type_variation = "JoinerySections"
 	_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	column.add_child(_body)
-	_spacer = Control.new()
-	_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	column.add_child(_spacer)
+	add_child(_body)
 	var row := HBoxContainer.new()
 	row.theme_type_variation = "JoineryRow"
 	_body.add_child(row)
@@ -78,25 +65,7 @@ func _ready() -> void:
 	inset.theme_type_variation = "JoineryInset"
 	inset.add_child(_empty)
 	_body.add_child(inset)
-	_on_theme_rebuilt()
-
-
-func _notification(what: int) -> void:
-	if (what == NOTIFICATION_RESIZED or what == NOTIFICATION_VISIBILITY_CHANGED) and _body != null:
-		_fit.call_deferred()
-
-
-func _on_theme_rebuilt() -> void:
-	_fit()
-
-
-## Cap the body at MAX_EM without raising the page's minimum width.
-func _fit() -> void:
-	var bar := get_v_scroll_bar()
-	var available := size.x - UI_THEME.space(self, 3) - (bar.size.x if bar.visible else 0.0)
-	var cap := MAX_EM * get_theme_default_font_size()
-	_body.size_flags_stretch_ratio = maxf(1.0, minf(available, cap))
-	_spacer.size_flags_stretch_ratio = maxf(0.0, available - cap)
+	STYLE.page_edges(self, _body)
 
 
 ## Show [param chats] (chat_store.gd's list); [param current] is the open chat's id.

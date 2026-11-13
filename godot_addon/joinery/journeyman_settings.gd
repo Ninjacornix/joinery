@@ -29,8 +29,6 @@ const MODE_HINTS := [
 	"Takes longer and works through bigger changes step by step",
 ]
 const THEMES := {"match": "Match editor", "dark": "Dark", "light": "Light"}
-## Page body width cap, in multiples of the font size.
-const MAX_EM := 36.0
 const TROUBLESHOOTING := [
 	["Refresh models", "/models"],
 	["Check installed apps", "/doctor"],
@@ -52,7 +50,6 @@ const LAYOUTS := ["Joinery", "Classic Godot"]
 
 var dock: Control
 var _body: VBoxContainer
-var _spacer: Control
 var _status: Label
 var _theme_picker: OptionButton
 var _theme_note: Control
@@ -178,21 +175,12 @@ func _ready() -> void:
 	size_flags_vertical = Control.SIZE_EXPAND_FILL
 	UI_THEME.watch(self)
 	UI_MOTION.rubber_band(self)
-	var gutter := MarginContainer.new()
-	gutter.theme_type_variation = "JoineryGutter"
-	gutter.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	add_child(gutter)
-	var column := HBoxContainer.new()
-	gutter.add_child(column)
 	_body = VBoxContainer.new()
 	_body.theme_type_variation = "JoinerySections"
 	_body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	column.add_child(_body)
-	_spacer = Control.new()
-	_spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	column.add_child(_spacer)
+	add_child(_body)
 	_build_title()
+	STYLE.page_edges(self, _body)
 	_build_appearance()
 	_build_replies()
 	_build_project()
@@ -202,9 +190,7 @@ func _ready() -> void:
 
 
 func _notification(what: int) -> void:
-	if (what == NOTIFICATION_RESIZED or what == NOTIFICATION_VISIBILITY_CHANGED) and _body != null:
-		_fit.call_deferred()
-	elif what == NOTIFICATION_EXIT_TREE:
+	if what == NOTIFICATION_EXIT_TREE:
 		_cancel_history()
 
 
@@ -217,17 +203,6 @@ func _on_theme_rebuilt() -> void:
 		var key: String = UI_THEME.ACCENTS.keys()[index]
 		var swatch: Color = UI_THEME.ACCENTS[key][0 if dark else 1]
 		_accent_picker.set_item_icon(index, _swatch(swatch))
-	_fit()
-
-
-## Cap the body at MAX_EM. Stretch ratios share the width without raising the page's minimum
-## size, so a narrow dock never gets pushed wider by its settings.
-func _fit() -> void:
-	var bar := get_v_scroll_bar()
-	var available := size.x - UI_THEME.space(self, 3) - (bar.size.x if bar.visible else 0.0)
-	var cap := MAX_EM * get_theme_default_font_size()
-	_body.size_flags_stretch_ratio = maxf(1.0, minf(available, cap))
-	_spacer.size_flags_stretch_ratio = maxf(0.0, available - cap)
 
 
 func _build_title() -> void:
@@ -681,7 +656,8 @@ func _flush_picker(picker: Button) -> void:
 	)
 
 
-## Pull a row button's trailing chevron right so its ink ends on the content edge.
+## Pull a row button's trailing chevron right so its ink ends on the content edge, and its
+## text onto the left edge every row's text starts on (the hover fill reaches outward).
 func _flush_row(button: Button) -> void:
 	STYLE.on_theme_overrides(
 		button,
@@ -697,6 +673,10 @@ func _flush_row(button: Button) -> void:
 					continue
 				var box := source.duplicate() as StyleBox
 				box.content_margin_right = maxf(0.0, box.content_margin_right - ink)
+				var pad := box.content_margin_left
+				box.content_margin_left = 0.0
+				if box is StyleBoxFlat:
+					(box as StyleBoxFlat).expand_margin_left += pad
 				button.add_theme_stylebox_override(state, box)
 	)
 
