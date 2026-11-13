@@ -83,7 +83,7 @@ func _run() -> void:
 			_check(dock.get_parent().is_class("EditorBottomPanel"), title + " must be at bottom")
 	_check(plugin._shell._toolbars.size() >= 1, "The viewport toolbar must be discovered")
 	for control: Control in plugin._shell._toolbars:
-		_check(not control.visible, "Viewport controls must be hidden by default")
+		_check(control.visible, "Viewport controls show by default")
 	var scene_tabs := base.find_children("*", "EditorSceneTabs", true, false)
 	_check(not scene_tabs.is_empty(), "Scene tabs must exist")
 	for tabs: Node in scene_tabs:
@@ -130,7 +130,7 @@ func _run() -> void:
 	_check(plugin._dock.target_snapshot()[0]["kind"] == "Audio", "Identify engine audio selection")
 	selection.clear()
 	for control: Control in plugin._shell._toolbars:
-		_check(control.visible, "Viewport controls must be toggleable")
+		_check(not control.visible, "Viewport controls must be toggleable")
 	plugin._on_toggle_toolbar()
 	EditorInterface.set_main_screen_editor("3D")
 	await get_tree().create_timer(0.2).timeout
@@ -143,13 +143,12 @@ func _run() -> void:
 	_check(plugin._rail._buttons.has("godot"), "Godot must be in the app rail")
 	_check(plugin._rail._buttons.has(""), "All assets must be in the app rail")
 	await _rail_states(plugin)
-	var toolbar_button: Button = plugin._rail.find_child("ViewportToolbarToggle", true, false)
+	_check(
+		plugin._rail.find_child("ViewportToolbarToggle", true, false) == null,
+		"The viewport toolbar has no rail toggle; /toolbar hides it"
+	)
 	for id: String in plugin._rail._buttons:
 		var app_button: Button = plugin._rail._buttons[id]
-		_check(
-			app_button.custom_minimum_size == toolbar_button.custom_minimum_size,
-			"Toolbar and app buttons must use the same size"
-		)
 		_check(app_button.icon_alignment == HORIZONTAL_ALIGNMENT_CENTER, "Center app icons")
 	if plugin._rail._buttons.has("blender"):
 		plugin._rail._buttons["blender"].pressed.emit()
@@ -245,13 +244,6 @@ func _run() -> void:
 
 
 func _rail_states(plugin: EditorPlugin) -> void:
-	var toggle: Button = plugin._rail.find_child("ViewportToolbarToggle", true, false)
-	_check(toggle.toggle_mode, "Viewport tools is a toggle")
-	_check(toggle.tooltip_text == "Viewport tools", "Viewport tools has a plain name")
-	_check(toggle.button_pressed == plugin._shell.is_shown(), "Toggle shows the saved preference")
-	plugin._on_toggle_toolbar()
-	_check(toggle.button_pressed == plugin._shell.is_shown(), "Toggle follows /toolbar")
-	plugin._on_toggle_toolbar()
 	# The scene is a Node3D, so the Godot item opens the 3D view.
 	EditorInterface.set_main_screen_editor("Script")
 	_screens.clear()

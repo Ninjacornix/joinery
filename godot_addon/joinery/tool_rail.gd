@@ -1,11 +1,10 @@
 @tool
 extends VBoxContainer
 ## The app rail beside the viewport. The fork provides the column (JoineryNavigation); the
-## addon fills it: Godot, All assets, then each project app, and the viewport tools toggle at
-## the bottom.
+## addon fills it: Godot, All assets, then each project app, and Joinery's own pages.
 ##
 ## Each app shows its official logo in its own colours (icons/apps, see licenses/tool-logos.md);
-## an app without one (and All assets, the viewport tools toggle and custom tools) shows a
+## an app without one (and All assets, the pages and custom tools) shows a
 ## monochrome glyph tinted text, or accent when selected. The selected item gets an accent bar
 ## on the rail's left edge and a raised pill behind its icon; a logo is never recoloured. Icons
 ## are rendered again whenever the theme turns light or dark. Each app shows its readiness from
@@ -15,7 +14,6 @@ extends VBoxContainer
 ## last checked. Every command runs as a job, off the UI thread.
 
 signal tool_selected(tool: String)
-signal toolbar_requested
 
 const UI_THEME := preload("ui_theme.gd")
 const UI_COMPONENTS := preload("ui_components.gd")
@@ -63,7 +61,6 @@ var _tools: VBoxContainer
 ## Joinery's own pages (Timeline, Share, Mixer) below the apps, and their ids.
 var _pages: VBoxContainer
 var _page_ids: Array[String] = []
-var _toolbar: RailItem
 var _group := ButtonGroup.new()
 var _selected := "godot"
 var _signature: Array = []
@@ -181,14 +178,6 @@ func _ready() -> void:
 	_pages.theme_type_variation = "JoineryTight"
 	_pages.hide()
 	add_child(_pages)
-	var spacer := Control.new()
-	spacer.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	spacer.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(spacer)
-	var toggle := _button("ViewportToolbarToggle", "Viewport tools")
-	_toolbar = _item(toggle, {"editor": "Ruler"}, false)
-	toggle.pressed.connect(func() -> void: toolbar_requested.emit())
-	add_child(_toolbar)
 	_build_card()
 	_refresh_readiness()
 
@@ -297,13 +286,6 @@ func select_tool(tool: String) -> void:
 		var item: RailItem = _items[id]
 		item.button.set_pressed_no_signal(id == tool)
 		_sync(item)
-
-
-## Reflect the saved viewport-tools preference on the toggle at the bottom of the rail.
-func set_toolbar_shown(shown: bool) -> void:
-	if _toolbar != null:
-		_toolbar.button.set_pressed_no_signal(shown)
-		_sync(_toolbar)
 
 
 func _on_theme_rebuilt() -> void:
@@ -435,8 +417,6 @@ func _all_items() -> Array[RailItem]:
 	var items: Array[RailItem] = []
 	for item: RailItem in _items.values():
 		items.append(item)
-	if _toolbar != null:
-		items.append(_toolbar)
 	return items
 
 

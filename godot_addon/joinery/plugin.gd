@@ -183,8 +183,6 @@ func _restore_focus() -> void:
 		_workspace.catalog_changed.connect(_rail.update_tools)
 		_workspace.creator_changed.connect(_on_creator_changed)
 		_rail.tool_selected.connect(_on_tool_selected)
-		_rail.toolbar_requested.connect(_on_toggle_toolbar)
-		_rail.set_toolbar_shown(_shell.is_shown())
 		for id: String in _pages:
 			_rail.add_page(id, str(_pages[id]["title"]), _pages[id]["icon"])
 		_workspace.refresh()
@@ -569,8 +567,6 @@ func _on_toggle_toolbar() -> void:
 		_status("The classic Godot view always shows the viewport tools")
 		return
 	var shown: bool = _shell.toggle(get_editor_interface().get_editor_settings())
-	if _rail != null:
-		_rail.set_toolbar_shown(shown)
 	_status("Viewport tools shown" if shown else "Viewport tools hidden")
 
 

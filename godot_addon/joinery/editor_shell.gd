@@ -1,15 +1,20 @@
 @tool
 extends RefCounted
 ## Viewport controls have their own preference, independent of Focus mode, in Joinery's layout
-## (Godot's classic layout always shows them). Scene tabs always show. Also keeps the
+## (Godot's classic layout always shows them); they show unless the user hid them with /toolbar.
+## The 3D view's "Perspective" menus wear the Joinery theme. Scene tabs always show. Also keeps the
 ## FileSystem tree scrolled to its first row when the Files panel opens, and explains the
 ## Output tab's status mark (the engine's error or warning icon) in the tab's tooltip.
 
 const TOOLBAR_SETTING := "joinery/show_viewport_toolbar"
+const UI_THEME := preload("ui_theme.gd")
 ## Longest log line quoted in the Output tab's tooltip.
 const OUTPUT_TIP_CHARS := 120
 
 var _toolbars: Array[Control] = []
+var _styled_menus: Array[MenuButton] = []
+## Toolbar controls hidden to keep the 3D toolbar compact.
+var _compacted: Array[Control] = []
 var _previous: Array[bool] = []
 var _shown := false
 var _file_tree: Tree
@@ -23,7 +28,7 @@ func apply(base: Control, settings: EditorSettings, joinery_layout := true) -> v
 	_shown = (
 		bool(settings.get_setting(TOOLBAR_SETTING))
 		if settings.has_setting(TOOLBAR_SETTING)
-		else false
+		else true
 	)
 	if not joinery_layout:
 		_shown = true
@@ -36,6 +41,13 @@ func apply(base: Control, settings: EditorSettings, joinery_layout := true) -> v
 			_toolbars.append(control)
 			_previous.append(control.visible)
 			control.visible = _shown
+			if joinery_layout:
+				_compact(control)
+	if joinery_layout:
+		for viewport: Node in base.find_children("*", "Node3DEditorViewport", true, false):
+			for menu: Node in viewport.find_children("*", "MenuButton", true, false):
+				if not (menu as MenuButton).flat:
+					_style_view_menu(menu as MenuButton)
 	# Scene tabs stay visible in both layouts: they switch between open scenes and their
 	# "+" button makes a new one.
 	for node: Node in base.find_children("*", "EditorSceneTabs", true, false):
@@ -46,6 +58,50 @@ func apply(base: Control, settings: EditorSettings, joinery_layout := true) -> v
 		if not _output.tree_entered.is_connected(_watch_output_tab):
 			_output.tree_entered.connect(_watch_output_tab)
 		_watch_output_tab()
+
+
+## Keep the 3D toolbar to one compact group: the mode tools (Transform, Move, Rotate, Scale,
+## Select) and Use Snap. The full toolbar is wider than the viewport beside the Scene column
+## and the sidebar; the classic view keeps all of it.
+func _compact(toolbar: Control) -> void:
+	var rows := toolbar.find_children("*", "HBoxContainer", true, false)
+	if rows.is_empty():
+		return
+	var first_group := true
+	for child: Node in (rows[0] as Node).get_children():
+		var control := child as Control
+		if control == null:
+			continue
+		if control is VSeparator:
+			first_group = false
+		var keep := first_group or control.accessibility_name == "Use Snap"
+		if not keep and not _compacted.has(control):
+			control.visible = false
+			_compacted.append(control)
+			# Godot shows Lock or Unlock, Group or Ungroup, as the selection changes.
+			control.visibility_changed.connect(
+				func() -> void:
+					if control.visible and _compacted.has(control):
+						control.hide.call_deferred()
+			)
+
+
+## The 3D view's menu ("⋮ Perspective"): a raised surface with the theme's corner radius over
+## the viewport, instead of the stock grey button.
+func _style_view_menu(menu: MenuButton) -> void:
+	for state: String in ["normal", "hover", "pressed", "focus"]:
+		var box := StyleBoxFlat.new()
+		box.bg_color = UI_THEME.color(menu, "surface" if state == "normal" else "surface_raised")
+		box.set_corner_radius_all(UI_THEME.radius(menu, "md"))
+		box.set_content_margin_all(UI_THEME.space(menu, 1))
+		box.content_margin_left = UI_THEME.space(menu, 2)
+		box.content_margin_right = UI_THEME.space(menu, 3)
+		if state == "focus":
+			box.draw_center = false
+		menu.add_theme_stylebox_override(state, box)
+	menu.add_theme_color_override("font_color", UI_THEME.color(menu, "text"))
+	menu.add_theme_color_override("font_hover_color", UI_THEME.color(menu, "text"))
+	_styled_menus.append(menu)
 
 
 ## True when [param base] (the editor's base control) runs Joinery's layout. Godot's classic
@@ -163,3 +219,15 @@ func restore() -> void:
 			_toolbars[index].visible = _previous[index]
 	_toolbars.clear()
 	_previous.clear()
+	for menu: MenuButton in _styled_menus:
+		if is_instance_valid(menu):
+			for state: String in ["normal", "hover", "pressed", "focus"]:
+				menu.remove_theme_stylebox_override(state)
+			menu.remove_theme_color_override("font_color")
+			menu.remove_theme_color_override("font_hover_color")
+	_styled_menus.clear()
+	var compacted := _compacted.duplicate()
+	_compacted.clear()
+	for control: Control in compacted:
+		if is_instance_valid(control):
+			control.visible = true
