@@ -256,10 +256,6 @@ func show_audit(data: Dictionary) -> void:
 	title_label.text = headline(data) if kind == "match" else check_headline(kind, data)
 	title_label.tooltip_text = title_label.text
 	var fixable := _fixable(findings)
-	var serious := 0
-	for item: Variant in findings:
-		if str((item as Dictionary).get("severity", "")) == "high":
-			serious += 1
 	show_target(str((data.get("facts", {}) as Dictionary).get("target", "")))
 	var errors: Array = data.get("errors", [])
 	if not errors.is_empty():
@@ -269,7 +265,7 @@ func show_audit(data: Dictionary) -> void:
 			"done", "Checked against the art bible's rules" if kind == "match" else facts_line(data)
 		)
 	else:
-		_settle("warning" if serious > 0 else "done", severity_line(findings))
+		_settle("", severity_line(findings))
 	_again.visible = true
 	_review.visible = _ready_count() > 0
 	_fill_areas(data.get("areas", []), before)
@@ -281,7 +277,7 @@ func show_audit(data: Dictionary) -> void:
 	fix_all.text = "Fix %d %s" % [fixable, "thing" if fixable == 1 else "things"]
 	fix_all.visible = fixable > 0
 	var needs := findings.size() - fixable
-	_needs.text = "%d need you" % needs if needs > 0 else ""
+	_needs.text = ("%d needs you" if needs == 1 else "%d need you") % needs if needs > 0 else ""
 	_needs.tooltip_text = _needs_detail(findings)
 	_needs.visible = needs > 0
 	var kept: Array = data.get("excluded", [])
@@ -721,8 +717,10 @@ func _working(words: String) -> void:
 func _settle(kind: String, words: String) -> void:
 	_dots.set("running", false)
 	_dots.hide()
-	UI.set_status_icon(_status, kind)
-	_status.show()
+	# "" is a plain fact (how many of each severity): no icon claims it is good or bad.
+	if not kind.is_empty():
+		UI.set_status_icon(_status, kind)
+	_status.visible = not kind.is_empty()
 	_step.text = words
 	_step.tooltip_text = words
 

@@ -148,11 +148,12 @@ func _init() -> void:
 	UI_MOTION.press_feedback(remove_all)
 	remove_all.pressed.connect(_on_remove_all)
 	_foot.add_child(remove_all)
-	caches = UI.quiet("")
+	# A real (secondary) button, so it reads as something to press, under the one filled action.
+	caches = UI.secondary("")
+	STYLE.on_card(caches)
 	caches.tooltip_text = "Joinery's own caches (review renders, maps, old results): made again"
-	UI.bind_height(caches, "xs")
+	UI.bind_height(caches, "sm")
 	caches.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	STYLE.hug_left(caches)
 	UI_MOTION.press_feedback(caches)
 	caches.pressed.connect(_on_caches)
 	caches.hide()

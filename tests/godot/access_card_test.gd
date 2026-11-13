@@ -100,7 +100,7 @@ func _run() -> void:
 	)
 	var fix_all: Button = card.get("fix_all")
 	_check(fix_all.text == "Fix 7 things", "Fix all names how many: " + fix_all.text)
-	_check(card.get("_needs").text == "1 need you", "What Joinery can't fix is counted")
+	_check(card.get("_needs").text == "1 needs you", "What Joinery can't fix is counted")
 
 	# The same findings by Xbox Accessibility Guideline, with what Joinery checks.
 	var guide: Control = card.get("guidelines")

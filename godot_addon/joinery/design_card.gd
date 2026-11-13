@@ -150,10 +150,7 @@ func show_report(data: Dictionary, agent_ran := false, dropped := 0) -> void:
 	if findings.is_empty():
 		_settle("done", "Checked " + read_line(data))
 	else:
-		var serious := 0
-		for item: Variant in findings:
-			serious += int(str((item as Dictionary).get("severity", "")) == "high")
-		_settle("warning" if serious > 0 else "done", severity_line(findings))
+		_settle("", severity_line(findings))
 	_step.tooltip_text = "Checked " + read_line(data)
 	if dropped > 0:
 		_step.tooltip_text += (
@@ -259,7 +256,7 @@ func _row(item: Dictionary) -> HBoxContainer:
 	var severity := str(item.get("severity", "low"))
 	row.add_child(UI.status_dot(str(DOTS.get(severity, "off"))))
 	var agent := str(item.get("source", "check")) == "agent"
-	var words := UI.label(str(item.get("title", "")), "JoineryCaption")
+	var words := UI.label(plain(str(item.get("title", ""))), "JoineryCaption")
 	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	words.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	words.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
@@ -300,6 +297,12 @@ func _row(item: Dictionary) -> HBoxContainer:
 	return row
 
 
+## A finding's words as the row shows them: `code` marks become quotes ("dash"), never raw
+## backticks.
+static func plain(text: String) -> String:
+	return RegEx.create_from_string("`([^`]+)`").sub(text, "\u201c$1\u201d", true)
+
+
 func _mark_asked(ask: Button) -> void:
 	ask.text = "Asked"
 	ask.tooltip_text = "The request is in the chat; ask again to put it back"
@@ -326,8 +329,10 @@ func _working(words: String) -> void:
 func _settle(kind: String, words: String) -> void:
 	_dots.set("running", false)
 	_dots.hide()
-	UI.set_status_icon(_status, kind)
-	_status.show()
+	# "" is a plain fact (how many of each severity): no icon claims it is good or bad.
+	if not kind.is_empty():
+		UI.set_status_icon(_status, kind)
+	_status.visible = not kind.is_empty()
 	_step.text = words
 	_step.tooltip_text = words
 

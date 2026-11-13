@@ -116,7 +116,7 @@ func _run() -> void:
 		"Fix all names how many: " + fix_all.text
 	)
 	_check(_button(card, "Fix") != null, "Each area that can be fixed has Fix")
-	_check(card.get("_needs").text == "1 need you", "What Joinery can't fix is counted")
+	_check(card.get("_needs").text == "1 needs you", "What Joinery can't fix is counted")
 	_check(card.get("_kept").text == "2 kept as they are", "Final and excluded files are counted")
 	_check((card.call("area_fix", "models") as Button).disabled, "A clean area has no Fix")
 

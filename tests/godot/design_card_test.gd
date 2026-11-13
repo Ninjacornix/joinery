@@ -107,7 +107,10 @@ func _run() -> void:
 	var rows: Array = card.call("finding_rows")
 	_check(rows.size() == 5, "The first five findings show: %d" % rows.size())
 	var first: Control = rows[0]
-	_check(_row_text(first) == "Dash: `dash` isn't in the input map", "One line per finding")
+	_check(
+		_row_text(first) == "Dash: \u201cdash\u201d isn't in the input map",
+		"One line per finding, code in quotes, not backticks"
+	)
 	_check(first.tooltip_text.contains("brief.md:12"), "The evidence is in the tooltip")
 	_check(first.tooltip_text.contains("The player has no way to dash."), "And the player's view")
 	_check(_button(first, "Ask agent to fix") != null, "Each finding has Ask agent to fix")

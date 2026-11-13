@@ -215,7 +215,7 @@ func apply(event: Dictionary) -> void:
 		"done":
 			var found := int(_total())
 			_settle(
-				"done" if _serious() == 0 else "warning",
+				"done" if _serious() == 0 else "",
 				(
 					"Nothing went wrong in %s of play." % _clock(_played())
 					if found == 0
@@ -539,8 +539,10 @@ func _settle(kind: String, words: String) -> void:
 	_timer.hide()
 	stop.hide()
 	close.show()
-	UI.set_status_icon(_status, kind)
-	_status.show()
+	# "" is a plain fact (how many of each severity): no icon claims it is good or bad.
+	if not kind.is_empty():
+		UI.set_status_icon(_status, kind)
+	_status.visible = not kind.is_empty()
 	_step.text = words
 	_step.tooltip_text = words
 

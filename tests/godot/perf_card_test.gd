@@ -87,7 +87,7 @@ func _run() -> void:
 	var row_text := (first.find_children("", "Label", true, false)[0] as Label).text
 	_check(row_text.begins_with("hot.gd: Costs 41.3 ms"), "A script finding: " + row_text)
 	_check((card.get("fix_all") as Button).text == "Fix 3 things", "Three can be fixed")
-	_check(card.get("_needs").text == "1 need you", "The frame time needs the others")
+	_check(card.get("_needs").text == "1 needs you", "The frame time needs the others")
 
 	# Another machine: measured again.
 	picker.select(3)

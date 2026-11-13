@@ -161,8 +161,7 @@ func apply(event: Dictionary) -> void:
 		"checked":
 			var summary := str(event.get("summary", ""))
 			_settle(
-				"done" if _fails() == 0 else "warning",
-				summary if not summary.is_empty() else _summary()
+				"done" if _fails() == 0 else "", summary if not summary.is_empty() else _summary()
 			)
 			UI_MOTION.pulse(self)
 		"cancelled", "dropped":
@@ -403,8 +402,10 @@ func _on_cancel() -> void:
 func _settle(kind: String, words: String) -> void:
 	_dots.set("running", false)
 	_dots.hide()
-	UI.set_status_icon(_status, kind)
-	_status.show()
+	# "" is a plain fact (how many of each severity): no icon claims it is good or bad.
+	if not kind.is_empty():
+		UI.set_status_icon(_status, kind)
+	_status.visible = not kind.is_empty()
 	_step.text = words
 	_step.tooltip_text = words
 	close.show()
