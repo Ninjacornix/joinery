@@ -110,7 +110,7 @@ def test_install_checks_the_worker_and_records_its_pin(
 @pytest.mark.parametrize(
     "options,message",
     [
-        ({"ref": "f" * 40}, "different Godot MCP"),
+        ({"ref": "f" * 40}, "Godot's tools need a refresh after the Joinery update"),
         ({"denied": True}, "dependency gate|denied package"),
         ({"lock_record": "0" * 64}, "lock differs"),
     ],
@@ -134,9 +134,15 @@ def test_install_without_docker_says_needs_docker(cache: Path) -> None:
 @pytest.mark.parametrize(
     "stderr,message",
     [
-        (b"Error response from daemon: No such image: joinery-mcp-worker", "not built"),
+        (
+            b"Error response from daemon: No such image: joinery-mcp-worker",
+            "Godot's tools need a refresh before they can work",
+        ),
         (b"Cannot connect to the Docker daemon", "^Needs Docker"),
-        (b"tar: joinery-pin.json: Cannot stat", "no pinned Godot MCP"),
+        (
+            b"tar: joinery-pin.json: Cannot stat",
+            "Godot's tools need a refresh after the Joinery update",
+        ),
     ],
 )
 def test_worker_file_failures_say_what_to_do(
