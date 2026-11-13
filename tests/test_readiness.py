@@ -115,6 +115,9 @@ class FakeHost:
     def expected_revision(self) -> str:
         return self.revision
 
+    def expected_image_revision(self, image: str) -> str:
+        return ""
+
     def mcp(self, project: Path, probe: McpProbe) -> ProbeResult:
         self.probed.append((probe.server, probe.tool))
         return self.probes.get((probe.server, probe.tool), ProbeResult(False, False))
@@ -712,7 +715,7 @@ def test_one_fake_status_flows_unchanged_into_every_surface(
     krita = report["krita"]
     assert krita["status"] == "unavailable"
     assert krita["action"] == {"id": "rebuild", "label": "Refresh tools"}
-    fields =("status", "status_label", "status_reason", "action", "checked_at")
+    fields = ("status", "status_label", "status_reason", "action", "checked_at")
     expected = {key: krita[key] for key in fields}
 
     menu = tool_menu(load_catalog(), load_project_tools(root / "joinery.toml"))
@@ -824,6 +827,68 @@ def test_sandbox_revision_follows_the_build_sources(tmp_path: Path) -> None:
     assert readiness.sandbox_revision() == readiness.sandbox_revision(
         readiness.SANDBOX_DIR
     )
+
+
+def test_each_image_has_its_own_revision_with_its_parents(tmp_path: Path) -> None:
+    import shutil
+
+    sources = tmp_path / "sandbox"
+    shutil.copytree(readiness.SANDBOX_DIR, sources)
+    before = {i: readiness.image_revision(i, sources) for i in readiness.WORKER_IMAGES}
+    assert before == {i: readiness.image_revision(i) for i in readiness.WORKER_IMAGES}
+    # What the creative worker copies in changes it and Inkscape's, built on it.
+    (sources / "krita_worker.py").write_text("# changed\n")
+    after = {i: readiness.image_revision(i, sources) for i in readiness.WORKER_IMAGES}
+    changed = {i for i in before if before[i] != after[i]}
+    assert changed == {"joinery-creative-worker", "joinery-inkscape-worker"}
+    # A tool nothing copies (fetch-checksums.sh) changes no image.
+    (sources / "fetch-checksums.sh").write_text("# changed\n")
+    assert after == {i: readiness.image_revision(i, sources) for i in after}
+    # The base's own Dockerfile, or the pins build.sh reads, change every image.
+    (sources / "versions.env").write_text("GODOT_VERSION=9.9\n")
+    last = {i: readiness.image_revision(i, sources) for i in readiness.WORKER_IMAGES}
+    assert all(last[i] != after[i] for i in last)
+    # Parents named here are the ones the Dockerfiles start from.
+    for image, (dockerfile, parent) in readiness.WORKER_IMAGES.items():
+        text = (readiness.SANDBOX_DIR / dockerfile).read_text()
+        assert not parent or parent in text, (image, parent)
+
+
+def test_an_image_labelled_with_its_own_revision_is_judged_by_it(
+    host: FakeHost,
+) -> None:
+    expected = {CREATIVE_WORKER: "new-creative"}
+    host.expected_image_revision = lambda image: expected.get(image, "")  # type: ignore[method-assign]
+    host.revision = "rev-2"
+    # Built from today's sources: current, whatever the whole sandbox's hash says.
+    host.images[CREATIVE_WORKER] = Image(
+        "sha256:a", revision="rev-1", image_revision="new-creative"
+    )
+    krita = by_id(status(tool="krita", refresh=True, host=host))["krita"]
+    assert krita["state"] == "ready"
+    host.images[CREATIVE_WORKER] = Image("sha256:b", image_revision="old-creative")
+    krita = by_id(status(tool="krita", refresh=True, host=host))["krita"]
+    assert krita["state"] == "needs_image" and krita["after_update"] is True
+
+
+def test_setup_rebuilds_only_what_changed(monkeypatch: pytest.MonkeyPatch) -> None:
+    from joinery import bootstrap
+
+    current = {
+        "joinery-sandbox-runtime": True,
+        "joinery-mcp-worker": True,
+        "joinery-creative-worker": False,
+        "joinery-blender-worker": True,
+        "joinery-inkscape-worker": True,
+    }
+    monkeypatch.setattr(bootstrap, "_current", lambda tag, _rev: current[tag])
+    wanted = list(current)
+    assert bootstrap._outdated(wanted, "r") == [
+        "joinery-creative-worker",
+        "joinery-inkscape-worker",  # built on the rebuilt creative worker
+    ]
+    current["joinery-sandbox-runtime"] = False
+    assert bootstrap._outdated(wanted, "r") == wanted
 
 
 def test_setup_marks_progress_labels_images_and_refreshes(

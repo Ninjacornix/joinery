@@ -25,10 +25,53 @@ TOOL_WORKERS = {"blender": "blender", "inkscape": "inkscape", "audacity": "audac
 RUNTIME = "joinery-sandbox-runtime"
 
 
+def _labels(tag: str, revision: str) -> list[str]:
+    """The image's own revision (what readiness compares), and the whole sandbox's."""
+    return [
+        "--label",
+        f"{readiness.SETUP_LABEL}={revision}",
+        "--label",
+        f"{readiness.IMAGE_LABEL}={readiness.image_revision(tag)}",
+    ]
+
+
+def _current(tag: str, revision: str) -> bool:
+    """True when the image is there and was built from today's sources.
+
+    An image from before per-image revisions counts only when the whole
+    sandbox is unchanged since it was built.
+    """
+    done = subprocess.run(
+        ["docker", "image", "inspect", "--format", "{{json .Config.Labels}}", tag],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if done.returncode:
+        return False
+    try:
+        labels = json.loads(str(getattr(done, "stdout", "")) or "null") or {}
+    except ValueError:
+        return False
+    if labels.get(readiness.IMAGE_LABEL):
+        return bool(labels[readiness.IMAGE_LABEL] == readiness.image_revision(tag))
+    return bool(labels.get(readiness.SETUP_LABEL) == revision)
+
+
+def _outdated(wanted: list[str], revision: str) -> list[str]:
+    """The images to build, in order: changed, missing, or built on a rebuilt parent."""
+    rebuilt: list[str] = []
+    for tag in wanted:
+        parent = readiness.WORKER_IMAGES[tag][1]
+        if parent in rebuilt or not _current(tag, revision):
+            rebuilt.append(tag)
+    return rebuilt
+
+
 def _docker_build(
     tag: str, dockerfile: str, revision: str, progress: tool_refresh.Progress
 ) -> None:
-    """Build one worker image, stamped with the sandbox revision it came from."""
+    """Build one worker image, stamped with the revisions it came from."""
     progress.begin(tag)
     tool_refresh.run(
         [
@@ -37,8 +80,7 @@ def _docker_build(
             "--progress=plain",
             "--platform",
             "linux/amd64",
-            "--label",
-            f"{readiness.SETUP_LABEL}={revision}",
+            *_labels(tag, revision),
             "-t",
             tag,
             "-f",
@@ -76,8 +118,7 @@ def _build_runtime(revision: str, progress: tool_refresh.Progress) -> None:
             "--progress=plain",
             "--platform",
             "linux/amd64",
-            "--label",
-            f"{readiness.SETUP_LABEL}={revision}",
+            *_labels(RUNTIME, revision),
             "-t",
             RUNTIME,
             "-",
@@ -98,7 +139,8 @@ def setup(
     While it builds, `~/.cache/joinery/setup.json` names the image in progress,
     so every readiness screen says "Refreshing…" instead of "Not available",
     and `refresh.json` and `refresh.log` say how far it is (joinery.tool_refresh;
-    `emit` gets each change). Each image is labelled with the sandbox revision,
+    `emit` gets each change). Only the images whose sources changed (or whose
+    parent was rebuilt) are built again, each labelled with its own revision,
     and a readiness refresh starts once the build is done. No image or build
     cache is ever removed. A failure raises RefreshFailed with a readable reason.
 
@@ -132,36 +174,34 @@ def _setup(project: Path, emit: tool_refresh.Emit | None) -> dict[str, Any]:
     )
     first = image.returncode != 0
     workers = [
-        TOOL_WORKERS[tool]
+        "joinery-" + TOOL_WORKERS[tool] + "-worker"
         for tool in selected
         if tool in TOOL_WORKERS and load_catalog().get(tool).mcp is not None
     ]
-    progress = tool_refresh.Progress(
-        int(first) + 2 + len(workers), emit, first=first
-    )
+    shared = [RUNTIME, "joinery-mcp-worker", "joinery-creative-worker"]
+    build = _outdated([*shared, *workers], revision)
+    progress = tool_refresh.Progress(len(build), emit, first=first)
     ready = []
     unavailable = []
     try:
-        if first:
+        if RUNTIME in build:
             readiness.mark_setup("build", RUNTIME)
             _build_runtime(revision, progress)
-        for dockerfile, tag in [
-            ("mcp.Dockerfile", "joinery-mcp-worker"),
-            ("creative.Dockerfile", "joinery-creative-worker"),
-        ]:
-            readiness.mark_setup("build", tag)
-            _docker_build(tag, dockerfile, revision, progress)
+        for tag in shared[1:]:
+            if tag in build:
+                readiness.mark_setup("build", tag)
+                _docker_build(tag, readiness.WORKER_IMAGES[tag][0], revision, progress)
         for tool in selected:
             entry = load_catalog().get(tool)
             if entry.mcp is None:
                 continue
             try:
                 install(tool)
-                worker = TOOL_WORKERS.get(tool)
-                if worker:
-                    tag = "joinery-" + worker + "-worker"
+                tag = "joinery-" + TOOL_WORKERS.get(tool, "") + "-worker"
+                if tag in build:
                     readiness.mark_setup("build", tag)
-                    _docker_build(tag, worker + ".Dockerfile", revision, progress)
+                    dockerfile = readiness.WORKER_IMAGES[tag][0]
+                    _docker_build(tag, dockerfile, revision, progress)
                 ready.append(tool)
             except tool_refresh.RefreshFailed:
                 raise
@@ -187,6 +227,7 @@ def _setup(project: Path, emit: tool_refresh.Emit | None) -> dict[str, Any]:
         "installed": ready,
         "unavailable": unavailable,
         "revision": revision,
+        "built": build,
         "refreshing": refreshing,
         "log": str(tool_refresh.log_path()),
         "note": "Run joinery mcp status --probe for actual connected operation readiness.",

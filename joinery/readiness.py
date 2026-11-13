@@ -152,7 +152,10 @@ def cache_dir() -> Path:
 class Image:
     id: str
     created: str = ""
+    #: The whole sandbox's revision (images built before per-image revisions).
     revision: str = ""
+    #: This image's own revision (`IMAGE_LABEL`), parent included.
+    image_revision: str = ""
 
 
 @dataclass(frozen=True)
@@ -192,6 +195,8 @@ class Host(Protocol):
     def setup(self) -> dict[str, Any] | None: ...
 
     def expected_revision(self) -> str: ...
+
+    def expected_image_revision(self, image: str) -> str: ...
 
     def mcp(self, project: Path, probe: McpProbe) -> ProbeResult: ...
 
@@ -273,6 +278,49 @@ def sandbox_revision(root: Path | None = None) -> str:
     return digest.hexdigest()[:16] if files else ""
 
 
+#: Each worker image: the Dockerfile it is built from and the image it starts from.
+#: The base is built by sandbox/build.sh from sandbox/Dockerfile.
+WORKER_IMAGES: dict[str, tuple[str, str]] = {
+    "joinery-sandbox-runtime": ("Dockerfile", ""),
+    "joinery-mcp-worker": ("mcp.Dockerfile", "joinery-sandbox-runtime"),
+    "joinery-creative-worker": ("creative.Dockerfile", "joinery-mcp-worker"),
+    "joinery-blender-worker": ("blender.Dockerfile", "joinery-mcp-worker"),
+    "joinery-inkscape-worker": ("inkscape.Dockerfile", "joinery-creative-worker"),
+    "joinery-audacity-worker": ("audacity.Dockerfile", "joinery-mcp-worker"),
+}
+#: The label with an image's own revision.
+IMAGE_LABEL = "org.joinery.image-rev"
+#: Files a build reads besides its Dockerfile and the files it copies in.
+_BUILD_FILES = {"joinery-sandbox-runtime": ("build.sh", "versions.env")}
+_COPY = re.compile(r"^\s*(?:COPY|ADD)\s+(.*)$", re.IGNORECASE | re.MULTILINE)
+
+
+def image_sources(image: str, root: Path | None = None) -> list[Path]:
+    """The files one image is built from: its Dockerfile, what it copies, its pins."""
+    root = root or SANDBOX_DIR
+    dockerfile, _parent = WORKER_IMAGES[image]
+    names = {dockerfile, *_BUILD_FILES.get(image, ())}
+    for found in _COPY.finditer((root / dockerfile).read_text()):
+        if "--from" in found.group(1):
+            continue  # From an earlier stage of the same build, not from the folder.
+        words = [word for word in found.group(1).split() if not word.startswith("--")]
+        names.update(words[:-1])
+    return sorted(root / name for name in names)
+
+
+def image_revision(image: str, root: Path | None = None) -> str:
+    """A short hash of what one image is built from, its parent's revision included.
+
+    A change to the creative worker's files rebuilds only it (and Inkscape's,
+    which starts from it); a change to the base rebuilds every worker.
+    """
+    _dockerfile, parent = WORKER_IMAGES[image]
+    digest = hashlib.sha256((image_revision(parent, root) if parent else "").encode())
+    for path in image_sources(image, root):
+        digest.update(path.name.encode() + b"\0" + path.read_bytes())
+    return digest.hexdigest()[:16]
+
+
 def mark_setup(phase: str, image: str = "") -> None:
     """Record that setup is building `image` now, so readiness says preparing."""
     path = cache_dir() / "setup.json"
@@ -315,7 +363,12 @@ def _parse_image(stdout: str) -> Image:
         parsed = json.loads(labels) or {}
     except json.JSONDecodeError:
         parsed = {}
-    return Image(identifier, created, str(parsed.get(SETUP_LABEL, "")))
+    return Image(
+        identifier,
+        created,
+        str(parsed.get(SETUP_LABEL, "")),
+        str(parsed.get(IMAGE_LABEL, "")),
+    )
 
 
 class DockerHost:
@@ -473,6 +526,12 @@ class DockerHost:
     def expected_revision(self) -> str:
         # Images built before the label existed carry none and count as current.
         return os.environ.get("JOINERY_SANDBOX_REV") or sandbox_revision()
+
+    def expected_image_revision(self, image: str) -> str:
+        try:
+            return image_revision(image) if image in WORKER_IMAGES else ""
+        except OSError:
+            return ""
 
     def mcp(self, project: Path, probe: McpProbe) -> ProbeResult:
         try:
@@ -683,6 +742,12 @@ def _image_gate(ctx: _Context, image: str) -> Outcome | None:
         return Outcome(known=False, detail="Docker didn't answer")
     if found is None:
         return Outcome("needs_image", f"{image} is not built")
+    if found.image_revision:
+        # Built from its own sources and its parent's: only a change there counts.
+        mine = ctx.host.expected_image_revision(image)
+        if mine and found.image_revision != mine:
+            return Outcome("needs_image", f"{image} is out of date", stale=True)
+        return None
     expected = ctx.host.expected_revision()
     if expected and found.revision and found.revision != expected:
         return Outcome("needs_image", f"{image} is out of date", stale=True)

@@ -84,17 +84,23 @@ worker, an image, bootstrap, MCP or a revision.
 - Setup (`joinery bootstrap`) writes `setup.json` (`phase`, `image`,
   `started`, `pid`) while it builds, so every surface says "Refreshing…"
   instead of "Not available yet". It labels each image
-  `org.joinery.sandbox-rev` with a hash of `sandbox/`, sets
-  `JOINERY_SANDBOX_REV`, and starts a background refresh when it is done. An
-  image whose label differs is out of date ("Refresh tools"); an image without the
-  label counts as current. Setup never removes images or build cache.
+  `org.joinery.image-rev` with a hash of what that image is built from (its
+  Dockerfile, the files it copies in, `build.sh` and `versions.env` for the
+  base) and its parent's revision, so a change rebuilds only the images it
+  touches and the ones built on them; the base is rebuilt when its own sources
+  change, not only when it is missing. An image whose label differs is out of
+  date ("Refresh tools"). Images from before this label carry
+  `org.joinery.sandbox-rev`, a hash of all of `sandbox/`, and are judged by
+  that; an image with neither counts as current. One refresh runs at a time
+  (`refresh.lock`); a second caller follows it. Setup never removes images or
+  build cache.
 
 ## UI rules
 
 - Every read runs off the UI thread, through `command_job.gd`.
 - Project apps re-asks every two seconds while anything is `checking` or
-  `preparing`. Start Docker shows how to start it, with Check again beside it;
-  Rebuild runs `joinery bootstrap --project` as a job; Check again runs
+  `preparing`. Start Docker opens it and asks again every 3 s for 2 minutes;
+  Refresh tools runs `joinery bootstrap --project` as a job; Check again runs
   `joinery status --tool <id> --refresh`.
 - The rail shows a mark only when an app needs something. Hover or focus shows
   a card with the sentence, the action, Check again and the last-checked time.
