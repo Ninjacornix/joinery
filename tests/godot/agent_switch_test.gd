@@ -54,6 +54,8 @@ func _screen(initial: String, confirm: bool, emitted: Array) -> Control:
 	var view: Control = load(CONNECT_PATH).new()
 	view.set("initial_agent", initial)
 	view.set("confirm_choice", confirm)
+	# No real test message to the agent from a test.
+	view.set("verify_after_continue", false)
 	view.connect("connected", func(agent: String, _method: String) -> void: emitted.append(agent))
 	root.add_child(view)
 	await process_frame
@@ -75,6 +77,7 @@ func _run() -> void:
 	await _check_mid_request()
 	await _check_restart_question()
 	await _check_model_row()
+	_check_helper_failure()
 	print("agent switch: ", "FAILED" if _failed else "ok")
 	quit(1 if _failed else 0)
 
@@ -99,6 +102,20 @@ func _check_switch_dialog() -> void:
 	_check(emitted == ["claude"], "Choosing another agent continues: %s" % [emitted])
 	view.queue_free()
 	await process_frame
+
+
+## A helper answer that isn't JSON shows its own last error line, keys taken out; only a
+## silent failure says the helper isn't set up.
+func _check_helper_failure() -> void:
+	var screen: GDScript = load(CONNECT_PATH)
+	var said: String = screen.call(
+		"helper_failure",
+		{"code": 1, "output": "", "error": "warming up\nerror: token=abc123secret is invalid"}
+	)
+	_check(said.contains("error: token=[redacted] is invalid"), said)
+	_check(not said.contains("abc123secret"), said)
+	var silent: String = screen.call("helper_failure", {"code": 1, "output": "", "error": ""})
+	_check(silent.begins_with("Joinery's helper isn't set up"), silent)
 
 
 ## The Project Manager's first screen still continues on its own with a signed-in agent.

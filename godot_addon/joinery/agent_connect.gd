@@ -11,6 +11,7 @@ signal connected(agent_id: String, method: String)
 
 const COMMAND_SCRIPT := preload("command_job.gd")
 const ICON_SCRIPT := preload("agent_icon.gd")
+const CHAT_SCRIPT := preload("chat_bridge.gd")
 const API_SCRIPT := preload("api_connection_form.gd")
 const INDICATOR := preload("activity_indicator.gd")
 const UI_THEME := preload("ui_theme.gd")
@@ -42,6 +43,8 @@ var initial_agent := ""
 ## continues until the user chooses (a row or Continue). The Project Manager leaves it off,
 ## so a signed-in agent there continues on its own.
 var confirm_choice := false
+## In the editor, after Continue, test the chosen agent in the background ([method _verify]).
+var verify_after_continue := true
 var initial_profile := ""
 var selected_profile := ""
 var _selected := ""
@@ -448,7 +451,9 @@ func _start(action: String, payload: Dictionary = {}) -> void:
 		return
 	_action = action
 	_job_agent = _selected
-	var args := PackedStringArray(["run", "--project", _home(), "joinery", "connect", action])
+	var args := PackedStringArray(
+		["run", "--frozen", "--quiet", "--project", _home(), "joinery", "connect", action]
+	)
 	if action in ["login", "use-key"]:
 		args.append_array(PackedStringArray(["--agent", _selected]))
 		_celebrate = true
@@ -497,9 +502,10 @@ func _process(delta: float) -> void:
 	)
 	if not payload is Dictionary:
 		_waiting_for = ""
-		_show_message(HELPER_MISSING, true)
+		var failure := helper_failure(result)
+		_show_message(failure, true)
 		if _action == "configure":
-			_api_form.call("show_result", HELPER_MISSING)
+			_api_form.call("show_result", failure)
 	elif _action == "status":
 		_apply_status(payload)
 	elif payload.has("profile"):
@@ -507,6 +513,17 @@ func _process(delta: float) -> void:
 	else:
 		_apply_reply(payload, int(result["code"]))
 	_update()
+
+
+## What to say when the helper answered with no JSON: its own last error line when it left
+## one (the rest goes to Output), else that it isn't set up.
+static func helper_failure(result: Dictionary) -> String:
+	var error := CHAT_SCRIPT.redact(str(result.get("error", "")).strip_edges())
+	if error.is_empty():
+		return HELPER_MISSING
+	print("[Joinery] joinery connect:\n", error)
+	var lines := error.split("\n", false)
+	return "Joinery's helper failed: %s Details are in Output." % lines[lines.size() - 1]
 
 
 func _apply_profile(profile: Dictionary) -> void:
@@ -684,11 +701,23 @@ func _emit(agent: String, method: String, profile: String) -> void:
 	# Only a new choice or sign-in continues again; never re-emit on the next refresh.
 	_auto_redirect = false
 	selected_profile = profile
+	if confirm_choice and verify_after_continue and profile.is_empty():
+		_verify(agent)
 	connected.emit(agent, method)
 	# The host hides this screen on the signal; reset it for the next time it is shown.
 	_content.show()
 	_content.modulate.a = 1.0
 	_update()
+
+
+## Send the chosen agent one small test message in the background (`joinery connect verify`),
+## so an account that is signed in but can't answer (out of quota, refused) shows as such
+## on this screen next time. It outlives the dialog; its result is saved by the helper.
+func _verify(agent: String) -> void:
+	var project := ProjectSettings.globalize_path("res://").rstrip("/")
+	var args := PackedStringArray(["run", "--frozen", "--quiet", "--project", _home()])
+	args.append_array(["joinery", "connect", "verify", "--agent", agent, "--project", project])
+	OS.create_process("uv", args)
 
 
 func _exit_tree() -> void:
