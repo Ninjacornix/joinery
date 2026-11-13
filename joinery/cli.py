@@ -842,6 +842,31 @@ def _parts() -> Any:
         return None
 
 
+def _refresh_tools(project: Path, progress: bool, cancel: bool) -> int:
+    """`joinery bootstrap`: Refresh tools, with JSON progress lines on request."""
+    from joinery import tool_refresh
+    from joinery.bootstrap import setup
+
+    if cancel:
+        print(json.dumps(tool_refresh.cancel()))
+        return 0
+
+    def emit(event: dict[str, Any]) -> None:
+        print(json.dumps(event), flush=True)
+
+    tool_refresh.stop_on_terminate()
+    try:
+        outcome = setup(project, emit if progress else None)
+    except tool_refresh.RefreshCancelled:
+        print(json.dumps({"state": "cancelled", "log": str(tool_refresh.log_path())}))
+        return 0
+    except (OSError, ValueError, RuntimeError) as exc:
+        print(json.dumps({"error": str(exc), "log": str(tool_refresh.log_path())}))
+        return 1
+    print(json.dumps({"state": "done", **outcome}))
+    return 0
+
+
 def _agents() -> int:
     """List supported agents and how the creation-only gate lands in each."""
     blocked = set(unwireable())
@@ -962,6 +987,14 @@ def _parser() -> argparse.ArgumentParser:
         "bootstrap", help="install pinned project servers and offline runtime images"
     )
     bootstrap.add_argument("--project", type=Path, required=True)
+    bootstrap.add_argument(
+        "--progress",
+        action="store_true",
+        help="print one JSON line per step (the result is the last line)",
+    )
+    bootstrap.add_argument(
+        "--cancel", action="store_true", help="stop the refresh that is running"
+    )
     delivery = commands.add_parser(
         "update-addon", help="update a closed project's addon with a reversible backup"
     )
@@ -1442,6 +1475,8 @@ def main(argv: list[str] | None = None) -> int:
         from joinery.bootstrap import setup as setup_runtime
         from joinery.bootstrap import transactions, update_addon
 
+        if args.command == "bootstrap":
+            return _refresh_tools(args.project.resolve(), args.progress, args.cancel)
         try:
             if args.command == "bootstrap":
                 outcome = setup_runtime(args.project.resolve())

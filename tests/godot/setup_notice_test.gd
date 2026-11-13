@@ -2,7 +2,8 @@ extends SceneTree
 ## The setup notice under the sidebar header (setup_notice.gd), headless, against a stand-in
 ## `joinery` that answers in JSON as the real one does: an out-of-date add-on is offered as
 ## Update and restart, which schedules the update after this editor exits and asks the editor to
-## close; the connection banner holds the notice back (one notice at a time).
+## close; the connection banner holds the notice back (one notice at a time). Refresh tools
+## runs in place with its step, a bar, Cancel and Show log, and a failure says why plainly.
 
 const NOTICE := preload("res://addons/joinery/setup_notice.gd")
 const HEADER := preload("res://addons/joinery/sidebar_header.gd")
@@ -18,6 +19,20 @@ if a[0] == "update-addon" and "--check" in a:
     print(json.dumps({"state": os.environ.get("ADDON", "stale")}))
 elif a[0] == "update-addon":
     print(json.dumps({"state": "scheduled", "helper": 7, "project": "p"}))
+elif a[0] == "bootstrap" and "--cancel" in a:
+    print(json.dumps({"state": "idle"}))
+elif a[0] == "bootstrap":
+    import time
+    log = os.environ["CALLS"] + ".log"
+    for step in (1, 2):
+        print(json.dumps({"state": "running", "progress": (step - 1) / 2, "step": step,
+            "steps": 2, "text": "Refreshing Blender (step %d of 2)…" % step, "log": log}),
+            flush=True)
+        time.sleep(0.4)
+    if os.environ.get("FAIL") == "1":
+        print(json.dumps({"error": "Docker ran out of disk space.", "log": log}))
+        sys.exit(1)
+    print(json.dumps({"state": "done", "installed": [], "log": log}))
 else:
     print(json.dumps({"error": "unexpected"}))
     sys.exit(1)
@@ -74,6 +89,7 @@ func _run() -> void:
 	await _check_addon()
 	await _check_banner_wins()
 	_check_doctor()
+	await _check_refresh()
 	print("setup notice: ok" if not _failed else "setup notice: FAILED")
 	quit(1 if _failed else 0)
 
@@ -148,3 +164,43 @@ func _check_doctor() -> void:
 	_check(text.contains("Godot 4.7 ready."), "Each app has its line: " + text)
 	_check(text.contains("Krita needs a refresh."), "The app that needs work too: " + text)
 	_check(not text.contains("couldn't finish"), "A found problem is not a crash: " + text)
+
+
+## Refresh tools runs right here: step and bar while it runs, then a fresh check; a failure says
+## why in plain words and keeps Show log.
+func _check_refresh() -> void:
+	var notice := _notice()
+	root.add_child(notice)
+	var asked: Array[bool] = []
+	notice.check_requested.connect(func() -> void: asked.append(true))
+	var needs := {
+		"state": "needs_image",
+		"text": "Blender and Krita need a refresh after the Joinery update.",
+		"action": {"id": "rebuild", "label": "Refresh tools"},
+	}
+	notice.show_readiness({"notice": needs})
+	_check(notice.text() == needs["text"], "The apps' sentence shows: " + notice.text())
+	_check(notice.action_text() == "Refresh tools", "With one button")
+	OS.set_environment("FAIL", "0")
+	notice.press()
+	_check(notice.refreshing(), "Refresh tools starts at once")
+	_check(
+		await _until(func() -> bool: return notice.text().contains("step 2 of 2")),
+		"The step shows as it goes: " + notice.text()
+	)
+	var bar: ProgressBar = notice.get("_bar")
+	_check(bar.visible and is_equal_approx(bar.value, 0.5), "The bar follows: %s" % bar.value)
+	_check((notice.get("_cancel") as Button).visible, "Cancel is there while it runs")
+	_check((notice.get("_show_log") as Button).visible, "So is Show log")
+	_check(await _until(func() -> bool: return not asked.is_empty()), "Done: ask again")
+	_check(not bar.visible, "The bar leaves when it is done")
+	_check(_logged()[-1].has("--progress"), "It asks for progress lines")
+	OS.set_environment("FAIL", "1")
+	notice.press()
+	_check(
+		await _until(func() -> bool: return notice.text() == "Docker ran out of disk space."),
+		"A failure says why in plain words: " + notice.text()
+	)
+	_check(notice.action_text() == "Try again", "And offers to try again")
+	_check((notice.get("_show_log") as Button).visible, "Show log stays for the failure")
+	notice.queue_free()

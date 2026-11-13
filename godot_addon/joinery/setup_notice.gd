@@ -14,6 +14,9 @@ extends MarginContainer
 ##   ("Blender and Krita need a refresh after the Joinery update."), and its button: Refresh
 ##   tools runs the refresh right here, Start Docker opens Docker, Check again asks again.
 ##
+## A refresh stays on show while it runs (`joinery bootstrap --progress`): which step, a bar,
+## Cancel and Show log. If it fails, the notice says why in plain words and keeps Show log.
+##
 ## The header hides it while the connection banner shows ([method set_held]): one notice at a
 ## time, and Connect wins.
 
@@ -49,6 +52,16 @@ var start_docker_argv := PackedStringArray(
 var _panel: PanelContainer
 var _text: Label
 var _action: Button
+var _bar: ProgressBar
+var _links: HBoxContainer
+var _cancel: Button
+var _show_log: Button
+## The last progress line of a refresh ({progress, step, steps, text, log}), or {}.
+var _progress := {}
+## The refresh's result line (its last), when it came with the progress lines.
+var _result := {}
+## The refresh log, once a refresh has run.
+var _log := ""
 ## What the notice says now: "" (nothing), "addon" or "tools".
 var _kind := ""
 var _held := false
@@ -86,6 +99,27 @@ func _init() -> void:
 	_action.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	_action.pressed.connect(_on_action)
 	column.add_child(_action)
+	_bar = ProgressBar.new()
+	_bar.name = "Progress"
+	_bar.show_percentage = false
+	_bar.max_value = 1.0
+	_bar.step = 0.001
+	_bar.accessibility_name = "Refresh progress"
+	STYLE.on_theme_overrides(
+		_bar, func() -> void: _bar.custom_minimum_size.y = UI_THEME.space(_bar, 1)
+	)
+	column.add_child(_bar)
+	_links = HBoxContainer.new()
+	_links.theme_type_variation = "JoineryRow"
+	column.add_child(_links)
+	_cancel = UI.quiet("Cancel")
+	_cancel.name = "Cancel"
+	_cancel.pressed.connect(cancel_refresh)
+	_links.add_child(_cancel)
+	_show_log = UI.link("Show log")
+	_show_log.name = "ShowLog"
+	_show_log.pressed.connect(show_log)
+	_links.add_child(_show_log)
 	set_process(false)
 
 
@@ -148,6 +182,37 @@ func refreshing() -> bool:
 	return _jobs.has("refresh")
 
 
+## Refresh tools now (the rail's or the notice's button): the progress shows here.
+func start_refresh() -> void:
+	_said = ""
+	_progress = {}
+	_result = {}
+	_run("refresh", ["bootstrap", "--project", _project(), "--progress"])
+	_refresh()
+
+
+## Stop the refresh that is running; the notice goes back to what the apps need.
+func cancel_refresh() -> void:
+	if refreshing():
+		_run("cancel", ["bootstrap", "--project", _project(), "--cancel"])
+		_cancel.disabled = true
+
+
+## Open the refresh log in the system's text viewer.
+func show_log() -> void:
+	if not _log.is_empty() and FileAccess.file_exists(_log):
+		OS.shell_open(_log)
+
+
+## How far the refresh is (0 to 1), and the log it writes.
+func progress() -> float:
+	return float(_progress.get("progress", 0.0))
+
+
+func log_path() -> String:
+	return _log
+
+
 func _refresh() -> void:
 	var kind := ""
 	var words := ""
@@ -165,7 +230,7 @@ func _refresh() -> void:
 			words = "Getting ready to restart…"
 	elif refreshing():
 		kind = "tools"
-		words = "Refreshing %s…" % _apps()
+		words = str(_progress.get("text", "Refreshing %s…" % _apps()))
 	elif not _said.is_empty():
 		kind = "tools"
 		words = _said
@@ -185,6 +250,14 @@ func _refresh() -> void:
 	_action.accessibility_name = action
 	_action.visible = not action.is_empty()
 	_action.disabled = _jobs.has("addon_update")
+	_bar.visible = kind == "tools" and refreshing()
+	_bar.value = progress()
+	_cancel.visible = _bar.visible
+	_cancel.disabled = _jobs.has("cancel")
+	_show_log.visible = (
+		kind == "tools" and not _log.is_empty() and (_bar.visible or not _said.is_empty())
+	)
+	_links.visible = _cancel.visible or _show_log.visible
 	var show_it := not kind.is_empty() and not _held
 	if show_it and fresh:
 		UI_MOTION.enter(self)
@@ -213,13 +286,12 @@ func _on_action() -> void:
 		args += ["--after-exit", str(OS.get_process_id()), "--editor", editor]
 		_run("addon_update", args)
 	elif _kind == "tools" and not _said.is_empty():
-		_said = ""
-		_start_refresh()
+		start_refresh()
 	elif _kind == "tools":
 		var found: Variant = _tools.get("action")
 		match str((found as Dictionary).get("id", "")) if found is Dictionary else "":
 			"rebuild":
-				_start_refresh()
+				start_refresh()
 			"start_docker":
 				if not start_docker_argv.is_empty():
 					OS.create_process(start_docker_argv[0], start_docker_argv.slice(1))
@@ -229,10 +301,6 @@ func _on_action() -> void:
 			"check_again":
 				check_requested.emit()
 	_refresh()
-
-
-func _start_refresh() -> void:
-	_run("refresh", ["bootstrap", "--project", _project()])
 
 
 func _run(kind: String, args: Array) -> void:
@@ -245,12 +313,21 @@ func _run(kind: String, args: Array) -> void:
 
 
 func _process(_delta: float) -> void:
+	if _jobs.has("refresh"):
+		var moved := false
+		for line: String in (_jobs["refresh"] as RefCounted).call("take_lines"):
+			moved = _on_progress(_json(line)) or moved
+		if moved:
+			_refresh()
 	for kind: String in _jobs.keys():
 		var done: Dictionary = (_jobs[kind] as RefCounted).call("poll")
 		if done.is_empty():
 			continue
 		_jobs.erase(kind)
-		_finished(kind, int(done.get("code", 1)), _json(str(done.get("output", ""))), done)
+		var data := _json(str(done.get("output", "")))
+		if kind == "refresh" and data.is_empty():
+			data = _result  # The result line already came through take_lines.
+		_finished(kind, int(done.get("code", 1)), data, done)
 	set_process(not _jobs.is_empty())
 
 
@@ -275,12 +352,25 @@ func _finished(kind: String, code: int, data: Dictionary, raw: Dictionary) -> vo
 				print("[Joinery] update-addon\n", raw.get("output", ""), "\n", raw.get("error", ""))
 				_addon["last_error"] = str(data.get("error", "Details are in Output."))
 		"refresh":
+			_log = str(data.get("log", _log))
+			_progress = {}
 			if code != 0:
 				print("[Joinery] refresh\n", raw.get("output", ""), "\n", raw.get("error", ""))
 				var why := str(data.get("error", ""))
-				_said = "The refresh didn't finish." + (" " + why if not why.is_empty() else "")
+				_said = why if not why.is_empty() else "The refresh didn't finish."
 			check_requested.emit()
 	_refresh()
+
+
+## A line of a running refresh: progress (true when it moved the notice on) or its result.
+func _on_progress(event: Dictionary) -> bool:
+	if not event.has("progress") or str(event.get("state", "running")) != "running":
+		if not event.is_empty():
+			_result = event
+		return false
+	_progress = event
+	_log = str(event.get("log", _log))
+	return true
 
 
 func _project() -> String:

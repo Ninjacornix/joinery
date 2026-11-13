@@ -611,11 +611,10 @@ func _rebuild_done(result: Dictionary) -> void:
 		row.state.set_busy(false)
 		_apply_readiness(row, row.state.entry)
 	if int(result.get("code", 1)) != 0:
-		var reason := _first_line(
-			str(result.get("error", "")) + "\n" + str(result.get("output", ""))
-		)
-		var why := reason if not reason.is_empty() else "no reason given"
-		_show_status("Rebuild didn't finish: " + why, true)
+		# Its JSON error is already plain words (joinery/tool_refresh.py), never Docker's own.
+		var data: Variant = _json(result)
+		var why := str((data as Dictionary).get("error", "")) if data is Dictionary else ""
+		_show_status(why if not why.is_empty() else "The refresh didn't finish.", true)
 	_query_status()
 
 

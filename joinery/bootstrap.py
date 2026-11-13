@@ -13,28 +13,28 @@ import time
 from pathlib import Path
 from typing import Any
 
-from joinery import metrics, readiness, references, team
+from joinery import metrics, readiness, references, team, tool_refresh
 from joinery.catalog import ROOT, load_catalog, load_project_tools, selection_ids
 from joinery.platform_support import bash_script_argv, editor_running
 from joinery.server_install import install
 from joinery.transactions import FileTransaction, atomic_json
 from joinery.wiring import _args, _command_str, _opencode_plugin
 
-
-def _run(argv: list[str], timeout: int = 1800) -> None:
-    result = subprocess.run(
-        bash_script_argv(argv), cwd=ROOT, check=False, timeout=timeout
-    )
-    if result.returncode:
-        raise ValueError("Setup command failed: " + argv[0])
+#: Each worker built for a tool that has one, after the shared images.
+TOOL_WORKERS = {"blender": "blender", "inkscape": "inkscape", "audacity": "audacity"}
+RUNTIME = "joinery-sandbox-runtime"
 
 
-def _docker_build(tag: str, dockerfile: str, revision: str) -> None:
+def _docker_build(
+    tag: str, dockerfile: str, revision: str, progress: tool_refresh.Progress
+) -> None:
     """Build one worker image, stamped with the sandbox revision it came from."""
-    _run(
+    progress.begin(tag)
+    tool_refresh.run(
         [
             "docker",
             "build",
+            "--progress=plain",
             "--platform",
             "linux/amd64",
             "--label",
@@ -44,45 +44,63 @@ def _docker_build(tag: str, dockerfile: str, revision: str) -> None:
             "-f",
             "sandbox/" + dockerfile,
             "sandbox",
-        ]
+        ],
+        progress,
+        cwd=ROOT,
+        timeout=3600,
+        what=tool_refresh.IMAGE_WORDS.get(tag, tag),
     )
 
 
-def _stamp_runtime(tag: str, revision: str) -> None:
-    """Add the revision label to an image sandbox/build.sh made.
+def _build_runtime(revision: str, progress: tool_refresh.Progress) -> None:
+    """The shared base every worker starts from (sandbox/build.sh), then its label.
 
-    A one-line build on top of the image: no new layers, nothing downloaded,
-    and the previous image is left as it is (nothing is pruned).
+    The label is a one-line build on top of the image: no new layers, nothing
+    downloaded, and the previous image is left as it is (nothing is pruned).
     """
-    result = subprocess.run(
+    progress.begin(RUNTIME)
+    words = tool_refresh.IMAGE_WORDS[RUNTIME]
+    tool_refresh.run(
+        bash_script_argv(
+            [str(ROOT / "sandbox/build.sh"), "--all", "--tag", RUNTIME]
+        ),
+        progress,
+        cwd=ROOT,
+        timeout=3600,
+        what=words,
+    )
+    tool_refresh.run(
         [
             "docker",
             "build",
+            "--progress=plain",
             "--platform",
             "linux/amd64",
             "--label",
             f"{readiness.SETUP_LABEL}={revision}",
             "-t",
-            tag,
+            RUNTIME,
             "-",
         ],
-        input=f"FROM {tag}\n",
-        text=True,
-        capture_output=True,
-        check=False,
+        progress,
+        cwd=ROOT,
         timeout=600,
+        input_text=f"FROM {RUNTIME}\n",
+        what=words,
     )
-    if result.returncode:
-        raise ValueError("Setup command failed: docker build (label " + tag + ")")
 
 
-def setup(project: Path) -> dict[str, Any]:
+def setup(
+    project: Path, emit: tool_refresh.Emit | None = None
+) -> dict[str, Any]:
     """Build the offline workers and install the pinned servers for a project.
 
     While it builds, `~/.cache/joinery/setup.json` names the image in progress,
-    so every readiness screen says "Refreshing…" instead of "Not available".
-    Each image is labelled with the sandbox revision, and a readiness refresh
-    starts once the build is done. No image or build cache is ever removed.
+    so every readiness screen says "Refreshing…" instead of "Not available",
+    and `refresh.json` and `refresh.log` say how far it is (joinery.tool_refresh;
+    `emit` gets each change). Each image is labelled with the sandbox revision,
+    and a readiness refresh starts once the build is done. No image or build
+    cache is ever removed. A failure raises RefreshFailed with a readable reason.
     """
     selected = selection_ids(
         load_catalog(), load_project_tools(project / "joinery.toml")
@@ -97,48 +115,44 @@ def setup(project: Path) -> dict[str, Any]:
         raise ValueError("Docker isn't running. Start Docker Desktop, then try again.")
     revision = readiness.sandbox_revision()
     os.environ["JOINERY_SANDBOX_REV"] = revision
+    image = subprocess.run(
+        ["docker", "image", "inspect", RUNTIME], capture_output=True, check=False
+    )
+    first = image.returncode != 0
+    workers = [
+        TOOL_WORKERS[tool]
+        for tool in selected
+        if tool in TOOL_WORKERS and load_catalog().get(tool).mcp is not None
+    ]
+    progress = tool_refresh.Progress(
+        int(first) + 2 + len(workers), emit, first=first
+    )
     ready = []
     unavailable = []
     try:
-        image = subprocess.run(
-            ["docker", "image", "inspect", "joinery-sandbox-runtime"],
-            capture_output=True,
-            check=False,
-        )
-        if image.returncode:
-            readiness.mark_setup("build", "joinery-sandbox-runtime")
-            _run(
-                [
-                    str(ROOT / "sandbox/build.sh"),
-                    "--all",
-                    "--tag",
-                    "joinery-sandbox-runtime",
-                ],
-                3600,
-            )
-            _stamp_runtime("joinery-sandbox-runtime", revision)
+        if first:
+            readiness.mark_setup("build", RUNTIME)
+            _build_runtime(revision, progress)
         for dockerfile, tag in [
             ("mcp.Dockerfile", "joinery-mcp-worker"),
             ("creative.Dockerfile", "joinery-creative-worker"),
         ]:
             readiness.mark_setup("build", tag)
-            _docker_build(tag, dockerfile, revision)
+            _docker_build(tag, dockerfile, revision, progress)
         for tool in selected:
             entry = load_catalog().get(tool)
             if entry.mcp is None:
                 continue
             try:
                 install(tool)
-                worker = {
-                    "blender": "blender",
-                    "inkscape": "inkscape",
-                    "audacity": "audacity",
-                }.get(tool)
+                worker = TOOL_WORKERS.get(tool)
                 if worker:
                     tag = "joinery-" + worker + "-worker"
                     readiness.mark_setup("build", tag)
-                    _docker_build(tag, worker + ".Dockerfile", revision)
+                    _docker_build(tag, worker + ".Dockerfile", revision, progress)
                 ready.append(tool)
+            except tool_refresh.RefreshFailed:
+                raise
             except (
                 OSError,
                 ValueError,
@@ -146,15 +160,23 @@ def setup(project: Path) -> dict[str, Any]:
                 subprocess.SubprocessError,
             ) as exc:
                 unavailable.append({"tool": tool, "reason": str(exc)})
+    except tool_refresh.RefreshCancelled:
+        progress.finish("cancelled")
+        raise
+    except BaseException as exc:
+        progress.finish("failed", error=str(exc))
+        raise
     finally:
         readiness.clear_setup()
-    # Check the new images now, in the background, so screens update by themselves.
-    refreshing = readiness.spawn_refresh(project, full=True, catalog=True)
+        # Check the images now, in the background, so screens update by themselves.
+        refreshing = readiness.spawn_refresh(project, full=True, catalog=True)
+    progress.finish("done")
     return {
         "installed": ready,
         "unavailable": unavailable,
         "revision": revision,
         "refreshing": refreshing,
+        "log": str(tool_refresh.log_path()),
         "note": "Run joinery mcp status --probe for actual connected operation readiness.",
     }
 

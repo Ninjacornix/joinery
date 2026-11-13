@@ -822,23 +822,32 @@ def test_setup_marks_progress_labels_images_and_refreshes(
         builds.append(argv)
         return Done()
 
-    def build(argv: list[str], timeout: int = 1800) -> None:
+    def build(argv: list[str], progress: Any, **_: object) -> None:
         builds.append(argv)
         seen_markers.append(json.loads((cache / "setup.json").read_text()))
 
     monkeypatch.setattr(bootstrap.shutil, "which", lambda _name: "/usr/bin/docker")
     monkeypatch.setattr(bootstrap.subprocess, "run", run)
-    monkeypatch.setattr(bootstrap, "_run", build)
+    monkeypatch.setattr(bootstrap.tool_refresh, "run", build)
     monkeypatch.setattr(bootstrap, "install", lambda _tool: None)
     monkeypatch.setattr(
         readiness, "spawn_refresh", lambda *a, **k: refreshed.append((a, k)) is None
     )
     monkeypatch.delenv("JOINERY_SANDBOX_REV", raising=False)
-    result = bootstrap.setup(root)
+    events: list[dict[str, Any]] = []
+    result = bootstrap.setup(root, events.append)
+    # Progress in plain words, step by step, ending where the log is.
+    assert [event["step"] for event in events] == [1, 2, 3]
+    assert {event["steps"] for event in events} == {3}
+    assert events[0]["text"].startswith("Refreshing the shared base (step 1 of 3)…")
+    assert "about an hour" in events[0]["text"]
+    assert events[1]["text"].startswith("Refreshing Godot (step 2 of 3)…")
+    assert json.loads((cache / "refresh.json").read_text())["state"] == "done"
+    assert result["log"] == str(cache / "refresh.log")
     revision = readiness.sandbox_revision()
     assert result["revision"] == revision and result["refreshing"] is True
     assert os.environ["JOINERY_SANDBOX_REV"] == revision
-    images = [marker["image"] for marker in seen_markers]
+    images = list(dict.fromkeys(marker["image"] for marker in seen_markers))
     assert images == [
         "joinery-sandbox-runtime",
         "joinery-mcp-worker",
@@ -847,6 +856,7 @@ def test_setup_marks_progress_labels_images_and_refreshes(
     assert all(marker["pid"] == os.getpid() for marker in seen_markers)
     label = f"{readiness.SETUP_LABEL}={revision}"
     docker_builds = [argv for argv in builds if argv[:2] == ["docker", "build"]]
+    assert all("--progress=plain" in argv for argv in docker_builds)
     assert len(docker_builds) == 3  # the runtime stamp and two workers
     assert all(label in argv for argv in docker_builds)
     # Setup never removes images or build cache.
