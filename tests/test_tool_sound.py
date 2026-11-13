@@ -808,7 +808,10 @@ def test_surge_features_are_measured_in_the_worker() -> None:
     assert surge["state"] == "ready"
     assert features["audio-edit"]["state"] == "ready"
     assert features["music"]["state"] == "needs_image"
-    assert "SoundFont" in features["music"]["detail"]
+    # Missing from a worker that is there: the one refresh wording, not the worker's name.
+    assert features["music"]["detail"] == (
+        "MIDI music (General MIDI and Surge XT) needs a refresh after the Joinery update."
+    )
     assert "Audio edits" in surge["summary"] and "MIDI music" not in surge["summary"]
 
 
