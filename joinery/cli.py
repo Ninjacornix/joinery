@@ -181,7 +181,11 @@ def _setup(
     # Project Manager reaches this path rather than `joinery new`, and without
     # this it would have no creation-only hooks for any agent, which is the one
     # thing a Joinery project must not be missing.
-    wired = write_agent_wiring(project)
+    try:
+        wired = write_agent_wiring(project)
+    except ValueError as exc:
+        print(f"setup: {exc}", file=sys.stderr)
+        return 1
     # Project memory (ADR 0077): only where the project has none yet.
     if memory.ensure(project):
         print(f"Wrote {memory.FILE}: standing instructions every agent reads")

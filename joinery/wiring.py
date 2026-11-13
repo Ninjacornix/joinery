@@ -161,6 +161,70 @@ def _content(agent: Agent, engine: str) -> str:
     raise KeyError(f"no wiring for agent {agent.id!r}")
 
 
+#: A hook command that runs Joinery's gate, whichever engine dir it names.
+_JOINERY_HOOK = re.compile(r"(?:^|[\s\"'/])joinery[\"']? [\"']?hook(?:[\"'\s]|$)")
+
+
+def _is_joinery_hook(hook: object) -> bool:
+    if not isinstance(hook, dict):
+        return False
+    command = hook.get("command")
+    return hook.get("name") == "joinery-gate" or (
+        isinstance(command, str) and _JOINERY_HOOK.search(command) is not None
+    )
+
+
+def _merge_hooks(existing: object, ours: list[object]) -> list[object]:
+    """``existing`` hook groups without Joinery's own hooks (a group left empty goes),
+    then Joinery's groups. Every other group and hook stays as it was."""
+    kept: list[object] = []
+    for group in existing if isinstance(existing, list) else []:
+        if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
+            kept.append(group)
+            continue
+        hooks = [h for h in group["hooks"] if not _is_joinery_hook(h)]
+        if hooks:
+            kept.append({**group, "hooks": hooks})
+    return [*kept, *ours]
+
+
+def merged_content(agent: Agent, engine: str, existing: str | None) -> str:
+    """``agent``'s hook config with Joinery's gate for ``engine``, keeping everything
+    else in ``existing``: the user's other keys, other events' hooks and any hook that
+    isn't Joinery's. Joinery's own keys (its hook, telemetry off, no automatic project
+    MCP servers for Claude Code) are set. opencode's gate is a plugin file of its own,
+    so it is written whole. Raises ValueError for a config that isn't a JSON object."""
+    ours = _content(agent, engine)
+    if existing is None or not existing.strip() or agent.id == "opencode":
+        return ours
+    try:
+        current = json.loads(existing)
+    except ValueError:
+        raise ValueError(
+            f"{agent.config_path} is not valid JSON. Fix or remove it, then Repair again."
+        ) from None
+    if not isinstance(current, dict):
+        # ValueError like invalid JSON: callers report both the same way.
+        raise ValueError(f"{agent.config_path} is not a JSON object.")  # noqa: TRY004
+    template: dict[str, object] = json.loads(ours)
+    merged = dict(current)
+    for key, value in template.items():
+        if key == "hooks" and isinstance(value, dict):
+            events = (
+                dict(current["hooks"]) if isinstance(current.get("hooks"), dict) else {}
+            )
+            for event, groups in value.items():
+                events[event] = _merge_hooks(events.get(event), list(groups))
+            merged["hooks"] = events
+        elif isinstance(value, dict) and isinstance(current.get(key), dict):
+            merged[key] = {**current[key], **value}
+        elif key == "description" and key in current:
+            continue  # The user's own description of the file stays.
+        else:
+            merged[key] = value
+    return json.dumps(merged, indent=2) + "\n"
+
+
 _ENGINE_MARK = "JOINERYENGINEDIRMARK"
 
 
@@ -253,13 +317,17 @@ def write_agent_wiring(
     Fail-closed: an agent without a reliable blocking hook is skipped, not
     silently half-wired. Callers that need the gate everywhere check
     `unwireable()` first. Pass `portable=True` for the engine repo's own config.
+    A config that exists keeps the user's other settings and hooks
+    (`merged_content`); only Joinery's own entries are replaced.
     """
     written: list[str] = []
     for agent in agents:
         if not agent.blocking_hook:
             continue
         path = root / agent.config_path
+        existing = path.read_text() if path.is_file() else None
+        text = merged_content(agent, _engine_ref(agent, portable), existing)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(_content(agent, _engine_ref(agent, portable)))
+        path.write_text(text)
         written.append(agent.config_path)
     return written
