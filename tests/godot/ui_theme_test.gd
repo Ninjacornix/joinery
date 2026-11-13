@@ -609,8 +609,9 @@ func _check_settings() -> void:
 	_check((dock.get("ran") as Array).has("/art"), "Rows run their command through the dock")
 	var switches := [0]
 	dock.connect("connect_requested", func() -> void: switches[0] += 1)
-	var agent_row: Control = page.get("_agent_row")
-	var switch_agent: Button = page.get("_agent_switch")
+	var agent_setting: Control = page.get("_agent")
+	var agent_row: Control = agent_setting.get("row")
+	var switch_agent: Button = agent_setting.get("switch_button")
 	_check(agent_row.get("title").text == "Agent: none connected", "No agent is named yet")
 	_check(switch_agent.text == "Connect", "Without an agent the row offers Connect")
 	dock.set("_agent_name", "Claude Code")

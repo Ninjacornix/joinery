@@ -72,6 +72,7 @@ func _run() -> void:
 	await _check_first_run()
 	await _check_same_agent()
 	await _check_mid_request()
+	await _check_restart_question()
 	print("agent switch: ", "FAILED" if _failed else "ok")
 	quit(1 if _failed else 0)
 
@@ -145,6 +146,10 @@ func _check_mid_request() -> void:
 	bridge.call("close")
 	await process_frame
 	_check(job.closed, "The old agent's pipe is closed")
+	_check(
+		job.sent.back() == {"kind": "shutdown", "keep_reviews": true},
+		"The old host keeps changes in Review: %s" % [job.sent]
+	)
 	_check(heard == [true, "failed", false], "The request ends and busy clears: %s" % [heard])
 	_check(
 		notices == ["Stopped: switched to Claude Code."], "The transcript says why: %s" % [notices]
@@ -162,4 +167,49 @@ func _check_mid_request() -> void:
 	bridge.call("close")
 	_check(notices.size() == 1, "A reconnect to the same agent says nothing: %s" % [notices])
 	bridge.queue_free()
+	await process_frame
+
+
+## Settings ask in place before restarting the chat while Journeyman works, and not otherwise.
+func _check_restart_question() -> void:
+	var script := GDScript.new()
+	script.source_code = (
+		'extends Control\nvar _busy := false\nvar _agent_name := "Claude Code"\n'
+		+ "var _tasks: Object = null\n"
+	)
+	script.reload()
+	var dock: Control = script.new()
+	root.add_child(dock)
+	var setting: VBoxContainer = load("res://addons/joinery/agent_setting.gd").new()
+	setting.set("dock", dock)
+	dock.add_child(setting)
+	var runs: Array[String] = []
+	setting.connect("run_requested", func(command: String) -> void: runs.append(command))
+	var confirm: Control = setting.get("confirm")
+	setting.call("refresh")
+	_check(setting.get("row").title.text == "Agent: Claude Code", "The agent is named")
+	setting.call("request", "connect")
+	_check(runs == ["connect"] and not confirm.visible, "Idle: Switch opens at once %s" % [runs])
+	runs.clear()
+	dock.set("_busy", true)
+	setting.call("request", "connect")
+	_check(runs.is_empty() and confirm.visible, "Working: Switch asks first")
+	var ask: Label = confirm.find_children("*", "Label", true, false)[0]
+	_check(ask.text.contains("Changes in Review stay"), ask.text)
+	var go: Button = null
+	for button: Node in confirm.find_children("*", "Button", true, false):
+		if (button as Button).text == "Switch":
+			go = button
+	_check(go != null, "The question offers Switch")
+	if go != null:
+		go.pressed.emit()
+	_check(runs == ["connect"] and not confirm.visible, "Switch goes on: %s" % [runs])
+	# Reconnect from Troubleshooting asks under its own button; Cancel keeps things running.
+	var other := Button.new()
+	setting.add_child(other)
+	setting.call("request", "reconnect", other)
+	_check(confirm.get_index() == other.get_index() + 1, "The question sits under Reconnect")
+	setting.call("close_question")
+	_check(runs == ["connect"] and not confirm.visible, "Cancel runs nothing")
+	dock.queue_free()
 	await process_frame

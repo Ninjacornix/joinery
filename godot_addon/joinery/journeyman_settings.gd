@@ -19,6 +19,7 @@ const REVIEWER_SETTING := preload("reviewer_setting.gd")
 const DESIGN_SETTING := preload("design_setting.gd")
 const COMPLEX_MODELS_SETTING := preload("complex_models_setting.gd")
 const FIX_ERRORS_SETTING := preload("fix_errors_setting.gd")
+const AGENT_SETTING := preload("agent_setting.gd")
 const PATH := "Joinery/journeyman.cfg"
 const TEXT_SIZES := UI_THEME.TEXT_SIZES
 const MODES := ["Auto", "Fast", "Thorough"]
@@ -73,8 +74,7 @@ var _timings_switch: CheckButton
 var _details_switch: CheckButton
 var _reconnect: Button
 ## "Agent: Claude Code", with Switch: which agent Journeyman runs.
-var _agent_row: UI.SettingRow
-var _agent_switch: Button
+var _agent: AGENT_SETTING
 var _history_row: Control
 var _history_size: Label
 var _history_button: MenuButton
@@ -135,6 +135,7 @@ func set_open(open: bool) -> void:
 		UI_MOTION.stagger(_body.get_children())
 	else:
 		_compact_confirm.hide()
+		_agent.close_question()
 		_close_policy()
 		if _history_action not in ["compact", "policy"]:
 			# Reading the size can stop; a running Compact finishes even with the page closed.
@@ -372,14 +373,10 @@ func _build_replies() -> void:
 	var section := _section("Replies")
 	# Which agent Journeyman runs (Codex, Claude Code, …). Switch opens the same Connect screen
 	# the banner opens, on the agent in use; choosing another restarts the chat with it.
-	_agent_switch = UI.secondary("Switch")
-	_agent_switch.accessibility_name = "Switch agent"
-	_agent_switch.tooltip_text = "Connect Journeyman to Codex, Claude Code, Gemini CLI or opencode"
-	_agent_switch.pressed.connect(_run.bind("connect"))
-	_agent_row = UI.setting_row("Agent", _agent_switch)
-	_agent_row.title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_agent_row.title.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
-	section.body.add_child(_agent_row)
+	_agent = AGENT_SETTING.new()
+	_agent.dock = dock
+	_agent.run_requested.connect(_run)
+	section.body.add_child(_agent)
 	_mode_picker = UI.picker(MODES)
 	_flush_picker(_mode_picker)
 	for index: int in MODES.size():
@@ -579,7 +576,7 @@ func _build_checks() -> void:
 func _build_troubleshooting() -> void:
 	var section := _section("Troubleshooting", true)
 	_reconnect = UI.row_button("Reconnect")
-	_reconnect.pressed.connect(_run.bind("reconnect"))
+	_reconnect.pressed.connect(func() -> void: _agent.request("reconnect", _reconnect))
 	_flush_row(_reconnect)
 	section.body.add_child(_reconnect)
 	for item: Array in TROUBLESHOOTING:
@@ -801,10 +798,8 @@ func _run(command: String) -> void:
 func _refresh_rows() -> void:
 	var state := str(dock.get("connection_state")) if dock != null else ""
 	_reconnect.visible = state != "connected"
-	var agent: Variant = dock.get("_agent_name") if dock != null else null
-	var named: bool = agent is String and not agent in ["", "Journeyman"]
-	_agent_row.title.text = "Agent: " + str(agent) if named else "Agent: none connected"
-	_agent_switch.text = "Switch" if named else "Connect"
+	_agent.dock = dock
+	_agent.refresh()
 
 
 ## Run `joinery history`: "usage", "compact", "policy-check" (a dry run) or "policy".

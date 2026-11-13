@@ -704,6 +704,8 @@ func close() -> bool:
 	_pending.clear()
 	_busy = false
 	if _job != null:
+		# Changes waiting in Review stay for the user; only the host's session ends.
+		_job.send_line(JSON.stringify({"kind": "shutdown", "keep_reviews": true}))
 		_job.close_pipes()
 		_job = null
 	if stopped:

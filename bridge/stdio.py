@@ -956,6 +956,13 @@ async def _serve(
                 data = json.loads(line)
                 if not isinstance(data, dict):
                     raise TypeError("Invalid chat message.")
+                if data.get("kind") == "shutdown":
+                    # The editor restarts its chat (another agent, Reconnect): changes
+                    # waiting for review stay for the user, as after `joinery run`.
+                    if data.get("keep_reviews"):
+                        gateway.keep_reviews = True
+                        gateway.held_by = "chat restart"
+                    break
                 if data.get("kind") not in QUIET_KINDS:
                     # The user did something: runs waiting for idle wait longer.
                     idle.touch()

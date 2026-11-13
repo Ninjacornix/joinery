@@ -292,6 +292,8 @@ class ProjectGateway:
         #: A headless run (``joinery run``): a change still waiting for review when
         #: the host closes is kept for the user (FileTransaction.hold), not discarded.
         self.keep_reviews = False
+        #: Who kept them: "joinery run", or the editor restarting its chat.
+        self.held_by = "joinery run"
         self.claims.register(MAIN, MAIN_TITLE)
         self.editor_context: dict[str, str] = {}
         self._lane_state()
@@ -1512,7 +1514,7 @@ class ProjectGateway:
             "review",
         }:
             if self.transaction.state == "review" and self._root.keep_reviews:
-                self.transaction.hold("joinery run")
+                self.transaction.hold(self._root.held_by)
             else:
                 self.transaction.reject()
         if self.is_lane:
