@@ -38,6 +38,8 @@ func _init() -> void:
 	switch_button.tooltip_text = "Connect Journeyman to Codex, Claude Code, Gemini CLI or opencode"
 	switch_button.pressed.connect(func() -> void: request("connect"))
 	row = UI.setting_row("Agent", switch_button)
+	row.title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	row.title.text_overrun_behavior = TextServer.OVERRUN_NO_TRIMMING
 	add_child(row)
 	var tools := HBoxContainer.new()
 	tools.theme_type_variation = "JoineryRow"
