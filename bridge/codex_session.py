@@ -14,7 +14,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-from bridge.connect_errors import ConnectError
+from bridge.connect_errors import ConnectError, ProviderGone, StderrTail
 from bridge.instructions import GAME_GUIDE, REVIEW_GUIDE
 from bridge.models import ModelChoice
 from bridge.protocol import (
@@ -139,6 +139,8 @@ class CodexSession:
         self._events: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._tasks: list[asyncio.Task[None]] = []
         self._secrets: list[str] = []
+        #: The app server's last stderr lines, for when it stops.
+        self.stderr = StderrTail()
         self._editor_calls: dict[str, asyncio.Future[dict[str, Any]]] = {}
         self._active_prompt: Prompt | None = None
         self._turn_ready = asyncio.Event()
@@ -209,7 +211,7 @@ class CodexSession:
             self._events = asyncio.Queue()
             self._tasks = [
                 asyncio.create_task(self._read()),
-                asyncio.create_task(self._discard_stderr()),
+                asyncio.create_task(self._keep_stderr()),
             ]
             await self.request(
                 "initialize",
@@ -477,11 +479,11 @@ class CodexSession:
                     )
             await self._events.put({"method": "session/closed"})
 
-    async def _discard_stderr(self) -> None:
+    async def _keep_stderr(self) -> None:
         assert self.process is not None and self.process.stderr is not None
         errors = self.process.stderr
-        while await errors.read(4096):
-            pass
+        while chunk := await errors.read(4096):
+            self.stderr.feed(chunk)
 
     async def send(self, prompt: Prompt) -> AsyncIterator[AgentEvent]:
         self._active_prompt = prompt
@@ -516,8 +518,9 @@ class CodexSession:
                 method = event.get("method", "")
                 params = event.get("params", {})
                 if method == "session/closed":
-                    raise ConnectionError(
-                        "Codex disconnected. Reconnect from the Project Manager."
+                    raise ProviderGone(
+                        "Codex stopped. Reconnect to start it again.",
+                        self.stderr.text(self._secrets),
                     )
                 turn = params.get("turn", {})
                 if params.get("turnId", turn.get("id")) != self.turn_id:

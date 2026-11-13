@@ -121,6 +121,21 @@ func _check_bridge() -> void:
 	_check(heard.size() == 2 and heard[1] == "error", "Problem, then error: %s" % [heard])
 	if heard.size() == 2:
 		_check(heard[0].get("reason") == "signed_out", "The reason arrives: %s" % [heard[0]])
-	bridge.set("_job", null)
+	# The host itself stops: its last error lines are the details, keys taken out.
+	heard.clear()
+	bridge.set("_error_detail", "")
+	var lines: Array[String] = []
+	for index: int in 30:
+		lines.append("line %d" % index)
+	lines.append("OPENAI_API_KEY=sk-abcdefghijklmnop")
+	job.result = {"code": 1, "output": "", "error": "\n".join(lines)}
+	await process_frame
+	await process_frame
+	_check(heard.size() == 2 and heard[1] == "error", "Crash, then error: %s" % [heard])
+	if heard.size() == 2:
+		var details: String = heard[0].get("details", "")
+		_check(heard[0].get("reason") == "crashed", "A stopped host is a crash: %s" % [heard[0]])
+		_check(details.split("\n").size() == 20, "The last 20 lines: %s" % details)
+		_check(not details.contains("sk-abcdefghijklmnop"), "No key in details: " + details)
 	bridge.queue_free()
 	await process_frame

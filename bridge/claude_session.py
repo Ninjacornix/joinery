@@ -11,6 +11,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
+from bridge.connect_errors import reason_of, tail
 from bridge.models import ModelChoice
 from bridge.protocol import (
     AgentEvent,
@@ -199,6 +200,19 @@ def claude_model_choices(
         is_default=True,
     )
     return [first, *choices]
+
+
+def claude_exit_text(details: str) -> str:
+    """What to say when Claude Code exits with an error: why, when its stderr says."""
+    reason = reason_of(ValueError(details))
+    if reason == "signed_out":
+        return "Claude Code needs you to sign in again (claude auth login)."
+    if reason == "quota":
+        return "Claude Code is out of usage for now. Details are in Output."
+    if reason == "outdated":
+        return "Claude Code is out of date. Run claude update, then Reconnect."
+    last = details.strip().splitlines()[-1] if details.strip() else ""
+    return "Claude Code stopped with an error" + (f": {last}" if last else ".")
 
 
 def claude_transcript_exists(project: Path, session_id: str) -> bool:
@@ -410,9 +424,9 @@ class ClaudeSession:
                         )
             await self.process.wait()
             if self.process.returncode and not ok:
+                details = tail((await stderr).decode("utf-8", "replace"))
                 yield Message(
-                    text="Claude process exited with an error. Check provider authentication and the local diagnostics.",
-                    level="warn",
+                    text=claude_exit_text(details), level="warn", details=details
                 )
             yield Done(ok=ok and self.process.returncode == 0)
         finally:

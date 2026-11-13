@@ -494,6 +494,7 @@ async def _serve(
                 Message(
                     text=str(exc) or f"{agent_name} could not complete this message.",
                     level="warn",
+                    details=str(getattr(exc, "details", "") or ""),
                 ).model_dump()
             )
             emit(Done(ok=False).model_dump())

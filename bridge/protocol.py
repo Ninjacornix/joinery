@@ -111,6 +111,9 @@ class Message(_Msg):
     kind: Literal["message"] = "message"
     text: str
     level: Literal["info", "warn", "refuse"] = "info"
+    #: The provider's own error output behind a warning (secrets removed), for the
+    #: editor's Output panel.
+    details: str = ""
 
 
 class Done(_Msg):

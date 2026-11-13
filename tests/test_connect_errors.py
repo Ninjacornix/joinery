@@ -10,6 +10,8 @@ from typing import Any
 import pytest
 
 from bridge import provider_process
+from bridge.claude_session import claude_exit_text
+from bridge.codex_session import CodexSession
 from bridge.connect_errors import (
     ConnectError,
     ProviderGone,
@@ -19,8 +21,39 @@ from bridge.connect_errors import (
     redact,
     tail,
 )
+from bridge.protocol import Prompt
 from joinery.cli import main as cli_main
 from joinery.connection import INSTALL_URLS
+
+
+def test_claude_says_why_it_stopped() -> None:
+    assert "sign in" in claude_exit_text("Error: not logged in")
+    assert "claude update" in claude_exit_text("error: unknown option '--tools'")
+    assert claude_exit_text("boom\npanic: disk full").endswith(": panic: disk full")
+    assert claude_exit_text("") == "Claude Code stopped with an error."
+
+
+def test_codex_keeps_its_last_words_when_it_stops() -> None:
+    session = CodexSession()
+    session.thread_id = "t"
+    session._secrets = ["sk-account-secret-key"]
+    session.stderr.feed(b"starting\nusing sk-account-secret-key\npanic: lost\n")
+
+    async def request(_method: str, _params: dict[str, Any]) -> dict[str, Any]:
+        await session._events.put({"method": "session/closed"})
+        return {"turn": {"id": "turn-1"}}
+
+    session.request = request  # type: ignore[method-assign]
+
+    async def run() -> None:
+        async for _ in session.send(Prompt(text="hi", project_dir="/p")):
+            pass
+
+    with pytest.raises(ProviderGone) as gone:
+        asyncio.run(run())
+    assert gone.value.details.endswith("panic: lost")
+    assert "sk-account-secret-key" not in gone.value.details
+    assert event("codex", "Codex CLI", gone.value)["reason"] == "crashed"
 
 
 @pytest.mark.parametrize(

@@ -84,6 +84,8 @@ const ATTACHMENTS := preload("chat_attachments.gd")
 const EDITOR_VIEW := preload("editor_view.gd")
 ## Each agent's name as the user knows it: the same as joinery/agents.py, which the chat host
 ## also sends in its connection event.
+## Lines of a stopped chat host's error output kept for "Copy details".
+const TAIL_LINES := 20
 const AGENT_NAMES := {
 	"claude": "Claude Code", "codex": "Codex CLI", "gemini": "Gemini CLI", "opencode": "opencode"
 }
@@ -487,7 +489,11 @@ func _process(_delta: float) -> void:
 		_connected = false
 		_busy = false
 		if _error_detail.is_empty():
+			# The host itself stopped: its last words are the details.
 			_error_detail = "Lost connection to %s." % _display_name()
+			var details := error_tail(result)
+			var full := redact(str(result.get("error", "")).strip_edges())
+			_problem({"reason": "crashed", "agent": _agent, "details": details}, full)
 		if not _pending.is_empty():
 			_notice(_error_detail, "error")
 		_pending.clear()
@@ -536,6 +542,8 @@ func _handle(event: Dictionary) -> void:
 		"message_delta":
 			message_delta.emit(str(event.get("text", "")), bool(event.get("new_message", false)))
 		"message":
+			if not str(event.get("details", "")).is_empty():
+				print("[Joinery] %s:\n%s" % [_display_name(), event["details"]])
 			message_received.emit(str(event.get("text", "")))
 		"progress":
 			status_changed.emit("working", str(event.get("text", "")))
@@ -592,14 +600,34 @@ func _handle(event: Dictionary) -> void:
 			busy_changed.emit(false)
 
 
+## The last [constant TAIL_LINES] lines a finished job wrote to stderr, keys and tokens
+## taken out.
+static func error_tail(result: Dictionary) -> String:
+	var lines := str(result.get("error", "")).strip_edges().split("\n", false)
+	return redact("\n".join(lines.slice(maxi(0, lines.size() - TAIL_LINES))))
+
+
+## [param text] without API keys, tokens or passwords (bridge/connect_errors.py does the same).
+static func redact(text: String) -> String:
+	var secret := RegEx.create_from_string(
+		(
+			"(?i)\\b(?:sk|pk|rk)-[A-Za-z0-9_\\-]{8,}|\\bbearer\\s+\\S{8,}"
+			+ "|\\b((?:[a-z_]*api[_-]?key|[a-z_]*token|secret|password)[\"']?\\s*[:=]\\s*)\\S+"
+		)
+	)
+	return secret.sub(text, "$1[redacted]", true)
+
+
 ## Tell the sidebar why the connection failed; the agent's own error output goes to Output.
-func _problem(event: Dictionary) -> void:
+## [param full] is the whole output when the details are only its last lines.
+func _problem(event: Dictionary, full := "") -> void:
 	var problem := {}
 	for key: String in ["reason", "agent", "name", "url", "details"]:
 		if event.has(key):
 			problem[key] = str(event[key])
-	if not str(problem.get("details", "")).is_empty():
-		print("[Joinery] %s:\n%s" % [_display_name(), problem["details"]])
+	var output := full if not full.is_empty() else str(problem.get("details", ""))
+	if not output.is_empty():
+		print("[Joinery] %s:\n%s" % [_display_name(), output])
 	connection_problem.emit(problem)
 
 
